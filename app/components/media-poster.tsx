@@ -115,18 +115,15 @@ export function MediaPoster({
 
   const vertical = aspect === "9:16";
   return (
-    <div
-      className={cn(
-        "overflow-hidden rounded-xl bg-surface-2",
-        vertical && "flex justify-center",
-      )}
-    >
+    // A vertical poster is centered at its own width, exactly where the
+    // player will be, with no box around it.
+    <div className="flex justify-center">
       <button
         type="button"
         onClick={onActivate}
         aria-label={name ? `Play video from ${name}` : "Play video"}
         className={cn(
-          "group relative block",
+          "group relative block overflow-hidden rounded-xl bg-surface-2",
           vertical
             ? "aspect-[9/16] h-[min(70vh,35rem)] max-w-full"
             : "aspect-video w-full",

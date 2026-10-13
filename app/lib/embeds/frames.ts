@@ -10,11 +10,14 @@ export const FRAME_ORIGINS: Record<Provider, string> = {
   suno: "https://suno.com",
   x: "https://platform.twitter.com",
   reddit: "https://embed.reddit.com",
+  telegram: "https://t.me",
 };
 
 // The only shape `resolveLink` produces for a Reddit post.
 const REDDIT_EMBED_PATH =
   /^(?:r|user)\/[A-Za-z0-9_-]{1,32}\/comments\/[a-z0-9]{1,12}$/;
+
+const TELEGRAM_POST_ID = /^[a-z][a-z0-9_]{3,31}\/\d{1,10}$/;
 
 export interface FrameOptions {
   /** The embedding page's origin, which YouTube requires for `postMessage`. */
@@ -93,6 +96,14 @@ export function frameUrl(link: MediaLink, options: FrameOptions): string {
           : `comments/${id}`;
       return `${origin}/${path}/?${params}`;
     }
+    case "telegram": {
+      // The ID is `<channel>/<post>`. Without the author picture the post is
+      // one compact bubble. Light is the default; `dark=1` switches it.
+      const params = new URLSearchParams({ embed: "1", userpic: "false" });
+      if (options.theme === "dark") params.set("dark", "1");
+      const path = TELEGRAM_POST_ID.test(link.id) ? link.id : id;
+      return `${origin}/${path}?${params}`;
+    }
   }
 }
 
@@ -102,6 +113,12 @@ export interface FrameLayout {
   maxWidth?: number;
   /** The height to reserve until the embed reports its own. */
   initialHeight?: number;
+  /**
+   * True when the embed reports its height. Its frame then never scrolls
+   * inside: the provider's own script does the same, since the report can
+   * fall a few pixels short of the document.
+   */
+  selfSizing?: boolean;
   /**
    * True when the provider's document is transparent and never declares a
    * dark color scheme. A browser paints an opaque white backdrop behind such
@@ -114,8 +131,9 @@ export const FRAME_LAYOUT: Record<Provider, FrameLayout> = {
   youtube: {},
   tiktok: {},
   suno: { initialHeight: 240 },
-  x: { maxWidth: 550, initialHeight: 320, lightScheme: true },
-  reddit: { maxWidth: 640, initialHeight: 420 },
+  x: { maxWidth: 550, initialHeight: 320, selfSizing: true, lightScheme: true },
+  reddit: { maxWidth: 640, initialHeight: 420, selfSizing: true },
+  telegram: { maxWidth: 500, initialHeight: 300, selfSizing: true },
 };
 
 /**

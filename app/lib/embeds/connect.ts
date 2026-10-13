@@ -2,6 +2,7 @@ import type { Provider } from "../links/types";
 import { FRAME_ORIGINS } from "./frames";
 import {
   decodeReddit,
+  decodeTelegram,
   decodeTikTok,
   decodeX,
   decodeYouTube,
@@ -25,6 +26,7 @@ const DECODERS: Record<Provider, (data: unknown) => EmbedEvent[]> = {
   suno: () => [],
   x: decodeX,
   reddit: decodeReddit,
+  telegram: decodeTelegram,
 };
 
 const HANDSHAKE_INTERVAL_MS = 250;

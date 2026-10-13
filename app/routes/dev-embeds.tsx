@@ -37,6 +37,7 @@ const SAMPLES: Record<Provider, string> = {
   suno: "https://suno.com/song/cf674415-debb-498c-aa29-37a58a28d8e9",
   x: "https://x.com/jack/status/20",
   reddit: "https://www.reddit.com/r/place/comments/tqbguc/412022/",
+  telegram: "https://t.me/telegram/83",
 };
 
 const CHECKS: Record<Provider, string[]> = {
@@ -66,7 +67,14 @@ const CHECKS: Record<Provider, string[]> = {
     "The compact post renders, in the site theme",
     "The frame grows to the post's height",
     "Image, video, and text posts all render",
+    "No scrollbar inside the frame",
     "A removed or private post shows the provider's fallback",
+  ],
+  telegram: [
+    "The post renders as one compact bubble, in the site theme",
+    "The frame grows to the post's height",
+    "Photo, video, and album posts render",
+    "A private channel link is rejected as not embeddable",
   ],
 };
 

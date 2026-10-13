@@ -1,4 +1,11 @@
-export const PROVIDERS = ["youtube", "tiktok", "suno", "x", "reddit"] as const;
+export const PROVIDERS = [
+  "youtube",
+  "tiktok",
+  "suno",
+  "x",
+  "reddit",
+  "telegram",
+] as const;
 
 export type Provider = (typeof PROVIDERS)[number];
 
@@ -8,6 +15,7 @@ export const PROVIDER_LABEL: Record<Provider, string> = {
   suno: "Suno",
   x: "X",
   reddit: "Reddit",
+  telegram: "Telegram",
 };
 
 export type Aspect = "16:9" | "9:16" | "post" | "audio";

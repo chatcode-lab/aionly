@@ -35,7 +35,7 @@ No secrets are needed yet. When they are, copy `.dev.vars.example` to `.dev.vars
 Two review pages exist outside production:
 
 - `/dev/ui` shows every component in both themes. It is the design gate before feature work.
-- `/dev/embeds` loads each provider (YouTube, TikTok, Suno, X, Reddit) through the production sandbox and policy, in the site theme, with playback controls and a message log, for testing on real devices.
+- `/dev/embeds` loads each provider (YouTube, TikTok, Suno, X, Reddit, Telegram) through the production sandbox and policy, in the site theme, with playback controls and a message log, for testing on real devices.
 
 ## Scripts
 

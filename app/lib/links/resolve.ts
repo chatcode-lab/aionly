@@ -9,6 +9,8 @@ const X_ID = /^\d{1,20}$/;
 const REDDIT_ID = /^[a-z0-9]{2,10}$/;
 const REDDIT_COMMUNITY = /^[A-Za-z0-9_]{2,21}$/;
 const REDDIT_USER = /^[A-Za-z0-9_-]{3,20}$/;
+const TELEGRAM_CHANNEL = /^[A-Za-z][A-Za-z0-9_]{3,31}$/;
+const TELEGRAM_POST = /^\d{1,10}$/;
 
 function segments(url: URL): string[] {
   return url.pathname.split("/").filter(Boolean);
@@ -143,6 +145,23 @@ function reddit(url: URL, host: string): ResolvedLink | null {
   });
 }
 
+function telegram(url: URL): ResolvedLink | null {
+  const parts = segments(url);
+  // t.me/s/<channel>/<post> is the same post on the web preview page.
+  const [channel, post, ...rest] = parts[0] === "s" ? parts.slice(1) : parts;
+
+  // Only posts in public channels can be embedded. Private channels
+  // (/c/<id>/<post>), group topics, and invite links stay ordinary pages.
+  if (rest.length > 0 || !channel || !post) return null;
+  if (!TELEGRAM_CHANNEL.test(channel) || !TELEGRAM_POST.test(post)) return null;
+
+  // Channel names are case-insensitive.
+  return media("telegram", `${channel.toLowerCase()}/${post}`, {
+    aspect: "post",
+    controlled: false,
+  });
+}
+
 const HOSTS: Record<string, (url: URL, host: string) => ResolvedLink | null> = {
   "youtube.com": youtube,
   "m.youtube.com": youtube,
@@ -167,6 +186,8 @@ const HOSTS: Record<string, (url: URL, host: string) => ResolvedLink | null> = {
   "m.reddit.com": reddit,
   "sh.reddit.com": reddit,
   "redd.it": reddit,
+  "t.me": telegram,
+  "telegram.me": telegram,
 };
 
 function page(url: URL): PageLink {

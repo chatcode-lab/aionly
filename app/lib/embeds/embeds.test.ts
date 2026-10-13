@@ -7,6 +7,7 @@ import { connectEmbed } from "./connect";
 import { FRAME_LAYOUT, FRAME_ORIGINS, FRAME_SANDBOX, frameUrl } from "./frames";
 import {
   decodeReddit,
+  decodeTelegram,
   decodeTikTok,
   decodeX,
   decodeYouTube,
@@ -54,14 +55,20 @@ describe("frameUrl", () => {
     expect(frameUrl(REDDIT, dark)).toBe(
       "https://embed.reddit.com/r/place/comments/tqbguc/?embed=true&style=subreddit-first&theme=dark",
     );
+    expect(frameUrl(link("telegram", "telegram/83"), dark)).toBe(
+      "https://t.me/telegram/83?embed=1&userpic=false&dark=1",
+    );
   });
 
   it("follows the site theme wherever the provider has one", () => {
     expect(frameUrl(link("x", "20"), light)).toContain("theme=light");
     expect(frameUrl(link("suno", "abc"), light)).toContain("theme=light");
-    // Light is Reddit's default, and "dark" the only value it accepts.
+    // Light is the default for Reddit and Telegram; each only has a dark switch.
     expect(frameUrl(REDDIT, light)).toBe(
       "https://embed.reddit.com/r/place/comments/tqbguc/?embed=true&style=subreddit-first",
+    );
+    expect(frameUrl(link("telegram", "telegram/83"), light)).toBe(
+      "https://t.me/telegram/83?embed=1&userpic=false",
     );
   });
 
@@ -107,6 +114,13 @@ describe("frameUrl", () => {
       expect(reddit.pathname).toBe("/comments/tqbguc/");
       expect(reddit.searchParams.get("embed")).toBe("true");
     }
+
+    const telegram = new URL(
+      frameUrl(link("telegram", "telegram/83/../../evil?x=1"), dark),
+    );
+    expect(telegram.origin).toBe("https://t.me");
+    expect(telegram.pathname).toBe("/telegram%2F83%2F..%2F..%2Fevil%3Fx%3D1");
+    expect(telegram.searchParams.get("embed")).toBe("1");
   });
 
   it("stays on the origin the policy allows for every provider", () => {
@@ -125,7 +139,17 @@ describe("frameUrl", () => {
   it("marks only transparent, light-only documents for the light scheme", () => {
     expect(FRAME_LAYOUT.x).toMatchObject({ maxWidth: 550, lightScheme: true });
     expect(FRAME_LAYOUT.reddit.maxWidth).toBe(640);
+    expect(FRAME_LAYOUT.telegram.maxWidth).toBe(500);
     expect(FRAME_LAYOUT.youtube.lightScheme).toBeUndefined();
+  });
+
+  it("keeps every self-sizing embed from scrolling inside its frame", () => {
+    for (const provider of ["x", "reddit", "telegram"] as const) {
+      expect(FRAME_LAYOUT[provider].selfSizing).toBe(true);
+    }
+    for (const provider of ["youtube", "tiktok", "suno"] as const) {
+      expect(FRAME_LAYOUT[provider].selfSizing).toBeUndefined();
+    }
   });
 });
 
@@ -182,6 +206,20 @@ describe("player messages", () => {
     expect(decodeTikTok({ type: "onPlayerReady" })).toEqual([]);
   });
 
+  it("decodes Telegram's height reports and nothing else it sends", () => {
+    expect(decodeTelegram('{"event":"resize","height":384}')).toEqual([
+      { type: "height", height: 384 },
+    ]);
+    // The frame also asks its host to scroll the page; that is never honored.
+    for (const data of [
+      '{"event":"ready"}',
+      '{"event":"scroll_to","x":0,"y":900}',
+      '{"event":"get_coords","_cb":1}',
+    ]) {
+      expect(decodeTelegram(data)).toEqual([]);
+    }
+  });
+
   it("decodes height reports from X and Reddit", () => {
     expect(
       decodeX({
@@ -216,7 +254,13 @@ describe("player messages", () => {
     { type: "MEASURE", details: { height: 700 } },
     { "twttr.embed": { method: "twttr.private.trigger" } },
   ])("ignores unrecognized data %j", (data) => {
-    for (const decode of [decodeYouTube, decodeTikTok, decodeX, decodeReddit]) {
+    for (const decode of [
+      decodeYouTube,
+      decodeTikTok,
+      decodeX,
+      decodeReddit,
+      decodeTelegram,
+    ]) {
       expect(decode(data)).toEqual([]);
     }
   });
@@ -224,7 +268,7 @@ describe("player messages", () => {
   it("offers mute commands only where the player keeps to them", () => {
     expect(PLAYER_COMMANDS.youtube).toEqual(["play", "pause", "mute", "unmute"]);
     expect(PLAYER_COMMANDS.tiktok).toEqual(["play", "pause"]);
-    for (const provider of ["suno", "x", "reddit"] as const) {
+    for (const provider of ["suno", "x", "reddit", "telegram"] as const) {
       expect(PLAYER_COMMANDS[provider]).toEqual([]);
     }
   });
@@ -312,7 +356,7 @@ describe("connectEmbed", () => {
   });
 
   it("never posts into uncontrolled embeds", () => {
-    for (const provider of ["suno", "x", "reddit"] as const) {
+    for (const provider of ["suno", "x", "reddit", "telegram"] as const) {
       const { frame, contentWindow } = fakeFrame();
       const connection = connectEmbed(provider, frame, { onEvent: () => {} });
       connection.send("play");

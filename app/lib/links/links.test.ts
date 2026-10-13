@@ -237,6 +237,39 @@ describe("resolveLink", () => {
     }
   });
 
+  it("collapses every Telegram spelling of one channel post", () => {
+    const keys = [
+      "https://t.me/telegram/83",
+      "https://t.me/Telegram/83",
+      "https://t.me/s/telegram/83",
+      "https://telegram.me/telegram/83",
+      "https://t.me/telegram/83?single",
+    ].map(keyOf);
+    expect(new Set(keys)).toEqual(new Set(["telegram:telegram/83"]));
+    expect(resolve("https://t.me/telegram/83")).toEqual({
+      kind: "media",
+      provider: "telegram",
+      id: "telegram/83",
+      canonicalKey: "telegram:telegram/83",
+      aspect: "post",
+      controlled: false,
+    });
+  });
+
+  it("treats Telegram links that cannot be embedded as ordinary pages", () => {
+    for (const input of [
+      "https://t.me/telegram",
+      "https://t.me/c/1234567890/42",
+      "https://t.me/somegroup/12/345",
+      "https://t.me/+AbCdEfGhIjK",
+      "https://t.me/joinchat/AbCdEfGhIjK",
+      "https://t.me/telegram/not-a-number",
+      "https://t.me/abc/83",
+    ]) {
+      expect(resolve(input).kind).toBe("page");
+    }
+  });
+
   it("no longer treats Instagram as a provider", () => {
     expect(resolve("https://www.instagram.com/p/CxYz_12-AbC/")).toMatchObject({
       kind: "page",

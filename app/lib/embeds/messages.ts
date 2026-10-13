@@ -2,9 +2,9 @@ import type { Provider } from "../links/types";
 
 /**
  * Message formats for talking to embed frames. Only TikTok's is documented by
- * the provider. The YouTube, X, and Reddit formats are the ones their own
- * scripts use on the wire, confirmed against the live frames in the embed
- * spike. Every decoder ignores anything it does not recognize.
+ * the provider. The YouTube, X, Reddit, and Telegram formats are the ones
+ * their own scripts use on the wire, confirmed against the live frames in
+ * the embed spike. Every decoder ignores anything it does not recognize.
  */
 
 export type PlayerState =
@@ -34,6 +34,7 @@ export const PLAYER_COMMANDS: Record<Provider, readonly PlayerCommand[]> = {
   suno: [],
   x: [],
   reddit: [],
+  telegram: [],
 };
 
 const MAX_FRAME_HEIGHT = 5000;
@@ -180,4 +181,13 @@ export function decodeReddit(data: unknown): EmbedEvent[] {
   const message = parseObject(data);
   if (!message || message.type !== "resize.embed") return [];
   return heightEvent(message.data);
+}
+
+// Telegram: the post frame reports its height too. It also asks its host to
+// scroll the page or report coordinates; those requests are never honored.
+
+export function decodeTelegram(data: unknown): EmbedEvent[] {
+  const message = parseObject(data);
+  if (!message || message.event !== "resize") return [];
+  return heightEvent(message.height);
 }

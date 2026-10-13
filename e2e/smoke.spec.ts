@@ -132,12 +132,21 @@ test.describe("embed spike", () => {
     await suno.getByRole("button", { name: "Load", exact: true }).click();
     await expect(suno.locator("iframe")).toHaveAttribute("src", /\?theme=light$/);
 
+    const telegram = section("Telegram");
+    await expect(telegram).toContainText("telegram:telegram/83 · post · uncontrolled");
+    await telegram.getByRole("button", { name: "Load", exact: true }).click();
+    await expect(telegram.locator("iframe")).toHaveAttribute(
+      "src",
+      "https://t.me/telegram/83?embed=1&userpic=false",
+    );
+
     // Switching the site theme rebuilds every mounted frame in that theme.
     await page.getByRole("button", { name: /^Theme:/ }).click();
     await page.getByRole("menuitemradio", { name: "Dark" }).click();
     await expect(reddit.locator("iframe")).toHaveAttribute("src", /&theme=dark$/);
     await expect(x.locator("iframe")).toHaveAttribute("src", /theme=dark/);
     await expect(suno.locator("iframe")).toHaveAttribute("src", /\?theme=dark$/);
+    await expect(telegram.locator("iframe")).toHaveAttribute("src", /&dark=1$/);
 
     expect(problems.violations).toEqual([]);
   });
@@ -160,6 +169,38 @@ test.describe("embed spike", () => {
     await expect(frame).toHaveCSS("color-scheme", "light");
     const box = await frame.boundingBox();
     expect(box!.width).toBeLessThanOrEqual(550);
+  });
+
+  test("never scrolls inside an embed that reports its own height", async ({ page }) => {
+    await page.goto("/dev/embeds");
+    for (const name of ["X", "Reddit", "Telegram"]) {
+      const section = page.locator("section", {
+        has: page.getByRole("heading", { name, exact: true }),
+      });
+      await section.getByRole("button", { name: "Load", exact: true }).click();
+      await expect(section.locator("iframe"), name).toHaveAttribute("scrolling", "no");
+    }
+  });
+
+  test("shows a vertical video at its own size with no box around it", async ({ page }) => {
+    await page.goto("/dev/embeds");
+    const tiktok = page.locator("section", {
+      has: page.getByRole("heading", { name: "TikTok", exact: true }),
+    });
+    await tiktok.getByRole("button", { name: "Load", exact: true }).click();
+
+    const frame = tiktok.locator("iframe");
+    await expect(frame).toHaveCSS("border-radius", "12px");
+    const wrapper = frame.locator("xpath=..");
+    await expect(wrapper).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+
+    // Narrower than its column, and centered in it.
+    const [frameBox, wrapperBox] = [await frame.boundingBox(), await wrapper.boundingBox()];
+    expect(frameBox!.width).toBeLessThan(wrapperBox!.width);
+    const left = frameBox!.x - wrapperBox!.x;
+    const right = wrapperBox!.x + wrapperBox!.width - (frameBox!.x + frameBox!.width);
+    expect(Math.abs(left - right)).toBeLessThanOrEqual(1);
+    expect(frameBox!.height / frameBox!.width).toBeCloseTo(16 / 9, 1);
   });
 
   test("offers only the commands each player obeys", async ({ page }) => {

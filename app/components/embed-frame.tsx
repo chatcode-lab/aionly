@@ -7,7 +7,8 @@ import { type MediaLink, PROVIDER_LABEL } from "~/lib/links/types";
 /**
  * The one way an embed reaches the page: a sandboxed frame that can never
  * navigate the top window. `src` must come from `frameUrl`. Videos keep a
- * fixed shape; posts and songs take the height the embed reports.
+ * fixed shape, and a vertical one is centered at its own width; posts and
+ * songs take the height the embed reports.
  */
 export function EmbedFrame({
   link,
@@ -25,12 +26,7 @@ export function EmbedFrame({
   const video = link.aspect === "16:9" || link.aspect === "9:16";
 
   return (
-    <div
-      className={cn(
-        "flex justify-center",
-        video && "overflow-hidden rounded-xl bg-surface-2",
-      )}
-    >
+    <div className="flex justify-center">
       <iframe
         ref={ref}
         src={src}
@@ -38,6 +34,7 @@ export function EmbedFrame({
         sandbox={FRAME_SANDBOX}
         allow={FRAME_ALLOW}
         allowFullScreen
+        scrolling={layout.selfSizing ? "no" : undefined}
         // Providers such as YouTube refuse to play without knowing the
         // embedding site; this sends our origin and nothing more.
         referrerPolicy="strict-origin-when-cross-origin"
@@ -46,12 +43,13 @@ export function EmbedFrame({
           height: video ? undefined : (height ?? layout.initialHeight),
           colorScheme: layout.lightScheme ? "light" : undefined,
         }}
+        // The frame is exactly the media: rounded corners, no surrounding box.
         className={cn(
-          "block border-0",
-          link.aspect === "16:9" && "aspect-video w-full",
+          "block overflow-hidden rounded-xl border-0",
+          link.aspect === "16:9" && "aspect-video w-full bg-surface-2",
           link.aspect === "9:16" &&
-            "aspect-[9/16] h-[min(70vh,35rem)] max-w-full",
-          !video && "w-full rounded-xl",
+            "aspect-[9/16] h-[min(70vh,35rem)] max-w-full bg-surface-2",
+          !video && "w-full",
         )}
       />
     </div>
