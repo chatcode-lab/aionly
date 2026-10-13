@@ -1,0 +1,9 @@
+# Local secrets for `npm run dev`. Copy to `.dev.vars`, which is git-ignored.
+# Nothing is required yet: sign-in, Turnstile, and report alerts arrive in
+# later build steps. Real values belong in `wrangler secret put`, never here.
+
+# BETTER_AUTH_SECRET=replace-with-a-long-random-string
+# GOOGLE_CLIENT_ID=replace-me.apps.googleusercontent.com
+# GOOGLE_CLIENT_SECRET=replace-me
+# TURNSTILE_SECRET_KEY=replace-me
+# REPORT_WEBHOOK_URL=https://example.com/replace-me
