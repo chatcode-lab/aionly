@@ -1,33 +1,30 @@
 import type { Provider } from "../links/types";
 import { FRAME_ORIGINS } from "./frames";
 import {
-  decodeInstagram,
-  decodeShell,
+  decodeReddit,
   decodeTikTok,
   decodeX,
   decodeYouTube,
   type EmbedEvent,
+  PLAYER_COMMANDS,
   type PlayerCommand,
   tiktokCommand,
   youtubeCommand,
   youtubeListening,
 } from "./messages";
 
-export type EmbedSource = Provider | "shell";
-
 export interface EmbedConnection {
-  /** Sends a playback command. A no-op for uncontrolled embeds. */
+  /** Sends a playback command. A no-op where the provider does not obey it. */
   send(command: PlayerCommand): void;
   disconnect(): void;
 }
 
-const DECODERS: Record<EmbedSource, (data: unknown) => EmbedEvent[]> = {
+const DECODERS: Record<Provider, (data: unknown) => EmbedEvent[]> = {
   youtube: decodeYouTube,
   tiktok: decodeTikTok,
   suno: () => [],
-  instagram: decodeInstagram,
   x: decodeX,
-  shell: decodeShell,
+  reddit: decodeReddit,
 };
 
 const HANDSHAKE_INTERVAL_MS = 250;
@@ -35,12 +32,11 @@ const HANDSHAKE_ATTEMPTS = 40;
 
 /**
  * Connects the page to one embed frame. Messages are accepted only from that
- * frame's own window and, for provider frames, only from the provider's
- * origin. The embed shell runs at an opaque origin, which serializes as
- * "null", so it is matched by source window alone.
+ * frame's own window and only from the provider's origin, and commands are
+ * posted to that origin alone.
  */
 export function connectEmbed(
-  source: EmbedSource,
+  provider: Provider,
   frame: HTMLIFrameElement,
   handlers: {
     onEvent: (event: EmbedEvent) => void;
@@ -48,21 +44,20 @@ export function connectEmbed(
     onMessage?: (data: unknown) => void;
   },
 ): EmbedConnection {
-  const expectedOrigin = source === "shell" ? "null" : FRAME_ORIGINS[source];
+  const origin = FRAME_ORIGINS[provider];
   let replied = false;
   let handshake: ReturnType<typeof setInterval> | undefined;
 
   const post = (message: unknown) => {
-    if (source === "shell") return;
-    frame.contentWindow?.postMessage(message, expectedOrigin);
+    frame.contentWindow?.postMessage(message, origin);
   };
 
   const onWindowMessage = (event: MessageEvent) => {
     if (event.source !== frame.contentWindow) return;
-    if (event.origin !== expectedOrigin) return;
+    if (event.origin !== origin) return;
     replied = true;
     handlers.onMessage?.(event.data);
-    for (const decoded of DECODERS[source](event.data)) {
+    for (const decoded of DECODERS[provider](event.data)) {
       handlers.onEvent(decoded);
     }
   };
@@ -75,7 +70,7 @@ export function connectEmbed(
   // YouTube stays silent until asked, and may not be ready when the frame's
   // load event fires, so keep asking for a few seconds.
   const startHandshake = () => {
-    if (source !== "youtube") return;
+    if (provider !== "youtube") return;
     stopHandshake();
     let attempts = 0;
     handshake = setInterval(() => {
@@ -91,8 +86,9 @@ export function connectEmbed(
 
   return {
     send(command) {
-      if (source === "youtube") post(youtubeCommand(command));
-      if (source === "tiktok") post(tiktokCommand(command));
+      if (!PLAYER_COMMANDS[provider].includes(command)) return;
+      if (provider === "youtube") post(youtubeCommand(command));
+      if (provider === "tiktok") post(tiktokCommand(command));
     },
     disconnect() {
       stopHandshake();

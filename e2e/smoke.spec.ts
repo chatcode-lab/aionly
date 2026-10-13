@@ -58,67 +58,15 @@ test.describe("security baseline", () => {
   });
 });
 
-test.describe("embed shell", () => {
-  test("sends its own sandboxing policy", async ({ request, baseURL }) => {
-    const response = await request.get("/embed/shell/x/20");
-    expect(response.status()).toBe(200);
-
-    const headers = response.headers();
-    const policy = headers["content-security-policy"];
-    expect(policy).toMatch(/^sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox;/);
-    expect(policy).toContain("default-src 'none'");
-    expect(policy).toContain(`frame-ancestors ${new URL(baseURL!).origin}`);
-    expect(headers["x-frame-options"]).toBeUndefined();
-  });
-
-  test("rejects anything but a well-formed post ID", async ({ request }) => {
-    for (const path of [
-      "/embed/shell/x/not-a-post",
-      "/embed/shell/youtube/dQw4w9WgXcQ",
-      "/embed/shell/x/20%22%3E%3Cscript%3E",
-    ]) {
+test.describe("removed embed shell", () => {
+  test("no first-party frame route remains", async ({ request }) => {
+    for (const path of ["/embed/shell/x/20", "/embed/shell/reddit/tqbguc"]) {
       const response = await request.get(path);
       expect(response.status(), path).toBe(404);
       expect(response.headers()["content-security-policy"], path).toContain(
         "frame-ancestors 'none'",
       );
     }
-  });
-
-  test("is admitted by the site policy and reports its height from an opaque origin", async ({
-    page,
-    problems,
-  }) => {
-    await page.goto("/dev/embeds");
-    const x = page.locator("section", { has: page.getByRole("heading", { name: "X", exact: true }) });
-
-    await x.getByLabel("Use embed shell").check();
-    await x.getByRole("button", { name: "Load", exact: true }).click();
-
-    const frame = x.locator("iframe");
-    await expect(frame).toHaveAttribute("src", /^\/embed\/shell\/x\/20\?theme=/);
-    await expect(frame).toHaveAttribute(
-      "sandbox",
-      "allow-scripts allow-popups allow-popups-to-escape-sandbox",
-    );
-    // The shell's reporter posts from origin "null"; the page matches it by
-    // source window and logs the decoded event.
-    await expect(x.getByRole("log")).toContainText('"type":"height"');
-    expect(problems.violations).toEqual([]);
-  });
-
-  test("cannot be framed from another origin", async ({ page, baseURL }) => {
-    // A stand-in for some other site that tries to frame the shell.
-    await page.route("https://other.example/**", (route) =>
-      route.fulfill({
-        contentType: "text/html",
-        body: `<!doctype html><iframe src="${baseURL}/embed/shell/x/20"></iframe>`,
-      }),
-    );
-    await page.goto("https://other.example/");
-    await expect
-      .poll(() => page.frames().some((f) => f.url().startsWith("chrome-error")))
-      .toBe(true);
   });
 });
 
@@ -153,6 +101,86 @@ test.describe("embed spike", () => {
     await expect(youtube.getByRole("alert")).toHaveText("Rejected: not_https");
     await expect(youtube.getByRole("button", { name: "Load", exact: true })).toBeDisabled();
   });
+
+  test("themes post embeds from the site and re-themes them on a switch", async ({
+    page,
+    context,
+    baseURL,
+    problems,
+  }) => {
+    await context.addCookies([{ name: "theme", value: "light", url: baseURL! }]);
+    await page.goto("/dev/embeds");
+    const section = (name: string) =>
+      page.locator("section", {
+        has: page.getByRole("heading", { name, exact: true }),
+      });
+
+    const reddit = section("Reddit");
+    await expect(reddit).toContainText("reddit:tqbguc · post · uncontrolled");
+    await reddit.getByRole("button", { name: "Load", exact: true }).click();
+    // Light is Reddit's default: the compact layout with no theme parameter.
+    await expect(reddit.locator("iframe")).toHaveAttribute(
+      "src",
+      "https://embed.reddit.com/r/place/comments/tqbguc/?embed=true&style=subreddit-first",
+    );
+
+    const x = section("X");
+    await x.getByRole("button", { name: "Load", exact: true }).click();
+    await expect(x.locator("iframe")).toHaveAttribute("src", /theme=light/);
+
+    const suno = section("Suno");
+    await suno.getByRole("button", { name: "Load", exact: true }).click();
+    await expect(suno.locator("iframe")).toHaveAttribute("src", /\?theme=light$/);
+
+    // Switching the site theme rebuilds every mounted frame in that theme.
+    await page.getByRole("button", { name: /^Theme:/ }).click();
+    await page.getByRole("menuitemradio", { name: "Dark" }).click();
+    await expect(reddit.locator("iframe")).toHaveAttribute("src", /&theme=dark$/);
+    await expect(x.locator("iframe")).toHaveAttribute("src", /theme=dark/);
+    await expect(suno.locator("iframe")).toHaveAttribute("src", /\?theme=dark$/);
+
+    expect(problems.violations).toEqual([]);
+  });
+
+  test("keeps a post embed at the provider's width with no backdrop", async ({
+    page,
+    context,
+    baseURL,
+  }) => {
+    await context.addCookies([{ name: "theme", value: "dark", url: baseURL! }]);
+    await page.goto("/dev/embeds");
+    const x = page.locator("section", {
+      has: page.getByRole("heading", { name: "X", exact: true }),
+    });
+    await x.getByRole("button", { name: "Load", exact: true }).click();
+
+    const frame = x.locator("iframe");
+    // A transparent, light-only document gets an opaque white backdrop on a
+    // dark page unless its frame is itself marked light.
+    await expect(frame).toHaveCSS("color-scheme", "light");
+    const box = await frame.boundingBox();
+    expect(box!.width).toBeLessThanOrEqual(550);
+  });
+
+  test("offers only the commands each player obeys", async ({ page }) => {
+    await page.goto("/dev/embeds");
+    const section = (name: string) =>
+      page.locator("section", {
+        has: page.getByRole("heading", { name, exact: true }),
+      });
+
+    const tiktok = section("TikTok");
+    await tiktok.getByRole("button", { name: "Load", exact: true }).click();
+    // TikTok only answers once playing, and undoes mute commands.
+    await expect(tiktok.locator("iframe")).toHaveAttribute("src", /autoplay=1/);
+    await expect(tiktok.locator("iframe")).not.toHaveAttribute("src", /muted=/);
+    await expect(tiktok.getByRole("button", { name: "Pause" })).toBeVisible();
+    await expect(tiktok.getByRole("button", { name: "Mute", exact: true })).toHaveCount(0);
+
+    const youtube = section("YouTube");
+    await youtube.getByRole("button", { name: "Load", exact: true }).click();
+    await expect(youtube.getByRole("button", { name: "Unmute" })).toBeVisible();
+  });
 });
 
 test.describe("theme", () => {
@@ -186,7 +214,7 @@ test.describe("design review page", () => {
 
       await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
       await expect(page.getByRole("heading", { name: "Design review" })).toBeVisible();
-      await expect(page.locator("article")).toHaveCount(8);
+      await expect(page.locator("article")).toHaveCount(12);
 
       await page.screenshot({
         path: testInfo.outputPath(`dev-ui-${theme}.png`),

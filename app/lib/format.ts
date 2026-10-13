@@ -23,6 +23,17 @@ export function formatAge(createdAt: number, now: number): string {
   return `${Math.floor(seconds / (365 * DAY))}y`;
 }
 
+/** A media length such as "0:42" or "1:03:20". */
+export function formatDuration(seconds: number): string {
+  const total = Math.max(0, Math.round(seconds));
+  const hours = Math.floor(total / HOUR);
+  const minutes = Math.floor((total % HOUR) / MINUTE);
+  const rest = String(total % MINUTE).padStart(2, "0");
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${rest}`
+    : `${minutes}:${rest}`;
+}
+
 /** "5 h 12 min", for posting-allowance and retry messages. */
 export function formatWait(seconds: number): string {
   const total = Math.max(0, Math.ceil(seconds));

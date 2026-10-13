@@ -1,24 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { formatDuration } from "../format";
 import { detectInAppBrowser } from "../in-app-browser";
-import type { MediaLink, Provider } from "../links/types";
+import { type MediaLink, PROVIDERS, type Provider } from "../links/types";
 import { connectEmbed } from "./connect";
-import { FRAME_SANDBOX, frameUrl, SHELL_SANDBOX, shellPath } from "./frames";
+import { FRAME_LAYOUT, FRAME_ORIGINS, FRAME_SANDBOX, frameUrl } from "./frames";
 import {
-  decodeInstagram,
-  decodeShell,
+  decodeReddit,
   decodeTikTok,
   decodeX,
   decodeYouTube,
   type EmbedEvent,
+  PLAYER_COMMANDS,
   tiktokCommand,
   youtubeCommand,
 } from "./messages";
-import { isShellId, SHELL_HEIGHT_MESSAGE, shellDocument } from "./shell";
 
 const SITE = "https://aion.ly";
 
-function link(provider: Provider, id: string): MediaLink {
+function link(provider: Provider, id: string, embedPath?: string): MediaLink {
   return {
     kind: "media",
     provider,
@@ -26,140 +26,106 @@ function link(provider: Provider, id: string): MediaLink {
     canonicalKey: `${provider}:${id}`,
     aspect: "16:9",
     controlled: provider === "youtube" || provider === "tiktok",
+    embedPath,
   };
 }
 
+const REDDIT = link("reddit", "tqbguc", "r/place/comments/tqbguc");
+
 describe("frameUrl", () => {
-  const options = { siteOrigin: SITE, theme: "dark" as const };
+  const dark = { siteOrigin: SITE, theme: "dark" as const };
+  const light = { siteOrigin: SITE, theme: "light" as const };
 
   it("builds the frame for each provider from its ID", () => {
-    expect(frameUrl(link("youtube", "dQw4w9WgXcQ"), options)).toBe(
-      "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?enablejsapi=1&origin=https%3A%2F%2Faion.ly&playsinline=1&rel=0",
+    expect(frameUrl(link("youtube", "dQw4w9WgXcQ"), dark)).toBe(
+      "https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ?enablejsapi=1&origin=https%3A%2F%2Faion.ly&playsinline=1&rel=0&iv_load_policy=3",
     );
-    expect(frameUrl(link("tiktok", "6718335390845095173"), options)).toBe(
-      "https://www.tiktok.com/player/v1/6718335390845095173?controls=1&rel=0&music_info=0&description=0",
+    expect(frameUrl(link("tiktok", "6718335390845095173"), dark)).toBe(
+      "https://www.tiktok.com/player/v1/6718335390845095173?autoplay=1&controls=1&rel=0&music_info=0&description=0",
     );
     expect(
-      frameUrl(link("suno", "1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d"), options),
-    ).toBe("https://suno.com/embed/1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d");
-    expect(frameUrl(link("instagram", "CxYz_12-AbC"), options)).toBe(
-      "https://www.instagram.com/p/CxYz_12-AbC/embed/",
+      frameUrl(link("suno", "1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d"), dark),
+    ).toBe(
+      "https://suno.com/embed/1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d?theme=dark",
     );
-    expect(frameUrl(link("x", "20"), options)).toBe(
-      "https://platform.twitter.com/embed/Tweet.html?id=20&theme=dark&dnt=true",
+    expect(frameUrl(link("x", "20"), dark)).toBe(
+      "https://platform.twitter.com/embed/Tweet.html?id=20&theme=dark&dnt=true&hideThread=true",
+    );
+    expect(frameUrl(REDDIT, dark)).toBe(
+      "https://embed.reddit.com/r/place/comments/tqbguc/?embed=true&style=subreddit-first&theme=dark",
     );
   });
 
-  it("starts controlled players muted for the card in focus", () => {
-    const youtube = new URL(
-      frameUrl(link("youtube", "dQw4w9WgXcQ"), { ...options, autoplay: "muted" }),
+  it("follows the site theme wherever the provider has one", () => {
+    expect(frameUrl(link("x", "20"), light)).toContain("theme=light");
+    expect(frameUrl(link("suno", "abc"), light)).toContain("theme=light");
+    // Light is Reddit's default, and "dark" the only value it accepts.
+    expect(frameUrl(REDDIT, light)).toBe(
+      "https://embed.reddit.com/r/place/comments/tqbguc/?embed=true&style=subreddit-first",
     );
-    expect(youtube.searchParams.get("autoplay")).toBe("1");
-    expect(youtube.searchParams.get("mute")).toBe("1");
-
-    const tiktok = new URL(
-      frameUrl(link("tiktok", "6718335390845095173"), {
-        ...options,
-        autoplay: "muted",
-      }),
-    );
-    expect(tiktok.searchParams.get("autoplay")).toBe("1");
-    expect(tiktok.searchParams.get("muted")).toBe("1");
   });
 
-  it("starts with sound after a tap on the poster", () => {
-    const youtube = new URL(
-      frameUrl(link("youtube", "dQw4w9WgXcQ"), { ...options, autoplay: "sound" }),
+  it("uses Reddit's compact layout", () => {
+    expect(new URL(frameUrl(REDDIT, dark)).searchParams.get("style")).toBe(
+      "subreddit-first",
     );
-    expect(youtube.searchParams.get("autoplay")).toBe("1");
-    expect(youtube.searchParams.has("mute")).toBe(false);
-
-    const tiktok = new URL(
-      frameUrl(link("tiktok", "6718335390845095173"), {
-        ...options,
-        autoplay: "sound",
-      }),
-    );
-    expect(tiktok.searchParams.get("autoplay")).toBe("1");
-    expect(tiktok.searchParams.has("muted")).toBe(false);
   });
 
-  it("cannot be steered off the provider by a hand-built ID", () => {
-    const url = new URL(frameUrl(link("suno", "../../evil?x=1#y"), options));
-    expect(url.origin).toBe("https://suno.com");
-    expect(url.pathname).toBe("/embed/..%2F..%2Fevil%3Fx%3D1%23y");
-    expect(url.search).toBe("");
+  it("starts YouTube muted for the card in focus, with sound after a tap", () => {
+    const focus = new URL(
+      frameUrl(link("youtube", "dQw4w9WgXcQ"), { ...dark, autoplay: "muted" }),
+    );
+    expect(focus.searchParams.get("autoplay")).toBe("1");
+    expect(focus.searchParams.get("mute")).toBe("1");
+
+    const tap = new URL(
+      frameUrl(link("youtube", "dQw4w9WgXcQ"), { ...dark, autoplay: "sound" }),
+    );
+    expect(tap.searchParams.get("autoplay")).toBe("1");
+    expect(tap.searchParams.has("mute")).toBe(false);
+  });
+
+  it("always starts TikTok playing and never locks its volume", () => {
+    for (const autoplay of [undefined, "muted", "sound"] as const) {
+      const url = new URL(
+        frameUrl(link("tiktok", "6718335390845095173"), { ...dark, autoplay }),
+      );
+      expect(url.searchParams.get("autoplay")).toBe("1");
+      // `muted=1` would stop the viewer from ever turning the sound on.
+      expect(url.searchParams.has("muted")).toBe(false);
+    }
+  });
+
+  it("cannot be steered off the provider by a hand-built ID or path", () => {
+    const suno = new URL(frameUrl(link("suno", "../../evil?x=1#y"), dark));
+    expect(suno.origin).toBe("https://suno.com");
+    expect(suno.pathname).toBe("/embed/..%2F..%2Fevil%3Fx%3D1%23y");
+
+    for (const path of ["r/a?b=1#c/comments/x", "r/place/comments/../../x", ""]) {
+      const reddit = new URL(frameUrl(link("reddit", "tqbguc", path), dark));
+      expect(reddit.origin).toBe("https://embed.reddit.com");
+      expect(reddit.pathname).toBe("/comments/tqbguc/");
+      expect(reddit.searchParams.get("embed")).toBe("true");
+    }
+  });
+
+  it("stays on the origin the policy allows for every provider", () => {
+    for (const provider of PROVIDERS) {
+      const url = new URL(
+        frameUrl(link(provider, "abc", "r/place/comments/abc"), dark),
+      );
+      expect(url.origin).toBe(FRAME_ORIGINS[provider]);
+    }
   });
 
   it("never lets a frame navigate the top window", () => {
-    for (const sandbox of [FRAME_SANDBOX, SHELL_SANDBOX]) {
-      expect(sandbox).not.toContain("allow-top-navigation");
-    }
-    expect(SHELL_SANDBOX).not.toContain("allow-same-origin");
-  });
-});
-
-describe("embed shell", () => {
-  it("accepts only well-formed provider IDs", () => {
-    expect(isShellId("x", "20")).toBe(true);
-    expect(isShellId("x", "1234567890123456789")).toBe(true);
-    expect(isShellId("instagram", "CxYz_12-AbC")).toBe(true);
-    for (const id of ["", "abc", "20/../x", '20"><script>', "123456789012345678901"]) {
-      expect(isShellId("x", id)).toBe(false);
-    }
-    for (const id of ["", "a b c d e", "Cx/Yz", '"><script>', "x".repeat(41)]) {
-      expect(isShellId("instagram", id)).toBe(false);
-    }
+    expect(FRAME_SANDBOX).not.toContain("allow-top-navigation");
   });
 
-  it("renders one post, the provider script, and the height reporter", () => {
-    const html = shellDocument({
-      provider: "x",
-      id: "20",
-      nonce: "abc",
-      siteOrigin: SITE,
-      theme: "dark",
-    });
-    expect(html).toContain('href="https://twitter.com/i/status/20"');
-    expect(html).toContain('data-theme="dark"');
-    expect(html).toContain(
-      '<script nonce="abc" async src="https://platform.twitter.com/widgets.js"',
-    );
-    expect(html).toContain(`type:"${SHELL_HEIGHT_MESSAGE}"`);
-    expect(html).toContain(`},"${SITE}")`);
-    // Exactly two scripts, and both carry the nonce.
-    expect(html.match(/<script/g)).toHaveLength(2);
-    expect(html.match(/<script nonce="abc"/g)).toHaveLength(2);
-  });
-
-  it("renders Instagram posts through Instagram's script", () => {
-    const html = shellDocument({
-      provider: "instagram",
-      id: "CxYz_12-AbC",
-      nonce: "abc",
-      siteOrigin: SITE,
-      theme: "light",
-    });
-    expect(html).toContain(
-      'data-instgrm-permalink="https://www.instagram.com/p/CxYz_12-AbC/"',
-    );
-    expect(html).toContain('src="https://www.instagram.com/embed.js"');
-  });
-
-  it("refuses an unvalidated ID rather than rendering it", () => {
-    expect(() =>
-      shellDocument({
-        provider: "x",
-        id: '20"><script>alert(1)</script>',
-        nonce: "abc",
-        siteOrigin: SITE,
-        theme: "light",
-      }),
-    ).toThrow();
-  });
-
-  it("lives under the path the site policy admits", () => {
-    expect(shellPath("x", "20")).toBe("/embed/shell/x/20");
+  it("marks only transparent, light-only documents for the light scheme", () => {
+    expect(FRAME_LAYOUT.x).toMatchObject({ maxWidth: 550, lightScheme: true });
+    expect(FRAME_LAYOUT.reddit.maxWidth).toBe(640);
+    expect(FRAME_LAYOUT.youtube.lightScheme).toBeUndefined();
   });
 });
 
@@ -194,9 +160,9 @@ describe("player messages", () => {
   });
 
   it("encodes and decodes TikTok's documented protocol", () => {
-    expect(tiktokCommand("unmute")).toEqual({
+    expect(tiktokCommand("pause")).toEqual({
       "x-tiktok-player": true,
-      type: "unMute",
+      type: "pause",
       value: undefined,
     });
     const event = (type: string, value?: unknown) =>
@@ -216,7 +182,7 @@ describe("player messages", () => {
     expect(decodeTikTok({ type: "onPlayerReady" })).toEqual([]);
   });
 
-  it("decodes height reports from X, Instagram, and the shell", () => {
+  it("decodes height reports from X and Reddit", () => {
     expect(
       decodeX({
         "twttr.embed": {
@@ -225,20 +191,17 @@ describe("player messages", () => {
         },
       }),
     ).toEqual([{ type: "height", height: 613 }]);
-    expect(
-      decodeInstagram('{"type":"MEASURE","details":{"height":740}}'),
-    ).toEqual([{ type: "height", height: 740 }]);
-    expect(decodeShell({ type: SHELL_HEIGHT_MESSAGE, height: 480 })).toEqual([
-      { type: "height", height: 480 },
+    expect(decodeReddit('{"type":"resize.embed","data":479}')).toEqual([
+      { type: "height", height: 479 },
     ]);
   });
 
   it("caps reported heights and drops nonsense", () => {
-    expect(decodeShell({ type: SHELL_HEIGHT_MESSAGE, height: 1e9 })).toEqual([
+    expect(decodeReddit('{"type":"resize.embed","data":1000000000}')).toEqual([
       { type: "height", height: 5000 },
     ]);
-    for (const height of [0, -5, Number.NaN, "600", null]) {
-      expect(decodeShell({ type: SHELL_HEIGHT_MESSAGE, height })).toEqual([]);
+    for (const data of [0, -5, null, "600"]) {
+      expect(decodeReddit({ type: "resize.embed", data })).toEqual([]);
     }
   });
 
@@ -250,16 +213,19 @@ describe("player messages", () => {
     "[]",
     "{}",
     { event: "somethingElse" },
+    { type: "MEASURE", details: { height: 700 } },
     { "twttr.embed": { method: "twttr.private.trigger" } },
   ])("ignores unrecognized data %j", (data) => {
-    for (const decode of [
-      decodeYouTube,
-      decodeTikTok,
-      decodeX,
-      decodeInstagram,
-      decodeShell,
-    ]) {
+    for (const decode of [decodeYouTube, decodeTikTok, decodeX, decodeReddit]) {
       expect(decode(data)).toEqual([]);
+    }
+  });
+
+  it("offers mute commands only where the player keeps to them", () => {
+    expect(PLAYER_COMMANDS.youtube).toEqual(["play", "pause", "mute", "unmute"]);
+    expect(PLAYER_COMMANDS.tiktok).toEqual(["play", "pause"]);
+    for (const provider of ["suno", "x", "reddit"] as const) {
+      expect(PLAYER_COMMANDS[provider]).toEqual([]);
     }
   });
 });
@@ -305,18 +271,18 @@ describe("connectEmbed", () => {
     expect(events).toEqual([{ type: "ready" }]);
   });
 
-  it("matches the opaque-origin shell by source window", () => {
+  it("sizes a Reddit post from Reddit's frame alone", () => {
     const { frame, contentWindow } = fakeFrame();
     const events: EmbedEvent[] = [];
-    connectEmbed("shell", frame, { onEvent: (event) => events.push(event) });
-    const height = { type: SHELL_HEIGHT_MESSAGE, height: 300 };
+    connectEmbed("reddit", frame, { onEvent: (event) => events.push(event) });
+    const resize = '{"type":"resize.embed","data":479}';
 
-    deliver("null", { postMessage: vi.fn() }, height);
-    deliver(SITE, contentWindow, height);
+    deliver("https://www.reddit.com", contentWindow, resize);
+    deliver("https://platform.twitter.com", contentWindow, resize);
     expect(events).toEqual([]);
 
-    deliver("null", contentWindow, height);
-    expect(events).toEqual([{ type: "height", height: 300 }]);
+    deliver("https://embed.reddit.com", contentWindow, resize);
+    expect(events).toEqual([{ type: "height", height: 479 }]);
   });
 
   it("sends commands to the provider's origin and nowhere else", () => {
@@ -330,10 +296,25 @@ describe("connectEmbed", () => {
     );
   });
 
-  it("never posts into uncontrolled embeds or the shell", () => {
-    for (const source of ["x", "instagram", "suno", "shell"] as const) {
+  it("does not send TikTok the mute commands it would undo", () => {
+    const { frame, contentWindow } = fakeFrame();
+    const connection = connectEmbed("tiktok", frame, { onEvent: () => {} });
+
+    connection.send("mute");
+    connection.send("unmute");
+    expect(contentWindow.postMessage).not.toHaveBeenCalled();
+
+    connection.send("pause");
+    expect(contentWindow.postMessage).toHaveBeenCalledWith(
+      tiktokCommand("pause"),
+      "https://www.tiktok.com",
+    );
+  });
+
+  it("never posts into uncontrolled embeds", () => {
+    for (const provider of ["suno", "x", "reddit"] as const) {
       const { frame, contentWindow } = fakeFrame();
-      const connection = connectEmbed(source, frame, { onEvent: () => {} });
+      const connection = connectEmbed(provider, frame, { onEvent: () => {} });
       connection.send("play");
       vi.advanceTimersByTime(2000);
       expect(contentWindow.postMessage).not.toHaveBeenCalled();
@@ -365,6 +346,19 @@ describe("connectEmbed", () => {
       type: "onPlayerReady",
     });
     expect(events).toEqual([]);
+  });
+});
+
+describe("formatDuration", () => {
+  it("formats media lengths", () => {
+    expect([0, 7, 42, 187, 3600, 3723].map(formatDuration)).toEqual([
+      "0:00",
+      "0:07",
+      "0:42",
+      "3:07",
+      "1:00:00",
+      "1:02:03",
+    ]);
   });
 });
 

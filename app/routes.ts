@@ -7,7 +7,6 @@ const reviewPages = process.env.CLOUDFLARE_ENV !== "production";
 export default [
   index("routes/home.tsx"),
   route("theme", "routes/theme.ts"),
-  route("embed/shell/:provider/:id", "routes/embed-shell.ts"),
   ...(reviewPages
     ? [
         route("dev/ui", "routes/dev-ui.tsx"),

@@ -186,31 +186,62 @@ describe("resolveLink", () => {
     expect(resolve("https://suno.com/@artist").kind).toBe("page");
   });
 
-  it("collapses Instagram post and Reel spellings", () => {
+  it("collapses every Reddit spelling of one post", () => {
     const keys = [
-      "https://www.instagram.com/p/CxYz_12-AbC/",
-      "https://instagram.com/p/CxYz_12-AbC/?igsh=tracking",
-      "https://www.instagram.com/reel/CxYz_12-AbC/",
-      "https://www.instagram.com/reels/CxYz_12-AbC/",
-      "https://www.instagram.com/someuser/p/CxYz_12-AbC/",
+      "https://www.reddit.com/r/place/comments/tqbguc/412022/",
+      "https://reddit.com/r/place/comments/tqbguc",
+      "https://old.reddit.com/r/place/comments/tqbguc/412022/",
+      "https://new.reddit.com/r/place/comments/TQBGUC/412022/?utm_source=share",
+      "https://www.reddit.com/r/place/comments/tqbguc/412022/i2gflrf/",
     ].map(keyOf);
-    expect(new Set(keys)).toEqual(new Set(["instagram:CxYz_12-AbC"]));
-    expect(resolve("https://www.instagram.com/reel/CxYz_12-AbC/")).toMatchObject(
-      { aspect: "9:16" },
-    );
-    expect(resolve("https://www.instagram.com/p/CxYz_12-AbC/")).toMatchObject({
-      aspect: "post",
-    });
+    expect(new Set(keys)).toEqual(new Set(["reddit:tqbguc"]));
   });
 
-  it("treats Instagram profiles and other pages as ordinary pages", () => {
+  it("keeps the community a Reddit frame needs", () => {
+    expect(
+      resolve("https://www.reddit.com/r/place/comments/tqbguc/412022/"),
+    ).toEqual({
+      kind: "media",
+      provider: "reddit",
+      id: "tqbguc",
+      canonicalKey: "reddit:tqbguc",
+      aspect: "post",
+      controlled: false,
+      embedPath: "r/place/comments/tqbguc",
+    });
+    expect(
+      resolve("https://www.reddit.com/u/some-user/comments/abc123/a_title/"),
+    ).toMatchObject({ embedPath: "user/some-user/comments/abc123" });
+  });
+
+  it("flags Reddit links that omit the community for resolution", () => {
     for (const input of [
-      "https://www.instagram.com/someuser/",
-      "https://www.instagram.com/explore/tags/aiart/",
-      "https://www.instagram.com/stories/someuser/123456/",
+      "https://redd.it/tqbguc",
+      "https://www.reddit.com/comments/tqbguc",
+      "https://www.reddit.com/gallery/tqbguc",
+      "https://www.reddit.com/r/place/s/AbCdEf1234",
+    ]) {
+      expect(resolve(input)).toMatchObject({ kind: "short", provider: "reddit" });
+    }
+  });
+
+  it("treats Reddit pages that are not one post as ordinary pages", () => {
+    for (const input of [
+      "https://www.reddit.com/r/place/",
+      "https://www.reddit.com/user/someone/",
+      "https://www.reddit.com/r/place/comments/",
+      "https://www.reddit.com/r/place/comments/not_an_id!/x/",
+      "https://www.reddit.com/r/a/comments/tqbguc/x/",
     ]) {
       expect(resolve(input).kind).toBe("page");
     }
+  });
+
+  it("no longer treats Instagram as a provider", () => {
+    expect(resolve("https://www.instagram.com/p/CxYz_12-AbC/")).toMatchObject({
+      kind: "page",
+      host: "instagram.com",
+    });
   });
 
   it("normalizes X and Twitter posts by post ID", () => {

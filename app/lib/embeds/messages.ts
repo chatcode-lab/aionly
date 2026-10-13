@@ -1,10 +1,10 @@
-import { SHELL_HEIGHT_MESSAGE } from "./shell";
+import type { Provider } from "../links/types";
 
 /**
  * Message formats for talking to embed frames. Only TikTok's is documented by
- * the provider. The YouTube, X, and Instagram formats are the ones their own
- * scripts use on the wire; the embed spike confirms them on real devices, and
- * every decoder ignores anything it does not recognize.
+ * the provider. The YouTube, X, and Reddit formats are the ones their own
+ * scripts use on the wire, confirmed against the live frames in the embed
+ * spike. Every decoder ignores anything it does not recognize.
  */
 
 export type PlayerState =
@@ -22,6 +22,19 @@ export type EmbedEvent =
   | { type: "height"; height: number };
 
 export type PlayerCommand = "play" | "pause" | "mute" | "unmute";
+
+/**
+ * The commands each provider's player obeys. TikTok's accepts mute and unmute
+ * messages but then restores its own state, so sound there is left to the
+ * player's own volume button. Uncontrolled embeds take no commands.
+ */
+export const PLAYER_COMMANDS: Record<Provider, readonly PlayerCommand[]> = {
+  youtube: ["play", "pause", "mute", "unmute"],
+  tiktok: ["play", "pause"],
+  suno: [],
+  x: [],
+  reddit: [],
+};
 
 const MAX_FRAME_HEIGHT = 5000;
 
@@ -161,18 +174,10 @@ export function decodeX(data: unknown): EmbedEvent[] {
   return heightEvent(parseObject(params[0])?.height);
 }
 
-// Instagram: the embed frame reports its measured height.
+// Reddit: the post frame reports its height the same way.
 
-export function decodeInstagram(data: unknown): EmbedEvent[] {
+export function decodeReddit(data: unknown): EmbedEvent[] {
   const message = parseObject(data);
-  if (!message || message.type !== "MEASURE") return [];
-  return heightEvent(parseObject(message.details)?.height);
-}
-
-// The first-party embed shell.
-
-export function decodeShell(data: unknown): EmbedEvent[] {
-  const message = parseObject(data);
-  if (!message || message.type !== SHELL_HEIGHT_MESSAGE) return [];
-  return heightEvent(message.height);
+  if (!message || message.type !== "resize.embed") return [];
+  return heightEvent(message.data);
 }

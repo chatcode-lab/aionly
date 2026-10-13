@@ -1,15 +1,8 @@
 import { ArrowUpRight, Music, Play } from "lucide-react";
 
 import { cn } from "~/lib/cn";
-import type { Aspect, Provider } from "~/lib/links/types";
-
-export const PROVIDER_LABEL: Record<Provider, string> = {
-  youtube: "YouTube",
-  tiktok: "TikTok",
-  suno: "Suno",
-  instagram: "Instagram",
-  x: "X",
-};
+import { formatDuration } from "~/lib/format";
+import { type Aspect, PROVIDER_LABEL, type Provider } from "~/lib/links/types";
 
 /** Outbound links never pass ranking credit and never get a window handle. */
 export const OUTBOUND_REL = "nofollow ugc noopener";
@@ -27,10 +20,21 @@ function Thumb({ src }: { src?: string }) {
   );
 }
 
-function ProviderBadge({ provider }: { provider: Provider }) {
+function Badge({
+  side,
+  children,
+}: {
+  side: "left" | "right";
+  children: string;
+}) {
   return (
-    <span className="absolute bottom-2 left-2 rounded-md bg-overlay px-2 py-0.5 text-meta font-medium text-on-overlay">
-      {PROVIDER_LABEL[provider]}
+    <span
+      className={cn(
+        "absolute bottom-2 rounded-md bg-overlay px-2 py-0.5 text-meta font-medium text-on-overlay tabular-nums",
+        side === "left" ? "left-2" : "right-2",
+      )}
+    >
+      {children}
     </span>
   );
 }
@@ -44,30 +48,35 @@ function PlayGlyph() {
 }
 
 /**
- * The stand-in for an embedded player. Every media card renders as a poster
- * with a fixed aspect ratio, so the feed never shifts, and a frame is mounted
- * only for the card in focus or on click.
+ * The stand-in for a player. Every media card renders as a poster with a
+ * fixed shape, so the feed never shifts, and a player is mounted only for the
+ * card in focus or on click. With a provider it stands in for that
+ * provider's embed; without one it stands in for media hosted by the board.
  */
 export function MediaPoster({
   provider,
   aspect,
   thumbUrl,
+  duration,
   onActivate,
 }: {
-  provider: Provider;
+  provider?: Provider;
   aspect: Aspect;
   /** A first-party `/img/<key>` snapshot. */
   thumbUrl?: string;
+  /** Length in seconds, when known. */
+  duration?: number;
   onActivate?: () => void;
 }) {
-  const name = PROVIDER_LABEL[provider];
+  const name = provider ? PROVIDER_LABEL[provider] : undefined;
+  const length = duration === undefined ? undefined : formatDuration(duration);
 
   if (aspect === "audio") {
     return (
       <button
         type="button"
         onClick={onActivate}
-        aria-label={`Play song from ${name}`}
+        aria-label={name ? `Play song from ${name}` : "Play audio"}
         className="group flex w-full items-center gap-3 rounded-xl border border-border bg-surface-2 p-2 text-left"
       >
         <span className="relative flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-border text-text-faint">
@@ -75,8 +84,12 @@ export function MediaPoster({
           <Thumb src={thumbUrl} />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-body font-medium">Play song</span>
-          <span className="block text-meta text-text-muted">{name}</span>
+          <span className="block text-body font-medium">
+            {name ? "Play song" : "Play audio"}
+          </span>
+          <span className="block text-meta text-text-muted tabular-nums">
+            {[name, length].filter(Boolean).join(" · ")}
+          </span>
         </span>
         <span className="mr-1 flex size-11 shrink-0 items-center justify-center rounded-full bg-accent-solid text-on-accent">
           <Play size={18} fill="currentColor" aria-hidden className="ml-0.5" />
@@ -94,7 +107,7 @@ export function MediaPoster({
       >
         <Thumb src={thumbUrl} />
         <span className="relative rounded-lg bg-overlay px-3.5 py-2 text-body font-medium text-on-overlay">
-          Load post from {name}
+          Load post{name ? ` from ${name}` : ""}
         </span>
       </button>
     );
@@ -111,7 +124,7 @@ export function MediaPoster({
       <button
         type="button"
         onClick={onActivate}
-        aria-label={`Play video from ${name}`}
+        aria-label={name ? `Play video from ${name}` : "Play video"}
         className={cn(
           "group relative block",
           vertical
@@ -121,8 +134,39 @@ export function MediaPoster({
       >
         <Thumb src={thumbUrl} />
         <PlayGlyph />
-        <ProviderBadge provider={provider} />
+        {name ? <Badge side="left">{name}</Badge> : null}
+        {length ? <Badge side="right">{length}</Badge> : null}
       </button>
+    </div>
+  );
+}
+
+/**
+ * A picture hosted by the board. The width and height reserve its shape
+ * before it loads; tall pictures are capped and letterboxed, never cropped.
+ */
+export function UploadedImage({
+  src,
+  width,
+  height,
+  alt,
+}: {
+  src: string;
+  width: number;
+  height: number;
+  alt: string;
+}) {
+  return (
+    <div className="flex justify-center overflow-hidden rounded-xl bg-surface-2">
+      <img
+        src={src}
+        width={width}
+        height={height}
+        alt={alt}
+        loading="lazy"
+        decoding="async"
+        className="h-auto max-h-[min(70vh,35rem)] w-auto max-w-full object-contain"
+      />
     </div>
   );
 }

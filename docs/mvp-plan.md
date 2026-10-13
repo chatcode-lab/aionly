@@ -69,24 +69,31 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 | Source | Presentation | Frame |
 |---|---|---|
 | YouTube and Shorts | Controlled embedded player | `youtube-nocookie.com/embed/<id>?enablejsapi=1` |
-| TikTok | Controlled embedded player | `tiktok.com/player/v1/<id>` |
-| Suno songs | Public player, loaded on click | `suno.com/embed/<id>` |
-| Instagram posts and Reels | Public embed, loaded on click | `instagram.com/p/<code>/embed/` |
-| X/Twitter posts | Post embed, including attached images or video, loaded on click | `platform.twitter.com/embed/Tweet.html?id=<id>` |
+| TikTok | Embedded player the page can pause and resume | `tiktok.com/player/v1/<id>?autoplay=1` |
+| Suno songs | Public player in the site theme, loaded on click | `suno.com/embed/<id>?theme=<theme>` |
+| X/Twitter posts | Post embed in the site theme, including attached images or video, loaded on click | `platform.twitter.com/embed/Tweet.html?id=<id>&theme=<theme>` |
+| Reddit posts | Compact post embed in the site theme, loaded on click | `embed.reddit.com/r/<community>/comments/<id>/?embed=true&style=subreddit-first` |
 | Apps, games, and other URLs | Preview card opening the original | None |
 
-- **Posters:** render every media card as a poster with a fixed aspect ratio: 16:9, or 9:16 capped at about 70% of the viewport height for Shorts, TikTok, and Reels. Only the focused card mounts an iframe, after 300 ms of dwell, and at most two iframes are mounted at once.
+- **Posters:** render every media card as a poster with a fixed aspect ratio: 16:9, or 9:16 capped at about 70% of the viewport height for Shorts and TikTok. Only the focused card mounts an iframe, after 300 ms of dwell, and at most two iframes are mounted at once.
 - Autoplay the focused YouTube or TikTok video **muted**, with a remembered off switch. Autoplay is on by default and off under `prefers-reduced-motion` or data saver. Focus is the visible player nearest the viewport center.
+- **Sound:** a tap on a poster mounts the player with sound. YouTube is unmuted by command. TikTok's player starts muted by itself and undoes mute commands from the page, so its sound comes from the player's own volume button. Never set TikTok's `muted` parameter: it also locks the volume.
+- **TikTok is always mounted playing.** Mounted paused, its player sends no events and ignores every command, so there is no paused TikTok frame: an unfocused card is a poster.
 - Keep one playback owner. Pause the previous controlled player; unload uncontrolled embeds when ownership changes. Pause or unload on leaving view, tab hiding, or navigation. Music requires a click.
 - Always retain "Open original." Unsupported, unavailable, private, or embedding-disabled content falls back to a preview; blocked autoplay shows Play.
-- Fetch and store bounded Open Graph metadata server-side at the Check link step. Missing metadata produces a title/domain card. Preview failure does not prevent publication. Expect no metadata for Instagram.
+- Fetch and store bounded Open Graph metadata server-side at the Check link step. Missing metadata produces a title/domain card. Preview failure does not prevent publication.
 - **Preview images:** at the Check link step, fetch the thumbnail once and store it in R2 under a random key, recorded in an `images` table as pending and owned by the submitter. Accept JPEG, PNG, or WebP by magic bytes, at most 2 MB, within 5 seconds. Use this for supported providers too, since their thumbnail URLs can expire. Failures fall back to the title/domain card.
 - **Image visibility:** `/img/<key>` checks the reference on every request. It serves an image only while it is attached to a post that is neither removed nor deleted, or is a current avatar. A pending image is served only to its owner, with `Cache-Control: private, no-store`. Anything else returns 404.
 - **Image caching:** serve public images with `Cache-Control: public, max-age=300` and `nosniff`, never `immutable`, and do not store them in the edge cache. A removal then takes effect at once for new requests and within 5 minutes for browsers that already loaded the image.
 - **Image cleanup:** each account holds at most one pending image; a new Check link replaces it. Publishing attaches the image in the same batch as the post. A scheduled sweep deletes pending images older than 24 hours and the images of author-deleted posts and deleted accounts. Moderator removal hides the image but keeps the object so restoration works; an admin purge deletes the object for content that must not be retained.
 - Generate embeds through provider adapters; accept URLs rather than submitted HTML. Build each frame URL from the validated provider ID.
-- **No provider scripts in the page:** control YouTube by `postMessage` directly instead of loading the IFrame API script, and TikTok through its official player `postMessage` API. Suno, Instagram, and X load as plain iframes. The YouTube message format and the Suno, Instagram, and X frame URLs are undocumented, so the spike must confirm them. Where one fails, fall back to the embed shell defined in the security baseline, which runs the provider's script at an opaque origin.
-- Accept both `x.com` and `twitter.com` post URLs and normalize them by post ID. Treat X/Twitter embeds as uncontrolled media: click to load, participate in the single playback owner, and unload on ownership changes. Retain the preview fallback for unavailable posts or blocked embeds. If the shell fallback is needed, it uses the official embedded-post widget. [X embedding documentation](https://help.x.com/en/using-x/how-to-embed-a-post)
+- **No provider scripts in the page:** every embed is a plain sandboxed iframe. Control YouTube by `postMessage` directly instead of loading the IFrame API script, and TikTok through its official player `postMessage` API. Suno, X, and Reddit need no control; X and Reddit report their height by message. Only TikTok's protocol is documented; the others were confirmed against the live frames in the embed spike.
+- **Minimal and themed:** request each provider's most compact presentation, and pass the site's color scheme wherever the provider has one: X and Suno take `theme`, Reddit takes `theme=dark` and is light otherwise. YouTube and TikTok have no theme. A mounted frame is rebuilt when the site theme changes.
+- **Post embed layout:** X and Reddit frames stop at the provider's own width (550 px and 640 px), are centered, and take the height the embed reports. X's frame is transparent and never declares a dark color scheme, so its iframe is marked `color-scheme: light`; otherwise the browser paints a white backdrop behind it on a dark page.
+- **No script fallback:** a provider whose frame fails falls back to the preview card. A first-party shell that ran the provider's own script in a sandbox was built and rejected: X's and Instagram's scripts load there but cannot complete their frame messaging at an opaque origin. A shell would need its own hostname.
+- **Instagram is not supported.** It blocks embedding for some posts and ignores the site theme. Instagram links are ordinary preview cards.
+- Accept both `x.com` and `twitter.com` post URLs and normalize them by post ID. Treat X/Twitter embeds as uncontrolled media: click to load, participate in the single playback owner, and unload on ownership changes. Retain the preview fallback for unavailable posts or blocked embeds.
+- Accept Reddit post URLs from any `reddit.com` host and normalize them by post ID; a comment permalink resolves to its post. The frame needs the community, so links without one (`redd.it`, `/comments/<id>`, share links) are resolved server-side at the Check link step. Reddit embeds are uncontrolled media, handled like X.
 - Allow limited Markdown: emphasis, lists, quotes, and code blocks. **Links in descriptions and comments remain non-clickable.** Display Markdown links as `label (URL)`, leave plain URLs inert, disable inline images, and escape HTML.
 - Main post links, preview cards, site navigation, and native provider controls remain interactive. Post links and preview cards use `rel="nofollow ugc noopener"` and `target="_blank"`, show the destination domain beside the title, and send an origin-only referrer (`strict-origin-when-cross-origin`).
 - **Sharing:** post pages emit `og:title`, a 160-character excerpt, the snapshot image, and a canonical `/p/<id>`. Tombstones emit generic tags.
@@ -138,10 +145,9 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 
 ### Security baseline
 
-- **Scripts:** the top-level document runs only first-party scripts, with Turnstile as the single exception. Provider code runs only inside provider frames or the embed shell.
-- **Content Security Policy:** send the site policy on every response except the embed shell, with `script-src 'self' 'nonce-…' https://challenges.cloudflare.com`, `frame-src` limited to the five providers, Turnstile, and the embed shell path, `frame-ancestors 'none'`, and `base-uri 'self'`.
-- **Embed shell:** the fallback for a provider that needs its own script is a separate first-party route, `/embed/shell/<provider>/<id>`. It ignores the session and renders only from the validated provider ID. It sends its own policy instead of the site policy: `sandbox allow-scripts allow-popups allow-popups-to-escape-sandbox`, `default-src 'none'`, `script-src` limited to a nonce and that provider's script host, `frame-src` limited to that provider, and `frame-ancestors` set to the site origin.
-- **Embed frames:** every embed iframe uses `sandbox` without `allow-top-navigation`. Message listeners check `event.origin` and `event.source`. The shell runs at an opaque origin, so its height messages are matched by `event.source` alone.
+- **Scripts:** the top-level document runs only first-party scripts, with Turnstile as the single exception. Provider code runs only inside provider frames.
+- **Content Security Policy:** send the site policy on every response, with `script-src 'self' 'nonce-…' https://challenges.cloudflare.com`, `frame-src` limited to the five providers and Turnstile, `frame-ancestors 'none'`, and `base-uri 'self'`. No first-party page is ever framed.
+- **Embed frames:** every embed iframe uses `sandbox` without `allow-top-navigation`. Message listeners check `event.origin` and `event.source`, and commands are posted to the provider's origin alone.
 - **Requests:** use React Router 7.15.1 or later and POST for every mutation, including sign-out. Reject any non-GET request whose `Origin` is not the site origin, because the built-in check is described as covering UI routes only.
 - **Cookies:** session cookies are host-only. Do not set a cookie domain, unlike the legacy configuration.
 - **Return destination:** it must parse as a same-origin path starting with a single `/`; anything else becomes `/`.
@@ -168,7 +174,6 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 /u/:username          profile
 /admin  /admin/users  /admin/log
 /api/auth/*  /img/:key
-/embed/shell/:provider/:id   fallback embed shell, own policy
 /dev/ui               staging only
 ```
 
@@ -197,7 +202,7 @@ deleted_identities(id_hash PK, banned, deleted_at)
 
 ### Build order
 
-1. Spike: deploy a skeleton to staging and test all six embeds on real phones. Confirm the undocumented frame URLs and message formats, autoplay behavior, whether the X widget runs inside the embed shell, and which providers return usable metadata and thumbnails from Workers.
+1. Spike: deploy a skeleton to staging and test all five embeds on real phones. Desktop Chromium has confirmed the frame URLs and message formats; phones still need to confirm autoplay, sound after a tap, TikTok playback, and in-app browser detection. Also confirm which providers return usable metadata and thumbnails from Workers.
 2. Read path with seeded data and the design system, including the `/dev/ui` gate.
 3. Sign-in, username, submission, votes, and karma.
 4. Comments and author controls.
@@ -214,7 +219,7 @@ deleted_identities(id_hash PK, banned, deleted_at)
 - Test that Top pagination neither skips nor repeats posts when scores change between pages, and that Refresh takes a new snapshot.
 - Test image visibility: pending images reach only their owner, images of removed or deleted posts return 404, public images are never served as `immutable`, and the sweep deletes expired pending images.
 - Test account deletion, the sign-up block for deleted and banned identities, and ban enforcement when a ban lands mid-request. A banned user can sign out and delete their account, and every participation action is refused.
-- Test that the embed shell can be framed only by the site, that the site policy admits the shell path, and that no other page can be framed.
+- Test that no page can be framed, that frames follow the site theme and are rebuilt on a theme switch, and that only the commands a player obeys are offered.
 - Test that the in-app browser sheet offers Copy draft when a draft exists.
 - Verify removed text never reaches public responses and submitted links never become clickable.
 - Seed sentinel strings for email, Google name, and removed text, crawl every public route as an anonymous user and as a different user, and assert none appear in HTML or data responses.
@@ -222,6 +227,7 @@ deleted_identities(id_hash PK, banned, deleted_at)
 - Test playback handoff, failed previews, mobile layouts, keyboard access, themes, migrations, and production builds.
 - Test back navigation restoring loaded pages and scroll position, the in-app browser sheet, the theme cookie rendering without a flash, autoplay staying off under reduced motion, and the two-iframe cap.
 - Test X/Twitter URL variants, posts with text/images/video, playback handoff, and preview fallback for deleted, protected, or unavailable posts and blocked embeds.
+- Test Reddit URL variants, including comment permalinks and links without a community, and the compact themed frame.
 - Verify the Chatcode and X footer links on all page types and confirm that public source, fixtures, and documentation contain no credentials or private user data.
 
 ### Cutover
@@ -239,4 +245,14 @@ deleted_identities(id_hash PK, banned, deleted_at)
 
 - When the board ships, publish project coverage at [chatcode.dev/lab/](https://chatcode.dev/lab/) describing the Lab sessions, shipped functionality, and lessons learned, with links to the live `aion.ly` board and public `chatcode-lab/aionly` repository. Use public-safe screenshots and examples.
 
-Defer uploads, Gravatar, search, categories, notifications, messaging, automated content detection, and coordinated-voting detection beyond these basic controls. Server-made image snapshots are not user uploads.
+Defer uploads, Gravatar, search, categories, notifications, messaging, automated content detection, and coordinated-voting detection beyond these basic controls. Server-made image snapshots are not user uploads. Facebook and Telegram embeds can follow as further provider adapters.
+
+### Later: media uploads
+
+Not in the MVP, but the design leaves room so adding them needs no redesign.
+
+- **What:** pictures, video, and audio hosted by the board, for creations that live nowhere else. Such a post has no outside link; its title opens the post page.
+- **Who:** off for everyone at first. Unlock by karma threshold, with a paid option as a possible alternative. Either way it is one configurable gate checked by `requireParticipant()`.
+- **Feed:** the same post card. A picture keeps its own shape, capped in height and never cropped. Video uses the same poster as a provider video and plays in the browser's own player. Audio uses the same row as a provider song. The `/dev/ui` page shows all three.
+- **Storage:** the `images` pipeline generalizes: R2 objects under random keys, pending until published, served only while attached to a live post, never `immutable`, swept when orphaned. Add `media-src 'self'` to the policy.
+- **Open before building:** size and length limits, transcoding and poster extraction, how uploads are screened for NSFW content when there is no provider doing it first, and storage and bandwidth cost.

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { FRAME_ORIGINS, frameUrl, shellPath } from "../embeds/frames";
-import type { MediaLink } from "../links/types";
-import { buildShellPolicy, buildSitePolicy, createNonce } from "./csp";
+import { frameUrl } from "../embeds/frames";
+import { type MediaLink, PROVIDERS } from "../links/types";
+import { buildSitePolicy, createNonce } from "./csp";
 import { withSecurityHeaders } from "./headers";
 import { isSameOriginRequest, safeReturnPath } from "./request";
 
@@ -26,7 +26,7 @@ describe("createNonce", () => {
 });
 
 describe("buildSitePolicy", () => {
-  const policy = directives(buildSitePolicy({ nonce: "abc", siteOrigin: SITE }));
+  const policy = directives(buildSitePolicy({ nonce: "abc" }));
 
   it("runs only first-party scripts and Turnstile", () => {
     expect(policy["script-src"]).toEqual([
@@ -36,16 +36,22 @@ describe("buildSitePolicy", () => {
     ]);
   });
 
-  it("limits frames to the five providers, Turnstile, and the shell path", () => {
+  it("limits frames to the five providers and Turnstile", () => {
     expect(policy["frame-src"]).toEqual([
       "https://www.youtube-nocookie.com",
       "https://www.tiktok.com",
       "https://suno.com",
-      "https://www.instagram.com",
       "https://platform.twitter.com",
+      "https://embed.reddit.com",
       "https://challenges.cloudflare.com",
-      "https://aion.ly/embed/shell/",
     ]);
+  });
+
+  it("never admits the site itself as a frame", () => {
+    expect(policy["frame-src"]).not.toContain("'self'");
+    expect(policy["frame-src"].some((source) => source.startsWith(SITE))).toBe(
+      false,
+    );
   });
 
   it("forbids framing the site and rebasing its URLs", () => {
@@ -56,15 +62,13 @@ describe("buildSitePolicy", () => {
 
   it("opens the HMR socket only in development", () => {
     expect(policy["connect-src"]).toEqual(["'self'"]);
-    const dev = directives(
-      buildSitePolicy({ nonce: "abc", siteOrigin: SITE, dev: true }),
-    );
+    const dev = directives(buildSitePolicy({ nonce: "abc", dev: true }));
     expect(dev["connect-src"]).toEqual(["'self'", "ws:"]);
   });
 
   it("admits every frame URL the builder can produce", () => {
     const sources = policy["frame-src"];
-    for (const provider of Object.keys(FRAME_ORIGINS) as MediaLink["provider"][]) {
+    for (const provider of PROVIDERS) {
       const link: MediaLink = {
         kind: "media",
         provider,
@@ -72,57 +76,11 @@ describe("buildSitePolicy", () => {
         canonicalKey: `${provider}:abc123`,
         aspect: "16:9",
         controlled: false,
+        embedPath: "r/place/comments/abc123",
       };
       const url = new URL(frameUrl(link, { siteOrigin: SITE, theme: "dark" }));
       expect(sources).toContain(url.origin);
     }
-  });
-
-  it("admits the embed shell path", () => {
-    const shell = new URL(shellPath("x", "20"), SITE).href;
-    const source = policy["frame-src"].find((value) => value.startsWith(SITE));
-    expect(source).toBeDefined();
-    expect(shell.startsWith(source!)).toBe(true);
-  });
-});
-
-describe("buildShellPolicy", () => {
-  const policy = directives(
-    buildShellPolicy({ nonce: "abc", siteOrigin: SITE, provider: "x" }),
-  );
-
-  it("sandboxes the shell at an opaque origin", () => {
-    expect(policy.sandbox).toEqual([
-      "allow-scripts",
-      "allow-popups",
-      "allow-popups-to-escape-sandbox",
-    ]);
-    expect(policy.sandbox).not.toContain("allow-same-origin");
-    expect(policy.sandbox).not.toContain("allow-top-navigation");
-  });
-
-  it("allows only the nonce and that provider's script and frame hosts", () => {
-    expect(policy["default-src"]).toEqual(["'none'"]);
-    expect(policy["script-src"]).toEqual([
-      "'nonce-abc'",
-      "https://platform.twitter.com",
-    ]);
-    expect(policy["frame-src"]).toEqual(["https://platform.twitter.com"]);
-  });
-
-  it("can be framed only by the site", () => {
-    expect(policy["frame-ancestors"]).toEqual([SITE]);
-  });
-
-  it("scopes Instagram to Instagram", () => {
-    const instagram = directives(
-      buildShellPolicy({ nonce: "abc", siteOrigin: SITE, provider: "instagram" }),
-    );
-    expect(instagram["script-src"]).toEqual([
-      "'nonce-abc'",
-      "https://www.instagram.com",
-    ]);
-    expect(instagram["frame-src"]).toEqual(["https://www.instagram.com"]);
   });
 });
 
@@ -149,7 +107,7 @@ describe("withSecurityHeaders", () => {
     expect(response.headers.has("X-Robots-Tag")).toBe(false);
   });
 
-  it("overrides a policy set by any route other than the shell", () => {
+  it("overrides a policy set by a route", () => {
     const response = withSecurityHeaders(
       new Request(`${SITE}/p/abc`),
       new Response("ok", {
@@ -160,36 +118,6 @@ describe("withSecurityHeaders", () => {
     expect(response.headers.get("Content-Security-Policy")).toContain(
       "default-src 'self'",
     );
-  });
-
-  it("keeps the embed shell's own policy and lets the site frame it", () => {
-    const shellPolicy = buildShellPolicy({
-      nonce: "abc",
-      siteOrigin: SITE,
-      provider: "x",
-    });
-    const response = withSecurityHeaders(
-      new Request(`${SITE}${shellPath("x", "20")}`),
-      new Response("<!doctype html>", {
-        headers: { "Content-Security-Policy": shellPolicy },
-      }),
-      options,
-    );
-    expect(response.headers.get("Content-Security-Policy")).toBe(shellPolicy);
-    expect(response.headers.has("X-Frame-Options")).toBe(false);
-    expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
-  });
-
-  it("falls back to the site policy when a shell response has none", () => {
-    const response = withSecurityHeaders(
-      new Request(`${SITE}/embed/shell/x/not-a-post`),
-      new Response("Not Found", { status: 404 }),
-      options,
-    );
-    expect(response.headers.get("Content-Security-Policy")).toContain(
-      "frame-ancestors 'none'",
-    );
-    expect(response.headers.get("X-Frame-Options")).toBe("DENY");
   });
 
   it("marks every response noindex outside production", () => {

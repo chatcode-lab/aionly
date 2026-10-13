@@ -1,6 +1,14 @@
-export const PROVIDERS = ["youtube", "tiktok", "suno", "instagram", "x"] as const;
+export const PROVIDERS = ["youtube", "tiktok", "suno", "x", "reddit"] as const;
 
 export type Provider = (typeof PROVIDERS)[number];
+
+export const PROVIDER_LABEL: Record<Provider, string> = {
+  youtube: "YouTube",
+  tiktok: "TikTok",
+  suno: "Suno",
+  x: "X",
+  reddit: "Reddit",
+};
 
 export type Aspect = "16:9" | "9:16" | "post" | "audio";
 
@@ -12,8 +20,13 @@ export interface MediaLink {
   /** `provider:id`, the uniqueness key for duplicate detection. */
   canonicalKey: string;
   aspect: Aspect;
-  /** Controlled players accept play, pause, and mute commands from the page. */
+  /** Controlled players accept playback commands from the page. */
   controlled: boolean;
+  /**
+   * The provider path a frame needs when the ID alone is not enough. Reddit
+   * addresses a post under its community: `r/<name>/comments/<id>`.
+   */
+  embedPath?: string;
 }
 
 /** Any other public page, shown as a preview card. */

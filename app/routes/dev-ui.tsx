@@ -133,6 +133,20 @@ function samplePosts(now: number): PostCardData[] {
       media: { kind: "media", provider: "x", aspect: "post" },
     },
     {
+      id: "y5z6a7b8",
+      title: "A community canvas, rebuilt frame by frame from prompts",
+      url: "https://www.reddit.com/r/place/comments/tqbguc/412022/",
+      host: "reddit.com",
+      origin: "found",
+      author: AUTHORS.moth,
+      createdAt: now - 3 * 24 * hour,
+      score: 19,
+      commentCount: 4,
+      excerpt:
+        "Posts from X and Reddit load on click, in their compact layout and the site theme.",
+      media: { kind: "media", provider: "reddit", aspect: "post" },
+    },
+    {
       id: "q7r8s9t0",
       title: "A tiny browser roguelike, built in an afternoon of prompting",
       url: "https://example.com/roguelike",
@@ -162,6 +176,65 @@ function samplePosts(now: number): PostCardData[] {
       commentCount: 0,
       excerpt: "No preview image on this one, so the card is title and domain.",
       media: { kind: "page" },
+    },
+  ];
+}
+
+/** Posts whose media the board would host itself. Not part of the MVP. */
+function sampleUploads(now: number): PostCardData[] {
+  const hour = 3600;
+  return [
+    {
+      id: "up1mage1",
+      title: "Poster series: twelve cities that do not exist",
+      url: "/p/up1mage1",
+      origin: "made",
+      author: AUTHORS.wren,
+      createdAt: now - 5 * hour,
+      score: 64,
+      commentCount: 9,
+      excerpt:
+        "Generated, then typeset by hand. A picture keeps its own shape, capped in height.",
+      media: {
+        kind: "image",
+        src: sampleArt("#264653", "#e9c46a", "#e76f51"),
+        width: 1200,
+        height: 900,
+      },
+    },
+    {
+      id: "up2video2",
+      title: "Forty seconds of rain on a street that was never filmed",
+      url: "/p/up2video2",
+      origin: "made",
+      author: AUTHORS.otter,
+      createdAt: now - 11 * hour,
+      score: 38,
+      commentCount: 2,
+      excerpt: "Uploaded video plays in the browser's own player.",
+      media: {
+        kind: "video",
+        aspect: "16:9",
+        thumbUrl: sampleArt("#1d3557", "#a8dadc", "#457b9d"),
+        duration: 42,
+      },
+    },
+    {
+      id: "up3audio3",
+      title: "Field recording of an imaginary forest",
+      url: "/p/up3audio3",
+      origin: "made",
+      author: AUTHORS.lark,
+      createdAt: now - 30 * hour,
+      score: 15,
+      commentCount: 0,
+      excerpt: "Uploaded audio uses the same row as a song from a provider.",
+      media: {
+        kind: "audio",
+        aspect: "audio",
+        thumbUrl: sampleArt("#283618", "#dda15e", "#606c38"),
+        duration: 187,
+      },
     },
   ];
 }
@@ -620,6 +693,27 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
         <PostCardSkeleton />
         <PostTombstone state="removed" />
         <PostTombstone state="deleted" />
+      </Section>
+
+      <Section
+        title="Uploads (later)"
+        note="Not in the MVP. Pictures, video, and audio hosted by the board would use the same card, so the feed needs no redesign when they arrive."
+      >
+        {sampleUploads(now).map((post) => {
+          const vote = votes[post.id] ?? 0;
+          return (
+            <PostCard
+              key={post.id}
+              post={{ ...post, score: post.score + vote }}
+              now={now}
+              vote={vote}
+              onVote={(next) =>
+                setVotes((current) => ({ ...current, [post.id]: next }))
+              }
+              menu={postMenu}
+            />
+          );
+        })}
       </Section>
 
       <Section

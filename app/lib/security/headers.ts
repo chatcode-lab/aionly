@@ -1,4 +1,3 @@
-import { SHELL_PATH_PREFIX } from "../embeds/frames";
 import { buildSitePolicy } from "./csp";
 
 export interface SecurityHeaderOptions {
@@ -10,9 +9,8 @@ export interface SecurityHeaderOptions {
 }
 
 /**
- * Applies the security baseline to a response. The embed shell is the one
- * response that keeps its own policy: it must be framed by the site and run a
- * provider script, both of which the site policy forbids.
+ * Applies the security baseline to a response. Every response gets the site
+ * policy, replacing anything a route set itself.
  */
 export function withSecurityHeaders(
   request: Request,
@@ -24,22 +22,11 @@ export function withSecurityHeaders(
   const secured = new Response(response.body, response);
   const headers = secured.headers;
 
-  const isShell =
-    url.pathname.startsWith(SHELL_PATH_PREFIX) &&
-    headers.has("Content-Security-Policy");
-
-  if (!isShell) {
-    headers.set(
-      "Content-Security-Policy",
-      buildSitePolicy({
-        nonce: options.nonce,
-        siteOrigin: url.origin,
-        dev: options.dev,
-      }),
-    );
-    headers.set("X-Frame-Options", "DENY");
-  }
-
+  headers.set(
+    "Content-Security-Policy",
+    buildSitePolicy({ nonce: options.nonce, dev: options.dev }),
+  );
+  headers.set("X-Frame-Options", "DENY");
   headers.set("X-Content-Type-Options", "nosniff");
   headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
   headers.set(

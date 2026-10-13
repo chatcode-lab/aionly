@@ -5,8 +5,10 @@ const YOUTUBE_ID = /^[A-Za-z0-9_-]{11}$/;
 const TIKTOK_ID = /^\d{8,25}$/;
 const SUNO_ID =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const INSTAGRAM_CODE = /^[A-Za-z0-9_-]{1,40}$/;
 const X_ID = /^\d{1,20}$/;
+const REDDIT_ID = /^[a-z0-9]{2,10}$/;
+const REDDIT_COMMUNITY = /^[A-Za-z0-9_]{2,21}$/;
+const REDDIT_USER = /^[A-Za-z0-9_-]{3,20}$/;
 
 function segments(url: URL): string[] {
   return url.pathname.split("/").filter(Boolean);
@@ -15,7 +17,7 @@ function segments(url: URL): string[] {
 function media(
   provider: Provider,
   id: string,
-  rest: Pick<MediaLink, "aspect" | "controlled">,
+  rest: Pick<MediaLink, "aspect" | "controlled" | "embedPath">,
 ): MediaLink {
   return {
     kind: "media",
@@ -90,23 +92,6 @@ function suno(url: URL): ResolvedLink | null {
   });
 }
 
-function instagram(url: URL): ResolvedLink | null {
-  const parts = segments(url);
-  // Share links may carry the author's handle first: /<handle>/p/<code>/.
-  const offset = ["p", "reel", "reels", "tv"].includes(parts[0] ?? "") ? 0 : 1;
-  const type = parts[offset];
-  const code = parts[offset + 1];
-
-  if (!type || !["p", "reel", "reels", "tv"].includes(type)) return null;
-  if (!code || !INSTAGRAM_CODE.test(code)) return null;
-
-  const reel = type === "reel" || type === "reels";
-  return media("instagram", code, {
-    aspect: reel ? "9:16" : "post",
-    controlled: false,
-  });
-}
-
 function x(url: URL): ResolvedLink | null {
   const parts = segments(url);
   const statusAt = parts.findIndex(
@@ -123,6 +108,41 @@ function x(url: URL): ResolvedLink | null {
   });
 }
 
+function reddit(url: URL, host: string): ResolvedLink | null {
+  const parts = segments(url);
+  const short: ResolvedLink = { kind: "short", provider: "reddit", url: url.href };
+
+  // redd.it/<id> names a post without its community.
+  if (host === "redd.it") return parts.length === 1 ? short : null;
+  // So do /comments/<id>, /gallery/<id>, and /r/<name>/s/<code> share links.
+  if (parts[0] === "comments" || parts[0] === "gallery") {
+    return parts[1] ? short : null;
+  }
+  if (parts[0] === "r" && parts[2] === "s") return parts[3] ? short : null;
+
+  const [kind, name, section, rawId] = parts;
+  if (section !== "comments" || !name || !rawId) return null;
+
+  const id = rawId.toLowerCase();
+  if (!REDDIT_ID.test(id)) return null;
+
+  let scope: string;
+  if (kind === "r" && REDDIT_COMMUNITY.test(name)) {
+    scope = `r/${name}`;
+  } else if ((kind === "user" || kind === "u") && REDDIT_USER.test(name)) {
+    scope = `user/${name}`;
+  } else {
+    return null;
+  }
+
+  // A comment permalink resolves to its post: the board links to posts.
+  return media("reddit", id, {
+    aspect: "post",
+    controlled: false,
+    embedPath: `${scope}/comments/${id}`,
+  });
+}
+
 const HOSTS: Record<string, (url: URL, host: string) => ResolvedLink | null> = {
   "youtube.com": youtube,
   "m.youtube.com": youtube,
@@ -136,12 +156,17 @@ const HOSTS: Record<string, (url: URL, host: string) => ResolvedLink | null> = {
   "suno.com": suno,
   "suno.ai": suno,
   "app.suno.ai": suno,
-  "instagram.com": instagram,
-  "m.instagram.com": instagram,
   "x.com": x,
   "mobile.x.com": x,
   "twitter.com": x,
   "mobile.twitter.com": x,
+  "reddit.com": reddit,
+  "old.reddit.com": reddit,
+  "new.reddit.com": reddit,
+  "np.reddit.com": reddit,
+  "m.reddit.com": reddit,
+  "sh.reddit.com": reddit,
+  "redd.it": reddit,
 };
 
 function page(url: URL): PageLink {

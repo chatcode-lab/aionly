@@ -1,23 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 
 import { EmbedFrame } from "~/components/embed-frame";
-import { PROVIDER_LABEL } from "~/components/media-poster";
 import { Button } from "~/components/ui/button";
 import { TextField } from "~/components/ui/field";
 import { Notice } from "~/components/ui/states";
-import { cn } from "~/lib/cn";
-import {
-  connectEmbed,
-  type EmbedConnection,
-  type EmbedSource,
-} from "~/lib/embeds/connect";
-import { frameUrl, isShellProvider, shellPath } from "~/lib/embeds/frames";
-import type { PlayerCommand } from "~/lib/embeds/messages";
+import { connectEmbed, type EmbedConnection } from "~/lib/embeds/connect";
+import { frameUrl } from "~/lib/embeds/frames";
+import { PLAYER_COMMANDS, type PlayerCommand } from "~/lib/embeds/messages";
 import { assertDevRoutes } from "~/lib/env.server";
 import { detectInAppBrowser } from "~/lib/in-app-browser";
 import { resolveLink } from "~/lib/links/resolve";
-import type { MediaLink, Provider } from "~/lib/links/types";
+import {
+  type MediaLink,
+  PROVIDER_LABEL,
+  PROVIDERS,
+  type Provider,
+} from "~/lib/links/types";
 import { parseSubmittedUrl } from "~/lib/links/url";
+import { type ResolvedTheme, useResolvedTheme } from "~/lib/use-resolved-theme";
 
 import type { Route } from "./+types/dev-embeds";
 
@@ -30,48 +30,47 @@ export function loader({ request }: Route.LoaderArgs) {
   return { userAgent: request.headers.get("User-Agent") ?? "" };
 }
 
-// Public examples to start from. Suno and Instagram need a real link pasted.
+// Public examples to start from. Paste any other link to test it.
 const SAMPLES: Record<Provider, string> = {
   youtube: "https://www.youtube.com/watch?v=jNQXAC9IVRw",
   tiktok: "https://www.tiktok.com/@scout2015/video/6718335390845095173",
-  suno: "",
-  instagram: "",
+  suno: "https://suno.com/song/cf674415-debb-498c-aa29-37a58a28d8e9",
   x: "https://x.com/jack/status/20",
+  reddit: "https://www.reddit.com/r/place/comments/tqbguc/412022/",
 };
 
 const CHECKS: Record<Provider, string[]> = {
   youtube: [
     "Frame loads and shows the player",
-    "A ready event arrives in the log",
     "Play, Pause, Mute, Unmute work from the buttons",
     "Autoplay muted starts without a tap, and Unmute then gives sound",
     "Autoplay with sound starts right after tapping Load",
     "Try a Shorts link: vertical frame, same controls",
   ],
   tiktok: [
-    "Frame loads and shows the player",
-    "A ready event arrives in the log",
-    "Started paused, the player sends nothing and ignores the buttons until tapped",
-    "Autoplay muted starts without a tap, and Unmute then gives sound",
-    "Autoplay with sound starts right after tapping Load, or logs an autoplay error",
-    "Once playing, Pause, Play, Mute, Unmute work from the buttons",
+    "The video starts by itself, muted",
+    "Pause and Play work from the buttons",
+    "The player's own volume button turns the sound on, and it stays on",
   ],
   suno: [
-    "Paste a suno.com/song/… link: the player loads",
+    "The player follows the site theme",
     "Playback starts only after a tap",
   ],
-  instagram: [
-    "Paste a post link and a Reel link: both render in the direct frame",
-    "A height event arrives and the frame resizes",
-    "Shell mode renders the same post",
-  ],
   x: [
-    "Direct frame renders text, images, and video posts",
-    "A height event arrives and the frame resizes",
-    "Shell mode renders the same post inside the sandbox",
+    "Text, image, and video posts render, in the site theme",
+    "No white strip beside or behind the post in the dark theme",
+    "The frame grows to the post's height",
     "A deleted or protected post shows the provider's fallback",
   ],
+  reddit: [
+    "The compact post renders, in the site theme",
+    "The frame grows to the post's height",
+    "Image, video, and text posts all render",
+    "A removed or private post shows the provider's fallback",
+  ],
 };
+
+type Start = "paused" | "muted" | "sound";
 
 interface LogEntry {
   id: number;
@@ -86,14 +85,16 @@ function ProviderSpike({
 }: {
   provider: Provider;
   siteOrigin: string;
-  theme: "light" | "dark";
+  theme: ResolvedTheme;
 }) {
   const [input, setInput] = useState(SAMPLES[provider]);
-  const [start, setStart] = useState<"paused" | "muted" | "sound">("paused");
-  const [mode, setMode] = useState<"frame" | "shell">("frame");
-  const [mounted, setMounted] = useState<{ src: string; shell: boolean } | null>(
-    null,
-  );
+  const [start, setStart] = useState<Start>("paused");
+  const [mounted, setMounted] = useState<{
+    link: MediaLink;
+    start: Start;
+    // Bumped by Reload, so the same link mounts a fresh frame.
+    run: number;
+  } | null>(null);
   const [height, setHeight] = useState<number | undefined>();
   const [log, setLog] = useState<LogEntry[]>([]);
 
@@ -105,6 +106,15 @@ function ProviderSpike({
   const link = parsed?.ok ? resolveLink(parsed.url) : null;
   const media: MediaLink | null =
     link?.kind === "media" && link.provider === provider ? link : null;
+
+  // The theme is part of the URL, so switching it remounts the frame.
+  const src = mounted
+    ? frameUrl(mounted.link, {
+        siteOrigin,
+        theme,
+        autoplay: mounted.start === "paused" ? undefined : mounted.start,
+      })
+    : null;
 
   const append = (text: string) => {
     nextId.current += 1;
@@ -118,10 +128,10 @@ function ProviderSpike({
 
   useEffect(() => {
     const frame = frameRef.current;
-    if (!mounted || !frame) return;
+    if (!src || !frame) return;
 
-    const source: EmbedSource = mounted.shell ? "shell" : provider;
-    const active = connectEmbed(source, frame, {
+    setHeight(undefined);
+    const active = connectEmbed(provider, frame, {
       onEvent: (event) => {
         if (event.type === "height") setHeight(event.height);
         append(`event ${JSON.stringify(event)}`);
@@ -137,24 +147,16 @@ function ProviderSpike({
       connection.current = null;
     };
     // `append` only touches a ref and state setters, so it is not a dependency.
-  }, [mounted, provider]);
+  }, [src, mounted?.run, provider]);
 
   const load = () => {
     if (!media) return;
-    setHeight(undefined);
     setLog([]);
-    const shell = mode === "shell" && isShellProvider(provider);
-    setMounted({
-      shell,
-      src:
-        shell && isShellProvider(provider)
-          ? `${shellPath(provider, media.id)}?theme=${theme}`
-          : frameUrl(media, {
-              siteOrigin,
-              theme,
-              autoplay: start === "paused" ? undefined : start,
-            }),
-    });
+    setMounted((current) => ({
+      link: media,
+      start,
+      run: (current?.run ?? 0) + 1,
+    }));
   };
 
   const send = (command: PlayerCommand) => {
@@ -162,7 +164,7 @@ function ProviderSpike({
     connection.current?.send(command);
   };
 
-  const vertical = media?.aspect === "9:16";
+  const commands = PLAYER_COMMANDS[provider];
 
   return (
     <section className="rounded-xl border border-border bg-surface p-3 sm:p-4">
@@ -209,12 +211,13 @@ function ProviderSpike({
         <Button onClick={() => setMounted(null)} disabled={!mounted}>
           Unload
         </Button>
-        {media?.controlled ? (
+        {/* TikTok always starts playing, so it has no start choice. */}
+        {provider === "youtube" ? (
           <label className="flex h-9 items-center gap-2 text-body pointer-coarse:h-11">
             Start
             <select
               value={start}
-              onChange={(event) => setStart(event.target.value as typeof start)}
+              onChange={(event) => setStart(event.target.value as Start)}
               className="h-9 rounded-lg border border-border-strong bg-surface px-2 text-body pointer-coarse:h-11 pointer-coarse:text-[1rem]"
             >
               <option value="paused">Paused</option>
@@ -223,55 +226,24 @@ function ProviderSpike({
             </select>
           </label>
         ) : null}
-        {isShellProvider(provider) ? (
-          <label className="flex h-9 items-center gap-2 text-body pointer-coarse:h-11">
-            <input
-              type="checkbox"
-              checked={mode === "shell"}
-              onChange={(event) => setMode(event.target.checked ? "shell" : "frame")}
-              className="size-4 accent-(--accent)"
-            />
-            Use embed shell
-          </label>
-        ) : null}
       </div>
 
-      {mounted ? (
+      {mounted && src ? (
         <div className="mt-3">
           <p className="mb-2 font-mono text-meta break-all text-text-muted">
-            {mounted.src}
+            {src}
           </p>
-          <div
-            className={cn(
-              "overflow-hidden rounded-xl bg-surface-2",
-              vertical && "flex justify-center",
-            )}
-          >
-            <EmbedFrame
-              ref={frameRef}
-              key={mounted.src}
-              src={mounted.src}
-              shell={mounted.shell}
-              title={`${PROVIDER_LABEL[provider]} embed`}
-              height={height}
-              className={cn(
-                vertical
-                  ? "aspect-[9/16] h-[min(70vh,35rem)] max-w-full"
-                  : "w-full",
-                !vertical &&
-                  height === undefined &&
-                  (media?.aspect === "16:9"
-                    ? "aspect-video"
-                    : media?.aspect === "audio"
-                      ? "h-60"
-                      : "h-[30rem]"),
-              )}
-            />
-          </div>
+          <EmbedFrame
+            ref={frameRef}
+            key={`${src}#${mounted.run}`}
+            link={mounted.link}
+            src={src}
+            height={height}
+          />
 
-          {media?.controlled && !mounted.shell ? (
+          {commands.length > 0 ? (
             <div className="mt-2 flex flex-wrap gap-2">
-              {(["play", "pause", "mute", "unmute"] as const).map((command) => (
+              {commands.map((command) => (
                 <Button key={command} onClick={() => send(command)}>
                   {command[0].toUpperCase() + command.slice(1)}
                 </Button>
@@ -289,7 +261,8 @@ function ProviderSpike({
             ) : (
               log.map((entry) => (
                 <p key={entry.id} className="break-all">
-                  <span className="text-text-faint">{entry.at}</span> {entry.text}
+                  <span className="text-text-faint">{entry.at}</span>{" "}
+                  {entry.text}
                 </p>
               ))
             )}
@@ -301,18 +274,11 @@ function ProviderSpike({
 }
 
 export default function DevEmbeds({ loaderData }: Route.ComponentProps) {
-  const [client, setClient] = useState<{
-    origin: string;
-    theme: "light" | "dark";
-  } | null>(null);
+  const theme = useResolvedTheme();
+  const [siteOrigin, setSiteOrigin] = useState<string | null>(null);
 
-  // The frame URLs need the page origin and the resolved theme, which only
-  // the browser knows.
-  useEffect(() => {
-    const dark =
-      getComputedStyle(document.documentElement).colorScheme === "dark";
-    setClient({ origin: window.location.origin, theme: dark ? "dark" : "light" });
-  }, []);
+  // Frame URLs carry the page origin, which only the browser knows.
+  useEffect(() => setSiteOrigin(window.location.origin), []);
 
   const inApp = detectInAppBrowser(loaderData.userAgent);
 
@@ -323,7 +289,7 @@ export default function DevEmbeds({ loaderData }: Route.ComponentProps) {
         <p className="mt-1 text-body text-text-muted">
           Build step 1. Load each provider on a real phone and tick off its
           checks. Every frame here goes through the production sandbox and
-          Content Security Policy.
+          Content Security Policy, and follows the theme in the header.
         </p>
       </div>
 
@@ -337,13 +303,13 @@ export default function DevEmbeds({ loaderData }: Route.ComponentProps) {
         </p>
       </Notice>
 
-      {client
-        ? (Object.keys(PROVIDER_LABEL) as Provider[]).map((provider) => (
+      {theme && siteOrigin
+        ? PROVIDERS.map((provider) => (
             <ProviderSpike
               key={provider}
               provider={provider}
-              siteOrigin={client.origin}
-              theme={client.theme}
+              siteOrigin={siteOrigin}
+              theme={theme}
             />
           ))
         : null}

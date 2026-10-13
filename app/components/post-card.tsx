@@ -7,7 +7,12 @@ import { formatAge, formatCount } from "~/lib/format";
 import type { Aspect, Provider } from "~/lib/links/types";
 
 import { Avatar } from "./avatar";
-import { MediaPoster, OUTBOUND_REL, PreviewCard } from "./media-poster";
+import {
+  MediaPoster,
+  OUTBOUND_REL,
+  PreviewCard,
+  UploadedImage,
+} from "./media-poster";
 import { type Vote, VoteControl } from "./vote-control";
 
 export interface PublicAuthor {
@@ -18,13 +23,23 @@ export interface PublicAuthor {
 
 export type PostMedia =
   | { kind: "media"; provider: Provider; aspect: Aspect; thumbUrl?: string }
-  | { kind: "page"; pageTitle?: string; thumbUrl?: string };
+  | { kind: "page"; pageTitle?: string; thumbUrl?: string }
+  // Media hosted by the board. Not offered in the MVP; the feed has room for it.
+  | { kind: "image"; src: string; width: number; height: number }
+  | {
+      kind: "video" | "audio";
+      aspect: Aspect;
+      thumbUrl?: string;
+      duration?: number;
+    };
 
 export interface PostCardData {
   id: string;
   title: string;
+  /** The original link, or the post's own page when the board hosts the media. */
   url: string;
-  host: string;
+  /** Absent for posts whose media the board hosts: there is no outside link. */
+  host?: string;
   /** "made" for originals, "found" for discoveries. */
   origin: "made" | "found";
   author: PublicAuthor;
@@ -97,6 +112,47 @@ export function AuthorLine({
   );
 }
 
+function PostMediaView({ post }: { post: PostCardData }) {
+  const { media } = post;
+  switch (media.kind) {
+    case "media":
+      return (
+        <MediaPoster
+          provider={media.provider}
+          aspect={media.aspect}
+          thumbUrl={media.thumbUrl}
+        />
+      );
+    case "page":
+      return (
+        <PreviewCard
+          url={post.url}
+          host={post.host ?? ""}
+          pageTitle={media.pageTitle}
+          thumbUrl={media.thumbUrl}
+        />
+      );
+    case "image":
+      return (
+        <UploadedImage
+          src={media.src}
+          width={media.width}
+          height={media.height}
+          alt={post.title}
+        />
+      );
+    case "video":
+    case "audio":
+      return (
+        <MediaPoster
+          aspect={media.aspect}
+          thumbUrl={media.thumbUrl}
+          duration={media.duration}
+        />
+      );
+  }
+}
+
 /** One post in the feed: votes, title, media or preview, excerpt, and meta. */
 export function PostCard({
   post,
@@ -131,18 +187,26 @@ export function PostCard({
 
       <div className="min-w-0 flex-1">
         <h2 className="text-title font-semibold [overflow-wrap:anywhere]">
-          <a
-            href={post.url}
-            target="_blank"
-            rel={OUTBOUND_REL}
-            className="hover:underline"
-          >
-            {post.title}
-          </a>{" "}
-          <span className="inline-flex items-center gap-0.5 text-meta font-normal whitespace-nowrap text-text-faint">
-            {post.host}
-            <ArrowUpRight size={13} aria-hidden />
-          </span>
+          {post.host ? (
+            <>
+              <a
+                href={post.url}
+                target="_blank"
+                rel={OUTBOUND_REL}
+                className="hover:underline"
+              >
+                {post.title}
+              </a>{" "}
+              <span className="inline-flex items-center gap-0.5 text-meta font-normal whitespace-nowrap text-text-faint">
+                {post.host}
+                <ArrowUpRight size={13} aria-hidden />
+              </span>
+            </>
+          ) : (
+            <Link to={permalink} className="hover:underline">
+              {post.title}
+            </Link>
+          )}
         </h2>
 
         <div className="mt-1.5">
@@ -158,20 +222,7 @@ export function PostCard({
         </div>
 
         <div className="mt-3">
-          {post.media.kind === "media" ? (
-            <MediaPoster
-              provider={post.media.provider}
-              aspect={post.media.aspect}
-              thumbUrl={post.media.thumbUrl}
-            />
-          ) : (
-            <PreviewCard
-              url={post.url}
-              host={post.host}
-              pageTitle={post.media.pageTitle}
-              thumbUrl={post.media.thumbUrl}
-            />
-          )}
+          <PostMediaView post={post} />
         </div>
 
         <p className="mt-3 line-clamp-2 text-body text-text-muted [overflow-wrap:anywhere]">

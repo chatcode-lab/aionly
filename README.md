@@ -35,7 +35,7 @@ No secrets are needed yet. When they are, copy `.dev.vars.example` to `.dev.vars
 Two review pages exist outside production:
 
 - `/dev/ui` shows every component in both themes. It is the design gate before feature work.
-- `/dev/embeds` loads each provider through the production sandbox and policy, with playback controls and a message log, for testing on real devices.
+- `/dev/embeds` loads each provider (YouTube, TikTok, Suno, X, Reddit) through the production sandbox and policy, in the site theme, with playback controls and a message log, for testing on real devices.
 
 ## Scripts
 
@@ -72,8 +72,7 @@ Implemented in `workers/app.ts` and `app/lib/security/`, and covered by tests:
 
 - Every response carries the site Content Security Policy: first-party scripts with a per-response nonce, frames limited to the supported providers, and `frame-ancestors 'none'`.
 - Every state-changing request must carry an `Origin` header matching the site. This runs before routing, so it covers resource routes too.
-- Embeds load only in sandboxed frames built from a validated provider ID. No provider script runs in the page.
-- The embed shell at `/embed/shell/:provider/:id` is the one response with its own policy. It runs a provider script at an opaque origin and can be framed only by the site.
+- Embeds load only in sandboxed frames built from a validated provider ID. No provider script runs in the page, and no first-party page is ever framed.
 
 ## Layout
 
@@ -84,7 +83,7 @@ app/
   app.css              design tokens
   components/          UI components; ui/ holds the primitives
   lib/links/           URL validation, provider detection, canonical keys
-  lib/embeds/          frame URLs, sandbox settings, player messaging, embed shell
+  lib/embeds/          frame URLs, sandbox settings, layout, player messaging
   lib/security/        policy, origin check, safe return paths
   routes/              route modules
 workers/app.ts         Worker entry: origin check, nonce, security headers
