@@ -22,8 +22,10 @@ export interface CommentData {
 /** At or below this net score a comment's body starts hidden. */
 export const LOW_SCORE_THRESHOLD = -5;
 
-// Indentation stops deepening on small screens; the structure is unchanged.
-const MOBILE_INDENT_DEPTH = 4;
+// Indentation is shallower on phones and stops deepening after this many
+// levels, so the vote, reply, and menu controls always fit a 320 px screen.
+// The thread's structure is unchanged.
+const MOBILE_INDENT_DEPTH = 3;
 
 function countReplies(comment: CommentData): number {
   return comment.replies.reduce(
@@ -53,7 +55,7 @@ export function CommentThread({
         // The rule sits under the parent's collapse button.
         depth > 0 &&
           (depth <= MOBILE_INDENT_DEPTH
-            ? "ml-2 border-l border-border pl-3 sm:pl-4"
+            ? "ml-1.5 border-l border-border pl-2 sm:ml-2 sm:pl-4"
             : "sm:ml-2 sm:border-l sm:border-border sm:pl-4"),
       )}
     >
@@ -132,7 +134,7 @@ function CommentItem({
 
       {collapsed ? null : (
         <>
-        <div className="pl-5.5">
+        <div className="sm:pl-5.5">
           {comment.state !== "visible" ? null : hiddenByScore && !revealed ? (
             <button
               type="button"

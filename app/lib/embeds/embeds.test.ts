@@ -140,6 +140,8 @@ describe("frameUrl", () => {
     expect(FRAME_LAYOUT.x).toMatchObject({ maxWidth: 550, lightScheme: true });
     expect(FRAME_LAYOUT.reddit.maxWidth).toBe(640);
     expect(FRAME_LAYOUT.telegram.maxWidth).toBe(500);
+    // Telegram lays out no narrower than this; the frame is scaled to fit.
+    expect(FRAME_LAYOUT.telegram.minWidth).toBe(320);
     expect(FRAME_LAYOUT.youtube.lightScheme).toBeUndefined();
   });
 

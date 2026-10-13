@@ -124,9 +124,7 @@ export function MediaPoster({
         aria-label={name ? `Play video from ${name}` : "Play video"}
         className={cn(
           "group relative block overflow-hidden rounded-xl bg-surface-2",
-          vertical
-            ? "aspect-[9/16] h-[min(70vh,35rem)] max-w-full"
-            : "aspect-video w-full",
+          vertical ? "aspect-[9/16] w-full max-w-80" : "aspect-video w-full",
         )}
       >
         <Thumb src={thumbUrl} />

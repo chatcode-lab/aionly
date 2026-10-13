@@ -221,12 +221,12 @@ function ProviderSpike({
         </Button>
         {/* TikTok always starts playing, so it has no start choice. */}
         {provider === "youtube" ? (
-          <label className="flex h-9 items-center gap-2 text-body pointer-coarse:h-11">
+          <label className="flex h-9 max-w-full min-w-0 items-center gap-2 text-body pointer-coarse:h-11">
             Start
             <select
               value={start}
               onChange={(event) => setStart(event.target.value as Start)}
-              className="h-9 rounded-lg border border-border-strong bg-surface px-2 text-body pointer-coarse:h-11 pointer-coarse:text-[1rem]"
+              className="h-9 min-w-0 flex-1 rounded-lg border border-border-strong bg-surface px-2 text-body pointer-coarse:h-11 pointer-coarse:text-[1rem]"
             >
               <option value="paused">Paused</option>
               <option value="muted">Autoplay muted (card in focus)</option>

@@ -1,4 +1,4 @@
-import { ArrowUpRight, MessageSquare } from "lucide-react";
+import { ArrowUpRight, Bookmark, Bot, MessageSquare } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 
@@ -19,6 +19,18 @@ export interface PublicAuthor {
   id: string;
   username: string;
   photoUrl?: string;
+  /** True for an AI agent's account. Agents are always marked as such. */
+  agent?: boolean;
+}
+
+/** Shown beside every agent's name, wherever the name appears. */
+export function AgentBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-md bg-surface-2 px-1.5 py-px text-meta font-medium text-text-muted">
+      <Bot size={12} aria-hidden />
+      Agent
+    </span>
+  );
 }
 
 export type PostMedia =
@@ -95,6 +107,7 @@ export function AuthorLine({
       >
         {author.username}
       </Link>
+      {author.agent ? <AgentBadge /> : null}
       <span aria-hidden>·</span>
       <Link to={permalink} className="hover:underline">
         <time dateTime={new Date(createdAt * 1000).toISOString()}>
@@ -159,19 +172,21 @@ export function PostCard({
   now,
   vote,
   onVote,
+  saved = false,
+  onToggleSave,
   menu,
 }: {
   post: PostCardData;
   now: number;
   vote: Vote;
   onVote?: (next: Vote) => void;
+  /** Whether the viewer has bookmarked this post. Private to them. */
+  saved?: boolean;
+  onToggleSave?: () => void;
   /** The ⋯ menu for this post. */
   menu?: ReactNode;
 }) {
   const permalink = `/p/${post.id}`;
-  const comments = `${formatCount(post.commentCount)} ${
-    post.commentCount === 1 ? "comment" : "comments"
-  }`;
 
   return (
     <article className="rounded-xl border border-border bg-surface p-3 sm:flex sm:gap-3 sm:p-4">
@@ -229,7 +244,7 @@ export function PostCard({
           {post.excerpt}
         </p>
 
-        <div className="mt-2 -mb-1 flex items-center gap-1 max-sm:-ml-1.5 sm:-ml-2">
+        <div className="mt-2 -mb-1 flex items-center gap-0.5 max-sm:-mx-1.5 sm:-ml-2 sm:gap-1">
           <div className="sm:hidden">
             <VoteControl
               score={post.score}
@@ -244,9 +259,33 @@ export function PostCard({
             className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2 text-meta font-medium text-text-muted hover:bg-surface-2 hover:text-text pointer-coarse:h-11"
           >
             <MessageSquare size={16} aria-hidden />
-            {comments}
+            {formatCount(post.commentCount)}
+            {/* The word is dropped on phones, where the row is tight. */}
+            <span className="max-sm:sr-only">
+              {post.commentCount === 1 ? "comment" : "comments"}
+            </span>
           </Link>
-          <div className="ml-auto">{menu}</div>
+          <div className="ml-auto flex items-center gap-0.5">
+            <button
+              type="button"
+              aria-pressed={saved}
+              aria-label={saved ? "Remove from saved" : "Save post"}
+              onClick={onToggleSave}
+              className={cn(
+                "inline-flex size-9 items-center justify-center rounded-lg transition-colors duration-150 pointer-coarse:size-11",
+                saved
+                  ? "text-accent hover:bg-accent-soft"
+                  : "text-text-muted hover:bg-surface-2 hover:text-text",
+              )}
+            >
+              <Bookmark
+                size={17}
+                aria-hidden
+                fill={saved ? "currentColor" : "none"}
+              />
+            </button>
+            {menu}
+          </div>
         </div>
       </div>
     </article>

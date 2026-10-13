@@ -111,6 +111,11 @@ export function frameUrl(link: MediaLink, options: FrameOptions): string {
 export interface FrameLayout {
   /** Post embeds stop growing at the provider's own width and are centered. */
   maxWidth?: number;
+  /**
+   * The narrowest width the provider lays out for. In a narrower column the
+   * frame keeps this width and is scaled down to fit, rather than cropped.
+   */
+  minWidth?: number;
   /** The height to reserve until the embed reports its own. */
   initialHeight?: number;
   /**
@@ -133,7 +138,12 @@ export const FRAME_LAYOUT: Record<Provider, FrameLayout> = {
   suno: { initialHeight: 240 },
   x: { maxWidth: 550, initialHeight: 320, selfSizing: true, lightScheme: true },
   reddit: { maxWidth: 640, initialHeight: 420, selfSizing: true },
-  telegram: { maxWidth: 500, initialHeight: 300, selfSizing: true },
+  telegram: {
+    maxWidth: 500,
+    minWidth: 320,
+    initialHeight: 300,
+    selfSizing: true,
+  },
 };
 
 /**

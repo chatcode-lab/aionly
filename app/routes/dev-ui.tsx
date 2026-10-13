@@ -1,15 +1,26 @@
-import { Ban, Flag, Link2, Pencil, Plus, Trash2 } from "lucide-react";
+import {
+  Ban,
+  Bookmark,
+  Flag,
+  Link2,
+  Pencil,
+  Plus,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import { type ReactNode, useState } from "react";
-import { useSearchParams } from "react-router";
+import { useRouteLoaderData, useSearchParams } from "react-router";
 
-import { Avatar } from "~/components/avatar";
+import { AccountMenu } from "~/components/account-menu";
 import { type CommentData, CommentThread } from "~/components/comment";
+import { DigestMenu } from "~/components/digest-menu";
 import {
   PostCard,
   type PostCardData,
   PostTombstone,
 } from "~/components/post-card";
 import { SiteHeader } from "~/components/site-chrome";
+import { ThemeSwitch, useTheme } from "~/components/theme-switch";
 import { Button, IconButton } from "~/components/ui/button";
 import {
   DialogClose,
@@ -19,17 +30,20 @@ import {
 } from "~/components/ui/dialog";
 import { TextArea, TextField } from "~/components/ui/field";
 import { Menu, MenuItem, MenuSeparator } from "~/components/ui/menu";
+import { Segmented } from "~/components/ui/segmented";
 import {
   EmptyState,
   ErrorState,
   Notice,
   PostCardSkeleton,
+  SoonBadge,
 } from "~/components/ui/states";
 import { LinkTabs } from "~/components/ui/tabs";
 import { Toast } from "~/components/ui/toast";
 import type { Vote } from "~/components/vote-control";
 import { assertDevRoutes } from "~/lib/env.server";
 import { formatWait } from "~/lib/format";
+import type { Theme } from "~/lib/theme";
 
 import type { Route } from "./+types/dev-ui";
 
@@ -56,6 +70,8 @@ const AUTHORS = {
   lark: { id: "u_02", username: "paper_lark_17" },
   moth: { id: "u_03", username: "amber_moth_905" },
   wren: { id: "u_04", username: "tidal_wren_63" },
+  // An AI agent's account. Agents are marked wherever their name appears.
+  scribe: { id: "a_01", username: "scribe_agent", agent: true },
 } as const;
 
 function samplePosts(now: number): PostCardData[] {
@@ -297,6 +313,13 @@ function sampleComments(now: number): CommentData[] {
           { edited: true },
         ),
         comment(
+          "c10",
+          AUTHORS.scribe,
+          95,
+          5,
+          "Summary for anyone skimming: one generation per shot, six to ten takes each, cut by hand. Posted by an agent, at the author's request.",
+        ),
+        comment(
           "c6",
           AUTHORS.wren,
           100,
@@ -356,7 +379,7 @@ const REPORT_REASONS = [
   "Spam",
   "Abuse",
   "Vote manipulation",
-  "Not enough AI involvement",
+  "Off-topic (not about AI)",
 ];
 
 function Section({
@@ -475,24 +498,49 @@ function SubmitFormSample() {
     "A four-minute stop-motion short, every frame generated",
   );
   const [description, setDescription] = useState("Too short.");
+  const [source, setSource] = useState<"link" | "upload">("link");
 
   return (
     <form
-      className="space-y-3 rounded-xl border border-border bg-surface p-4"
+      className="space-y-3 rounded-xl border border-border bg-surface p-3 sm:p-4"
       onSubmit={(event) => event.preventDefault()}
     >
-      <div className="flex items-end gap-2">
-        <div className="min-w-0 flex-1">
-          <TextField
-            label="Link"
-            type="url"
-            inputMode="url"
-            defaultValue="https://www.youtube.com/watch?v=jNQXAC9IVRw"
-          />
+      <Segmented
+        label="Post from"
+        value={source}
+        onChange={setSource}
+        options={[
+          { value: "link", label: "Link" },
+          { value: "upload", label: "Upload" },
+        ]}
+      />
+      {source === "link" ? (
+        <div className="flex items-end gap-2">
+          <div className="min-w-0 flex-1">
+            <TextField
+              label="Link"
+              type="url"
+              inputMode="url"
+              defaultValue="https://www.youtube.com/watch?v=jNQXAC9IVRw"
+            />
+          </div>
+          {/* Lines up with the input, above the field's message row. */}
+          <Button className="mb-[1.375rem]">Check link</Button>
         </div>
-        {/* Lines up with the input, above the field's message row. */}
-        <Button className="mb-[1.375rem]">Check link</Button>
-      </div>
+      ) : (
+        // Designed and visible, but not switched on.
+        <div className="rounded-xl border border-dashed border-border-strong px-4 py-6 text-center">
+          <Upload size={24} aria-hidden className="mx-auto text-text-faint" />
+          <p className="mt-2 flex flex-wrap items-center justify-center gap-2 text-body font-medium">
+            Upload a picture, video, or audio
+            <SoonBadge />
+          </p>
+          <p className="mx-auto mt-1 max-w-sm text-meta text-text-muted">
+            For work that lives nowhere else. Uploads will open to members
+            with enough karma.
+          </p>
+        </div>
+      )}
       <TextField
         label="Title"
         value={title}
@@ -501,7 +549,7 @@ function SubmitFormSample() {
       />
       <TextArea
         label="Description"
-        hint="Tools, prompts, or workflow. Links here are shown as plain text."
+        hint="How it was made, or why it is worth reading. Links here are shown as plain text."
         value={description}
         onChange={(event) => setDescription(event.target.value)}
         error={
@@ -530,10 +578,10 @@ function SubmitFormSample() {
       </fieldset>
       <label className="flex items-start gap-2.5 text-body">
         <input type="checkbox" className="mt-1 size-4 accent-(--accent)" />
-        This is substantially AI-generated and safe for work.
+        This is made with AI or about AI, and safe for work.
       </label>
       <div className="flex justify-end">
-        <Button variant="primary" type="submit">
+        <Button variant="primary" type="submit" disabled={source === "upload"}>
           Publish
         </Button>
       </div>
@@ -541,10 +589,26 @@ function SubmitFormSample() {
   );
 }
 
+/** Icon alone on the narrowest phones, where the top bar is tight. */
+function SubmitButton() {
+  return (
+    <Button variant="primary" className="max-[23rem]:w-11 max-[23rem]:px-0">
+      <Plus size={18} aria-hidden className="min-[23.0625rem]:hidden" />
+      <span className="max-[23rem]:sr-only">Submit</span>
+    </Button>
+  );
+}
+
 export default function DevUi({ loaderData }: Route.ComponentProps) {
   const { now } = loaderData;
   const posts = samplePosts(now);
   const [votes, setVotes] = useState<Record<string, Vote>>({ a1b2c3d4: 1 });
+  const [saved, setSaved] = useState<Record<string, boolean>>({
+    q7r8s9t0: true,
+  });
+  const theme = useTheme(
+    useRouteLoaderData<{ theme: Theme }>("root")?.theme,
+  );
   const [toastOpen, setToastOpen] = useState(false);
   const [dialog, setDialog] = useState<"report" | "ban" | null>(null);
 
@@ -634,8 +698,8 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
       </Section>
 
       <Section
-        title="Header"
-        note="Sort and range share the row on wide screens and wrap to a second, scrollable row on phones."
+        title="Top bar"
+        note="Signed in: saved posts, the email digest, Submit, and the account menu, which holds the theme. Sort and range share the row on wide screens and wrap to a second, scrollable row on phones."
       >
         <div className="overflow-hidden rounded-xl border border-border [&>header]:static [&>header]:z-0">
           <SiteHeader
@@ -663,17 +727,29 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
               </>
             }
           >
-            <Button variant="primary">Submit</Button>
-            <IconButton aria-label="Account: quiet_otter_482">
-              <Avatar userId="u_01" username="quiet_otter_482" size={26} />
+            <IconButton aria-label="Saved posts">
+              <Bookmark size={18} aria-hidden />
             </IconButton>
+            <DigestMenu value="off" available={false} />
+            <SubmitButton />
+            <AccountMenu user={AUTHORS.otter} theme={theme} />
+          </SiteHeader>
+        </div>
+        <p className="text-body text-text-muted">
+          Signed out: the theme switch, Submit, and Sign in.
+        </p>
+        <div className="overflow-hidden rounded-xl border border-border [&>header]:static [&>header]:z-0">
+          <SiteHeader>
+            <ThemeSwitch theme={theme} />
+            <SubmitButton />
+            <Button variant="ghost">Sign in</Button>
           </SiteHeader>
         </div>
       </Section>
 
       <Section
         title="Feed"
-        note="Media cards are posters with a fixed shape; a player mounts only for the card in focus. Votes sit beside the card on wide screens and in its footer on phones."
+        note="Media cards are posters with a fixed shape; a player mounts only for the card in focus. Votes sit beside the card on wide screens and in its footer on phones. The bookmark saves a post privately."
       >
         {posts.map((post) => {
           const vote = votes[post.id] ?? 0;
@@ -685,6 +761,13 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
               vote={vote}
               onVote={(next) =>
                 setVotes((current) => ({ ...current, [post.id]: next }))
+              }
+              saved={saved[post.id] ?? false}
+              onToggleSave={() =>
+                setSaved((current) => ({
+                  ...current,
+                  [post.id]: !current[post.id],
+                }))
               }
               menu={postMenu}
             />
@@ -718,7 +801,7 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
 
       <Section
         title="Discussion"
-        note="Collapse any thread. Low-score bodies start hidden, removed and deleted comments keep their replies."
+        note="Collapse any thread. Low-score bodies start hidden, removed and deleted comments keep their replies. An agent's comments carry an Agent badge."
       >
         <div className="rounded-xl border border-border bg-surface p-3 sm:p-4">
           <CommentThread
@@ -770,7 +853,7 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
 
       <Section
         title="Submission"
-        note="Eligibility shows before any typing. Errors sit under their field; counters turn red past the limit."
+        note="Eligibility shows before any typing. Errors sit under their field; counters turn red past the limit. Upload is shown but not switched on."
       >
         <Notice tone="wait">
           Next post available in {formatWait(5 * 3600 + 12 * 60)}.
@@ -801,6 +884,9 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
           }
         >
           Widen the range, or be the first to post.
+        </EmptyState>
+        <EmptyState title="Nothing saved yet">
+          Tap the bookmark on any post to keep it here.
         </EmptyState>
         <ErrorState title="The feed did not load" action={<Button>Try again</Button>}>
           Check your connection and try again.

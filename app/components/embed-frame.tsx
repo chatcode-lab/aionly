@@ -1,8 +1,23 @@
-import type { Ref } from "react";
+import { type Ref, useEffect, useRef, useState } from "react";
 
 import { cn } from "~/lib/cn";
 import { FRAME_ALLOW, FRAME_LAYOUT, FRAME_SANDBOX } from "~/lib/embeds/frames";
 import { type MediaLink, PROVIDER_LABEL } from "~/lib/links/types";
+
+/** The width of an element's content box, kept current as it resizes. */
+function useWidth(ref: { current: HTMLElement | null }): number | null {
+  const [width, setWidth] = useState<number | null>(null);
+  useEffect(() => {
+    const element = ref.current;
+    if (!element) return;
+    const observer = new ResizeObserver(([entry]) => {
+      setWidth(entry.contentRect.width);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [ref]);
+  return width;
+}
 
 /**
  * The one way an embed reaches the page: a sandboxed frame that can never
@@ -24,9 +39,27 @@ export function EmbedFrame({
 }) {
   const layout = FRAME_LAYOUT[link.provider];
   const video = link.aspect === "16:9" || link.aspect === "9:16";
+  const frameHeight = video ? undefined : (height ?? layout.initialHeight);
+
+  // Some providers refuse to lay out below a minimum width and would be
+  // cropped in a narrower column. Their frame keeps that width and is scaled
+  // down to fit, so the whole post stays visible.
+  const wrapper = useRef<HTMLDivElement>(null);
+  const available = useWidth(wrapper);
+  const scale =
+    layout.minWidth && available !== null && available < layout.minWidth
+      ? available / layout.minWidth
+      : 1;
+  const scaled = scale < 1;
 
   return (
-    <div className="flex justify-center">
+    <div
+      ref={wrapper}
+      className={cn("flex", scaled ? "overflow-hidden" : "justify-center")}
+      style={
+        scaled && frameHeight ? { height: frameHeight * scale } : undefined
+      }
+    >
       <iframe
         ref={ref}
         src={src}
@@ -39,17 +72,20 @@ export function EmbedFrame({
         // embedding site; this sends our origin and nothing more.
         referrerPolicy="strict-origin-when-cross-origin"
         style={{
-          maxWidth: layout.maxWidth,
-          height: video ? undefined : (height ?? layout.initialHeight),
+          maxWidth: scaled ? undefined : layout.maxWidth,
+          width: scaled ? layout.minWidth : undefined,
+          height: frameHeight,
           colorScheme: layout.lightScheme ? "light" : undefined,
+          transform: scaled ? `scale(${scale})` : undefined,
+          transformOrigin: scaled ? "top left" : undefined,
         }}
         // The frame is exactly the media: rounded corners, no surrounding box.
         className={cn(
           "block overflow-hidden rounded-xl border-0",
           link.aspect === "16:9" && "aspect-video w-full bg-surface-2",
-          link.aspect === "9:16" &&
-            "aspect-[9/16] h-[min(70vh,35rem)] max-w-full bg-surface-2",
-          !video && "w-full",
+          // As wide as the column allows, up to 320 px; the height follows.
+          link.aspect === "9:16" && "aspect-[9/16] w-full max-w-80 bg-surface-2",
+          !video && (scaled ? "shrink-0" : "w-full"),
         )}
       />
     </div>

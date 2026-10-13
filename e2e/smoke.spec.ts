@@ -194,9 +194,9 @@ test.describe("embed spike", () => {
     const wrapper = frame.locator("xpath=..");
     await expect(wrapper).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
 
-    // Narrower than its column, and centered in it.
+    // As wide as the column allows up to 320 px, and centered in it.
     const [frameBox, wrapperBox] = [await frame.boundingBox(), await wrapper.boundingBox()];
-    expect(frameBox!.width).toBeLessThan(wrapperBox!.width);
+    expect(frameBox!.width).toBeCloseTo(Math.min(wrapperBox!.width, 320), 0);
     const left = frameBox!.x - wrapperBox!.x;
     const right = wrapperBox!.x + wrapperBox!.width - (frameBox!.x + frameBox!.width);
     expect(Math.abs(left - right)).toBeLessThanOrEqual(1);
@@ -221,6 +221,50 @@ test.describe("embed spike", () => {
     const youtube = section("YouTube");
     await youtube.getByRole("button", { name: "Load", exact: true }).click();
     await expect(youtube.getByRole("button", { name: "Unmute" })).toBeVisible();
+  });
+});
+
+test.describe("narrow screens", () => {
+  test("no page scrolls sideways", async ({ page }) => {
+    const overflow = () =>
+      page.evaluate(
+        () =>
+          document.documentElement.scrollWidth -
+          document.documentElement.clientWidth,
+      );
+
+    for (const path of ["/", "/dev/ui", "/dev/embeds"]) {
+      await page.goto(path);
+      expect(await overflow(), path).toBeLessThanOrEqual(0);
+    }
+
+    // With every provider's frame and controls mounted, too.
+    const loads = page.getByRole("button", { name: "Load", exact: true });
+    await expect(loads).toHaveCount(6);
+    while ((await loads.count()) > 0) await loads.first().click();
+    await expect(page.locator("iframe")).toHaveCount(6);
+    expect(await overflow(), "embeds mounted").toBeLessThanOrEqual(0);
+  });
+
+  test("scales Telegram to fit instead of cropping it", async ({ page, viewport }) => {
+    await page.goto("/dev/embeds");
+    const telegram = page.locator("section", {
+      has: page.getByRole("heading", { name: "Telegram", exact: true }),
+    });
+    await telegram.getByRole("button", { name: "Load", exact: true }).click();
+
+    const frame = telegram.locator("iframe");
+    const wrapper = frame.locator("xpath=..");
+    const [frameBox, wrapperBox] = [await frame.boundingBox(), await wrapper.boundingBox()];
+
+    // The post is never wider on screen than its column.
+    expect(frameBox!.width).toBeLessThanOrEqual(wrapperBox!.width + 0.5);
+    if (viewport!.width < 400) {
+      // In a column under 320 px the frame keeps Telegram's minimum layout
+      // width and is shrunk to fit.
+      await expect(frame).toHaveCSS("width", "320px");
+      expect(frameBox!.width).toBeCloseTo(wrapperBox!.width, 0);
+    }
   });
 });
 
@@ -281,6 +325,45 @@ test.describe("design review page", () => {
     await expect(dialog).toBeVisible();
     await dialog.getByRole("button", { name: "Cancel" }).click();
     await expect(dialog).toBeHidden();
+  });
+
+  test("saves a post from its card", async ({ page }) => {
+    await page.goto("/dev/ui");
+    const card = page.locator("article").first();
+
+    const save = card.getByRole("button", { name: "Save post" });
+    await expect(save).toHaveAttribute("aria-pressed", "false");
+    await save.click();
+    await expect(
+      card.getByRole("button", { name: "Remove from saved" }),
+    ).toHaveAttribute("aria-pressed", "true");
+  });
+
+  test("shows the digest and uploads as coming soon, not as working", async ({ page }) => {
+    await page.goto("/dev/ui");
+
+    await page.getByRole("button", { name: /^Email digest:/ }).click();
+    const menu = page.getByRole("menu");
+    await expect(menu).toContainText("Soon");
+    for (const option of ["Daily", "Weekly", "Monthly"]) {
+      await expect(
+        menu.getByRole("menuitemradio", { name: option }),
+      ).toHaveAttribute("aria-disabled", "true");
+    }
+    await page.keyboard.press("Escape");
+
+    await page.getByRole("button", { name: "Upload", exact: true }).click();
+    await expect(page.getByText("Upload a picture, video, or audio")).toBeVisible();
+    const form = page.locator("form", {
+      has: page.getByRole("group", { name: "Post from" }),
+    });
+    await expect(form.getByRole("button", { name: "Publish" })).toBeDisabled();
+  });
+
+  test("marks an agent's comment", async ({ page }) => {
+    await page.goto("/dev/ui");
+    const comment = page.locator("li", { hasText: "scribe_agent" }).last();
+    await expect(comment.getByText("Agent", { exact: true })).toBeVisible();
   });
 
   test("a low-score comment starts hidden and can be shown", async ({ page }) => {

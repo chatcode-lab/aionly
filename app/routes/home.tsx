@@ -12,7 +12,7 @@ export function meta(_: Route.MetaArgs) {
     {
       name: "description",
       content:
-        "A public board for AI-made music, videos, images, apps, and games.",
+        "A public board for everything AI: what people make with it, and the news about it.",
     },
   ];
 }
@@ -39,7 +39,8 @@ export default function Home({ loaderData }: Route.ComponentProps) {
           ) : undefined
         }
       >
-        A public board for AI-made music, videos, images, apps, and games.
+        A public board for everything AI: what people make with it, and the
+        news about it.
       </EmptyState>
     </main>
   );

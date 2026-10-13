@@ -15,14 +15,56 @@ const OPTIONS: Record<Theme, { label: string; Icon: typeof Sun }> = {
   dark: { label: "Dark", Icon: Moon },
 };
 
+export const MENU_CONTENT =
+  "z-50 rounded-xl border border-border bg-surface p-1 shadow-lg";
+
+export const MENU_RADIO_ITEM =
+  "flex h-9 cursor-default items-center gap-2.5 rounded-lg px-2.5 text-body outline-none select-none data-disabled:opacity-50 data-highlighted:bg-surface-2 pointer-coarse:h-11";
+
 /** The theme currently in effect, counting a change still being saved. */
 export function useTheme(saved: Theme | undefined): Theme {
   const fetcher = useFetcher({ key: THEME_FETCHER_KEY });
   return parseTheme(fetcher.formData?.get("theme") ?? saved);
 }
 
-export function ThemeSwitch({ theme }: { theme: Theme }) {
+/**
+ * The three theme choices, for use inside any dropdown menu: the header's
+ * theme switch when signed out, the account menu when signed in.
+ */
+export function ThemeRadioGroup({ theme }: { theme: Theme }) {
   const fetcher = useFetcher({ key: THEME_FETCHER_KEY });
+
+  return (
+    <DropdownMenu.RadioGroup
+      value={theme}
+      onValueChange={(next) => {
+        void fetcher.submit(
+          { theme: next },
+          { method: "post", action: "/theme" },
+        );
+      }}
+    >
+      {THEMES.map((option) => {
+        const { label, Icon } = OPTIONS[option];
+        return (
+          <DropdownMenu.RadioItem
+            key={option}
+            value={option}
+            className={MENU_RADIO_ITEM}
+          >
+            <Icon size={16} aria-hidden className="text-text-muted" />
+            {label}
+            <DropdownMenu.ItemIndicator className="ml-auto">
+              <Check size={16} aria-hidden />
+            </DropdownMenu.ItemIndicator>
+          </DropdownMenu.RadioItem>
+        );
+      })}
+    </DropdownMenu.RadioGroup>
+  );
+}
+
+export function ThemeSwitch({ theme }: { theme: Theme }) {
   const { Icon } = OPTIONS[theme];
 
   return (
@@ -36,38 +78,9 @@ export function ThemeSwitch({ theme }: { theme: Theme }) {
         <DropdownMenu.Content
           align="end"
           sideOffset={4}
-          className="z-50 min-w-40 rounded-xl border border-border bg-surface p-1 shadow-lg"
+          className={`${MENU_CONTENT} min-w-40`}
         >
-          <DropdownMenu.RadioGroup
-            value={theme}
-            onValueChange={(next) => {
-              void fetcher.submit(
-                { theme: next },
-                { method: "post", action: "/theme" },
-              );
-            }}
-          >
-            {THEMES.map((option) => {
-              const { label, Icon: OptionIcon } = OPTIONS[option];
-              return (
-                <DropdownMenu.RadioItem
-                  key={option}
-                  value={option}
-                  className="flex h-9 cursor-default items-center gap-2.5 rounded-lg px-2.5 text-body outline-none select-none data-highlighted:bg-surface-2 pointer-coarse:h-11"
-                >
-                  <OptionIcon
-                    size={16}
-                    aria-hidden
-                    className="text-text-muted"
-                  />
-                  {label}
-                  <DropdownMenu.ItemIndicator className="ml-auto">
-                    <Check size={16} aria-hidden />
-                  </DropdownMenu.ItemIndicator>
-                </DropdownMenu.RadioItem>
-              );
-            })}
-          </DropdownMenu.RadioGroup>
+          <ThemeRadioGroup theme={theme} />
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>

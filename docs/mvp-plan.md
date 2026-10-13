@@ -2,13 +2,13 @@
 
 ## Summary and replacement
 
-Create the board in the new public [chatcode-lab/aionly](https://github.com/chatcode-lab/aionly) repository as part of Chatcode Lab sessions. It will replace the newsletter at `aion.ly`, currently maintained in [tractorfm/aionly](https://github.com/tractorfm/aionly), with a public board for substantially AI-generated music, videos, images, apps, games, and other creations.
+Create the board in the new public [chatcode-lab/aionly](https://github.com/chatcode-lab/aionly) repository as part of Chatcode Lab sessions. It will replace the newsletter at `aion.ly`, currently maintained in [tractorfm/aionly](https://github.com/tractorfm/aionly), with a public board for everything AI: what people make with it (music, videos, images, apps, games) and news, announcements, research, and discussion about it. Think of an AI subreddit.
 
 - Use TypeScript, React Router with server rendering, Cloudflare Workers, D1, R2 for image snapshots, Better Auth with Google sign-in, and Turnstile.
 - Start with fresh accounts and a new database. There are no newsletter subscribers to migrate.
 - Retire newsletter authentication, billing, and email integrations. Preserve the old database and previous deployment for rollback.
 - Keep separate staging and production environments.
-- Human editing and human-written comments are welcome. Incidental AI assistance does not qualify a post. NSFW content is prohibited.
+- Posts must be AI-related: made with AI, or about AI. This is not checked at submission; off-topic posts are handled through reports and moderation. Human-written posts and comments are welcome. NSFW content is prohibited.
 
 ### Public repository
 
@@ -20,10 +20,13 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 ## Design
 
 - **Character:** content-first and quiet. Neutral surfaces and one accent color; the media supplies the color. No gradients or glass.
-- **Layout:** one 680 px column with a slim sticky header holding the logo, sort and range, Submit, theme, and avatar. Votes sit left of the card on desktop and in the card footer on mobile.
+- **Layout:** one 680 px column with a slim sticky header. Votes sit left of the card on desktop and in the card footer on mobile.
+- **Top bar:** signed in, it holds the logo, sort and range, Saved, the email digest, Submit, and the account menu, which contains the theme. Signed out, it holds the logo, sort and range, the theme switch, Submit, and Sign in. That is never more than four controls beside the logo, so it fits a 320 px screen; Submit shrinks to an icon there.
+- **Narrow screens:** every page holds at 320 px wide with no sideways scroll. This is tested.
 - **Type and tokens:** system font stack, four text sizes, a 4 px spacing grid, and 44 px minimum touch targets. Colors are CSS variables that meet AA contrast in both themes.
 - **Components:** Tailwind with Radix primitives for the ⋯ menu, dialogs, and toasts.
 - **States:** every screen defines skeleton, empty, error, pending, and rate-limited states.
+- **Soon:** a feature that is designed but not switched on is shown with a "Soon" marker and cannot be operated, so nobody believes it worked. The email digest and uploads start this way.
 - **Gate:** build a staging-only `/dev/ui` page showing every component in both themes, and agree on it before feature work starts. Exclude it from production.
 
 ## Board, accounts, and discussion
@@ -35,8 +38,8 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 - **Cold start:** with no range in the URL, the server uses the narrowest of Week, Month, and All time that has at least 10 posts, and the selector shows which. An explicitly chosen empty range shows an empty state linking to a wider range and to Submit. Seed 20–30 posts from the admin account before launch.
 - **Themes:** System, Light, and Dark, with the preference remembered in a `theme` cookie. The server sets `<html data-theme>` and CSS resolves System with `prefers-color-scheme`, so no script runs and nothing flashes.
 - **Footer:** on every page, show "A Chatcode Lab project" linking to [chatcode.dev](https://chatcode.dev/) and "@karulin" linking to [x.com/karulin](https://x.com/karulin). These are normal clickable site links.
-- **Submission:** one URL, title, required description, and "I made this" or "I found this." Originals explain tools, prompts, or workflow; discoveries explain why they are worth sharing. Require AI-only and safe-for-work attestation.
-- **Submission flow:** one page, two steps. Paste a URL and press **Check link**; the server returns the provider, duplicate status, and the card or embed as it will appear. Then complete the title (prefilled from metadata), description, "made" or "found," attestations, and Turnstile, and press Publish. Show eligibility at the top before any typing, such as "Next post available in 5 h 12 min" or "Posting is paused while your karma is below 0."
+- **Submission:** one URL, title, required description, and "I made this" or "I found this." Originals explain tools, prompts, or workflow; discoveries explain why they are worth sharing. Require an attestation that the post is AI-related and safe for work.
+- **Submission flow:** one page, two steps. A Link or Upload switch sits at the top; Upload is shown as "Soon" until uploads open. Paste a URL and press **Check link**; the server returns the provider, duplicate status, and the card or embed as it will appear. Then complete the title (prefilled from metadata), description, "made" or "found," attestations, and Turnstile, and press Publish. Show eligibility at the top before any typing, such as "Next post available in 5 h 12 min" or "Posting is paused while your karma is below 0."
 - **Duplicates:** compute a `canonical_key` at submission. Supported providers use `provider:id`, so `youtu.be`, `watch`, and `shorts` links collapse. Other URLs use the lowercased host without `www.` plus the path and query, with tracking parameters and the fragment stripped. Enforce uniqueness across every post that is live or moderator-removed, whether or not its author also deleted it. Only a post that is author-deleted and not moderator-removed frees its link. An author-deleted post cannot then be moderator-removed, which keeps the rule enforceable as one partial unique index. A duplicate shows "Already posted" with a link to the existing post and does not use the posting allowance. A link removed by a moderator stays blocked.
 - **Accounts:** public browsing; Google sign-in for participation. Preserve destinations and drafts through login; drafts autosave to `localStorage`. Posts and comments require Submit afterward.
 - **In-app browsers:** Google blocks sign-in inside embedded webviews. Detect Instagram, Facebook, TikTok, X, and generic Android WebView user agents. There, tapping Sign in opens a sheet explaining that Google sign-in does not work inside the app's browser, with a Copy link button, instead of starting OAuth. The link carries only the destination: drafts live in the in-app browser's storage and do not follow. When a draft exists, the sheet says so and adds a Copy draft button that copies its text for pasting after sign-in.
@@ -45,10 +48,11 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 - **Avatars:** default to a generated avatar: the username's first letter on a color derived from the user ID, rendered as inline SVG. Settings offers "Use my Google photo," off by default, which snapshots the photo through the image pipeline. The Google name and photo are never shown otherwise. An admin can reset an avatar to the generated default.
 - **Posting allowance:** one successful publication per rolling 24 hours. Failed submissions do not count; deletion or removal does not reset the allowance. Admins are exempt, which also covers seeding.
 - **Karma:** start at zero. Received upvotes add one and downvotes subtract one across posts and comments. No self-votes; one reversible vote per account per item. Negative karma blocks new posts while leaving comments and voting available.
-- **Threading:** nested replies with collapse controls; siblings ordered by score, then oldest. Allow replies to depth 10. Cap visual indentation on mobile while retaining thread structure.
+- **Threading:** nested replies with collapse controls; siblings ordered by score, then oldest. Allow replies to depth 10. On mobile, indent less per level and stop deepening after three levels, so the controls always fit, while retaining thread structure.
 - **Low-score comments:** at net score **≤ −5**, hide the comment body by default behind **Show comment**. Keep its author, score, controls, and replies visible. This is reader-reversible and automatically stops applying when the score rises above −5.
 - **Author controls:** edit titles, descriptions, and comments; delete own content. Published post URLs stay fixed. The title and the "made" or "found" choice are editable for 1 hour after publication. Descriptions and comments are editable any time and are marked "edited" when changed more than 5 minutes after posting. Author deletion is permanent for the author. Removed or deleted items cannot be edited.
 - **Removed and deleted posts:** they leave the feed and profiles. The permalink shows **[removed by moderator]** or **[deleted by author]** with status 410 and `noindex`. Exclude the title, URL, description, preview, and embed from public HTML and loader data. Existing comments stay readable, and the thread is read-only until an admin restores the post.
+- **Saved posts:** a bookmark on every post card and post page saves the post for the signed-in user. The Saved button in the top bar opens `/saved`, newest saved first. Saved lists are private. A post that is later removed or deleted stays in the list as its tombstone and can be unsaved.
 
 ### Limits
 
@@ -76,7 +80,7 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 | Telegram channel posts | Compact post embed in the site theme, loaded on click | `t.me/<channel>/<post>?embed=1&userpic=false` |
 | Apps, games, and other URLs | Preview card opening the original | None |
 
-- **Posters:** render every media card as a poster with a fixed aspect ratio: 16:9, or 9:16 capped at about 70% of the viewport height for Shorts and TikTok. A vertical poster or player is centered at its own width with rounded corners and no box around it. Only the focused card mounts an iframe, after 300 ms of dwell, and at most two iframes are mounted at once.
+- **Posters:** render every media card as a poster with a fixed aspect ratio: 16:9, or 9:16 for Shorts and TikTok at up to 320 px wide, which is the full column on a narrow phone. A vertical poster or player is centered at its own width with rounded corners and no box around it. Only the focused card mounts an iframe, after 300 ms of dwell, and at most two iframes are mounted at once.
 - Autoplay the focused YouTube or TikTok video **muted**, with a remembered off switch. Autoplay is on by default and off under `prefers-reduced-motion` or data saver. Focus is the visible player nearest the viewport center.
 - **Sound:** a tap on a poster mounts the player with sound. YouTube is unmuted by command. TikTok's player starts muted by itself and undoes mute commands from the page, so its sound comes from the player's own volume button. Never set TikTok's `muted` parameter: it also locks the volume.
 - **TikTok is always mounted playing.** Mounted paused, its player sends no events and ignores every command, so there is no paused TikTok frame: an unfocused card is a poster.
@@ -90,7 +94,7 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 - Generate embeds through provider adapters; accept URLs rather than submitted HTML. Build each frame URL from the validated provider ID.
 - **No provider scripts in the page:** every embed is a plain sandboxed iframe. Control YouTube by `postMessage` directly instead of loading the IFrame API script, and TikTok through its official player `postMessage` API. Suno, X, Reddit, and Telegram need no control; X, Reddit, and Telegram report their height by message. Only TikTok's protocol is documented; the others were confirmed against the live frames in the embed spike.
 - **Minimal and themed:** request each provider's most compact presentation, and pass the site's color scheme wherever the provider has one: X and Suno take `theme`; Reddit takes `theme=dark` and Telegram takes `dark=1`, and both are light otherwise. YouTube and TikTok have no theme. A mounted frame is rebuilt when the site theme changes.
-- **Post embed layout:** X, Reddit, and Telegram frames stop at the provider's own width (550 px, 640 px, and 500 px), are centered, and take the height the embed reports. Those frames never scroll inside, as the providers' own scripts arrange: a report can fall a few pixels short of the document. X's frame is transparent and never declares a dark color scheme, so its iframe is marked `color-scheme: light`; otherwise the browser paints a white backdrop behind it on a dark page.
+- **Post embed layout:** X, Reddit, and Telegram frames stop at the provider's own width (550 px, 640 px, and 500 px), are centered, and take the height the embed reports. Telegram lays out no narrower than 320 px, so in a narrower column its frame keeps that width and is scaled down to fit rather than cropped. Those frames never scroll inside, as the providers' own scripts arrange: a report can fall a few pixels short of the document. X's frame is transparent and never declares a dark color scheme, so its iframe is marked `color-scheme: light`; otherwise the browser paints a white backdrop behind it on a dark page.
 - **No script fallback:** a provider whose frame fails falls back to the preview card. A first-party shell that ran the provider's own script in a sandbox was built and rejected: X's and Instagram's scripts load there but cannot complete their frame messaging at an opaque origin. A shell would need its own hostname.
 - **Instagram is not supported.** It blocks embedding for some posts and ignores the site theme. Instagram links are ordinary preview cards.
 - Accept both `x.com` and `twitter.com` post URLs and normalize them by post ID. Treat X/Twitter embeds as uncontrolled media: click to load, participate in the single playback owner, and unload on ownership changes. Retain the preview fallback for unavailable posts or blocked embeds.
@@ -105,7 +109,7 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 ### Reporting
 
 - Put **Report only in the ⋯ menu**, regardless of score, for posts, comments, and users. User reporting is accessible from profiles and author menus.
-- A report opens a small dialog with a reason and optional explanation. Offer reasons appropriate to the target, including NSFW, spam, abuse, vote manipulation, and insufficient AI involvement.
+- A report opens a small dialog with a reason and optional explanation. Offer reasons appropriate to the target, including NSFW, spam, abuse, vote manipulation, and off-topic (not about AI).
 - Require sign-in and allow one open report per reporter/target. Repeated submissions return the existing report.
 - Store a snapshot of the reported text with the report, so a later edit does not erase the evidence.
 - Reports enter an admin queue; they do not automatically remove content or ban accounts.
@@ -174,6 +178,7 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 /p/:id                post and thread (comment anchors #c-<id>)
 /submit  /settings  /rules  /privacy  /terms
 /u/:username          profile
+/saved                the signed-in user's saved posts
 /admin  /admin/users  /admin/log
 /api/auth/*  /img/:key
 /dev/ui               staging only
@@ -191,6 +196,7 @@ posts(id, author_id, url, canonical_key, provider, kind, title, description,
 comments(id, post_id, parent_id, author_id, body, depth, score,
          created_at, edited_at, deleted_at, removed_batch_id)
 votes(voter_id, target_type, target_id, value, invalidated_batch_id)
+bookmarks(user_id, post_id, created_at)
 images(key PK, owner_id, kind, state, content_type, bytes, created_at)
 reports(id, reporter_id, target_type, target_id, reason, note, snapshot, status)
 mod_actions(id, batch_id, actor_id, action, target_type, target_id, reason,
@@ -206,7 +212,7 @@ deleted_identities(id_hash PK, banned, deleted_at)
 
 1. Spike: deploy a skeleton to staging and test all six embeds on real phones. Desktop Chromium has confirmed the frame URLs and message formats; phones still need to confirm autoplay, sound after a tap, TikTok playback, and in-app browser detection. Also confirm which providers return usable metadata and thumbnails from Workers.
 2. Read path with seeded data and the design system, including the `/dev/ui` gate.
-3. Sign-in, username, submission, votes, and karma.
+3. Sign-in, username, submission, votes, karma, and saved posts.
 4. Comments and author controls.
 5. Reports, moderation, and rate limits.
 6. Autoplay and playback ownership, then cutover.
@@ -223,6 +229,8 @@ deleted_identities(id_hash PK, banned, deleted_at)
 - Test account deletion, the sign-up block for deleted and banned identities, and ban enforcement when a ban lands mid-request. A banned user can sign out and delete their account, and every participation action is refused.
 - Test that no page can be framed, that frames follow the site theme and are rebuilt on a theme switch, and that only the commands a player obeys are offered.
 - Test that a vertical video has no box around it and that self-sizing embeds never scroll inside.
+- Test saving and unsaving, that saved lists are private, and that a removed post stays in the list as a tombstone.
+- Test every page at 320 px wide for sideways scroll, with all embeds mounted, and that features marked "Soon" cannot be operated.
 - Test that the in-app browser sheet offers Copy draft when a draft exists.
 - Verify removed text never reaches public responses and submitted links never become clickable.
 - Seed sentinel strings for email, Google name, and removed text, crawl every public route as an anonymous user and as a different user, and assert none appear in HTML or data responses.
@@ -249,14 +257,40 @@ deleted_identities(id_hash PK, banned, deleted_at)
 
 - When the board ships, publish project coverage at [chatcode.dev/lab/](https://chatcode.dev/lab/) describing the Lab sessions, shipped functionality, and lessons learned, with links to the live `aion.ly` board and public `chatcode-lab/aionly` repository. Use public-safe screenshots and examples.
 
-Defer uploads, Gravatar, search, categories, notifications, messaging, automated content detection, and coordinated-voting detection beyond these basic controls. Server-made image snapshots are not user uploads. Facebook embeds can follow as a further provider adapter.
+Defer uploads, Gravatar, search, categories, notifications, messaging, and coordinated-voting detection beyond these basic controls. Server-made image snapshots are not user uploads. Facebook embeds can follow as a further provider adapter.
 
 ### Later: media uploads
 
 Not in the MVP, but the design leaves room so adding them needs no redesign.
 
 - **What:** pictures, video, and audio hosted by the board, for creations that live nowhere else. Such a post has no outside link; its title opens the post page.
-- **Who:** off for everyone at first. Unlock by karma threshold, with a paid option as a possible alternative. Either way it is one configurable gate checked by `requireParticipant()`.
+- **Who:** off for everyone at first, and shown as "Soon" on the submit form. Unlock by karma threshold, with a paid option as a possible alternative. Either way it is one configurable gate checked by `requireParticipant()`.
 - **Feed:** the same post card. A picture keeps its own shape, capped in height and never cropped. Video uses the same poster as a provider video and plays in the browser's own player. Audio uses the same row as a provider song. The `/dev/ui` page shows all three.
 - **Storage:** the `images` pipeline generalizes: R2 objects under random keys, pending until published, served only while attached to a live post, never `immutable`, swept when orphaned. Add `media-src 'self'` to the policy.
 - **Open before building:** size and length limits, transcoding and poster extraction, how uploads are screened for NSFW content when there is no provider doing it first, and storage and bandwidth cost.
+
+
+### Later: email digest
+
+The top-bar menu ships in the MVP marked "Soon"; nothing is sent yet.
+
+- **What:** the top posts by email, daily, weekly, or monthly, chosen from the Digest menu in the top bar. Off by default.
+- **Where it goes:** the sign-in email, which Google has verified. Every email carries a one-click unsubscribe link that works without signing in.
+- **Needs:** an email sending service, which the newsletter's retirement removes, a scheduled Worker per frequency, a `digest` preference on `profiles`, and a line in the privacy page.
+- **Open before building:** which service sends, what a digest contains when the period was quiet, and bounce and complaint handling.
+
+### Later: agents
+
+AI agents taking part alongside people, openly.
+
+- **Accounts:** an agent is an account created and owned by a signed-in person, who answers for it: banning the owner bans their agents.
+- **Marking:** an Agent badge beside the name wherever it appears, with no way to turn it off. The `/dev/ui` page shows it.
+- **Access:** an API with per-agent tokens, stored hashed and revocable. Commenting first; posting possibly as a paid option. Agents do not vote, so they cannot move scores or karma.
+- **Rules:** the same content rules, reports, and moderation as people, with their own tighter rate limits.
+- **Open before building:** pricing, whether agents earn karma, and how replies to an agent reach it.
+
+### Later: automated screening
+
+- A low-cost model reads each new post and comment for NSFW content, spam, and off-topic posts.
+- It files a report into the same admin queue, marked as automated. It never removes anything or bans anyone by itself, in keeping with the rule that reports do not act automatically.
+- **Open before building:** which model, cost per item, and what text and media it is given.
