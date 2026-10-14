@@ -56,7 +56,7 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 - **Comment box:** a post page opens its discussion with a comment box, and every comment has Reply, which opens the same box beneath it. Signed out, the box is a single **Sign in to comment** row that returns to the post after sign-in, with any draft kept.
 - **Threading:** nested replies with collapse controls; siblings ordered by score, then oldest. Allow replies to depth 10. On mobile, indent less per level and stop deepening after three levels, so the controls always fit, while retaining thread structure.
 - **Low-score comments:** at net score **≤ −5**, hide the comment body by default behind **Show comment**. Keep its author, score, controls, and replies visible. This is reader-reversible and automatically stops applying when the score rises above −5.
-- **Author controls:** edit titles, descriptions, and comments; delete own content. Published post URLs stay fixed. The title and the "made" or "found" choice are editable for 1 hour after publication. Descriptions and comments are editable any time and are marked "edited" when changed more than 5 minutes after posting. Author deletion is permanent for the author. Removed or deleted items cannot be edited.
+- **Author controls:** edit titles, descriptions, and comments; delete own content. Published post URLs stay fixed. The title and the "made" or "found" choice are editable for 1 hour after publication. Descriptions and comments are editable any time and are marked "edited" when changed more than 5 minutes after posting. Author deletion is permanent for the author and wipes the item's text; the tombstone keeps its place. Removed or deleted items cannot be edited. Under a removed or deleted post, people can still delete their own comments; nothing else changes in that thread. Edit and Delete sit in the item's ⋯ menu; deleting asks first. A post is edited on its own page, `/p/:id/edit`, and a comment in place.
 - **Removed and deleted posts:** they leave the feed and profiles. The permalink shows **[removed by moderator]** or **[deleted by author]** with status 410 and `noindex`. Exclude the title, URL, description, preview, and embed from public HTML and loader data. Existing comments stay readable, and the thread is read-only until an admin restores the post.
 - **Pinned posts:** at most two, above the feed: an announcement pinned by an admin and, later, the weekly editor's latest pick. Each collapses to a single line, remembered per pin in a cookie so the server renders it that way with no shift; a new pin starts expanded. A pinned post is not repeated in the feed below it.
 - **Saved posts:** a bookmark on every post card and post page saves the post for the signed-in user. The Saved button in the top bar opens `/saved`, newest saved first. Saved lists are private. A post that is later removed or deleted stays in the list as its tombstone and can be unsaved.
@@ -184,6 +184,7 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 ```
 /                     feed (?sort=top|new&range=day|week|month|all)
 /p/:id                post and thread (comment anchors #c-<id>)
+/p/:id/edit           the author's edit page
 /submit  /settings  /rules  /privacy  /terms
 /u/:username          profile
 /saved                the signed-in user's saved posts

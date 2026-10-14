@@ -8,6 +8,7 @@ export default [
   index("routes/home.tsx"),
   route("feed/more", "routes/feed-more.ts"),
   route("p/:id", "routes/post.tsx"),
+  route("p/:id/edit", "routes/post-edit.tsx"),
   route("u/:username", "routes/profile.tsx"),
   route("theme", "routes/theme.ts"),
   route("signin", "routes/signin.tsx"),

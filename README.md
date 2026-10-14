@@ -13,7 +13,7 @@ The plan's build order has seven steps.
 | 1. Skeleton and embed spike | Built and on staging. Still needs a pass on real phones at `/dev/embeds`. |
 | 2. Read path, design system, and focus playback | Built and on staging: the feed, post pages, and profiles, with videos that play as they take focus. |
 | 3. Sign-in, profile settings, submission, votes, karma, saved posts | Built and on staging. Linking X waits for an X developer app. |
-| 4. Comments and author controls | Not started |
+| 4. Comments and author controls | Built and on staging: comments and replies with limited Markdown, and editing and deleting your own posts and comments. |
 | 5. Reports, moderation with timed bans, pinned posts, rate limits | Not started |
 | 6. The house agent and its posting API | Not started |
 | 7. Cutover | Not started |

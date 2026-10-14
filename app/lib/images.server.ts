@@ -155,6 +155,30 @@ export async function sweepPendingImages(
   return keys.length;
 }
 
+/**
+ * Deletes the pictures of posts their authors deleted. A moderator's removal
+ * keeps its picture, so restoring the post brings it back.
+ */
+export async function sweepDeletedPostImages(db: D1Database, bucket: R2Bucket): Promise<number> {
+  const { results } = await db
+    .prepare(
+      `SELECT image.key FROM images AS image
+       JOIN posts AS post ON post.thumb_key = image.key
+       WHERE image.kind = 'post' AND post.deleted_at IS NOT NULL AND post.removed_batch_id IS NULL
+       LIMIT 500`,
+    )
+    .all<{ key: string }>();
+  if (results.length === 0) return 0;
+  const keys = results.map((row) => row.key);
+  await bucket.delete(keys);
+  const list = JSON.stringify(keys);
+  await db.batch([
+    db.prepare(`UPDATE posts SET thumb_key = NULL WHERE thumb_key IN (SELECT value FROM json_each(?1))`).bind(list),
+    db.prepare(`DELETE FROM images WHERE key IN (SELECT value FROM json_each(?1))`).bind(list),
+  ]);
+  return keys.length;
+}
+
 export type PhotoResult = { ok: true } | { ok: false; reason: "no_photo" | "failed" };
 
 /**

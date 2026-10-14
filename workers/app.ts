@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { createRequestHandler, RouterContextProvider } from "react-router";
 
 import { nonceContext, viewerContext } from "../app/context";
-import { sweepPendingImages } from "../app/lib/images.server";
+import { sweepDeletedPostImages, sweepPendingImages } from "../app/lib/images.server";
 import { createNonce } from "../app/lib/security/csp";
 import { withSecurityHeaders } from "../app/lib/security/headers";
 import { isSameOriginRequest } from "../app/lib/security/request";
@@ -43,5 +43,6 @@ export default {
     ctx.waitUntil(
       sweepPendingImages(workerEnv.DB, workerEnv.IMAGES, Math.floor(Date.now() / 1000)),
     );
+    ctx.waitUntil(sweepDeletedPostImages(workerEnv.DB, workerEnv.IMAGES));
   },
 } satisfies ExportedHandler<Env>;

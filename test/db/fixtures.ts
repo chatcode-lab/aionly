@@ -98,6 +98,7 @@ export interface CommentFields {
   age?: number;
   deleted?: boolean;
   removed?: boolean;
+  depth?: number;
 }
 
 export async function comment(id: string, fields: CommentFields = {}): Promise<void> {
@@ -105,8 +106,8 @@ export async function comment(id: string, fields: CommentFields = {}): Promise<v
   await db
     .prepare(
       `INSERT INTO comments (id, post_id, parent_id, author_id, body, score, created_at,
-         deleted_at, removed_batch_id)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`,
+         deleted_at, removed_batch_id, depth)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)`,
     )
     .bind(
       id,
@@ -118,6 +119,7 @@ export async function comment(id: string, fields: CommentFields = {}): Promise<v
       createdAt,
       fields.deleted ? createdAt + 60 : null,
       fields.removed ? `batch-${id}` : null,
+      fields.depth ?? 0,
     )
     .run();
 }

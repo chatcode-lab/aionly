@@ -1,5 +1,6 @@
 import { type Aspect, PROVIDERS, type Provider } from "../links/types";
 import { displayHost } from "../links/url";
+import { plainText } from "../text/markdown";
 import type {
   CommentData,
   PostDetail,
@@ -70,7 +71,7 @@ export interface PostRow extends AuthorRow {
 }
 
 function excerptOf(description: string): string {
-  const flat = description.replace(/\s+/g, " ").trim();
+  const flat = plainText(description);
   return flat.length > EXCERPT_LENGTH
     ? `${flat.slice(0, EXCERPT_LENGTH - 1).trimEnd()}…`
     : flat;

@@ -2,10 +2,11 @@ import { Minus, Plus } from "lucide-react";
 import { type ReactNode, useState } from "react";
 
 import { cn } from "~/lib/cn";
-
+import { MAX_DEPTH } from "~/lib/comments/rules";
 import type { CommentData } from "~/lib/public-types";
 
 import { AuthorLine } from "./post-card";
+import { RichText } from "./rich-text";
 import { type Vote, VoteControl } from "./vote-control";
 
 /** At or below this net score a comment's body starts hidden. */
@@ -37,6 +38,8 @@ export function CommentThread({
   renderMenu,
   renderBadge,
   renderAction,
+  renderBody,
+  renderAfter,
 }: {
   comments: CommentData[];
   now: number;
@@ -58,6 +61,10 @@ export function CommentThread({
   renderBadge?: (comment: CommentData) => ReactNode;
   /** An extra control after Reply, such as an election vote. */
   renderAction?: (comment: CommentData) => ReactNode;
+  /** In place of the text and controls, such as an editor; undefined for neither. */
+  renderBody?: (comment: CommentData) => ReactNode;
+  /** Under the controls, above the replies, such as a reply box. */
+  renderAfter?: (comment: CommentData) => ReactNode;
 }) {
   return (
     <ul
@@ -87,6 +94,8 @@ export function CommentThread({
           renderMenu={renderMenu}
           renderBadge={renderBadge}
           renderAction={renderAction}
+          renderBody={renderBody}
+          renderAfter={renderAfter}
         />
       ))}
     </ul>
@@ -107,6 +116,8 @@ function CommentItem({
   renderMenu,
   renderBadge,
   renderAction,
+  renderBody,
+  renderAfter,
 }: {
   comment: CommentData;
   now: number;
@@ -121,6 +132,8 @@ function CommentItem({
   renderMenu?: (comment: CommentData) => ReactNode;
   renderBadge?: (comment: CommentData) => ReactNode;
   renderAction?: (comment: CommentData) => ReactNode;
+  renderBody?: (comment: CommentData) => ReactNode;
+  renderAfter?: (comment: CommentData) => ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [revealed, setRevealed] = useState(false);
@@ -129,6 +142,8 @@ function CommentItem({
   const hiddenByScore =
     comment.state === "visible" && comment.score <= LOW_SCORE_THRESHOLD;
   const hidden = countReplies(comment) + 1;
+  // Null when there is nothing in it for this viewer.
+  const menu = comment.state === "visible" ? renderMenu?.(comment) : null;
 
   return (
     <li id={`c-${comment.id}`}>
@@ -173,45 +188,50 @@ function CommentItem({
       {collapsed ? null : (
         <>
         <div className="sm:pl-5.5">
-          {comment.state !== "visible" ? null : hiddenByScore && !revealed ? (
-            <button
-              type="button"
-              onClick={() => setRevealed(true)}
-              className="mt-1 rounded-md text-body text-text-muted underline decoration-border-strong underline-offset-4 hover:text-text"
-            >
-              Show comment
-            </button>
+          {comment.state === "visible" && renderBody?.(comment) !== undefined ? (
+            renderBody(comment)
           ) : (
-            <p className="mt-1 text-body whitespace-pre-wrap [overflow-wrap:anywhere]">
-              {comment.body}
-            </p>
-          )}
-
-          {comment.state === "visible" && !readOnly ? (
-            <div className="mt-1 -ml-1.5 flex items-center gap-1">
-              <VoteControl
-                score={scoreOf ? scoreOf(comment) : comment.score}
-                vote={vote}
-                onVote={(next) => onVote?.(comment, next)}
-                disabled={canVote ? !canVote(comment) : false}
-                orientation="horizontal"
-                subject="comment"
-              />
-              {onReply ? (
+            <>
+              {comment.state !== "visible" ? null : hiddenByScore && !revealed ? (
                 <button
                   type="button"
-                  onClick={() => onReply(comment)}
-                  className="inline-flex h-8 items-center rounded-lg px-2 text-meta font-medium text-text-muted hover:bg-surface-2 hover:text-text pointer-coarse:h-(--touch)"
+                  onClick={() => setRevealed(true)}
+                  className="mt-1 rounded-md text-body text-text-muted underline decoration-border-strong underline-offset-4 hover:text-text"
                 >
-                  Reply
+                  Show comment
                 </button>
+              ) : (
+                <RichText text={comment.body ?? ""} className="mt-1" />
+              )}
+
+              {comment.state === "visible" && (!readOnly || menu) ? (
+                <div className="mt-1 -ml-1.5 flex items-center gap-1">
+                  {readOnly ? null : (
+                    <VoteControl
+                      score={scoreOf ? scoreOf(comment) : comment.score}
+                      vote={vote}
+                      onVote={(next) => onVote?.(comment, next)}
+                      disabled={canVote ? !canVote(comment) : false}
+                      orientation="horizontal"
+                      subject="comment"
+                    />
+                  )}
+                  {onReply && !readOnly && depth < MAX_DEPTH ? (
+                    <button
+                      type="button"
+                      onClick={() => onReply(comment)}
+                      className="inline-flex h-8 items-center rounded-lg px-2 text-meta font-medium text-text-muted hover:bg-surface-2 hover:text-text pointer-coarse:h-(--touch)"
+                    >
+                      Reply
+                    </button>
+                  ) : null}
+                  {readOnly ? null : renderAction?.(comment)}
+                  {menu ? <div className="ml-auto">{menu}</div> : null}
+                </div>
               ) : null}
-              {renderAction?.(comment)}
-              {renderMenu ? (
-                <div className="ml-auto">{renderMenu(comment)}</div>
-              ) : null}
-            </div>
-          ) : null}
+            </>
+          )}
+          {comment.state === "visible" ? renderAfter?.(comment) : null}
         </div>
 
         {comment.replies.length > 0 ? (
@@ -229,6 +249,8 @@ function CommentItem({
             renderMenu={renderMenu}
             renderBadge={renderBadge}
             renderAction={renderAction}
+            renderBody={renderBody}
+            renderAfter={renderAfter}
           />
         ) : null}
         </>

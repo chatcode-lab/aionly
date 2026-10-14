@@ -1,7 +1,8 @@
 import { env } from "cloudflare:workers";
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router";
+import { Link, type ShouldRevalidateFunctionArgs } from "react-router";
 
+import { PostMenu } from "~/components/author-menus";
 import { PostCard } from "~/components/post-card";
 import { Button } from "~/components/ui/button";
 import { EmptyState, Notice } from "~/components/ui/states";
@@ -91,6 +92,13 @@ if (typeof window !== "undefined") {
   window.addEventListener("popstate", () => {
     lastPopAt = Date.now();
   });
+}
+
+// Deleting a post from the feed hides its card at once; loading the feed
+// again would drop the pages added with Load more.
+export function shouldRevalidate({ formAction, defaultShouldRevalidate }: ShouldRevalidateFunctionArgs) {
+  if (formAction?.startsWith("/p/")) return false;
+  return defaultShouldRevalidate;
 }
 
 export async function clientLoader({ request, serverLoader }: Route.ClientLoaderArgs) {
@@ -196,7 +204,7 @@ function FeedList({ data, address }: { data: FeedData; address: string }) {
 
   return (
     <div className="space-y-3">
-      {posts.map((post) => (
+      {posts.filter((post) => !participation.isGone(post.id)).map((post) => (
         <PostCard
           key={post.id}
           post={{ ...post, score: participation.scoreOf("post", post.id, post.score) }}
@@ -206,6 +214,7 @@ function FeedList({ data, address }: { data: FeedData; address: string }) {
           canVote={participation.viewer?.id !== post.author.id}
           saved={participation.isSaved(post.id)}
           onToggleSave={() => void participation.toggleSave(post.id)}
+          menu={<PostMenu post={post} onDeleted={() => participation.markGone(post.id)} />}
         />
       ))}
 

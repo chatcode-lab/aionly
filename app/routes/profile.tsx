@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { data, Link, redirect } from "react-router";
 
+import { PostMenu } from "~/components/author-menus";
 import { Avatar } from "~/components/avatar";
 import { PostCard } from "~/components/post-card";
 import { EmptyState } from "~/components/ui/states";
@@ -66,7 +67,7 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
         {profile.posts.length === 0 ? (
           <EmptyState title="No posts yet" />
         ) : (
-          profile.posts.map((post) => (
+          profile.posts.filter((post) => !participation.isGone(post.id)).map((post) => (
             <PostCard
               key={post.id}
               post={{ ...post, score: participation.scoreOf("post", post.id, post.score) }}
@@ -76,6 +77,7 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
               canVote={participation.viewer?.id !== post.author.id}
               saved={participation.isSaved(post.id)}
               onToggleSave={() => void participation.toggleSave(post.id)}
+              menu={<PostMenu post={post} onDeleted={() => participation.markGone(post.id)} />}
             />
           ))
         )}
@@ -100,7 +102,7 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
                     {comment.postTitle}
                   </Link>
                 </p>
-                <p className="mt-1 line-clamp-3 text-body whitespace-pre-wrap [overflow-wrap:anywhere]">
+                <p className="mt-1 line-clamp-3 text-body [overflow-wrap:anywhere]">
                   {comment.body}
                 </p>
                 <p className="mt-1 text-meta text-text-muted tabular-nums">

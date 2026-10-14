@@ -2,7 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 
 const PORT = 4173;
 
-const SUBMITS = /submit\.spec\.ts/;
+// Tests that publish posts or add comments.
+const WRITES = /(submit|discussion)\.spec\.ts/;
 
 // Point this at an existing Chromium to skip `npx playwright install chromium`.
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH;
@@ -15,6 +16,10 @@ const executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH;
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
+  // The local preview now and then fails to hand a request to the Workers
+  // runtime ("TypeError: fetch failed" from Miniflare), so the app never sees
+  // it. One retry absorbs that; a test that needed it is reported as flaky.
+  retries: 1,
   forbidOnly: Boolean(process.env.CI),
   reporter: "list",
   use: {
@@ -22,27 +27,27 @@ export default defineConfig({
     launchOptions: executablePath ? { executablePath } : {},
   },
   projects: [
-    { name: "desktop", use: { ...devices["Desktop Chrome"] }, testIgnore: SUBMITS },
-    { name: "phone", use: { ...devices["Pixel 7"] }, testIgnore: SUBMITS },
+    { name: "desktop", use: { ...devices["Desktop Chrome"] }, testIgnore: WRITES },
+    { name: "phone", use: { ...devices["Pixel 7"] }, testIgnore: WRITES },
     // The narrowest screen the layout supports, such as a small phone with
     // larger text turned on.
     {
       name: "narrow",
       use: { ...devices["Pixel 7"], viewport: { width: 320, height: 568 } },
-      testIgnore: SUBMITS,
+      testIgnore: WRITES,
     },
-    // Tests that publish posts run last, so the posts they add never change
-    // what the feed tests count.
+    // Tests that publish posts or add comments run last, so what they add
+    // never changes what the feed and thread tests count.
     {
       name: "submit-desktop",
       use: { ...devices["Desktop Chrome"] },
-      testMatch: SUBMITS,
+      testMatch: WRITES,
       dependencies: ["desktop", "phone", "narrow"],
     },
     {
       name: "submit-narrow",
       use: { ...devices["Pixel 7"], viewport: { width: 320, height: 568 } },
-      testMatch: SUBMITS,
+      testMatch: WRITES,
       dependencies: ["desktop", "phone", "narrow"],
     },
   ],

@@ -1,4 +1,5 @@
 import type { PostCardData } from "../public-types";
+import { plainText } from "../text/markdown";
 import {
   AUTHOR_JOINS,
   POST_COLUMNS,
@@ -115,7 +116,8 @@ export async function profileByName(
         }>
       ).map((row) => ({
         id: row.id,
-        body: row.body,
+        // Listed clamped to a few lines, without the markup.
+        body: plainText(row.body),
         score: row.score,
         createdAt: row.created_at,
         postId: row.post_id,

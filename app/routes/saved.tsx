@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { Bookmark } from "lucide-react";
 import { Link } from "react-router";
 
+import { PostMenu } from "~/components/author-menus";
 import { PostCard } from "~/components/post-card";
 import { Button } from "~/components/ui/button";
 import { EmptyState } from "~/components/ui/states";
@@ -65,6 +66,7 @@ export default function Saved({ loaderData }: Route.ComponentProps) {
                 canVote={participation.viewer?.id !== entry.post.author.id}
                 saved={participation.isSaved(entry.post.id)}
                 onToggleSave={() => void participation.toggleSave(entry.post.id)}
+                menu={<PostMenu post={entry.post} />}
               />
             ) : (
               // A post removed or deleted since it was saved: no title or link,

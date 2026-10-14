@@ -15,6 +15,8 @@ interface Change {
   vote?: Vote;
   score?: number;
   saved?: boolean;
+  /** The viewer deleted it. */
+  gone?: boolean;
   /** Milliseconds since the epoch. */
   at: number;
 }
@@ -139,5 +141,12 @@ export function useParticipation(initial: ViewerMarks, loadedAt: number) {
     refuse(status, data, "That did not save. Try again.");
   };
 
-  return { viewer, voteOf, scoreOf, vote, isSaved, toggleSave, absorb };
+  /** A post the viewer deleted in this tab, which lists leave out. */
+  const isGone = (id: string): boolean => changes.get(`post:${id}`)?.gone === true;
+  const markGone = (id: string) => {
+    record(`post:${id}`, { gone: true });
+    refresh();
+  };
+
+  return { viewer, voteOf, scoreOf, vote, isSaved, toggleSave, absorb, isGone, markGone };
 }

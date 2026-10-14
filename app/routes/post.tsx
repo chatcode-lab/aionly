@@ -1,12 +1,28 @@
 import { env } from "cloudflare:workers";
+import { useCallback, useState } from "react";
 import { data } from "react-router";
 
+import { CommentMenu, PostMenu } from "~/components/author-menus";
 import { CommentThread } from "~/components/comment";
+import { CommentBox, CommentEditor } from "~/components/comment-box";
 import { PostCard, PostTombstone } from "~/components/post-card";
+import { useSignIn } from "~/components/sign-in";
+import { useParticipation } from "~/components/use-participation";
+import type { AuthoringIntent, AuthoringResult } from "~/lib/authoring";
+import { cleanComment, commentProblem } from "~/lib/comments/rules";
+import {
+  addComment,
+  type CommentRefusal,
+  deleteComment,
+  deletePost,
+  editComment,
+} from "~/lib/db/authoring.server";
 import { viewerMarks } from "~/lib/db/marks.server";
 import { postPage } from "~/lib/db/posts.server";
+import { formatWait } from "~/lib/format";
+import { newId } from "~/lib/ids";
 import type { CommentData } from "~/lib/public-types";
-import { useParticipation } from "~/components/use-participation";
+import { ROW_ID } from "~/lib/security/body";
 import { viewerOf } from "~/lib/viewer.server";
 
 import type { Route } from "./+types/post";
@@ -30,6 +46,92 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
   return page.state === "live"
     ? { ...page, marks, now, canonical }
     : data({ ...page, marks, now, canonical }, { status: 410 });
+}
+
+const COMMENT_REFUSAL: Record<Exclude<CommentRefusal, "limit">, string> = {
+  closed: "This discussion is closed.",
+  parent: "That comment is no longer here to reply to.",
+  depth: "Replies go no deeper here. Reply further up the thread.",
+  not_allowed: "Your account can't comment.",
+};
+
+const CHANGE_REFUSAL = {
+  not_found: "That is no longer here.",
+  closed: "This can no longer be changed.",
+  window: "The title can only change in the first hour.",
+  not_allowed: "Your account can't make changes.",
+} as const;
+
+/**
+ * Adds, edits, and deletes comments, and deletes the post, for its author.
+ * Every answer is data for the form that asked, so the page stays.
+ */
+export async function action({ params, request, context }: Route.ActionArgs) {
+  // A comment is at most 5,000 characters; nothing bigger is read.
+  if (Number(request.headers.get("Content-Length") ?? "0") > 64 * 1024) {
+    return data<AuthoringResult>({ ok: false, intent: "comment", error: "That is too long." }, { status: 413 });
+  }
+  const form = await request.formData();
+  const intent = String(form.get("intent") ?? "") as AuthoringIntent;
+  const refuse = (error: string, status: number) =>
+    data<AuthoringResult>({ ok: false, intent, error }, { status });
+
+  if (!["comment", "edit-comment", "delete-comment", "delete-post"].includes(intent)) {
+    return refuse("That was not understood.", 400);
+  }
+  const viewer = await viewerOf(context);
+  if (!viewer) return refuse("Sign in to continue.", 401);
+  if (viewer.ban) return refuse("Your account is read-only while the ban lasts.", 403);
+
+  const now = Math.floor(Date.now() / 1000);
+  const postId = params.id;
+  const id = String(form.get("id") ?? "");
+  const body = cleanComment(String(form.get("body") ?? ""));
+
+  switch (intent) {
+    case "comment": {
+      const problem = commentProblem(body);
+      if (problem) return refuse(problem, 400);
+      const parent = String(form.get("parent") ?? "");
+      if (parent && !ROW_ID.test(parent)) return refuse("That was not understood.", 400);
+      const commentId = newId();
+      const result = await addComment(env.DB, {
+        id: commentId,
+        postId,
+        parentId: parent || null,
+        authorId: viewer.id,
+        body,
+        now,
+      });
+      if (result.ok) return { ok: true, intent, id: commentId } satisfies AuthoringResult;
+      if (result.reason === "limit") {
+        return refuse(
+          `That is 100 comments in a day. Try again in ${formatWait((result.retryAt ?? now) - now)}; your draft is saved.`,
+          429,
+        );
+      }
+      return refuse(COMMENT_REFUSAL[result.reason], 403);
+    }
+    case "edit-comment": {
+      const problem = commentProblem(body);
+      if (problem) return refuse(problem, 400);
+      if (!ROW_ID.test(id)) return refuse("That was not understood.", 400);
+      const result = await editComment(env.DB, { id, authorId: viewer.id, body, now });
+      if (result.ok) return { ok: true, intent, id } satisfies AuthoringResult;
+      return refuse(CHANGE_REFUSAL[result.reason], result.reason === "not_found" ? 404 : 403);
+    }
+    case "delete-comment": {
+      if (!ROW_ID.test(id)) return refuse("That was not understood.", 400);
+      const result = await deleteComment(env.DB, { id, authorId: viewer.id, now });
+      if (result.ok) return { ok: true, intent, id } satisfies AuthoringResult;
+      return refuse(CHANGE_REFUSAL[result.reason], result.reason === "not_found" ? 404 : 403);
+    }
+    case "delete-post": {
+      const result = await deletePost(env.DB, { id: postId, authorId: viewer.id, now });
+      if (result.ok) return { ok: true, intent, id: postId } satisfies AuthoringResult;
+      return refuse(CHANGE_REFUSAL[result.reason], result.reason === "not_found" ? 404 : 403);
+    }
+  }
 }
 
 export function meta({ loaderData }: Route.MetaArgs) {
@@ -69,8 +171,16 @@ function countAll(comments: Route.ComponentProps["loaderData"]["comments"]): num
 
 export default function Post({ loaderData }: Route.ComponentProps) {
   const participation = useParticipation(loaderData.marks, loaderData.now);
+  const signIn = useSignIn();
+  const [replyingTo, setReplyingTo] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
   const live = loaderData.state === "live";
   const total = countAll(loaderData.comments);
+  const postId = loaderData.canonical.split("/").pop() ?? "";
+  const viewerId = participation.viewer?.id;
+  const closeReply = useCallback(() => setReplyingTo(null), []);
+  const closeEditor = useCallback(() => setEditing(null), []);
+  const own = (comment: CommentData) => viewerId !== undefined && comment.author?.id === viewerId;
 
   return (
     <main className="mx-auto max-w-column space-y-4 px-(--gutter) py-4">
@@ -89,23 +199,25 @@ export default function Post({ loaderData }: Route.ComponentProps) {
           canVote={participation.viewer?.id !== loaderData.post.author.id}
           saved={participation.isSaved(loaderData.post.id)}
           onToggleSave={() => void participation.toggleSave(loaderData.post.id)}
+          menu={<PostMenu post={loaderData.post} />}
         />
       ) : (
         <PostTombstone state={loaderData.state} />
       )}
 
-      <section aria-labelledby="comments-heading">
+      <section aria-labelledby="comments-heading" className="space-y-3">
         <h2 id="comments-heading" className="text-title font-semibold">
           {total === 0
             ? "No comments yet"
             : `${total} ${total === 1 ? "comment" : "comments"}`}
         </h2>
+        {live ? <CommentBox postId={postId} /> : null}
         {total > 0 ? (
-          <div className="mt-3 rounded-xl border border-border bg-surface p-3 sm:p-4">
+          <div className="rounded-xl border border-border bg-surface p-3 sm:p-4">
             <CommentThread
               comments={loaderData.comments}
               now={loaderData.now}
-              postId={loaderData.canonical.split("/").pop() ?? ""}
+              postId={postId}
               // The thread under a removed or deleted post is read-only.
               readOnly={!live}
               votes={Object.fromEntries(
@@ -115,6 +227,52 @@ export default function Post({ loaderData }: Route.ComponentProps) {
               canVote={(comment) => participation.viewer?.id !== comment.author?.id}
               onVote={(comment, next) =>
                 void participation.vote("comment", comment.id, comment.score, next)
+              }
+              onReply={(comment) => {
+                if (!participation.viewer) {
+                  signIn({ title: "Sign in to reply" });
+                  return;
+                }
+                setEditing(null);
+                setReplyingTo((current) => (current === comment.id ? null : comment.id));
+              }}
+              renderMenu={(comment) =>
+                own(comment) ? (
+                  <CommentMenu
+                    postId={postId}
+                    comment={comment}
+                    onEdit={
+                      live
+                        ? () => {
+                            setReplyingTo(null);
+                            setEditing(comment.id);
+                          }
+                        : undefined
+                    }
+                  />
+                ) : null
+              }
+              renderBody={(comment) =>
+                live && editing === comment.id ? (
+                  <CommentEditor
+                    postId={postId}
+                    commentId={comment.id}
+                    body={comment.body ?? ""}
+                    onDone={closeEditor}
+                  />
+                ) : undefined
+              }
+              renderAfter={(comment) =>
+                live && replyingTo === comment.id ? (
+                  <div className="mt-2">
+                    <CommentBox
+                      postId={postId}
+                      parentId={comment.id}
+                      onCancel={closeReply}
+                      onDone={closeReply}
+                    />
+                  </div>
+                ) : null
               }
             />
           </div>

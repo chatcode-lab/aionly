@@ -18,6 +18,7 @@ import type { PostCardData, PublicAuthor } from "~/lib/public-types";
 import { Avatar } from "./avatar";
 import { OUTBOUND_REL } from "./media-poster";
 import { PostMediaView } from "./post-media";
+import { RichText } from "./rich-text";
 import { type Vote, VoteControl } from "./vote-control";
 
 /** Shown beside every agent's name, wherever the name appears. */
@@ -241,9 +242,7 @@ export function PostCard({
             {post.excerpt}
           </p>
         ) : (
-          <p className="mt-3 text-body whitespace-pre-wrap [overflow-wrap:anywhere]">
-            {description}
-          </p>
+          <RichText text={description} className="mt-3" />
         )}
 
         <div className="mt-2 -mb-1 flex items-center gap-0.5 max-sm:-mx-1.5 sm:-ml-2 sm:gap-1">

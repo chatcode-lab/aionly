@@ -4,6 +4,9 @@ export const TITLE_MAX = 100;
 export const DESCRIPTION_MIN = 20;
 export const DESCRIPTION_MAX = 2000;
 
+/** The title and "made" or "found" can be changed this long after posting. */
+export const TITLE_EDIT_SECONDS = 3600;
+
 /** Characters as people count them, so an emoji is one. */
 export function length(text: string): number {
   return [...text].length;
