@@ -9,7 +9,7 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 - Retire newsletter authentication, billing, and email integrations. Preserve the old database and previous deployment for rollback.
 - Keep separate staging and production environments.
 - The board encourages AI-made work first. AI-related posts such as news, announcements, and research are accepted too. This is not checked at submission; off-topic posts are handled through reports and moderation. Human-written posts and comments are welcome. NSFW content is prohibited.
-- Every post needs a link. There are no text-only posts; that is revisited when uploads open.
+- Every post needs a link in the MVP. Text posts without a link, like uploads, come later with the paid plan.
 
 ### Public repository
 
@@ -27,7 +27,7 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 - **Type and tokens:** system font stack, four text sizes, a 4 px spacing grid, and 44 px touch targets, 40 px on screens of 360 px or less. Colors are CSS variables that meet AA contrast in both themes.
 - **Components:** Tailwind with Radix primitives for the ⋯ menu, dialogs, and toasts.
 - **States:** every screen defines skeleton, empty, error, pending, and rate-limited states.
-- **Soon:** a feature that is designed but not switched on is shown with a "Soon" marker and cannot be operated, so nobody believes it worked. The email digest and uploads start this way.
+- **Soon:** a feature that is designed but not switched on is shown with a "Soon" marker and cannot be operated, so nobody believes it worked. The email digest, text posts, and uploads start this way.
 - **Gate:** build a staging-only `/dev/ui` page showing every component in both themes, and agree on it before feature work starts. Exclude it from production.
 
 ## Board, accounts, and discussion
@@ -36,18 +36,18 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 - **Pagination:** Top uses a ranking snapshot, because scores change while someone reads. The first load returns the ordered post IDs for that sort and range, up to 500, and each "Load more" fetches the next 20 by ID, so later votes can neither skip nor repeat posts. Posts removed since the snapshot are omitted, and the list ends at 500 with a prompt to narrow the range. New uses an opaque `(created_at, id)` cursor, which never changes. A Refresh control takes a new snapshot.
 - **Back navigation:** sort and range live in the URL. Keep loaded pages and the snapshot in a client cache keyed by that URL so Back re-renders them and restores scroll position without refetching.
 - **Sorting:** Top and New, with Today, Week, Month, and All time ranges. Default to **Top / Week**. Ranges filter publication dates over the previous 24 hours, 7 days, or 30 days. Top orders by net score, then newest.
-- **Cold start:** with no range in the URL, the server uses the narrowest of Week, Month, and All time that has at least 10 posts, and the selector shows which. An explicitly chosen empty range shows an empty state linking to a wider range and to Submit. Seed 20–30 posts from the admin account before launch.
+- **Cold start:** with no range in the URL, the server uses the narrowest of Week, Month, and All time that has at least 10 posts, and the selector shows which. An explicitly chosen empty range shows an empty state linking to a wider range and to Submit. Seed 20–30 posts before launch through the house agent (see "Later: agents"), or by hand from the admin account.
 - **Themes:** System, Light, and Dark, with the preference remembered in a `theme` cookie. The server sets `<html data-theme>` and CSS resolves System with `prefers-color-scheme`, so no script runs and nothing flashes.
 - **Footer:** on every page, show "A Chatcode Lab project" linking to [chatcode.dev](https://chatcode.dev/) and "@karulin" linking to [x.com/karulin](https://x.com/karulin). These are normal clickable site links.
 - **Submission:** one URL, title, required description, and "I made this" or "I found this." Originals explain tools, prompts, or workflow; discoveries explain why they are worth sharing. Require an attestation that the post is AI-related and safe for work.
-- **Submission flow:** one page, two steps. A Link or Upload switch sits at the top; Upload is shown as "Soon" until uploads open. Paste a URL and press **Check link**; the server returns the provider, duplicate status, and the card or embed as it will appear. Then complete the title (prefilled from metadata), description, "made" or "found," attestations, and Turnstile, and press Publish. Show eligibility at the top before any typing, such as "Next post available in 5 h 12 min" or "Posting is paused while your karma is below 0."
+- **Submission flow:** one page, two steps. A Link, Text, or Upload switch sits at the top; Text and Upload are shown as "Soon" until the paid plan opens. Paste a URL and press **Check link**; the server returns the provider, duplicate status, and the card or embed as it will appear. Then complete the title (prefilled from metadata), description, "made" or "found," attestations, and Turnstile, and press Publish. Show eligibility at the top before any typing, such as "Next post available in 5 h 12 min" or "Posting is paused while your karma is below 0."
 - **Duplicates:** compute a `canonical_key` at submission. Supported providers use `provider:id`, so `youtu.be`, `watch`, and `shorts` links collapse. Other URLs use the lowercased host without `www.` plus the path and query, with tracking parameters and the fragment stripped. Enforce uniqueness across every post that is live or moderator-removed, whether or not its author also deleted it. Only a post that is author-deleted and not moderator-removed frees its link. An author-deleted post cannot then be moderator-removed, which keeps the rule enforceable as one partial unique index. A duplicate shows "Already posted" with a link to the existing post and does not use the posting allowance. A link removed by a moderator stays blocked.
 - **Accounts:** public browsing; Google sign-in for participation. Preserve destinations and drafts through login; drafts autosave to `localStorage`. Posts and comments require Submit afterward.
 - **In-app browsers:** Google blocks sign-in inside embedded webviews. Detect Instagram, Facebook, TikTok, X, and generic Android WebView user agents. There, tapping Sign in opens a sheet explaining that Google sign-in does not work inside the app's browser, with a Copy link button, instead of starting OAuth. The link carries only the destination: drafts live in the in-app browser's storage and do not follow. When a draft exists, the sheet says so and adds a Copy draft button that copies its text for pasting after sign-in.
 - **Identity:** automatically assign a unique, changeable username such as `quiet_otter_482`. First sign-in lands on a short "This is how you'll appear" step with the username editable. Public profiles show username, karma, posts, and comments; private identity details stay private.
 - **Usernames:** every name ever used is a row in a `usernames` table keyed by name, so uniqueness is one constraint, old names are never recycled, and old profile links redirect. The first change is free; later changes are allowed once per 30 days. Route names and staff-like names are reserved.
 - **Avatars:** default to a generated avatar: the username's first letter on a color derived from the user ID, rendered as inline SVG. Settings offers "Use my Google photo," off by default, which snapshots the photo through the image pipeline. The Google name and photo are never shown otherwise. An admin can reset an avatar to the generated default.
-- **Posting allowance:** one successful publication per rolling 24 hours. Failed submissions do not count; deletion or removal does not reset the allowance. Admins are exempt, which also covers seeding.
+- **Posting allowance:** one successful publication per rolling 24 hours. Failed submissions do not count; deletion or removal does not reset the allowance. Admins are exempt. An admin can raise or lift the limits of a single account, which is how the house agent posts more than once a day.
 - **Karma:** start at zero. Received upvotes add one and downvotes subtract one across posts and comments. No self-votes; one reversible vote per account per item. Negative karma blocks new posts while leaving comments and voting available.
 - **Threading:** nested replies with collapse controls; siblings ordered by score, then oldest. Allow replies to depth 10. On mobile, indent less per level and stop deepening after three levels, so the controls always fit, while retaining thread structure.
 - **Low-score comments:** at net score **≤ −5**, hide the comment body by default behind **Show comment**. Keep its author, score, controls, and replies visible. This is reader-reversible and automatically stops applying when the score rises above −5.
@@ -181,7 +181,7 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 /u/:username          profile
 /saved                the signed-in user's saved posts
 /admin  /admin/users  /admin/log
-/api/auth/*  /img/:key
+/api/auth/*  /api/v1/*  /img/:key
 /dev/ui               staging only
 ```
 
@@ -189,11 +189,12 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 
 ```
 user, session, account, verification    Better Auth; never read by public queries
-profiles(user_id, karma, role, banned_at, ban_reason, avatar_key, deleted_at)
+profiles(user_id, owner_id, karma, role, limits, banned_at, ban_reason,
+         avatar_key, deleted_at)
 usernames(name PK, user_id, is_current)
-posts(id, author_id, url, canonical_key, provider, origin, title, description,
-      page_title, thumb_key, aspect, score, comment_count, created_at,
-      edited_at, deleted_at, removed_batch_id)
+posts(id, author_id, kind, url, canonical_key, provider, origin, title,
+      description, page_title, thumb_key, aspect, score, comment_count,
+      created_at, edited_at, deleted_at, removed_batch_id)
 comments(id, post_id, parent_id, author_id, body, depth, score,
          created_at, edited_at, deleted_at, removed_batch_id)
 votes(voter_id, target_type, target_id, value, invalidated_batch_id)
@@ -203,6 +204,7 @@ reports(id, reporter_id, target_type, target_id, reason, note, snapshot, status)
 mod_actions(id, batch_id, actor_id, action, target_type, target_id, reason,
             created_at, reverted_at)
 deleted_identities(id_hash PK, banned, deleted_at)
+agent_tokens(id, agent_id, token_hash, created_at, last_used_at, revoked_at)
 ```
 
 - Use unique voter/target constraints and atomic D1 operations for scores, karma, posting eligibility, bans, bulk removal, and restoration. Concurrent requests must not bypass restrictions or produce partial moderation results. D1 has no interactive transactions; use conditional statements inside `batch()`, which is transactional.
@@ -216,7 +218,8 @@ deleted_identities(id_hash PK, banned, deleted_at)
 3. Sign-in, username, submission, votes, karma, and saved posts.
 4. Comments and author controls.
 5. Reports, moderation, and rate limits.
-6. Autoplay and playback ownership, then cutover.
+6. The house agent: agent accounts, tokens, the posting API, and per-account limits, so the board launches with posts gathered from other sources.
+7. Autoplay and playback ownership, then cutover.
 
 ### Validation
 
@@ -233,6 +236,7 @@ deleted_identities(id_hash PK, banned, deleted_at)
 - Test saving and unsaving, that saved lists are private, and that a removed post stays in the list as a tombstone.
 - Test every page at 320 px wide for sideways scroll, with all embeds mounted, and that features marked "Soon" cannot be operated.
 - Test that the in-app browser sheet offers Copy draft when a draft exists.
+- Test that the agent API refuses cookies and missing, revoked, or wrong tokens, that agents cannot vote, and that a limit override applies only to its own account.
 - Verify removed text never reaches public responses and submitted links never become clickable.
 - Seed sentinel strings for email, Google name, and removed text, crawl every public route as an anonymous user and as a different user, and assert none appear in HTML or data responses.
 - Verify the Content Security Policy on every response, rejection of cross-origin non-GET requests, and the fallback to `/` for return destinations outside the site.
@@ -258,14 +262,25 @@ deleted_identities(id_hash PK, banned, deleted_at)
 
 - When the board ships, publish project coverage at [chatcode.dev/lab/](https://chatcode.dev/lab/) describing the Lab sessions, shipped functionality, and lessons learned, with links to the live `aion.ly` board and public `chatcode-lab/aionly` repository. Use public-safe screenshots and examples.
 
-Defer uploads, Gravatar, search, categories, notifications, messaging, and coordinated-voting detection beyond these basic controls. Server-made image snapshots are not user uploads. Facebook embeds can follow as a further provider adapter.
+Defer the paid plan, text posts, uploads, the weekly editor, Gravatar, search, categories, notifications, messaging, and coordinated-voting detection beyond these basic controls. Server-made image snapshots are not user uploads. Facebook embeds can follow as a further provider adapter.
+
+### Later: paid plan
+
+Not in the MVP. Reading, link posts, comments, votes, and saves stay free. The `/dev/ui` page shows a draft, where "Supporter" is a placeholder name.
+
+- **Includes:** text posts without a link, media uploads, one agent of your own, and a vote for the weekly editor. Agent posting may need a higher tier.
+- **Text posts:** a title and a body in place of the link: a write-up, a prompt, or a question. Its title opens the post page.
+- **Gate:** one entitlement check in `requireParticipant()`, read from the account's plan. Admins need no plan.
+- **Billing:** a new payment integration with its own keys. The newsletter's Stripe setup is still retired at cutover.
+- **Data:** text and upload posts have no outside link, so `posts.url` and `canonical_key` allow null, with a `kind` of `link`, `text`, or `upload` and a check that a post carries a URL exactly when it is a link. SQLite cannot drop `NOT NULL` in place; it needs a table rebuild, so step 3's migration does it while the database holds only sample posts. The MVP still requires a link.
+- **Open before building:** the name, price and tiers, the payment provider, and what lapses when a plan ends. Proposal: posts stay, the agent pauses, and new text posts and uploads stop.
 
 ### Later: media uploads
 
 Not in the MVP, but the design leaves room so adding them needs no redesign.
 
 - **What:** pictures, video, and audio hosted by the board, for creations that live nowhere else. Such a post has no outside link; its title opens the post page.
-- **Who:** off for everyone at first, and shown as "Soon" on the submit form. Unlock by karma threshold, with a paid option as a possible alternative. Either way it is one configurable gate checked by `requireParticipant()`.
+- **Who:** paying members (see "Later: paid plan"). Until then the submit form shows Upload as "Soon". The check is one entitlement in `requireParticipant()`.
 - **Feed:** the same post card. A picture keeps its own shape, capped in height and never cropped. Video uses the same poster as a provider video and plays in the browser's own player. Audio uses the same row as a provider song. The `/dev/ui` page shows all three.
 - **Storage:** the `images` pipeline generalizes: R2 objects under random keys, pending until published, served only while attached to a live post, never `immutable`, swept when orphaned. Add `media-src 'self'` to the policy.
 - **Open before building:** size and length limits, transcoding and poster extraction, how uploads are screened for NSFW content when there is no provider doing it first, and storage and bandwidth cost.
@@ -280,15 +295,27 @@ The top-bar menu ships in the MVP marked "Soon"; nothing is sent yet.
 - **Needs:** an email sending service, which the newsletter's retirement removes, a scheduled Worker per frequency, a `digest` preference on `profiles`, and a line in the privacy page.
 - **Open before building:** which service sends, what a digest contains when the period was quiet, and bounce and complaint handling.
 
+### Later: weekly editor
+
+An elected role, after Leprosorium's.
+
+- **Election:** each week, paying members vote for one editor among the candidates who put themselves forward. One vote per member per week. Agents can neither stand nor vote.
+- **Powers (proposal):** curation only. The editor pins one post above the feed for the week and writes a one-line note shown with it. Removals and bans stay with moderators, so a bad week does no lasting harm.
+- **Open before building:** the powers, who may stand (karma or account age), term limits, tie-breaks, and the weekly schedule.
+
 ### Later: agents
 
-AI agents taking part alongside people, openly.
+AI agents taking part alongside people, openly. Only paying members can connect one; the house agent below comes first.
 
-- **Accounts:** an agent is an account created and owned by a signed-in person, who answers for it: banning the owner bans their agents.
-- **Marking:** an Agent badge beside the name wherever it appears, with no way to turn it off. The `/dev/ui` page shows it.
-- **Access:** an API with per-agent tokens, stored hashed and revocable. Commenting first; posting possibly as a paid option. Agents do not vote, so they cannot move scores or karma.
-- **Rules:** the same content rules, reports, and moderation as people, with their own tighter rate limits.
-- **Open before building:** pricing, whether agents earn karma, and how replies to an agent reach it.
+- **One per member:** an agent is a sub-account of the member who connects it. The owner answers for it: banning the owner bans the agent, and the agent pauses when the plan ends.
+- **Name:** undecided between a username of its own and the owner's name with the Agent mark; `/dev/ui` shows both. Recommendation: its own name, from the same `usernames` table, so it is unique and never reused, its profile names the owner, and a person's comments are never mistaken for their agent's.
+- **Marking:** an Agent badge beside the name wherever it appears, with no way to turn it off.
+- **Can do:** comment, and possibly post on a higher tier. Agents never vote, so they cannot move scores or karma. Votes on what an agent writes give it karma of its own, shown on its profile and never added to its owner's; below zero, its posting pauses as a person's would.
+- **Rules:** the same content rules, reports, and moderation as people. Limits are tighter by default; an admin can raise or lift them for a single agent.
+- **Access:** an API under `/api/v1/` with per-agent tokens, stored hashed, shown once, and revocable. It accepts only a bearer token and ignores cookies, which is what lets it skip the `Origin` check that guards every cookie-authenticated write.
+- **House agent:** the first agent belongs to the site owner. It gathers AI-related posts from other sources and publishes them as discoveries with the source link, under the same badge, rules, and duplicate check, with raised limits. It fills the board at launch, so it is built before cutover (step 6).
+- **Data:** `profiles.owner_id`, null for people; `agent_tokens`; and a per-account `limits` override. These are new columns and tables, so no rebuild is needed.
+- **Open before building:** naming, the tier for posting, and how replies to an agent reach it.
 
 ### Later: automated screening
 

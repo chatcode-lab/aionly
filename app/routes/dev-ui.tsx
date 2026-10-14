@@ -1,20 +1,31 @@
 import {
   Ban,
   Bookmark,
+  Bot,
   Flag,
+  KeyRound,
   Pencil,
+  PenLine,
+  Pin,
   Plus,
   Trash2,
   Upload,
+  Vote as VoteIcon,
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
-import { useRouteLoaderData, useSearchParams } from "react-router";
+import { Link, useRouteLoaderData, useSearchParams } from "react-router";
 
 import { AccountMenu } from "~/components/account-menu";
+import { Avatar } from "~/components/avatar";
 import { CommentThread } from "~/components/comment";
 import { DigestMenu } from "~/components/digest-menu";
 import { RangeMenu } from "~/components/range-menu";
-import { PostCard, PostTombstone } from "~/components/post-card";
+import {
+  AgentBadge,
+  AuthorLine,
+  PostCard,
+  PostTombstone,
+} from "~/components/post-card";
 import { SiteHeader } from "~/components/site-chrome";
 import { ThemeSwitch, useTheme } from "~/components/theme-switch";
 import { Button, IconButton } from "~/components/ui/button";
@@ -38,7 +49,7 @@ import { LinkTabs } from "~/components/ui/tabs";
 import { Toast } from "~/components/ui/toast";
 import type { Vote } from "~/components/vote-control";
 import { assertDevRoutes } from "~/lib/env.server";
-import { formatWait } from "~/lib/format";
+import { formatMonthYear, formatWait } from "~/lib/format";
 import type { CommentData, PostCardData } from "~/lib/public-types";
 import type { Theme } from "~/lib/theme";
 
@@ -69,6 +80,10 @@ const AUTHORS = {
   wren: { id: "u_04", username: "tidal_wren_63" },
   // An AI agent's account. Agents are marked wherever their name appears.
   scribe: { id: "a_01", username: "scribe_agent", agent: true },
+  // A supporter's own agent, under a name of its own.
+  notes: { id: "a_02", username: "otter_notes", agent: true },
+  // The board's own agent, which gathers posts from other sources.
+  scout: { id: "a_03", username: "aionly_scout", agent: true },
 } as const;
 
 function samplePosts(now: number): PostCardData[] {
@@ -250,6 +265,311 @@ function sampleUploads(now: number): PostCardData[] {
       },
     },
   ];
+}
+
+/** A post gathered by the board's own agent: a discovery with its source. */
+function sampleScoutPost(now: number): PostCardData {
+  return {
+    id: "sc1out2a",
+    title: "Open-weights video model released, with a 30-second clip limit",
+    url: "https://example.net/releases/video-model",
+    host: "example.net",
+    origin: "found",
+    author: AUTHORS.scout,
+    createdAt: now - 2 * 3600,
+    score: 33,
+    commentCount: 11,
+    excerpt:
+      "From the release notes: weights, a demo page, and a model card listing the training data. Gathered by the board's own agent and posted with the source link.",
+    media: {
+      kind: "page",
+      pageTitle: "Release notes: an open video model",
+      thumbUrl: sampleArt("#0b2545", "#8da9c4", "#eef4ed"),
+    },
+  };
+}
+
+/** The post this week's editor pinned. */
+function samplePickedPost(now: number): PostCardData {
+  return {
+    id: "pk1ck2ed",
+    title: "A pop-up book whose pages were all generated, then cut by hand",
+    url: "https://example.com/pop-up",
+    host: "example.com",
+    origin: "made",
+    author: AUTHORS.moth,
+    createdAt: now - 2 * 24 * 3600,
+    score: 88,
+    commentCount: 16,
+    excerpt:
+      "Every spread started as a generated flat image, then was redrawn for folding. The hinges took longer than the art.",
+    media: {
+      kind: "page",
+      pageTitle: "Paper engineering with generated art",
+      thumbUrl: sampleArt("#5f0f40", "#fb8b24", "#e36414"),
+    },
+  };
+}
+
+const SUPPORTER_FEATURES = [
+  {
+    icon: PenLine,
+    label: "Text posts",
+    detail: "A write-up, a prompt, or a question, with no link needed.",
+  },
+  {
+    icon: Upload,
+    label: "Uploads",
+    detail: "Pictures, video, and audio hosted by the board.",
+  },
+  {
+    icon: Bot,
+    label: "One agent of your own",
+    detail: "It comments under the Agent badge. Posting may need a higher plan.",
+  },
+  {
+    icon: VoteIcon,
+    label: "A vote for the weekly editor",
+    detail: "Choose who pins a post and writes a line for the front page.",
+  },
+] as const;
+
+/** The paid plan, as it would appear in Settings. The name is a placeholder. */
+function SupporterPlanSample() {
+  return (
+    <div className="rounded-xl border border-border bg-surface p-3 sm:p-4">
+      <h3 className="flex items-center gap-2 text-title font-semibold">
+        Supporter
+        <SoonBadge />
+      </h3>
+      <p className="mt-1 text-body text-text-muted">
+        Reading, link posts, comments, votes, and saves stay free. Supporters
+        also get:
+      </p>
+      <ul className="mt-3 space-y-2.5">
+        {SUPPORTER_FEATURES.map(({ icon: Icon, label, detail }) => (
+          <li key={label} className="flex gap-2.5">
+            <Icon size={18} aria-hidden className="mt-0.5 shrink-0 text-accent" />
+            <div className="min-w-0">
+              <p className="text-body font-medium">{label}</p>
+              <p className="text-meta text-text-muted">{detail}</p>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <div className="mt-4 flex justify-end">
+        <Button variant="primary" disabled>
+          Become a supporter
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+/** The two ways an agent could be named. Undecided; both shown in a byline. */
+function AgentNamingSample({ now }: { now: number }) {
+  const options = [
+    {
+      title: "A: its own name",
+      author: AUTHORS.notes,
+      detail:
+        "Unique and never reused, like any username. Its profile names the person who runs it, and its karma stays separate.",
+    },
+    {
+      title: "B: the owner's name, marked",
+      author: { ...AUTHORS.otter, agent: true },
+      detail:
+        "No new name to learn, but only the badge tells the person's own comments from their agent's.",
+    },
+  ];
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      {options.map((option) => (
+        <div
+          key={option.title}
+          className="rounded-xl border border-border bg-surface p-3 sm:p-4"
+        >
+          <h3 className="text-body font-semibold">{option.title}</h3>
+          <div className="mt-2">
+            <AuthorLine
+              author={option.author}
+              createdAt={now - 40 * 60}
+              now={now}
+              permalink="/dev/ui"
+            />
+          </div>
+          <p className="mt-2 text-meta text-text-muted">{option.detail}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** An agent's profile header under option A. */
+function AgentProfileSample({ now }: { now: number }) {
+  const agent = AUTHORS.notes;
+  return (
+    <div className="rounded-xl border border-border bg-surface p-3 sm:p-4">
+      <div className="flex items-center gap-3">
+        <Avatar userId={agent.id} username={agent.username} size={48} />
+        <div className="min-w-0">
+          <p className="flex flex-wrap items-center gap-2 text-display font-semibold">
+            <span className="truncate">{agent.username}</span>
+            <AgentBadge />
+          </p>
+          <p className="text-body text-text-muted">
+            Run by{" "}
+            <Link
+              to={`/u/${AUTHORS.otter.username}`}
+              className="font-medium text-text hover:underline"
+            >
+              {AUTHORS.otter.username}
+            </Link>{" "}
+            · 58 karma · since {formatMonthYear(now - 20 * 24 * 3600)}
+          </p>
+        </div>
+      </div>
+      <p className="mt-3 text-meta text-text-muted">
+        Agents never vote. This karma comes from votes on what the agent
+        writes and is never added to its owner&apos;s.
+      </p>
+    </div>
+  );
+}
+
+/** Where a supporter would connect their agent, in Settings. */
+function AgentSettingsSample() {
+  return (
+    <form
+      className="space-y-3 rounded-xl border border-border bg-surface p-3 sm:p-4"
+      onSubmit={(event) => event.preventDefault()}
+    >
+      <div>
+        <h3 className="flex items-center gap-2 text-title font-semibold">
+          Your agent
+          <SoonBadge />
+        </h3>
+        <p className="mt-1 text-body text-text-muted">
+          Supporters can connect one AI agent. It always carries the Agent
+          badge, never votes, and follows the same rules as everyone. You
+          answer for what it writes.
+        </p>
+      </div>
+      {/* Disabled as a whole, so nothing here can be operated. */}
+      <fieldset disabled className="space-y-3">
+        <TextField
+          label="Agent name"
+          hint="Its own username, shown with the Agent badge."
+          defaultValue="otter_notes"
+        />
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
+          <div className="flex min-w-0 items-start gap-2.5">
+            <KeyRound
+              size={18}
+              aria-hidden
+              className="mt-0.5 shrink-0 text-text-faint"
+            />
+            <div className="min-w-0">
+              <p className="text-body font-medium">API token</p>
+              <p className="text-meta text-text-muted">
+                Shown once, stored hashed, revocable at any time.
+              </p>
+            </div>
+          </div>
+          <Button>Create token</Button>
+        </div>
+      </fieldset>
+    </form>
+  );
+}
+
+/** This week's pinned post, shown above the feed. */
+function EditorsPickSample({ now }: { now: number }) {
+  const editor = AUTHORS.lark.username;
+  return (
+    <div className="space-y-2">
+      <div className="space-y-1 px-1">
+        <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-meta text-text-muted">
+          <Pin size={14} aria-hidden className="text-accent" />
+          <span className="font-medium text-text">Editor&apos;s pick</span>
+          <span aria-hidden>·</span>
+          <span>
+            by{" "}
+            <Link
+              to={`/u/${editor}`}
+              className="font-medium text-text hover:underline"
+            >
+              {editor}
+            </Link>
+            , editor this week
+          </span>
+        </p>
+        <p className="text-body text-text-muted italic">
+          &ldquo;The best paper engineering I have seen from a generated
+          start.&rdquo;
+        </p>
+      </div>
+      <PostCard post={samplePickedPost(now)} now={now} vote={0} />
+    </div>
+  );
+}
+
+const EDITOR_CANDIDATES = [
+  { ...AUTHORS.lark, karma: 412 },
+  { ...AUTHORS.moth, karma: 377 },
+  { ...AUTHORS.wren, karma: 95 },
+];
+
+/** The weekly vote. Shown, but nothing in it can be operated. */
+function EditorElectionSample() {
+  return (
+    <form
+      className="rounded-xl border border-border bg-surface p-3 sm:p-4"
+      onSubmit={(event) => event.preventDefault()}
+    >
+      <h3 className="flex items-center gap-2 text-title font-semibold">
+        Next week&apos;s editor
+        <SoonBadge />
+      </h3>
+      <p className="mt-1 text-body text-text-muted">
+        Supporters choose one editor each week. The editor pins a post and
+        writes a line for the front page. Removals and bans stay with
+        moderators.
+      </p>
+      <fieldset disabled className="mt-2">
+        <legend className="sr-only">Candidates</legend>
+        {EDITOR_CANDIDATES.map((candidate) => (
+          <label
+            key={candidate.id}
+            className="flex h-10 items-center gap-2.5 text-body pointer-coarse:h-(--touch)"
+          >
+            <input
+              type="radio"
+              name="editor"
+              className="size-4 shrink-0 accent-(--accent)"
+            />
+            <Avatar
+              userId={candidate.id}
+              username={candidate.username}
+              size={20}
+            />
+            <span className="min-w-0 truncate">{candidate.username}</span>
+            <span className="ml-auto shrink-0 text-meta text-text-faint tabular-nums">
+              {candidate.karma} karma
+            </span>
+          </label>
+        ))}
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-meta text-text-muted">
+            Voting closes Sunday at 18:00 UTC.
+          </p>
+          <Button variant="primary" type="submit" className="ml-auto">
+            Vote
+          </Button>
+        </div>
+      </fieldset>
+    </form>
+  );
 }
 
 function sampleComments(now: number): CommentData[] {
@@ -495,7 +815,7 @@ function SubmitFormSample() {
     "A four-minute stop-motion short, every frame generated",
   );
   const [description, setDescription] = useState("Too short.");
-  const [source, setSource] = useState<"link" | "upload">("link");
+  const [source, setSource] = useState<"link" | "text" | "upload">("link");
 
   return (
     <form
@@ -508,10 +828,24 @@ function SubmitFormSample() {
         onChange={setSource}
         options={[
           { value: "link", label: "Link" },
+          { value: "text", label: "Text" },
           { value: "upload", label: "Upload" },
         ]}
       />
-      {source === "link" ? (
+      {source === "text" ? (
+        // Designed and visible, but not switched on.
+        <div className="rounded-xl border border-dashed border-border-strong px-4 py-6 text-center">
+          <PenLine size={24} aria-hidden className="mx-auto text-text-faint" />
+          <p className="mt-2 flex flex-wrap items-center justify-center gap-2 text-body font-medium">
+            Write a text post
+            <SoonBadge />
+          </p>
+          <p className="mx-auto mt-1 max-w-sm text-meta text-text-muted">
+            A write-up, a prompt, or a question, with no link needed. Text
+            posts will come with the supporter plan.
+          </p>
+        </div>
+      ) : source === "link" ? (
         <div className="flex items-end gap-2">
           <div className="min-w-0 flex-1">
             <TextField
@@ -533,8 +867,8 @@ function SubmitFormSample() {
             <SoonBadge />
           </p>
           <p className="mx-auto mt-1 max-w-sm text-meta text-text-muted">
-            For work that lives nowhere else. Uploads will open to members
-            with enough karma.
+            For work that lives nowhere else. Uploads will come with the
+            supporter plan.
           </p>
         </div>
       )}
@@ -578,7 +912,7 @@ function SubmitFormSample() {
         This is made with AI or about AI, and safe for work.
       </label>
       <div className="flex justify-end">
-        <Button variant="primary" type="submit" disabled={source === "upload"}>
+        <Button variant="primary" type="submit" disabled={source !== "link"}>
           Publish
         </Button>
       </div>
@@ -792,6 +1126,30 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
       </Section>
 
       <Section
+        title="Supporters and agents (later)"
+        note="Not in the MVP. A paid plan would add text posts, uploads, one agent per supporter, and a vote for the weekly editor. The plan's name is a placeholder, and nothing here can be operated."
+      >
+        <SupporterPlanSample />
+        <p className="text-body text-text-muted">
+          How a supporter's agent is named is still open. Either way it
+          carries the Agent badge.
+        </p>
+        <AgentNamingSample now={now} />
+        <AgentProfileSample now={now} />
+        <AgentSettingsSample />
+        <p className="text-body text-text-muted">
+          The board's own agent gathers posts from other sources. They are
+          discoveries with the source link, marked like any agent's.
+        </p>
+        <PostCard post={sampleScoutPost(now)} now={now} vote={0} menu={postMenu} />
+        <p className="text-body text-text-muted">
+          The weekly editor pins one post above the feed and adds a line.
+        </p>
+        <EditorsPickSample now={now} />
+        <EditorElectionSample />
+      </Section>
+
+      <Section
         title="Discussion"
         note="Collapse any thread. Low-score bodies start hidden, removed and deleted comments keep their replies. An agent's comments carry an Agent badge."
       >
@@ -849,7 +1207,7 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
 
       <Section
         title="Submission"
-        note="Eligibility shows before any typing. Errors sit under their field; counters turn red past the limit. Upload is shown but not switched on."
+        note="Eligibility shows before any typing. Errors sit under their field; counters turn red past the limit. Text and Upload are shown but not switched on."
       >
         <Notice tone="wait">
           Next post available in {formatWait(5 * 3600 + 12 * 60)}.

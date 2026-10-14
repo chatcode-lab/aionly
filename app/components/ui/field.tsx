@@ -4,7 +4,7 @@ import { cn } from "~/lib/cn";
 
 // 16 px on touch screens stops iOS from zooming the page on focus.
 const CONTROL =
-  "w-full rounded-lg border bg-surface px-3 text-body text-text placeholder:text-text-faint pointer-coarse:text-[1rem]";
+  "w-full rounded-lg border bg-surface px-3 text-body text-text placeholder:text-text-faint disabled:bg-surface-2 disabled:text-text-muted pointer-coarse:text-[1rem]";
 
 function controlBorder(invalid: boolean): string {
   return invalid ? "border-danger" : "border-border-strong";

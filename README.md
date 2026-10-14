@@ -52,6 +52,7 @@ Two review pages exist outside production:
 | `npm run db:seed:local`, `db:seed:staging` | Replace the sample posts. Never run a seed against production. |
 | `npm run deploy:staging` | Builds for staging and deploys it |
 | `npm run deploy:production` | Builds for production and deploys it |
+| `npm run secret:staging -- <NAME>`, `secret:production` | Prompts for a secret's value and stores it on that environment's Worker |
 
 The end-to-end tests need a Chromium. Install one with `npx playwright install chromium`, or point `PLAYWRIGHT_CHROMIUM_PATH` at an existing binary. They answer every third-party request locally, so no test traffic reaches a provider.
 
@@ -69,7 +70,7 @@ The end-to-end tests need a Chromium. Install one with `npx playwright install c
 
 The top level of `wrangler.jsonc` is for local development only. A bare `wrangler deploy` produces a Worker with no public address whose review pages answer 404.
 
-Secrets go in with `wrangler secret put <NAME> --env <environment>`. Never commit them, and never put them in `vars`.
+Secrets go in with `npm run secret:staging -- <NAME>` (or `secret:production`), run inside this repository. Never commit them, and never put them in `vars`. These scripts, like the database scripts, name `wrangler.jsonc` explicitly: after a build, a bare `wrangler` command reads the build's own config instead, which may belong to a different environment.
 
 ## Security baseline
 

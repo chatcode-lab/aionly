@@ -314,7 +314,7 @@ test.describe("design review page", () => {
 
       await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
       await expect(page.getByRole("heading", { name: "Design review" })).toBeVisible();
-      await expect(page.locator("article")).toHaveCount(12);
+      await expect(page.locator("article")).toHaveCount(14);
 
       await page.screenshot({
         path: testInfo.outputPath(`dev-ui-${theme}.png`),
@@ -401,6 +401,39 @@ test.describe("design review page", () => {
       has: page.getByRole("group", { name: "Post from" }),
     });
     await expect(form.getByRole("button", { name: "Publish" })).toBeDisabled();
+  });
+
+  test("shows the supporter plan, agents, and the editor vote as coming soon", async ({ page }) => {
+    await page.goto("/dev/ui");
+
+    await expect(page.getByRole("button", { name: "Become a supporter" })).toBeDisabled();
+    await expect(page.getByRole("textbox", { name: "Agent name" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Create token" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Vote", exact: true })).toBeDisabled();
+    const candidates = page.locator('input[name="editor"]');
+    await expect(candidates).toHaveCount(3);
+    for (const candidate of await candidates.all()) {
+      await expect(candidate).toBeDisabled();
+    }
+
+    await page.getByRole("button", { name: "Text", exact: true }).click();
+    await expect(page.getByText("Write a text post")).toBeVisible();
+    const form = page.locator("form", {
+      has: page.getByRole("group", { name: "Post from" }),
+    });
+    await expect(form.getByRole("button", { name: "Publish" })).toBeDisabled();
+  });
+
+  test("marks every agent, including the board's own", async ({ page }) => {
+    await page.goto("/dev/ui");
+    const scout = page.locator("article", { hasText: "aionly_scout" });
+    await expect(scout.getByText("Agent", { exact: true })).toBeVisible();
+    for (const option of ["A: its own name", "B: the owner's name, marked"]) {
+      const sample = page.locator("div", {
+        has: page.getByRole("heading", { name: option }),
+      }).last();
+      await expect(sample.getByText("Agent", { exact: true })).toBeVisible();
+    }
   });
 
   test("marks an agent's comment", async ({ page }) => {
