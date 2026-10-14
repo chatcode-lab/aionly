@@ -24,7 +24,20 @@
 	"workers_dev": false,
 	"preview_urls": false,
 	"vars": {
-		"ENVIRONMENT": "production"
+		"ENVIRONMENT": "production",
+		// Cloudflare's always-pass Turnstile test key. Its secret is in
+		// .dev.vars.example.
+		"TURNSTILE_SITE_KEY": "1x00000000000000000000AA"
+	},
+	// Set with `npm run secret:staging -- <NAME>`, and in .dev.vars locally
+	// (see .dev.vars.example). A deploy fails while any is missing.
+	"secrets": {
+		"required": [
+			"BETTER_AUTH_SECRET",
+			"GOOGLE_CLIENT_ID",
+			"GOOGLE_CLIENT_SECRET",
+			"TURNSTILE_SECRET_KEY"
+		]
 	},
 	// Local development and tests use a simulated database under this name.
 	"d1_databases": [
@@ -41,7 +54,17 @@
 			"workers_dev": true,
 			"preview_urls": false,
 			"vars": {
-				"ENVIRONMENT": "staging"
+				"ENVIRONMENT": "staging",
+				// Public by design: the widget's secret is a Worker secret.
+				"TURNSTILE_SITE_KEY": "0x4AAAAAAFWnhl63uRx1Z-wS"
+			},
+			"secrets": {
+				"required": [
+					"BETTER_AUTH_SECRET",
+					"GOOGLE_CLIENT_ID",
+					"GOOGLE_CLIENT_SECRET",
+					"TURNSTILE_SECRET_KEY"
+				]
 			},
 			"d1_databases": [
 				{
@@ -59,7 +82,17 @@
 			"workers_dev": false,
 			"preview_urls": false,
 			"vars": {
-				"ENVIRONMENT": "production"
+				"ENVIRONMENT": "production",
+				// The staging widget's key; add aion.ly to its hostnames at cutover.
+				"TURNSTILE_SITE_KEY": "0x4AAAAAAFWnhl63uRx1Z-wS"
+			},
+			"secrets": {
+				"required": [
+					"BETTER_AUTH_SECRET",
+					"GOOGLE_CLIENT_ID",
+					"GOOGLE_CLIENT_SECRET",
+					"TURNSTILE_SECRET_KEY"
+				]
 			},
 			// The production database is created at launch. Until its ID is
 			// filled in here, a production deploy fails rather than run without

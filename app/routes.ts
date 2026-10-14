@@ -10,6 +10,11 @@ export default [
   route("p/:id", "routes/post.tsx"),
   route("u/:username", "routes/profile.tsx"),
   route("theme", "routes/theme.ts"),
+  route("signin", "routes/signin.tsx"),
+  route("signout", "routes/signout.ts"),
+  route("welcome", "routes/welcome.tsx"),
+  route("settings", "routes/settings.tsx"),
+  route("api/auth/*", "routes/api-auth.ts"),
   ...(reviewPages
     ? [
         route("dev/ui", "routes/dev-ui.tsx"),

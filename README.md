@@ -6,20 +6,21 @@ The product and security decisions live in [docs/mvp-plan.md](docs/mvp-plan.md).
 
 ## Status
 
-The plan's build order has six steps. The first two are built.
+The plan's build order has seven steps.
 
 | Step | State |
 |---|---|
 | 1. Skeleton and embed spike | Built and on staging. Still needs a pass on real phones at `/dev/embeds`. |
-| 2. Read path and design system | Built: the feed, post pages, and profiles run on staging against sample posts. Media loads on tap; thumbnails arrive with submission. |
-| 3. Sign-in, submission, votes, karma | Not started |
+| 2. Read path, design system, and focus playback | Built and on staging: the feed, post pages, and profiles, with videos that play as they take focus. |
+| 3. Sign-in, profile settings, submission, votes, karma, saved posts | In progress: Google sign-in, usernames, and settings are built. |
 | 4. Comments and author controls | Not started |
-| 5. Reports, moderation, rate limits | Not started |
-| 6. Autoplay, playback ownership, cutover | Not started |
+| 5. Reports, moderation with timed bans, pinned posts, rate limits | Not started |
+| 6. The house agent and its posting API | Not started |
+| 7. Cutover | Not started |
 
 ## Stack
 
-TypeScript, React Router 8 with server rendering, Cloudflare Workers, D1, Tailwind 4, and Radix primitives. R2, Better Auth with Google sign-in, and Turnstile arrive with the steps that need them.
+TypeScript, React Router 8 with server rendering, Cloudflare Workers, D1, Better Auth with Google sign-in, Tailwind 4, and Radix primitives. R2 and Turnstile arrive with submission.
 
 ## Local setup
 
@@ -32,7 +33,9 @@ npm run db:seed:local      # fill it with sample posts
 npm run dev
 ```
 
-No secrets are needed yet. When they are, copy `.dev.vars.example` to `.dev.vars`; that file is git-ignored.
+Copy `.dev.vars.example` to `.dev.vars`, which is git-ignored, and set `BETTER_AUTH_SECRET` to a long random string. Everything but signing in works with the placeholder Google values; to sign in locally, add a Google OAuth client whose redirect URIs include `http://localhost:5173/api/auth/callback/google`.
+
+The end-to-end tests never sign in through Google: they insert accounts with sessions (`scripts/e2e-accounts.ts`) and set a session cookie signed with the test server's secret. No build contains a test-login route.
 
 Two review pages exist outside production:
 
@@ -69,6 +72,8 @@ The end-to-end tests need a Chromium. Install one with `npx playwright install c
 | Indexing | `X-Robots-Tag: noindex` | Allowed |
 
 The top level of `wrangler.jsonc` is for local development only. A bare `wrangler deploy` produces a Worker with no public address whose review pages answer 404.
+
+Each Worker needs four secrets: `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `TURNSTILE_SECRET_KEY`. `wrangler.jsonc` declares them as required, so a deploy fails while any is missing. The Google client's redirect URI is `<site address>/api/auth/callback/google`; the Worker takes its address from each request, so no hostname is kept in configuration.
 
 Secrets go in with `npm run secret:staging -- <NAME>` (or `secret:production`), run inside this repository. Never commit them, and never put them in `vars`. These scripts, like the database scripts, name `wrangler.jsonc` explicitly: after a build, a bare `wrangler` command reads the build's own config instead, which may belong to a different environment.
 

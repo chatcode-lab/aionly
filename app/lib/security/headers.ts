@@ -36,6 +36,12 @@ export function withSecurityHeaders(
   if (url.protocol === "https:") {
     headers.set("Strict-Transport-Security", "max-age=31536000");
   }
+  // Pages can carry the signed-in account's own data, so nothing is shared
+  // between visitors or kept without checking back. Routes that serve
+  // something cacheable say so themselves.
+  if (!headers.has("Cache-Control")) {
+    headers.set("Cache-Control", "private, no-cache");
+  }
   if (!options.indexable) {
     headers.set("X-Robots-Tag", "noindex");
   }

@@ -46,17 +46,21 @@ export interface IconButtonProps extends ComponentProps<"button"> {
   /** Icon-only buttons have no visible text, so a label is required. */
   "aria-label": string;
   variant?: Extract<Variant, "ghost" | "secondary">;
+  /** Render the child element, such as a link, with button styling. */
+  asChild?: boolean;
 }
 
 export function IconButton({
   variant = "ghost",
+  asChild = false,
   className,
   type = "button",
   ...props
 }: IconButtonProps) {
+  const Component = asChild ? Slot.Root : "button";
   return (
-    <button
-      type={type}
+    <Component
+      type={asChild ? undefined : type}
       className={cn(
         BASE,
         HEIGHT,

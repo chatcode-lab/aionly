@@ -59,3 +59,9 @@ export function formatWait(seconds: number): string {
   if (hours === 0) return `${minutes} min`;
   return minutes === 0 ? `${hours} h` : `${hours} h ${minutes} min`;
 }
+
+/** "14 Oct 2026", from epoch seconds, in UTC like the other dates. */
+export function formatDate(seconds: number): string {
+  const date = new Date(seconds * 1000);
+  return `${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
+}

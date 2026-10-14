@@ -1,6 +1,6 @@
 import { Bookmark, LogOut, Settings, User } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
-import { Link } from "react-router";
+import { Link, useSubmit } from "react-router";
 
 import type { Theme } from "~/lib/theme";
 
@@ -20,6 +20,7 @@ export function AccountMenu({
   user: PublicAuthor;
   theme: Theme;
 }) {
+  const submit = useSubmit();
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
@@ -70,7 +71,11 @@ export function AccountMenu({
           <ThemeRadioGroup theme={theme} />
           <AutoplayItem />
           <MenuSeparator />
-          <MenuItem>
+          <MenuItem
+            onSelect={() => {
+              void submit(null, { method: "post", action: "/signout" });
+            }}
+          >
             <LogOut size={16} aria-hidden className="text-text-muted" />
             Sign out
           </MenuItem>

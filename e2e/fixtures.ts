@@ -1,4 +1,8 @@
-import { test as base, expect } from "@playwright/test";
+import { readFileSync } from "node:fs";
+
+import { test as base, type BrowserContext, expect, type Page } from "@playwright/test";
+
+import { ACCOUNTS_PER_WORKER, BANNED_ACCOUNT, MAX_WORKERS } from "./accounts";
 
 export interface PageProblems {
   /** Console errors and uncaught exceptions. */
@@ -96,6 +100,65 @@ const FAKE_FRAMES: Array<{ match: RegExp; script: string }> = [
   },
 ];
 
+/** Opens a page and waits until its scripts run, so every control works. */
+export async function open(page: Page, path: string): Promise<void> {
+  await page.goto(path);
+  await page.locator("html[data-hydrated]").waitFor({ state: "attached" });
+}
+
+export interface TestAccount {
+  id: string;
+  username: string;
+  /** Signs the browser context in as this account. */
+  signIn: (context: BrowserContext) => Promise<void>;
+}
+
+/**
+ * The secret the test server signs session cookies with. The build copies the
+ * local secrets into its output, wherever they came from.
+ */
+function authSecret(): string {
+  const vars = readFileSync(new URL("../build/server/.dev.vars", import.meta.url), "utf8");
+  const match = /^BETTER_AUTH_SECRET=(['"`])(.*)\1$/m.exec(vars);
+  if (!match) throw new Error("BETTER_AUTH_SECRET is missing from build/server/.dev.vars");
+  return match[2];
+}
+
+/** A session cookie value as Better Auth signs it: `token.HMAC`, URL-encoded. */
+async function signedToken(token: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(authSecret()),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(token));
+  return encodeURIComponent(`${token}.${Buffer.from(signature).toString("base64")}`);
+}
+
+function testAccount(id: string, username: string, baseURL: string): TestAccount {
+  return {
+    id,
+    username,
+    signIn: async (context) => {
+      await context.addCookies([
+        {
+          name: "better-auth.session_token",
+          value: await signedToken(`e2e-session-${id}`),
+          url: baseURL,
+          httpOnly: true,
+          sameSite: "Lax",
+        },
+      ]);
+    },
+  };
+}
+
+// Each test in a worker takes the next unused account, so tests never share
+// one and can change it freely. See scripts/e2e-accounts.ts.
+let accountsTaken = 0;
+
 /**
  * Every test runs offline from third parties: requests that leave the app are
  * answered locally, with an empty page or, when `fakePlayers` is on, a stand-in
@@ -106,8 +169,27 @@ export const test = base.extend<{
   fakePlayers: boolean;
   thirdParties: void;
   problems: PageProblems;
+  /** A fresh account of the test's own, not yet signed in. */
+  account: TestAccount;
+  /** An account under a permanent ban, shared by every test. */
+  bannedAccount: TestAccount;
 }>({
   fakePlayers: [false, { option: true }],
+
+  account: async ({ baseURL }, use, testInfo) => {
+    if (accountsTaken >= ACCOUNTS_PER_WORKER || testInfo.workerIndex >= MAX_WORKERS) {
+      throw new Error("out of test accounts: raise the counts in e2e/accounts.ts");
+    }
+    // The worker index is unique over the whole run, so no two workers,
+    // even one replacing another, hand out the same account.
+    const n = testInfo.workerIndex * ACCOUNTS_PER_WORKER + accountsTaken;
+    accountsTaken += 1;
+    await use(testAccount(`e2e${n}`, `e2e_user_${n}`, baseURL!));
+  },
+
+  bannedAccount: async ({ baseURL }, use) => {
+    await use(testAccount(BANNED_ACCOUNT, "e2e_banned", baseURL!));
+  },
 
   thirdParties: [
     async ({ page, baseURL, fakePlayers }, use) => {

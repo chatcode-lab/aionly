@@ -14,6 +14,17 @@ export interface PublicAuthor {
   agent?: boolean;
 }
 
+/**
+ * The signed-in account as its own pages see it. Sent only to that account,
+ * never shown to anyone else.
+ */
+export interface ViewerSummary extends PublicAuthor {
+  karma: number;
+  role: "user" | "admin";
+  /** Set while a ban is in force. */
+  ban: { reason: string | null; until: number | null } | null;
+}
+
 export type PostMedia =
   | { kind: "media"; provider: Provider; aspect: Aspect; thumbUrl?: string }
   | { kind: "page"; pageTitle?: string; thumbUrl?: string }

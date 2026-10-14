@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import {
   isRouteErrorResponse,
   Links,
@@ -12,23 +13,64 @@ import {
 import type { Route } from "./+types/root";
 import "./app.css";
 import { FeedToolbar } from "./components/feed-toolbar";
+import { HeaderActions } from "./components/header-actions";
 import { NotifyProvider } from "./components/notify";
+import { SignInProvider } from "./components/sign-in";
 import { SiteFooter, SiteHeader } from "./components/site-chrome";
-import { ThemeSwitch, useTheme } from "./components/theme-switch";
-import { ErrorState } from "./components/ui/states";
+import { useTheme } from "./components/theme-switch";
+import { ErrorState, Notice } from "./components/ui/states";
 import { ToastProvider } from "./components/ui/toast";
 import { appEnvironment } from "./lib/env.server";
+import { formatDate } from "./lib/format";
+import { detectInAppBrowser } from "./lib/in-app-browser";
+import type { ViewerSummary } from "./lib/public-types";
 import { readTheme } from "./lib/theme";
+import { viewerOf } from "./lib/viewer.server";
 
-export function loader({ request }: Route.LoaderArgs) {
+export async function loader({ request, context }: Route.LoaderArgs) {
+  const account = await viewerOf(context);
+  const viewer: ViewerSummary | null = account
+    ? {
+        id: account.id,
+        username: account.username,
+        photoUrl: account.avatarKey ? `/img/${account.avatarKey}` : undefined,
+        karma: account.karma,
+        role: account.role,
+        ban: account.ban,
+      }
+    : null;
   return {
     theme: readTheme(request.headers.get("Cookie")),
     reviewPages: appEnvironment() !== "production",
+    inAppBrowser: detectInAppBrowser(request.headers.get("User-Agent") ?? ""),
+    viewer,
   };
+}
+
+/** The signed-in account, on any page; null when signed out. */
+export function useViewer(): ViewerSummary | null {
+  return useRouteLoaderData<typeof loader>("root")?.viewer ?? null;
+}
+
+function BanNotice({ ban }: { ban: NonNullable<ViewerSummary["ban"]> }) {
+  return (
+    <div className="mx-auto max-w-column px-(--gutter) pt-4">
+      <Notice tone="danger">
+        Your account is read-only {ban.until ? `until ${formatDate(ban.until)}` : "for good"}
+        : you can read and sign out, but not post, comment, vote, or report.
+        {ban.reason ? ` Reason: ${ban.reason}` : null}
+      </Notice>
+    </div>
+  );
 }
 
 export function Layout({ children }: { children: React.ReactNode }) {
   const data = useRouteLoaderData<typeof loader>("root");
+  // Marks the moment the page's scripts are running, which tests wait for
+  // before using controls that need them.
+  useEffect(() => {
+    document.documentElement.dataset.hydrated = "";
+  }, []);
   // The server renders the remembered theme into the document, and CSS
   // resolves "system", so the first paint is already correct.
   const theme = useTheme(data?.theme);
@@ -52,11 +94,14 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <body className="flex min-h-dvh flex-col bg-bg text-text">
         <ToastProvider>
           <NotifyProvider>
-            <SiteHeader toolbar={feedToolbar ? <FeedToolbar /> : undefined}>
-              <ThemeSwitch theme={theme} />
-            </SiteHeader>
-            <div className="flex-1">{children}</div>
-            <SiteFooter reviewPages={data?.reviewPages ?? false} />
+            <SignInProvider>
+              <SiteHeader toolbar={feedToolbar ? <FeedToolbar /> : undefined}>
+                <HeaderActions viewer={data?.viewer ?? null} theme={theme} />
+              </SiteHeader>
+              {data?.viewer?.ban ? <BanNotice ban={data.viewer.ban} /> : null}
+              <div className="flex-1">{children}</div>
+              <SiteFooter reviewPages={data?.reviewPages ?? false} />
+            </SignInProvider>
           </NotifyProvider>
         </ToastProvider>
         <ScrollRestoration />

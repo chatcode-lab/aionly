@@ -1,9 +1,18 @@
-# Local secrets for `npm run dev`. Copy to `.dev.vars`, which is git-ignored.
-# Nothing is required yet: sign-in, Turnstile, and report alerts arrive in
-# later build steps. Real values belong in `wrangler secret put`, never here.
+# Local secrets for `npm run dev` and `vite preview`. Copy to .dev.vars, which
+# Git ignores, and fill in. Deployed Workers get theirs from
+# `npm run secret:staging -- <NAME>` instead.
 
-# BETTER_AUTH_SECRET=replace-with-a-long-random-string
-# GOOGLE_CLIENT_ID=replace-me.apps.googleusercontent.com
-# GOOGLE_CLIENT_SECRET=replace-me
-# TURNSTILE_SECRET_KEY=replace-me
+# Any long random string, such as the output of `openssl rand -base64 32`.
+BETTER_AUTH_SECRET=replace-with-a-long-random-string
+
+# A Google OAuth client whose redirect URIs include
+# http://localhost:5173/api/auth/callback/google.
+GOOGLE_CLIENT_ID=replace-with-your-client-id
+GOOGLE_CLIENT_SECRET=replace-with-your-client-secret
+
+# Cloudflare's always-pass Turnstile test secret, which pairs with the test
+# site key in wrangler.jsonc.
+TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
+
+# Arrives with reports in a later build step.
 # REPORT_WEBHOOK_URL=https://example.com/replace-me

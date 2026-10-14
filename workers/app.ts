@@ -1,10 +1,11 @@
 import { env } from "cloudflare:workers";
 import { createRequestHandler, RouterContextProvider } from "react-router";
 
-import { nonceContext } from "../app/context";
+import { nonceContext, viewerContext } from "../app/context";
 import { createNonce } from "../app/lib/security/csp";
 import { withSecurityHeaders } from "../app/lib/security/headers";
 import { isSameOriginRequest } from "../app/lib/security/request";
+import { loadViewer } from "../app/lib/viewer.server";
 
 const requestHandler = createRequestHandler(
   () => import("virtual:react-router/server-build"),
@@ -30,6 +31,8 @@ export default {
 
     const context = new RouterContextProvider();
     context.set(nonceContext, nonce);
+    let viewer: ReturnType<typeof loadViewer> | undefined;
+    context.set(viewerContext, () => (viewer ??= loadViewer(request)));
     const response = await requestHandler(request, context);
     return withSecurityHeaders(request, response, options);
   },
