@@ -4,6 +4,7 @@ import { useNotify } from "./notify";
 import { useSignIn } from "./sign-in";
 
 import { type ViewerMarks, voteKey } from "~/lib/participation";
+import { track } from "~/lib/pending-writes";
 import { useViewer } from "~/lib/use-viewer";
 
 type Vote = -1 | 0 | 1;
@@ -31,11 +32,15 @@ async function postJson(
   body: unknown,
 ): Promise<{ ok: boolean; status: number; data: Record<string, unknown> }> {
   try {
-    const response = await fetch(path, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
+    const response = await track(
+      fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        // Finishes even if the viewer reloads or leaves at once.
+        keepalive: true,
+      }),
+    );
     const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
     return { ok: response.ok, status: response.status, data };
   } catch {

@@ -134,7 +134,10 @@ test("saved posts are listed newest first and can be unsaved", async ({ page, co
   await expect(titles.first()).toContainText("Sintel");
   await expect(titles.last()).toContainText("Attention Is All You Need");
 
+  // A reload is not a navigation the app can hold, so it waits here.
+  const removed = page.waitForResponse("**/api/save");
   await page.locator("article", { hasText: "Sintel" }).getByRole("button", { name: "Remove from saved" }).click();
+  await removed;
   await page.reload();
   await expect(page.locator("article h2")).toHaveCount(1);
 });

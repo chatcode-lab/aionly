@@ -24,8 +24,18 @@ import { appEnvironment } from "./lib/env.server";
 import { formatDate } from "./lib/format";
 import { detectInAppBrowser } from "./lib/in-app-browser";
 import type { ViewerSummary } from "./lib/public-types";
+import { writesSettled } from "./lib/pending-writes";
 import { readTheme } from "./lib/theme";
 import { viewerOf } from "./lib/viewer.server";
+
+// A navigation right after a vote or save waits for it, so the next page,
+// such as Saved, loads with it already counted.
+export const clientMiddleware: Route.ClientMiddlewareFunction[] = [
+  async (_, next) => {
+    await writesSettled();
+    await next();
+  },
+];
 
 export async function loader({ request, context }: Route.LoaderArgs) {
   const account = await viewerOf(context);

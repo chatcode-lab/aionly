@@ -26,9 +26,13 @@ async function focus(page: Page, title: string): Promise<void> {
 async function player(page: Page, title: string): Promise<Frame> {
   const frame = card(page, title).locator("iframe");
   await expect(frame).toHaveCount(1);
-  const content = await (await frame.elementHandle())!.contentFrame();
+  // A frame just inserted has no content frame for a moment.
+  let content: Frame | null = null;
   await expect
-    .poll(() => content!.evaluate(() => "player" in window).catch(() => false))
+    .poll(async () => {
+      content = (await (await frame.elementHandle())?.contentFrame()) ?? null;
+      return content ? content.evaluate(() => "player" in window).catch(() => false) : false;
+    })
     .toBe(true);
   return content!;
 }
