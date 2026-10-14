@@ -171,3 +171,25 @@ test("a banned account reads, sees why, and cannot change its name", async ({ pa
   });
   expect(response.status()).toBe(403);
 });
+
+test("without a Google photo, the letter avatar stays and the switch says why", async ({ page, context, account }) => {
+  await account.signIn(context);
+  await open(page, "/settings");
+  await expect(page.getByText("Your Google account has no photo to use.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Use my Google photo" })).toBeDisabled();
+});
+
+test("the Google name and email never reach a page, for the account or anyone else", async ({ page, context, account, request }) => {
+  // The test accounts carry these as their Google identity.
+  const secrets = [`${account.id}@example.invalid`, `Test ${account.id}`];
+  const pages = ["/", "/settings", "/saved", "/submit", "/welcome", `/u/${account.username}`, "/p/s_post_01"];
+
+  await account.signIn(context);
+  for (const path of pages) {
+    const response = await page.request.get(path);
+    const body = await response.text();
+    for (const secret of secrets) expect(body, `${secret} on ${path}`).not.toContain(secret);
+  }
+  const anonymous = await request.get(`/u/${account.username}`);
+  for (const secret of secrets) expect(await anonymous.text()).not.toContain(secret);
+});

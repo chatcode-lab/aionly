@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { accountRecord } from "../../app/lib/db/accounts.server";
 import { findDuplicate, postingStatus, publishPost, type NewPost } from "../../app/lib/db/submit.server";
-import { imageAccess, sniffImage, snapshotImage, sweepPendingImages } from "../../app/lib/images.server";
+import { imageAccess, setGooglePhoto, sniffImage, snapshotImage, sweepPendingImages } from "../../app/lib/images.server";
 import { fetchPublic, FetchRefused } from "../../app/lib/links/fetch.server";
 import { readPageMeta } from "../../app/lib/links/metadata.server";
 import { verifyTurnstile } from "../../app/lib/security/turnstile.server";
@@ -379,5 +379,57 @@ describe("checkLink", () => {
     const result = await check("https://www.youtube.com/watch?v=aqz-KE-bpKQ");
     expect(result).toMatchObject({ ok: true, duplicate: { id: "old", state: "live" }, receipt: null });
     expect(spy).not.toHaveBeenCalled();
+  });
+});
+
+describe("Google photo", () => {
+  const signedUp = (image: string | null) =>
+    db
+      .prepare(
+        `INSERT OR REPLACE INTO "user" ("id", "name", "email", "emailVerified", "image", "createdAt", "updatedAt")
+         VALUES ('u1', 'Private Name', 'private@example.com', 1, ?1, '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`,
+      )
+      .bind(image)
+      .run();
+  const avatarKey = async () =>
+    (await db.prepare(`SELECT avatar_key FROM profiles WHERE user_id = 'u1'`).first<{ avatar_key: string | null }>())?.avatar_key;
+  const set = (on: boolean) => setGooglePhoto(db, bucket, { userId: "u1", on, ownHosts: OWN, now: NOW });
+
+  it("keeps a copy as the avatar, served to everyone, and deletes it when turned off", async () => {
+    await signedUp("https://lh3.googleusercontent.com/a/photo=s96-c");
+    stubFetch({ "https://lh3.googleusercontent.com/": () => image(JPEG) });
+    expect(await set(true)).toEqual({ ok: true });
+    const key = (await avatarKey())!;
+    expect(key).toMatch(/^[0-9A-Za-z]{24}$/);
+    expect(await imageAccess(db, key, null)).toEqual({ visible: true, public: true, contentType: "image/jpeg" });
+
+    // Turning it on again replaces the copy.
+    expect(await set(true)).toEqual({ ok: true });
+    const second = (await avatarKey())!;
+    expect(second).not.toBe(key);
+    expect(await bucket.get(key)).toBeNull();
+
+    expect(await set(false)).toEqual({ ok: true });
+    expect(await avatarKey()).toBeNull();
+    expect(await bucket.get(second)).toBeNull();
+    expect(await imageAccess(db, second, null)).toEqual({ visible: false });
+  });
+
+  it("says when there is no photo, or it cannot be copied", async () => {
+    await signedUp(null);
+    expect(await set(true)).toEqual({ ok: false, reason: "no_photo" });
+    await signedUp("https://lh3.googleusercontent.com/a/photo");
+    stubFetch({ "https://lh3.googleusercontent.com/": () => html("<html>") });
+    expect(await set(true)).toEqual({ ok: false, reason: "failed" });
+    expect(await avatarKey()).toBeNull();
+  });
+
+  it("refuses a banned account and keeps nothing", async () => {
+    await signedUp("https://lh3.googleusercontent.com/a/photo");
+    stubFetch({ "https://lh3.googleusercontent.com/": () => image(PNG) });
+    await db.prepare(`UPDATE profiles SET banned_at = ?1 WHERE user_id = 'u1'`).bind(NOW).run();
+    expect(await set(true)).toEqual({ ok: false, reason: "failed" });
+    expect((await bucket.list()).objects).toHaveLength(0);
+    expect((await db.prepare(`SELECT COUNT(*) AS n FROM images`).first<{ n: number }>())?.n).toBe(0);
   });
 });

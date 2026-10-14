@@ -1,5 +1,6 @@
-import { fetchPublic, readCapped } from "./links/fetch.server";
+import { participantCondition } from "./db/accounts.server";
 import { newId } from "./ids";
+import { fetchPublic, readCapped } from "./links/fetch.server";
 
 /** The largest picture kept as a snapshot. */
 export const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
@@ -24,6 +25,33 @@ export function sniffImage(bytes: Uint8Array): ImageType | null {
 }
 
 /**
+ * Fetches a picture for keeping: at most 2 MB, and only JPEG, PNG, or WebP by
+ * its bytes. Null when it cannot be fetched or is not an allowed image.
+ */
+async function fetchImage(
+  url: URL,
+  signal: AbortSignal,
+  ownHosts: readonly string[],
+): Promise<{ bytes: Uint8Array<ArrayBuffer>; type: ImageType } | null> {
+  try {
+    const { response } = await fetchPublic(url, {
+      accept: "image/webp,image/png,image/jpeg",
+      signal,
+      ownHosts,
+    });
+    if (!response.ok) {
+      await response.body?.cancel();
+      return null;
+    }
+    const bytes = await readCapped(response, MAX_IMAGE_BYTES);
+    const type = bytes && sniffImage(bytes);
+    return bytes && type ? { bytes, type } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Fetches a preview picture and keeps it as the account's one pending image,
  * replacing any earlier one. Returns its key, or null when the picture could
  * not be fetched or is not an allowed image. Publishing attaches it.
@@ -33,23 +61,9 @@ export async function snapshotImage(
   bucket: R2Bucket,
   input: { ownerId: string; url: URL; signal: AbortSignal; ownHosts: readonly string[]; now: number },
 ): Promise<string | null> {
-  let bytes: Uint8Array<ArrayBuffer> | null;
-  try {
-    const { response } = await fetchPublic(input.url, {
-      accept: "image/webp,image/png,image/jpeg",
-      signal: input.signal,
-      ownHosts: input.ownHosts,
-    });
-    if (!response.ok) {
-      await response.body?.cancel();
-      return null;
-    }
-    bytes = await readCapped(response, MAX_IMAGE_BYTES);
-  } catch {
-    return null;
-  }
-  const type = bytes && sniffImage(bytes);
-  if (!bytes || !type) return null;
+  const image = await fetchImage(input.url, input.signal, input.ownHosts);
+  if (!image) return null;
+  const { bytes, type } = image;
 
   const key = newId(24);
   const { results: earlier } = await db
@@ -139,4 +153,81 @@ export async function sweepPendingImages(
     .bind(JSON.stringify(keys))
     .run();
   return keys.length;
+}
+
+export type PhotoResult = { ok: true } | { ok: false; reason: "no_photo" | "failed" };
+
+/**
+ * Turns the account's Google photo on or off. On keeps a copy, never a link
+ * to Google, and shows it as the avatar; off goes back to the generated one
+ * and deletes the copy. Changing it is taking part, so a ban refuses it.
+ */
+export async function setGooglePhoto(
+  db: D1Database,
+  bucket: R2Bucket,
+  input: { userId: string; on: boolean; ownHosts: readonly string[]; now: number },
+): Promise<PhotoResult> {
+  const current = await db
+    .prepare(`SELECT avatar_key FROM profiles WHERE user_id = ?1`)
+    .bind(input.userId)
+    .first<{ avatar_key: string | null }>();
+  const previous = current?.avatar_key ?? null;
+
+  let key: string | null = null;
+  if (input.on) {
+    const user = await db
+      .prepare(`SELECT "image" FROM "user" WHERE "id" = ?1`)
+      .bind(input.userId)
+      .first<{ image: string | null }>();
+    if (!user?.image) return { ok: false, reason: "no_photo" };
+    let url: URL;
+    try {
+      url = new URL(user.image);
+    } catch {
+      return { ok: false, reason: "no_photo" };
+    }
+    const image = await fetchImage(url, AbortSignal.timeout(5000), input.ownHosts);
+    if (!image) return { ok: false, reason: "failed" };
+    key = newId(24);
+    await bucket.put(key, image.bytes, { httpMetadata: { contentType: image.type } });
+    try {
+      const [, updated] = await db.batch([
+        db
+          .prepare(
+            `INSERT INTO images (key, owner_id, kind, state, content_type, bytes, created_at)
+             VALUES (?1, ?2, 'avatar', 'attached', ?3, ?4, ?5)`,
+          )
+          .bind(key, input.userId, image.type, image.bytes.byteLength, input.now),
+        db
+          .prepare(
+            `UPDATE profiles SET avatar_key = ?1
+             WHERE user_id = ?2 AND ${participantCondition(2, input.now)}`,
+          )
+          .bind(key, input.userId),
+      ]);
+      if (updated.meta.changes === 0) {
+        await db.prepare(`DELETE FROM images WHERE key = ?1`).bind(key).run();
+        await bucket.delete(key);
+        return { ok: false, reason: "failed" };
+      }
+    } catch (error) {
+      await bucket.delete(key);
+      throw error;
+    }
+  } else {
+    const updated = await db
+      .prepare(
+        `UPDATE profiles SET avatar_key = NULL
+         WHERE user_id = ?1 AND ${participantCondition(1, input.now)}`,
+      )
+      .bind(input.userId)
+      .run();
+    if (updated.meta.changes === 0) return { ok: false, reason: "failed" };
+  }
+
+  if (previous && previous !== key) {
+    await db.prepare(`DELETE FROM images WHERE key = ?1 AND kind = 'avatar'`).bind(previous).run();
+    await bucket.delete(previous);
+  }
+  return { ok: true };
 }
