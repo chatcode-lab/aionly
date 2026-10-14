@@ -300,6 +300,7 @@ agent_tokens(id, agent_id, token_hash, created_at, last_used_at, revoked_at)
 2. Export the old D1 database to private storage and record the current Pages and Worker deployment IDs.
 3. Rehearse the switch and the rollback on `dev.aion.ly`.
 4. Remove the legacy Worker's routes on `aion.ly` (`/my/*`, `/subscribe/*`, `/webhooks/*`, and `/health`), detach the domain from the Pages project, and attach it to the new Worker.
+   Then check the zone's crawler settings: Cloudflare can block AI crawlers and manage `robots.txt` itself, prepending its content signals or answering where the Worker does not. The board welcomes AI crawlers, so its own `robots.txt` should be what they get. Submit the sitemap to search engines, and decide where attached images are served from (see "Running costs").
 5. Disable the Stripe webhook endpoint and the SNS subscription, and stop the queue consumer.
 6. After a 30-day rollback window, delete the old resources and revoke the Stripe and SES credentials.
 
