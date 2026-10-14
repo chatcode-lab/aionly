@@ -1,6 +1,6 @@
 # aion.ly board
 
-A public board for everything AI: what people make with it (music, videos, images, apps, games) and the news, announcements, and research about it. It is a [Chatcode Lab](https://chatcode.dev/) project and will replace the newsletter at `aion.ly`.
+A public board for things made with AI (music, videos, images, apps, games), with room for related news, announcements, and research. It is a [Chatcode Lab](https://chatcode.dev/) project and will replace the newsletter at `aion.ly`.
 
 The product and security decisions live in [docs/mvp-plan.md](docs/mvp-plan.md). Read it before changing behavior.
 

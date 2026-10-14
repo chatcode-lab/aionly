@@ -2,13 +2,14 @@
 
 ## Summary and replacement
 
-Create the board in the new public [chatcode-lab/aionly](https://github.com/chatcode-lab/aionly) repository as part of Chatcode Lab sessions. It will replace the newsletter at `aion.ly`, currently maintained in [tractorfm/aionly](https://github.com/tractorfm/aionly), with a public board for everything AI: what people make with it (music, videos, images, apps, games) and news, announcements, research, and discussion about it. Think of an AI subreddit.
+Create the board in the new public [chatcode-lab/aionly](https://github.com/chatcode-lab/aionly) repository as part of Chatcode Lab sessions. It will replace the newsletter at `aion.ly`, currently maintained in [tractorfm/aionly](https://github.com/tractorfm/aionly), with a public board for things made with AI (music, videos, images, apps, games), with room for related news, announcements, and research. Think of an AI subreddit that favors what people make.
 
 - Use TypeScript, React Router with server rendering, Cloudflare Workers, D1, R2 for image snapshots, Better Auth with Google sign-in, and Turnstile.
 - Start with fresh accounts and a new database. There are no newsletter subscribers to migrate.
 - Retire newsletter authentication, billing, and email integrations. Preserve the old database and previous deployment for rollback.
 - Keep separate staging and production environments.
-- Posts must be AI-related: made with AI, or about AI. This is not checked at submission; off-topic posts are handled through reports and moderation. Human-written posts and comments are welcome. NSFW content is prohibited.
+- The board encourages AI-made work first. AI-related posts such as news, announcements, and research are accepted too. This is not checked at submission; off-topic posts are handled through reports and moderation. Human-written posts and comments are welcome. NSFW content is prohibited.
+- Every post needs a link. There are no text-only posts; that is revisited when uploads open.
 
 ### Public repository
 
@@ -21,9 +22,9 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 
 - **Character:** content-first and quiet. Neutral surfaces and one accent color; the media supplies the color. No gradients or glass.
 - **Layout:** one 680 px column with a slim sticky header. Votes sit left of the card on desktop and in the card footer on mobile.
-- **Top bar:** signed in, it holds the logo, sort and range, Saved, the email digest, Submit, and the account menu, which contains the theme. Signed out, it holds the logo, sort and range, the theme switch, Submit, and Sign in. That is never more than four controls beside the logo, so it fits a 320 px screen; Submit shrinks to an icon there.
+- **Top bar:** signed in, it holds the logo, the Top and New tabs, one range button, Saved, the email digest, Submit, and the account menu, which contains the theme. Signed out, it holds the logo, the tabs, the range button, the theme switch, Submit, and Sign in. The range button shows the range in effect and opens the other three. That is never more than four controls beside the logo, so it fits a 320 px screen; Submit shrinks to an icon there.
 - **Narrow screens:** every page holds at 320 px wide with no sideways scroll. This is tested.
-- **Type and tokens:** system font stack, four text sizes, a 4 px spacing grid, and 44 px minimum touch targets. Colors are CSS variables that meet AA contrast in both themes.
+- **Type and tokens:** system font stack, four text sizes, a 4 px spacing grid, and 44 px touch targets, 40 px on screens of 360 px or less. Colors are CSS variables that meet AA contrast in both themes.
 - **Components:** Tailwind with Radix primitives for the ⋯ menu, dialogs, and toasts.
 - **States:** every screen defines skeleton, empty, error, pending, and rate-limited states.
 - **Soon:** a feature that is designed but not switched on is shown with a "Soon" marker and cannot be operated, so nobody believes it worked. The email digest and uploads start this way.
@@ -31,7 +32,7 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 
 ## Board, accounts, and discussion
 
-- **Feed:** minimal, responsive single column with votes, title, media or preview, description excerpt, author, age, and comment count. Use "Load more" pagination, 20 posts per page.
+- **Feed:** minimal, responsive single column with votes, title, media or preview, description excerpt, author, age, and comment count. Each card ends with save, copy link, and the ⋯ menu, in that order; copy link copies the post's own address on the board. Use "Load more" pagination, 20 posts per page.
 - **Pagination:** Top uses a ranking snapshot, because scores change while someone reads. The first load returns the ordered post IDs for that sort and range, up to 500, and each "Load more" fetches the next 20 by ID, so later votes can neither skip nor repeat posts. Posts removed since the snapshot are omitted, and the list ends at 500 with a prompt to narrow the range. New uses an opaque `(created_at, id)` cursor, which never changes. A Refresh control takes a new snapshot.
 - **Back navigation:** sort and range live in the URL. Keep loaded pages and the snapshot in a client cache keyed by that URL so Back re-renders them and restores scroll position without refetching.
 - **Sorting:** Top and New, with Today, Week, Month, and All time ranges. Default to **Top / Week**. Ranges filter publication dates over the previous 24 hours, 7 days, or 30 days. Top orders by net score, then newest.
