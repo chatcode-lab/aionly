@@ -78,6 +78,17 @@ Each Worker needs four secrets: `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGL
 
 Secrets go in with `npm run secret:staging -- <NAME>` (or `secret:production`), run inside this repository. Never commit them, and never put them in `vars`. These scripts, like the database scripts, name `wrangler.jsonc` explicitly: after a build, a bare `wrangler` command reads the build's own config instead, which may belong to a different environment.
 
+### Granting an admin
+
+There is no in-app way to grant roles. Make an account admin with one command per environment, naming its current username:
+
+```sh
+npx wrangler d1 execute DB -c wrangler.jsonc --env staging --remote --command \
+  "UPDATE profiles SET role = 'admin' WHERE user_id = (SELECT user_id FROM usernames WHERE name = 'your_username' AND is_current = 1)"
+```
+
+Admins are exempt from the posting allowance and the karma rule.
+
 ## Security baseline
 
 Implemented in `workers/app.ts` and `app/lib/security/`, and covered by tests:
