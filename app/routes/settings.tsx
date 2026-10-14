@@ -11,6 +11,7 @@ import { RENAME_INTERVAL_DAYS } from "~/lib/accounts/usernames";
 import { renameStatus } from "~/lib/db/accounts.server";
 import { formatDate } from "~/lib/format";
 import { setGooglePhoto } from "~/lib/images.server";
+import { imageAddress } from "~/lib/media.server";
 import { requireAccount, requireParticipant } from "~/lib/viewer.server";
 
 import type { Route } from "./+types/settings";
@@ -32,7 +33,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     id: viewer.id,
     username: viewer.username,
     email: google?.email ?? "",
-    photoUrl: viewer.avatarKey ? `/img/${viewer.avatarKey}` : undefined,
+    photoUrl: viewer.avatarKey ? imageAddress(viewer.avatarKey) : undefined,
     hasGooglePhoto: google?.has_photo === 1,
     banned: viewer.ban !== null,
     firstChange: status.firstChange,

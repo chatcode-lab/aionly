@@ -87,3 +87,13 @@ test("the feed, profiles, and tombstones answer in Markdown too; browsers get HT
   const preferHtml = await request.get(SOURCE, { headers: { Accept: "text/html, text/markdown;q=0.5" } });
   expect(preferHtml.headers()["content-type"]).toContain("text/html");
 });
+
+test("images come from the media domain; the old address redirects there", async ({ request }) => {
+  const policy = (await request.get("/")).headers()["content-security-policy"];
+  expect(policy).toMatch(/img-src 'self' data: https:\/\/media-staging\.aion\.ly(;|$)/);
+  const key = "abcdefghijklmnopqrstuvwx.png";
+  const old = await request.get(`/img/${key}`, { maxRedirects: 0 });
+  expect(old.status()).toBe(301);
+  expect(old.headers()["location"]).toBe(`https://media-staging.aion.ly/${key}`);
+  expect((await request.get("/img/not-a-key", { maxRedirects: 0 })).status()).toBe(404);
+});

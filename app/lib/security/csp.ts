@@ -19,6 +19,8 @@ export interface SitePolicyOptions {
   nonce: string;
   /** Loosens `connect-src` for the Vite dev server's HMR socket. */
   dev?: boolean;
+  /** The images bucket's own domain, when it has one. */
+  mediaOrigin?: string;
 }
 
 /**
@@ -29,6 +31,7 @@ export interface SitePolicyOptions {
 export function buildSitePolicy({
   nonce,
   dev = false,
+  mediaOrigin,
 }: SitePolicyOptions): string {
   return serialize({
     "default-src": ["'self'"],
@@ -36,7 +39,7 @@ export function buildSitePolicy({
     // Server-rendered `style` attributes carry aspect ratios and avatar
     // colors. Styles cannot run code, so this is the one inline allowance.
     "style-src": ["'self'", "'unsafe-inline'"],
-    "img-src": ["'self'", "data:"],
+    "img-src": ["'self'", "data:", ...(mediaOrigin ? [mediaOrigin] : [])],
     "font-src": ["'self'"],
     "connect-src": dev ? ["'self'", "ws:"] : ["'self'"],
     "frame-src": [...Object.values(FRAME_ORIGINS), TURNSTILE_ORIGIN],

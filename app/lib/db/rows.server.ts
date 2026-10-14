@@ -1,5 +1,6 @@
 import { type Aspect, PROVIDERS, type Provider } from "../links/types";
 import { displayHost } from "../links/url";
+import { imageAddress } from "../media.server";
 import { postPath } from "../slug";
 import { plainText } from "../text/markdown";
 import type {
@@ -46,7 +47,7 @@ export function toPublicAuthor(row: AuthorRow): PublicAuthor {
   return {
     id: row.author_id,
     username: row.author_name,
-    photoUrl: row.author_avatar ? `/img/${row.author_avatar}` : undefined,
+    photoUrl: row.author_avatar ? imageAddress(row.author_avatar) : undefined,
   };
 }
 
@@ -81,7 +82,7 @@ function excerptOf(description: string): string {
 
 /** The only way a post row becomes something a page can show. */
 export function toPublicPost(row: PostRow): PostDetail {
-  const thumbUrl = row.thumb_key ? `/img/${row.thumb_key}` : undefined;
+  const thumbUrl = row.thumb_key ? imageAddress(row.thumb_key) : undefined;
   const provider = PROVIDERS.find((known) => known === row.provider) as
     | Provider
     | undefined;

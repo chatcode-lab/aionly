@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { accountRecord } from "../../app/lib/db/accounts.server";
 import { findDuplicate, postingStatus, publishPost, type NewPost } from "../../app/lib/db/submit.server";
-import { imageAccess, setGooglePhoto, sniffImage, snapshotImage, sweepPendingImages } from "../../app/lib/images.server";
+import { setGooglePhoto, sniffImage, snapshotImage, sweepPendingImages } from "../../app/lib/images.server";
 import { fetchPublic, FetchRefused } from "../../app/lib/links/fetch.server";
 import { readPageMeta } from "../../app/lib/links/metadata.server";
 import { verifyTurnstile } from "../../app/lib/security/turnstile.server";
@@ -117,7 +117,7 @@ describe("snapshots", () => {
       snapshotImage(db, bucket, { ownerId: "u1", url: new URL("https://img.example.com/a.jpg"), signal: AbortSignal.timeout(1000), ownHosts: OWN, now: NOW });
     const first = await take();
     const second = await take();
-    expect(first).toMatch(/^[0-9A-Za-z]{24}$/);
+    expect(first).toMatch(/^[0-9A-Za-z]{24}\.jpg$/);
     expect(second).not.toBe(first);
     expect(await bucket.get(first!)).toBeNull();
     const stored = await bucket.get(second!);
@@ -138,21 +138,20 @@ describe("snapshots", () => {
     expect((await bucket.list()).objects).toHaveLength(0);
   });
 
-  it("serves a pending image to its owner only, and an attached one while its post is live", async () => {
+  it("stores a picture under its type's extension, ready for the public domain, and publishing attaches it", async () => {
     stubFetch({ "https://img.example.com/": () => image(PNG) });
     const key = (await snapshotImage(db, bucket, { ownerId: "u1", url: new URL("https://img.example.com/a.png"), signal: AbortSignal.timeout(1000), ownHosts: OWN, now: NOW }))!;
-    expect(await imageAccess(db, key, "u1")).toEqual({ visible: true, public: false, contentType: "image/png" });
-    expect(await imageAccess(db, key, "u2")).toEqual({ visible: false });
-    expect(await imageAccess(db, key, null)).toEqual({ visible: false });
+    expect(key).toMatch(/^[0-9A-Za-z]{24}\.png$/);
+    const stored = await bucket.head(key);
+    expect(stored?.httpMetadata).toMatchObject({
+      contentType: "image/png",
+      cacheControl: "public, max-age=86400",
+      contentDisposition: "inline",
+    });
 
     const author = (await accountRecord(db, "u1", NOW))!;
-    const result = await publishPost(db, newPost(author, { thumbKey: key }));
-    expect(result.ok).toBe(true);
-    expect(await imageAccess(db, key, null)).toEqual({ visible: true, public: true, contentType: "image/png" });
-
-    await db.prepare(`UPDATE posts SET removed_batch_id = 'b1'`).run();
-    expect(await imageAccess(db, key, null)).toEqual({ visible: false });
-    expect(await imageAccess(db, key, "u1")).toEqual({ visible: false });
+    expect((await publishPost(db, newPost(author, { thumbKey: key }))).ok).toBe(true);
+    expect(await db.prepare(`SELECT state FROM images WHERE key = ?1`).bind(key).first()).toEqual({ state: "attached" });
   });
 
   it("sweeps pending images older than a day", async () => {
@@ -161,7 +160,7 @@ describe("snapshots", () => {
     expect(await sweepPendingImages(db, bucket, NOW + DAY - 1)).toBe(0);
     expect(await sweepPendingImages(db, bucket, NOW + DAY + 1)).toBe(1);
     expect(await bucket.get(key)).toBeNull();
-    expect(await imageAccess(db, key, "u1")).toEqual({ visible: false });
+    expect(await db.prepare(`SELECT 1 FROM images WHERE key = ?1`).bind(key).first()).toBeNull();
   });
 });
 
@@ -315,7 +314,7 @@ describe("posting", () => {
     expect((await publishPost(db, newPost(author, { id: "p1", thumbKey: theirs }))).ok).toBe(true);
     const row = await db.prepare(`SELECT thumb_key FROM posts WHERE id = 'p1'`).first<{ thumb_key: string | null }>();
     expect(row?.thumb_key).toBeNull();
-    expect(await imageAccess(db, theirs, "u2")).toMatchObject({ visible: true, public: false });
+    expect(await db.prepare(`SELECT state FROM images WHERE key = ?1`).bind(theirs).first()).toEqual({ state: "pending" });
   });
 });
 
@@ -348,7 +347,7 @@ describe("checkLink", () => {
       pageTitle: null,
       suggestedTitle: "Big Buck Bunny 60fps 4K",
     });
-    expect(result.link.thumbUrl).toMatch(/^\/img\/[0-9A-Za-z]{24}$/);
+    expect(result.link.thumbUrl).toMatch(/^\/img\/[0-9A-Za-z]{24}\.jpg$/);
     const receipt = await readReceipt(result.receipt!, SECRET, "u1", NOW);
     expect(receipt).toMatchObject({ canonicalKey: "youtube:aqz-KE-bpKQ", provider: "youtube" });
   });
@@ -433,8 +432,9 @@ describe("Google photo", () => {
     stubFetch({ "https://lh3.googleusercontent.com/": () => image(JPEG) });
     expect(await set(true)).toEqual({ ok: true });
     const key = (await avatarKey())!;
-    expect(key).toMatch(/^[0-9A-Za-z]{24}$/);
-    expect(await imageAccess(db, key, null)).toEqual({ visible: true, public: true, contentType: "image/jpeg" });
+    expect(key).toMatch(/^[0-9A-Za-z]{24}\.jpg$/);
+    // Personal, so caches let it go within the hour once it is deleted.
+    expect((await bucket.head(key))?.httpMetadata?.cacheControl).toBe("public, max-age=3600");
 
     // Turning it on again replaces the copy.
     expect(await set(true)).toEqual({ ok: true });
@@ -445,7 +445,6 @@ describe("Google photo", () => {
     expect(await set(false)).toEqual({ ok: true });
     expect(await avatarKey()).toBeNull();
     expect(await bucket.get(second)).toBeNull();
-    expect(await imageAccess(db, second, null)).toEqual({ visible: false });
   });
 
   it("says when there is no photo, or it cannot be copied", async () => {

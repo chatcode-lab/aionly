@@ -2,6 +2,7 @@ import { findDuplicate, type Existing } from "../db/submit.server";
 import { snapshotImage } from "../images.server";
 import { FetchRefused, fetchPublic } from "../links/fetch.server";
 import { linkMeta } from "../links/metadata.server";
+import { imageAddress } from "../media.server";
 import { mediaUrl, resolveLink } from "../links/resolve";
 import type { Aspect, MediaLink, PageLink, Provider, UrlRejection } from "../links/types";
 import { cleanPageUrl, displayHost, isSamePage, parseSubmittedUrl } from "../links/url";
@@ -135,7 +136,7 @@ export async function checkLink(input: {
     host: displayHost(new URL(address)),
     // Only a preview card shows the page's own title.
     pageTitle: resolved.kind === "page" ? (meta.title ?? null) : null,
-    thumbUrl: thumbKey ? `/img/${thumbKey}` : null,
+    thumbUrl: thumbKey ? imageAddress(thumbKey) : null,
     suggestedTitle: meta.title ?? null,
   };
   const receipt = await signReceipt(

@@ -27,7 +27,11 @@
 		"ENVIRONMENT": "production",
 		// Cloudflare's always-pass Turnstile test key. Its secret is in
 		// .dev.vars.example.
-		"TURNSTILE_SITE_KEY": "1x00000000000000000000AA"
+		"TURNSTILE_SITE_KEY": "1x00000000000000000000AA",
+		// Where stored images are served from: the IMAGES bucket on its own
+		// public domain, with no Worker in the way. Empty means through the
+		// Worker at /img/<key>, as in local development and tests.
+		"MEDIA_ORIGIN": ""
 	},
 	// Set with `npm run secret:staging -- <NAME>`, and in .dev.vars locally
 	// (see .dev.vars.example). A deploy fails while any is missing.
@@ -69,7 +73,9 @@
 			"vars": {
 				"ENVIRONMENT": "staging",
 				// Public by design: the widget's secret is a Worker secret.
-				"TURNSTILE_SITE_KEY": "0x4AAAAAAFWnhl63uRx1Z-wS"
+				"TURNSTILE_SITE_KEY": "0x4AAAAAAFWnhl63uRx1Z-wS",
+				// The staging IMAGES bucket's custom domain.
+				"MEDIA_ORIGIN": "https://media-staging.aion.ly"
 			},
 			"secrets": {
 				"required": [
@@ -103,7 +109,9 @@
 			"vars": {
 				"ENVIRONMENT": "production",
 				// The staging widget's key; add aion.ly to its hostnames at cutover.
-				"TURNSTILE_SITE_KEY": "0x4AAAAAAFWnhl63uRx1Z-wS"
+				"TURNSTILE_SITE_KEY": "0x4AAAAAAFWnhl63uRx1Z-wS",
+				// The production IMAGES bucket's custom domain.
+				"MEDIA_ORIGIN": "https://media.aion.ly"
 			},
 			"secrets": {
 				"required": [
@@ -124,7 +132,8 @@
 					"migrations_dir": "migrations"
 				}
 			],
-			// Created at launch with the database, in the same location.
+			// Created ahead of launch, in Western Europe, with media.aion.ly
+			// attached.
 			"r2_buckets": [
 				{
 					"binding": "IMAGES",

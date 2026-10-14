@@ -10,6 +10,40 @@ export const PENDING_TTL_SECONDS = 24 * 3600;
 
 type ImageType = "image/jpeg" | "image/png" | "image/webp";
 
+const EXTENSION: Record<ImageType, string> = {
+  "image/jpeg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+};
+
+/**
+ * How long browsers and Cloudflare's cache keep an image. Images are served
+ * straight from the bucket's public domain: anyone with a key can load it,
+ * and keys are 24 random characters that only pages on the board reveal.
+ * Taking content down deletes the object; caches then drop it within this
+ * time, or at once when the address is purged. A post's picture is a copy
+ * of what its page already publishes; an avatar is personal, so it goes
+ * sooner.
+ */
+const CACHE_CONTROL = {
+  post: "public, max-age=86400",
+  avatar: "public, max-age=3600",
+} as const;
+
+/**
+ * A new image's key: random, with the extension of its real type, which is
+ * what Cloudflare's cache goes by when it decides what to keep.
+ */
+function imageKey(type: ImageType): string {
+  return `${newId(24)}.${EXTENSION[type]}`;
+}
+
+function storeOptions(type: ImageType, kind: keyof typeof CACHE_CONTROL): R2PutOptions {
+  return {
+    httpMetadata: { contentType: type, cacheControl: CACHE_CONTROL[kind], contentDisposition: "inline" },
+  };
+}
+
 /**
  * The picture's real type from its first bytes. The server's own claim is
  * ignored: only JPEG, PNG, and WebP are kept.
@@ -65,13 +99,13 @@ export async function snapshotImage(
   if (!image) return null;
   const { bytes, type } = image;
 
-  const key = newId(24);
+  const key = imageKey(type);
   const { results: earlier } = await db
     .prepare(`SELECT key FROM images WHERE owner_id = ?1 AND kind = 'post' AND state = 'pending'`)
     .bind(input.ownerId)
     .all<{ key: string }>();
 
-  await bucket.put(key, bytes, { httpMetadata: { contentType: type } });
+  await bucket.put(key, bytes, storeOptions(type, "post"));
   try {
     await db.batch([
       db
@@ -90,49 +124,6 @@ export async function snapshotImage(
   }
   if (earlier.length > 0) await bucket.delete(earlier.map((row) => row.key));
   return key;
-}
-
-export type ImageAccess =
-  | { visible: false }
-  | { visible: true; public: boolean; contentType: string };
-
-/**
- * Whether an image may be served, checked on every request. Public while it
- * is attached to a live post or is a current avatar; a pending image only to
- * its owner; nothing else at all.
- */
-export async function imageAccess(
-  db: D1Database,
-  key: string,
-  viewerId: string | null,
-): Promise<ImageAccess> {
-  const row = await db
-    .prepare(
-      `SELECT image.owner_id, image.state, image.content_type,
-              EXISTS (SELECT 1 FROM posts WHERE thumb_key = image.key
-                        AND deleted_at IS NULL AND removed_batch_id IS NULL) AS on_live_post,
-              EXISTS (SELECT 1 FROM profiles WHERE avatar_key = image.key
-                        AND deleted_at IS NULL) AS is_avatar
-       FROM images AS image WHERE image.key = ?1`,
-    )
-    .bind(key)
-    .first<{
-      owner_id: string;
-      state: "pending" | "attached";
-      content_type: string;
-      on_live_post: number;
-      is_avatar: number;
-    }>();
-  if (!row) return { visible: false };
-  if (row.state === "pending") {
-    return row.owner_id === viewerId
-      ? { visible: true, public: false, contentType: row.content_type }
-      : { visible: false };
-  }
-  if (row.on_live_post || row.is_avatar) {
-    return { visible: true, public: true, contentType: row.content_type };
-  }
-  return { visible: false };
 }
 
 /** Deletes pending images nobody published within a day. */
@@ -212,8 +203,8 @@ export async function setGooglePhoto(
     }
     const image = await fetchImage(url, AbortSignal.timeout(5000), input.ownHosts);
     if (!image) return { ok: false, reason: "failed" };
-    key = newId(24);
-    await bucket.put(key, image.bytes, { httpMetadata: { contentType: image.type } });
+    key = imageKey(image.type);
+    await bucket.put(key, image.bytes, storeOptions(image.type, "avatar"));
     try {
       const [, updated] = await db.batch([
         db

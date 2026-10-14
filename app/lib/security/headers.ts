@@ -6,6 +6,8 @@ export interface SecurityHeaderOptions {
   dev: boolean;
   /** False everywhere except production, where pages may be indexed. */
   indexable: boolean;
+  /** The images bucket's own domain, when it has one. */
+  mediaOrigin?: string;
 }
 
 /**
@@ -24,7 +26,7 @@ export function withSecurityHeaders(
 
   headers.set(
     "Content-Security-Policy",
-    buildSitePolicy({ nonce: options.nonce, dev: options.dev }),
+    buildSitePolicy({ nonce: options.nonce, dev: options.dev, mediaOrigin: options.mediaOrigin }),
   );
   headers.set("X-Frame-Options", "DENY");
   headers.set("X-Content-Type-Options", "nosniff");

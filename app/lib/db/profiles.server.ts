@@ -1,4 +1,5 @@
 import type { PostCardData } from "../public-types";
+import { imageAddress } from "../media.server";
 import { postPath } from "../slug";
 import { plainText } from "../text/markdown";
 import { withPlainMentions } from "./mentions.server";
@@ -128,7 +129,7 @@ export async function profileByName(
       username: owner.current_name,
       karma: owner.karma,
       joinedAt: owner.created_at,
-      photoUrl: owner.avatar_key ? `/img/${owner.avatar_key}` : undefined,
+      photoUrl: owner.avatar_key ? imageAddress(owner.avatar_key) : undefined,
       posts: await withPlainMentions(db, cards, "excerpt"),
       comments: await withPlainMentions(db, listed, "body"),
     },

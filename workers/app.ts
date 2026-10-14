@@ -42,6 +42,7 @@ export default {
       nonce,
       dev: import.meta.env.DEV,
       indexable: !import.meta.env.DEV && env.ENVIRONMENT === "production",
+      mediaOrigin: env.MEDIA_ORIGIN || undefined,
     };
 
     if (!isSameOriginRequest(request)) {
