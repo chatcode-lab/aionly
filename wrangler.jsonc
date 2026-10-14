@@ -68,6 +68,10 @@
 	"env": {
 		"staging": {
 			"name": "aionly-board-staging",
+			// Runs the Worker near the database when that is measurably faster:
+			// a page makes several queries in a row, and each would otherwise
+			// cross the distance. Static assets and media stay at the edge.
+			"placement": { "mode": "smart" },
 			"workers_dev": true,
 			"preview_urls": false,
 			"vars": {
@@ -102,6 +106,7 @@
 		},
 		"production": {
 			"name": "aionly-board",
+			"placement": { "mode": "smart" },
 			// No public address until the `aion.ly` custom domain is attached at
 			// cutover (see docs/mvp-plan.md, "Cutover").
 			"workers_dev": false,
@@ -121,9 +126,10 @@
 					"TURNSTILE_SECRET_KEY"
 				]
 			},
-			// The production database is created at launch. Until its ID is
-			// filled in here, a production deploy fails rather than run without
-			// a database.
+			// The production database is created at launch, in Eastern North
+			// America like its media: `wrangler d1 create aionly-board
+			// --location enam`. Until its ID is filled in here, a production
+			// deploy fails rather than run without a database.
 			"d1_databases": [
 				{
 					"binding": "DB",
@@ -132,12 +138,13 @@
 					"migrations_dir": "migrations"
 				}
 			],
-			// Created ahead of launch, in Western Europe, with media.aion.ly
-			// attached.
+			// Created ahead of launch in Eastern North America, between the US
+			// and Europe, with media.aion.ly attached. A location hint counts
+			// only the first time a bucket name is created.
 			"r2_buckets": [
 				{
 					"binding": "IMAGES",
-					"bucket_name": "aionly-board-images"
+					"bucket_name": "aionly-board-media"
 				}
 			]
 		}
