@@ -1,0 +1,137 @@
+import { findDuplicate, type Existing } from "../db/submit.server";
+import { snapshotImage } from "../images.server";
+import { FetchRefused, fetchPublic } from "../links/fetch.server";
+import { linkMeta } from "../links/metadata.server";
+import { mediaUrl, resolveLink } from "../links/resolve";
+import type { Aspect, MediaLink, PageLink, Provider, UrlRejection } from "../links/types";
+import { cleanPageUrl, displayHost, parseSubmittedUrl } from "../links/url";
+import { RECEIPT_SECONDS, signReceipt } from "./receipt.server";
+
+const REJECTION: Record<UrlRejection, string> = {
+  empty: "Paste a link first.",
+  too_long: "That link is too long.",
+  invalid: "That doesn't look like a link.",
+  not_https: "Only https links can be posted.",
+  credentials: "Links with a username or password can't be posted.",
+  port: "Links with a port number can't be posted.",
+  host_not_public: "That address isn't on the public web.",
+  own_host: "Links to this board can't be posted.",
+};
+
+/** How a checked link will appear, sent back to the form. */
+export interface CheckedLink {
+  url: string;
+  host: string;
+  provider: Provider | null;
+  aspect: Aspect | null;
+  pageTitle: string | null;
+  /** The pending snapshot, visible to its owner only until published. */
+  thumbUrl: string | null;
+  /** The link's own title, to prefill the post's title. */
+  suggestedTitle: string | null;
+}
+
+export type CheckResult =
+  | { ok: false; error: string }
+  | { ok: true; link: CheckedLink; duplicate: Existing | null; receipt: string | null };
+
+/** Follows a provider's short link to the address it stands for. */
+async function expandShortLink(url: URL, signal: AbortSignal, ownHosts: readonly string[]) {
+  const { response, finalUrl } = await fetchPublic(url, {
+    accept: "text/html",
+    signal,
+    ownHosts,
+  });
+  await response.body?.cancel();
+  return finalUrl;
+}
+
+/**
+ * The Check link step: validates the link, resolves it to its canonical
+ * form, reports a duplicate, and fetches what the preview needs. Every fetch
+ * is bounded, and a failed preview never blocks publishing.
+ */
+export async function checkLink(input: {
+  raw: string;
+  userId: string;
+  ownHosts: readonly string[];
+  db: D1Database;
+  bucket: R2Bucket;
+  secret: string;
+  now: number;
+}): Promise<CheckResult> {
+  const parsed = parseSubmittedUrl(input.raw, { ownHosts: input.ownHosts });
+  if (!parsed.ok) return { ok: false, error: REJECTION[parsed.reason] };
+
+  let url = parsed.url;
+  let link = resolveLink(url);
+  if (link.kind === "short") {
+    try {
+      url = await expandShortLink(url, AbortSignal.timeout(5000), input.ownHosts);
+    } catch (error) {
+      return {
+        ok: false,
+        error:
+          error instanceof FetchRefused
+            ? "That short link leads somewhere that can't be posted."
+            : "That short link didn't open. Paste the full link instead.",
+      };
+    }
+    link = resolveLink(url);
+    if (link.kind === "short") {
+      return { ok: false, error: "That short link didn't lead to a post. Paste the full link instead." };
+    }
+  }
+  const resolved: MediaLink | PageLink = link;
+  // A media link is stored as its provider's plain address for it; a page as
+  // given, without tracking or a fragment.
+  const address = resolved.kind === "page" ? cleanPageUrl(url) : mediaUrl(resolved, url);
+
+  const duplicate = await findDuplicate(input.db, resolved.canonicalKey);
+  const base: CheckedLink = {
+    url: address,
+    host: displayHost(new URL(address)),
+    provider: resolved.kind === "media" ? resolved.provider : null,
+    aspect: resolved.kind === "media" ? resolved.aspect : null,
+    pageTitle: null,
+    thumbUrl: null,
+    suggestedTitle: null,
+  };
+  if (duplicate) return { ok: true, link: base, duplicate, receipt: null };
+
+  const meta = await linkMeta(resolved, new URL(address), {
+    signal: AbortSignal.timeout(5000),
+    ownHosts: input.ownHosts,
+  });
+  const thumbKey = meta.image
+    ? await snapshotImage(input.db, input.bucket, {
+        ownerId: input.userId,
+        url: meta.image,
+        signal: AbortSignal.timeout(5000),
+        ownHosts: input.ownHosts,
+        now: input.now,
+      })
+    : null;
+
+  const checked: CheckedLink = {
+    ...base,
+    // Only a preview card shows the page's own title.
+    pageTitle: resolved.kind === "page" ? (meta.title ?? null) : null,
+    thumbUrl: thumbKey ? `/img/${thumbKey}` : null,
+    suggestedTitle: meta.title ?? null,
+  };
+  const receipt = await signReceipt(
+    {
+      userId: input.userId,
+      url: checked.url,
+      canonicalKey: resolved.canonicalKey,
+      provider: checked.provider,
+      aspect: checked.aspect,
+      pageTitle: checked.pageTitle,
+      thumbKey,
+      expiresAt: input.now + RECEIPT_SECONDS,
+    },
+    input.secret,
+  );
+  return { ok: true, link: checked, duplicate: null, receipt };
+}

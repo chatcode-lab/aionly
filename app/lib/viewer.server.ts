@@ -37,11 +37,23 @@ export function viewerOf(
   return context.get(viewerContext)();
 }
 
+/**
+ * The page a request is for. A navigation inside the app asks for the page's
+ * data at `<path>.data`, or `/_root.data` for the home page, with the routes
+ * it needs in `_routes`; this is the address the visitor sees.
+ */
+export function pagePath(request: Request): string {
+  const url = new URL(request.url);
+  let path = url.pathname;
+  if (path.endsWith(".data")) path = path.slice(0, -".data".length);
+  if (path === "/_root") path = "/";
+  url.searchParams.delete("_routes");
+  return `${path}${url.search}`;
+}
+
 /** Where a signed-out visitor goes to sign in, and comes back from. */
 export function signInPath(request: Request): string {
-  const url = new URL(request.url);
-  const next = `${url.pathname}${url.search}`;
-  return `/signin?${new URLSearchParams({ next })}`;
+  return `/signin?${new URLSearchParams({ next: pagePath(request) })}`;
 }
 
 function isDataRequest(request: Request): boolean {

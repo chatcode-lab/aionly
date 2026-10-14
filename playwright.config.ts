@@ -2,6 +2,8 @@ import { defineConfig, devices } from "@playwright/test";
 
 const PORT = 4173;
 
+const SUBMITS = /submit\.spec\.ts/;
+
 // Point this at an existing Chromium to skip `npx playwright install chromium`.
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH;
 
@@ -20,13 +22,28 @@ export default defineConfig({
     launchOptions: executablePath ? { executablePath } : {},
   },
   projects: [
-    { name: "desktop", use: { ...devices["Desktop Chrome"] } },
-    { name: "phone", use: { ...devices["Pixel 7"] } },
+    { name: "desktop", use: { ...devices["Desktop Chrome"] }, testIgnore: SUBMITS },
+    { name: "phone", use: { ...devices["Pixel 7"] }, testIgnore: SUBMITS },
     // The narrowest screen the layout supports, such as a small phone with
     // larger text turned on.
     {
       name: "narrow",
       use: { ...devices["Pixel 7"], viewport: { width: 320, height: 568 } },
+      testIgnore: SUBMITS,
+    },
+    // Tests that publish posts run last, so the posts they add never change
+    // what the feed tests count.
+    {
+      name: "submit-desktop",
+      use: { ...devices["Desktop Chrome"] },
+      testMatch: SUBMITS,
+      dependencies: ["desktop", "phone", "narrow"],
+    },
+    {
+      name: "submit-narrow",
+      use: { ...devices["Pixel 7"], viewport: { width: 320, height: 568 } },
+      testMatch: SUBMITS,
+      dependencies: ["desktop", "phone", "narrow"],
     },
   ],
   webServer: {

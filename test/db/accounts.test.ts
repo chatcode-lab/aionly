@@ -130,3 +130,13 @@ describe("bans", () => {
     expect(await check(NOW)).toBe(0);
   });
 });
+
+describe("pagePath", async () => {
+  const { pagePath } = await import("../../app/lib/viewer.server");
+  it("names the page a data request is for", () => {
+    expect(pagePath(new Request("https://aion.ly/submit.data"))).toBe("/submit");
+    expect(pagePath(new Request("https://aion.ly/_root.data?_routes=routes%2Fhome"))).toBe("/");
+    expect(pagePath(new Request("https://aion.ly/u/otter.data?tab=posts&_routes=x"))).toBe("/u/otter?tab=posts");
+    expect(pagePath(new Request("https://aion.ly/settings"))).toBe("/settings");
+  });
+});

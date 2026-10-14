@@ -15,6 +15,9 @@ export default [
   route("welcome", "routes/welcome.tsx"),
   route("settings", "routes/settings.tsx"),
   route("saved", "routes/saved.tsx"),
+  route("submit", "routes/submit.tsx"),
+  route("submit/check", "routes/submit-check.ts"),
+  route("img/:key", "routes/img.ts"),
   route("api/auth/*", "routes/api-auth.ts"),
   route("api/vote", "routes/api-vote.ts"),
   route("api/save", "routes/api-save.ts"),
@@ -22,6 +25,7 @@ export default [
     ? [
         route("dev/ui", "routes/dev-ui.tsx"),
         route("dev/embeds", "routes/dev-embeds.tsx"),
+        route("dev/previews", "routes/dev-previews.tsx"),
       ]
     : []),
 ] satisfies RouteConfig;

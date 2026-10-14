@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveLink } from "./resolve";
+import { mediaUrl, resolveLink } from "./resolve";
 import type { ResolvedLink } from "./types";
-import { canonicalizePageUrl, MAX_URL_LENGTH, parseSubmittedUrl } from "./url";
+import { canonicalizePageUrl, cleanPageUrl, MAX_URL_LENGTH, parseSubmittedUrl } from "./url";
 
 function resolve(input: string): ResolvedLink {
   const parsed = parseSubmittedUrl(input);
@@ -309,5 +309,29 @@ describe("resolveLink", () => {
       url: "https://www.example.com/game/?utm_campaign=x",
       host: "example.com",
     });
+  });
+});
+
+describe("stored addresses", () => {
+  const stored = (input: string) => {
+    const url = new URL(input);
+    const link = resolveLink(url);
+    if (link.kind === "short") throw new Error("short");
+    return link.kind === "media" ? mediaUrl(link, url) : cleanPageUrl(url);
+  };
+
+  it("stores a provider's plain address, whatever the spelling", () => {
+    expect(stored("https://youtu.be/dQw4w9WgXcQ?si=abc&t=10")).toBe("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+    expect(stored("https://m.youtube.com/watch?v=dQw4w9WgXcQ&feature=share")).toBe("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
+    expect(stored("https://www.youtube.com/shorts/jNQXAC9IVRw?feature=share")).toBe("https://www.youtube.com/shorts/jNQXAC9IVRw");
+    expect(stored("https://suno.com/song/CF674415-DEBB-498C-AA29-37A58A28D8E9?sh=xyz")).toBe("https://suno.com/song/cf674415-debb-498c-aa29-37a58a28d8e9");
+    expect(stored("https://old.reddit.com/r/place/comments/tqbguc/412022/abc123/?utm_source=share")).toBe("https://www.reddit.com/r/place/comments/tqbguc/");
+    expect(stored("https://t.me/s/Telegram/83?single")).toBe("https://t.me/telegram/83");
+    expect(stored("https://twitter.com/jack/status/20?s=20&t=abc")).toBe("https://twitter.com/jack/status/20");
+    expect(stored("https://www.tiktok.com/@scout2015/video/6718335390845095173?is_from_webapp=1")).toBe("https://www.tiktok.com/@scout2015/video/6718335390845095173");
+  });
+
+  it("keeps a page's own query, minus tracking and the fragment", () => {
+    expect(stored("https://example.com/a?page=2&utm_source=x&fbclid=y#top")).toBe("https://example.com/a?page=2");
   });
 });

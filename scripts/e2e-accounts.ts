@@ -15,7 +15,16 @@ const iso = (seconds: number) => new Date(seconds * 1000).toISOString();
 
 const lines: string[] = [];
 
-// Start clean: everything an earlier run did with these accounts.
+// Start clean: everything an earlier run did with these accounts, starting
+// with the posts they published and what others attached to them.
+const theirPosts = `(SELECT id FROM posts WHERE author_id LIKE 'e2e%')`;
+lines.push(
+  `DELETE FROM bookmarks WHERE post_id IN ${theirPosts};`,
+  `DELETE FROM votes WHERE target_type = 'post' AND target_id IN ${theirPosts};`,
+  `DELETE FROM comments WHERE post_id IN ${theirPosts};`,
+  `DELETE FROM posts WHERE author_id LIKE 'e2e%';`,
+  `DELETE FROM images WHERE owner_id LIKE 'e2e%';`,
+);
 for (const [table, column] of [
   ["bookmarks", "user_id"],
   ["votes", "voter_id"],

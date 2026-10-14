@@ -160,6 +160,23 @@ function testAccount(id: string, username: string, baseURL: string): TestAccount
 let accountsTaken = 0;
 
 /**
+ * Turnstile's script, standing in for Cloudflare's: it shows a box and passes
+ * at once with the token Cloudflare's test keys produce.
+ */
+const FAKE_TURNSTILE = `
+  window.turnstile = {
+    render(element, options) {
+      const box = document.createElement("div");
+      box.textContent = "Turnstile stand-in";
+      element.appendChild(box);
+      setTimeout(() => options.callback("XXXX.DUMMY.TOKEN.XXXX"), 50);
+      return "stand-in-" + Math.random();
+    },
+    remove() {},
+  };
+`;
+
+/**
  * Every test runs offline from third parties: requests that leave the app are
  * answered locally, with an empty page or, when `fakePlayers` is on, a stand-in
  * player. Nothing depends on a provider being up and no test traffic reaches
@@ -198,6 +215,13 @@ export const test = base.extend<{
         (url) => url.origin !== appOrigin && url.protocol.startsWith("http"),
         (route) => {
           const url = route.request().url();
+          if (url.startsWith("https://challenges.cloudflare.com/turnstile/")) {
+            return route.fulfill({
+              status: 200,
+              contentType: "text/javascript",
+              body: FAKE_TURNSTILE,
+            });
+          }
           const fake = fakePlayers
             ? FAKE_FRAMES.find((frame) => frame.match.test(url))
             : undefined;

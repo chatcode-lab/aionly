@@ -212,3 +212,31 @@ export function resolveLink(url: URL): ResolvedLink {
   const handler = HOSTS[host];
   return handler?.(url, host) ?? page(url);
 }
+
+/**
+ * The address to store for a provider's media: the provider's plain address
+ * for it, without share codes or tracking. Every spelling of a link stores
+ * the same address.
+ */
+export function mediaUrl(link: MediaLink, url: URL): string {
+  switch (link.provider) {
+    case "youtube":
+      return link.aspect === "9:16"
+        ? `https://www.youtube.com/shorts/${link.id}`
+        : `https://www.youtube.com/watch?v=${link.id}`;
+    case "suno":
+      return `https://suno.com/song/${link.id}`;
+    case "reddit":
+      return `https://www.reddit.com/${link.embedPath}/`;
+    case "telegram":
+      return `https://t.me/${link.id}`;
+    case "tiktok":
+    case "x": {
+      // The path names the account as well as the ID; keep it, minus the query.
+      const clean = new URL(url.href);
+      clean.search = "";
+      clean.hash = "";
+      return clean.href;
+    }
+  }
+}

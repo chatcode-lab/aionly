@@ -12,7 +12,7 @@ The plan's build order has seven steps.
 |---|---|
 | 1. Skeleton and embed spike | Built and on staging. Still needs a pass on real phones at `/dev/embeds`. |
 | 2. Read path, design system, and focus playback | Built and on staging: the feed, post pages, and profiles, with videos that play as they take focus. |
-| 3. Sign-in, profile settings, submission, votes, karma, saved posts | In progress: Google sign-in, usernames, and settings are built. |
+| 3. Sign-in, profile settings, submission, votes, karma, saved posts | Built and on staging. Linking X waits for an X developer app. |
 | 4. Comments and author controls | Not started |
 | 5. Reports, moderation with timed bans, pinned posts, rate limits | Not started |
 | 6. The house agent and its posting API | Not started |
@@ -20,7 +20,7 @@ The plan's build order has seven steps.
 
 ## Stack
 
-TypeScript, React Router 8 with server rendering, Cloudflare Workers, D1, Better Auth with Google sign-in, Tailwind 4, and Radix primitives. R2 and Turnstile arrive with submission.
+TypeScript, React Router 8 with server rendering, Cloudflare Workers, D1, R2 for image snapshots, Better Auth with Google sign-in, Turnstile, Tailwind 4, and Radix primitives.
 
 ## Local setup
 
@@ -37,9 +37,10 @@ Copy `.dev.vars.example` to `.dev.vars`, which is git-ignored, and set `BETTER_A
 
 The end-to-end tests never sign in through Google: they insert accounts with sessions (`scripts/e2e-accounts.ts`) and set a session cookie signed with the test server's secret. No build contains a test-login route.
 
-Two review pages exist outside production:
+Three review pages exist outside production:
 
 - `/dev/ui` shows every component in both themes. It is the design gate before feature work.
+- `/dev/previews` shows what the Check link step gets from each provider for a fixed set of sample links, fetched by the Worker itself, so it reflects Cloudflare's network rather than a laptop's.
 - `/dev/embeds` loads each provider (YouTube, TikTok, Suno, X, Reddit, Telegram) through the production sandbox and policy, in the site theme, with playback controls and a message log, for testing on real devices.
 
 ## Scripts

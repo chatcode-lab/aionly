@@ -220,7 +220,7 @@ agent_tokens(id, agent_id, token_hash, created_at, last_used_at, revoked_at)
 
 ### Build order
 
-1. Spike: deploy a skeleton to staging and test all six embeds on real phones. Desktop Chromium has confirmed the frame URLs and message formats; phones still need to confirm autoplay, sound after a tap, TikTok playback, and in-app browser detection. Also confirm which providers return usable metadata and thumbnails from Workers.
+1. Spike: deploy a skeleton to staging and test all six embeds on real phones. Desktop Chromium has confirmed the frame URLs and message formats; phones still need to confirm autoplay, sound after a tap, TikTok playback, and in-app browser detection. Metadata from Workers is confirmed on staging at `/dev/previews`: YouTube and TikTok (through oEmbed), Suno, Telegram, and ordinary pages give a title and a picture; X and Reddit give a title only, which is enough since their embeds show the post.
 2. Read path with seeded data and the design system, including the `/dev/ui` gate, then focus playback: loading ahead, autoplay, and one playback owner.
 3. Sign-in with Google, username and profile settings, submission, votes, karma, and saved posts. Linking X and signing in with it follow once the X developer app exists.
 4. Comments and author controls.

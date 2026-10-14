@@ -108,6 +108,19 @@ export function parseSubmittedUrl(
   return { ok: true, url };
 }
 
+/**
+ * The address to store for an ordinary page: as given, without tracking
+ * parameters or a fragment.
+ */
+export function cleanPageUrl(url: URL): string {
+  const clean = new URL(url.href);
+  clean.hash = "";
+  for (const name of [...clean.searchParams.keys()]) {
+    if (isTrackingParam(name)) clean.searchParams.delete(name);
+  }
+  return clean.href;
+}
+
 /** The host as shown beside a title: lowercased, without `www.`. */
 export function displayHost(url: URL): string {
   return normalizeHost(url.hostname).replace(/^www\./, "");

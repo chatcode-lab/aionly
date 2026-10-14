@@ -26,6 +26,7 @@ export default defineConfig({
               compatibilityDate: "2026-10-06",
               compatibilityFlags: ["nodejs_compat"],
               d1Databases: ["DB"],
+              r2Buckets: ["IMAGES"],
               bindings: {
                 TEST_MIGRATIONS: await readD1Migrations(
                   path.join(root, "migrations"),

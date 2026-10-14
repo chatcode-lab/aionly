@@ -48,6 +48,19 @@
 			"migrations_dir": "migrations"
 		}
 	],
+	// Image snapshots: preview thumbnails, later avatars and uploads. Simulated
+	// locally.
+	"r2_buckets": [
+		{
+			"binding": "IMAGES",
+			"bucket_name": "aionly-board-local-images"
+		}
+	],
+	// The hourly sweep of abandoned pending images. Every environment inherits
+	// this schedule.
+	"triggers": {
+		"crons": ["17 * * * *"]
+	},
 	"env": {
 		"staging": {
 			"name": "aionly-board-staging",
@@ -72,6 +85,12 @@
 					"database_name": "aionly-board-staging",
 					"database_id": "976382e7-1d1e-4b19-add5-921ac53b931f",
 					"migrations_dir": "migrations"
+				}
+			],
+			"r2_buckets": [
+				{
+					"binding": "IMAGES",
+					"bucket_name": "aionly-board-staging-images"
 				}
 			]
 		},
@@ -103,6 +122,13 @@
 					"database_name": "aionly-board",
 					"database_id": "create-at-launch",
 					"migrations_dir": "migrations"
+				}
+			],
+			// Created at launch with the database, in the same location.
+			"r2_buckets": [
+				{
+					"binding": "IMAGES",
+					"bucket_name": "aionly-board-images"
 				}
 			]
 		}
