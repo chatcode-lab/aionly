@@ -20,9 +20,11 @@ export function scoreSql(type: TargetType, item: string): string {
  * including ones since removed or deleted. `user` is the SQL for its ID.
  */
 export function karmaSql(user: string): string {
+  // CROSS JOIN fixes the order: the author's own items by their author
+  // index, then each item's votes. Left to choose, SQLite scans every vote.
   const received = (type: TargetType) => `COALESCE((
-    SELECT SUM(vote.value) FROM votes AS vote
-    JOIN ${TABLE[type]} AS item
+    SELECT SUM(vote.value) FROM ${TABLE[type]} AS item
+    CROSS JOIN votes AS vote
       ON vote.target_type = '${type}' AND vote.target_id = item.id
     WHERE item.author_id = ${user} AND vote.invalidated_batch_id IS NULL
   ), 0)`;

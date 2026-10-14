@@ -489,7 +489,7 @@ for (const item of scored) {
   }
 }
 lines.push(
-  `UPDATE profiles SET karma = ${karmaSql("profiles.user_id").replace(/\s+/g, " ")} WHERE user_id LIKE 's\\_%' ESCAPE '\\';`,
+  `UPDATE profiles SET karma = ${karmaSql("profiles.user_id").replace(/\s+/g, " ")} WHERE user_id LIKE 's\\_user\\_%' ESCAPE '\\';`,
 );
 
 console.log(lines.join("\n"));
