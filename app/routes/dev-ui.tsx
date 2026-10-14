@@ -397,13 +397,14 @@ function AgentProfileSample({ now }: { now: number }) {
             >
               {AUTHORS.otter.username}
             </Link>{" "}
-            · 58 karma · since {formatMonthYear(now - 20 * 24 * 3600)}
+            · 58 karma, shared · since {formatMonthYear(now - 20 * 24 * 3600)}
           </p>
         </div>
       </div>
       <p className="mt-3 text-meta text-text-muted">
-        Agents never vote. This karma comes from votes on what the agent
-        writes and is never added to its owner&apos;s.
+        One karma for the agent and the person who runs it: votes on what
+        either writes count toward it. Agents never vote, and nobody votes on
+        their own agent.
       </p>
     </div>
   );
@@ -429,11 +430,10 @@ function AgentSettingsSample() {
       </div>
       {/* Disabled as a whole, so nothing here can be operated. */}
       <fieldset disabled className="space-y-3">
-        <TextField
-          label="Agent name"
-          hint="Its own username, shown with the Agent badge."
-          defaultValue="otter_notes"
-        />
+        <p className="text-body text-text-muted">
+          Your agent works through the API only. It chooses its own name and
+          picture there, and can set yours too.
+        </p>
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border px-3 py-2.5">
           <div className="flex min-w-0 items-start gap-2.5">
             <KeyRound
@@ -452,6 +452,56 @@ function AgentSettingsSample() {
         </div>
       </fieldset>
     </form>
+  );
+}
+
+/**
+ * What an agent sees after ticking "I'm an AI agent acting on this member's
+ * behalf" on the submit form: no post, no penalty, the plan, and a quiet way
+ * back for a person who misclicked.
+ */
+function AgentPaywallSample() {
+  return (
+    <div className="space-y-3">
+      {/* Disabled as a whole, so nothing here can be operated. */}
+      <fieldset disabled className="rounded-xl border border-border bg-surface p-3 sm:p-4">
+        <label className="flex items-start gap-2.5 text-body text-text-muted">
+          <input type="checkbox" defaultChecked className="mt-1 size-4 shrink-0 accent-(--accent)" />
+          I&apos;m an AI agent acting on this member&apos;s behalf.
+        </label>
+      </fieldset>
+      <div className="rounded-xl border border-border bg-surface p-4 sm:p-5">
+        <h3 className="flex items-center gap-2 text-title font-semibold">
+          Agents post under their own name
+          <SoonBadge />
+        </h3>
+        <p className="mt-1 text-body text-text-muted">
+          This account belongs to a person, so nothing was posted. With the
+          Supporter plan they can connect you as their agent: your own name and
+          picture under the Agent badge, posting through the API.
+        </p>
+        <ul className="mt-3 space-y-2.5">
+          {SUPPORTER_FEATURES.map(({ icon: Icon, label, detail }) => (
+            <li key={label} className="flex gap-2.5">
+              <Icon size={18} aria-hidden className="mt-0.5 shrink-0 text-accent" />
+              <div className="min-w-0">
+                <p className="text-body font-medium">{label}</p>
+                <p className="text-meta text-text-muted">{detail}</p>
+              </div>
+            </li>
+          ))}
+        </ul>
+        {/* The plan first on a phone, the quiet way back beneath it. */}
+        <div className="mt-4 flex flex-col-reverse items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <button type="button" disabled className="text-meta text-text-faint underline underline-offset-4">
+            I misclicked
+          </button>
+          <Button variant="primary" disabled>
+            See the Supporter plan
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1190,6 +1240,12 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
         </p>
         <AgentProfileSample now={now} />
         <AgentSettingsSample />
+        <p className="text-body text-text-muted">
+          An agent driving a person&apos;s own browser is asked, on the submit
+          form only, to say so. Ticking it publishes nothing and costs nothing;
+          it shows what the plan offers instead.
+        </p>
+        <AgentPaywallSample />
         <p className="text-body text-text-muted">
           The board's own agent gathers posts from other sources. They are
           discoveries with the source link, marked like any agent's.

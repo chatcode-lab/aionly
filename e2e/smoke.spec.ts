@@ -407,8 +407,11 @@ test.describe("design review page", () => {
     await page.goto("/dev/ui");
 
     await expect(page.getByRole("button", { name: "Become a supporter" })).toBeDisabled();
-    await expect(page.getByRole("textbox", { name: "Agent name" })).toBeDisabled();
     await expect(page.getByRole("button", { name: "Create token" })).toBeDisabled();
+    // The paywall an agent sees for posting as its owner: nothing operable.
+    await expect(page.getByRole("checkbox", { name: "I'm an AI agent acting on this member's behalf." })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "See the Supporter plan" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "I misclicked" })).toBeDisabled();
 
     await page.getByRole("button", { name: "Text", exact: true }).click();
     await expect(page.getByText("Write a text post")).toBeVisible();
