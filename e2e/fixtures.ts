@@ -8,7 +8,8 @@ export interface PageProblems {
 }
 
 /**
- * Stand-ins for the controlled players and one self-sizing embed. Each speaks
+ * Stand-ins for the controlled players, a song player, and one self-sizing
+ * embed. Each speaks
  * the same messages as the real frame and records the commands it receives,
  * so playback can be tested without a provider.
  */
@@ -70,6 +71,18 @@ const FAKE_FRAMES: Array<{ match: RegExp; script: string }> = [
         if (data.type === "play") { state = 1; send("onStateChange", 1); }
         if (data.type === "pause") { state = 2; send("onStateChange", 2); }
       });
+    `,
+  },
+  {
+    // Suno's player takes no commands; the viewer plays it in its own button.
+    match: /^https:\/\/suno\.com\/embed\//,
+    script: `
+      let playing = false;
+      window.player = () => ({ playing });
+      const button = document.createElement("button");
+      button.textContent = "Play";
+      button.onclick = () => { playing = true; };
+      addEventListener("DOMContentLoaded", () => document.body.append(button));
     `,
   },
   {

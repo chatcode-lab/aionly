@@ -388,11 +388,12 @@ export class PlaybackController {
   private stop(key: string): void {
     const slot = this.slots.get(key);
     if (!slot) return;
-    // Songs and tapped posts unload at the next evaluation, once not held.
+    // A tapped frame is no longer held, and unloads once far away.
     slot.tapped = false;
     if (CONTROLLED.has(slot.kind)) {
       this.reconcile(slot);
-    } else if (slot.kind === "post" && this.state(key).mounted) {
+    } else if (this.state(key).mounted) {
+      // Rebuilding the frame is the only way to stop an uncontrolled embed.
       const state = this.state(key);
       this.publish(key, { ...state, generation: state.generation + 1 });
     }

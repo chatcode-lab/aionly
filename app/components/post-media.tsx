@@ -124,12 +124,15 @@ function ProviderMedia({
           aspect={media.aspect}
           thumbUrl={media.thumbUrl}
           // A post embed's poster keeps the height the embed last showed at,
-          // so loading and releasing it does not move the page.
+          // and a song's the player's fixed height, so loading and releasing
+          // the frame does not move the page.
           height={
             media.aspect === "post"
               ? (playbackController()?.posterHeight(post.id) ??
                 FRAME_LAYOUT[media.provider].initialHeight)
-              : undefined
+              : media.aspect === "audio"
+                ? FRAME_LAYOUT[media.provider].initialHeight
+                : undefined
           }
           onActivate={() => playbackController()?.tap(key)}
         />

@@ -140,7 +140,8 @@ export interface FrameLayout {
 export const FRAME_LAYOUT: Record<Provider, FrameLayout> = {
   youtube: {},
   tiktok: {},
-  suno: { initialHeight: 240 },
+  // Suno's player lays itself out to fit; this height suits every column.
+  suno: { initialHeight: 176 },
   x: { maxWidth: 550, initialHeight: 320, selfSizing: true, lightScheme: true },
   reddit: { maxWidth: 640, initialHeight: 420, selfSizing: true },
   telegram: {

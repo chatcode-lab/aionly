@@ -124,14 +124,20 @@ describe("planMounts", () => {
     expect(planMounts(input({ boxes, mounted })).has("t")).toBe(false);
   });
 
-  it("loads songs only when held", () => {
-    const boxes = [box("s", "song", 100)];
-    expect(planMounts(input({ boxes })).has("s")).toBe(false);
-    expect(planMounts(input({ boxes, held: new Set(["s"]) })).has("s")).toBe(true);
+  it("loads songs ahead like post embeds, and never focuses them", () => {
+    const boxes = [box("s", "song", VH + 300)];
+    expect(planMounts(input({ boxes })).has("s")).toBe(true);
+    expect(focusCandidate([box("s", "song", 100)], VH)).toBeNull();
+    const far = [box("s", "song", VH * 4)];
+    expect(planMounts(input({ boxes: far, mounted: new Set(["s"]) })).has("s")).toBe(false);
   });
 
   it("loads nothing ahead under data saver", () => {
-    const boxes = [box("v", "video", 100), box("p", "post", 500)];
+    const boxes = [
+      box("v", "video", 100),
+      box("p", "post", 500),
+      box("s", "song", 700),
+    ];
     expect(planMounts(input({ boxes, loadAhead: false })).size).toBe(0);
   });
 });

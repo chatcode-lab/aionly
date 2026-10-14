@@ -9,6 +9,7 @@ const BUNNY = "Big Buck Bunny";
 const SINTEL = "Sintel, a second open movie";
 const TIKTOK = "a vertical video from TikTok";
 const X_POST = "a post on X";
+const SONG = "a generated song on Suno";
 
 function card(page: Page, title: string): Locator {
   return page.locator("article", { hasText: title });
@@ -137,6 +138,57 @@ test("playback the viewer starts takes over, and stops once scrolled away", asyn
     window.scrollBy(0, element.getBoundingClientRect().bottom - 20),
   );
   await expect.poll(() => isPlaying(sintel)).toBe(false);
+});
+
+test("a song loads ahead, and it and a video never play together", async ({ page }) => {
+  // With autoplay off, only what the viewer starts plays.
+  await page.addInitScript(() => window.localStorage.setItem("autoplay", "off"));
+  await page.goto("/");
+  await focus(page, SONG);
+
+  // The song's player loaded without a tap, exactly where its poster was.
+  const song = await player(page, SONG);
+  expect(
+    await card(page, SONG).locator("iframe").evaluate((element) => element.clientHeight),
+  ).toBe(176);
+
+  // A video near it was loaded ahead too; the viewer starts it.
+  let video: Frame | undefined;
+  await expect
+    .poll(() => (video = page.frames().find((frame) => frame.url().includes("youtube-nocookie"))))
+    .toBeTruthy();
+  await expect.poll(() => video!.evaluate(() => "player" in window)).toBe(true);
+  await video!.evaluate(() => (window as unknown as Fake).viewerPlay());
+
+  // Playing the song in its own controls pauses the video.
+  await card(page, SONG).frameLocator("iframe").getByRole("button", { name: "Play" }).click();
+  await expect.poll(() => isPlaying(video!)).toBe(false);
+  expect(await isPlaying(song)).toBe(true);
+
+  // Starting the video again stops the song, which has no pause command: its
+  // frame is rebuilt.
+  await video!.evaluate(() => (window as unknown as Fake).viewerPlay());
+  await expect.poll(async () => isPlaying(await player(page, SONG))).toBe(false);
+  expect(await isPlaying(video!)).toBe(true);
+  expect(await playingCount(page)).toBe(1);
+});
+
+test("under data saver a song waits for a tap, at the player's height", async ({ page }) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "connection", {
+      value: { saveData: true },
+      configurable: true,
+    });
+  });
+  await page.goto("/");
+  await focus(page, SONG);
+  const poster = card(page, SONG).getByRole("button", { name: "Play song from Suno" });
+  expect(await poster.evaluate((element) => (element as HTMLElement).offsetHeight)).toBe(176);
+  await page.waitForTimeout(600);
+  await expect(card(page, SONG).locator("iframe")).toHaveCount(0);
+
+  await poster.click();
+  await expect(card(page, SONG).locator("iframe")).toHaveAttribute("src", /^https:\/\/suno\.com\/embed\//);
 });
 
 test("leaves a video the viewer paused alone until focus moves on", async ({ page }) => {

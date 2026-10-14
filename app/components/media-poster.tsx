@@ -67,7 +67,7 @@ export function MediaPoster({
   thumbUrl?: string;
   /** Length in seconds, when known. */
   duration?: number;
-  /** For a post embed, the height to reserve: the embed's own, once known. */
+  /** For a post embed or a song player, the height to reserve: the embed's own. */
   height?: number;
   onActivate?: () => void;
 }) {
@@ -75,14 +75,27 @@ export function MediaPoster({
   const length = duration === undefined ? undefined : formatDuration(duration);
 
   if (aspect === "audio") {
+    // A provider's song player has a fixed height, which its poster keeps,
+    // with the cover filling it the way the player shows it.
+    const tall = height !== undefined;
     return (
       <button
         type="button"
         onClick={onActivate}
         aria-label={name ? `Play song from ${name}` : "Play audio"}
-        className="group flex w-full items-center gap-3 rounded-xl border border-border bg-surface-2 p-2 text-left"
+        style={tall ? { height } : undefined}
+        className={cn(
+          "group flex w-full items-center rounded-xl border border-border bg-surface-2 text-left",
+          tall ? "@container gap-4 p-4" : "gap-3 p-2",
+        )}
       >
-        <span className="relative flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-border text-text-faint">
+        <span
+          className={cn(
+            "relative flex shrink-0 items-center justify-center overflow-hidden rounded-lg bg-border text-text-faint",
+            // Like the player, the cover gives way in a narrow column.
+            tall ? "aspect-square h-full @max-[20rem]:hidden" : "size-16",
+          )}
+        >
           <Music size={22} aria-hidden />
           <Thumb src={thumbUrl} />
         </span>

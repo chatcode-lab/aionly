@@ -11,7 +11,7 @@ export type SlotKind =
   | "tiktok"
   /** A post embed that sizes itself: X, Reddit, and Telegram. */
   | "post"
-  /** A song, which loads only on a tap. */
+  /** A song player the page cannot control: Suno. */
   | "song";
 
 export interface SlotBox {
@@ -109,7 +109,8 @@ function wanted(box: SlotBox, input: MountInput): boolean {
   const loaded = input.mounted.has(box.key);
   switch (box.kind) {
     case "video":
-    case "post": {
+    case "post":
+    case "song": {
       if (loaded) return away <= RULES.releaseBeyond;
       const above = box.bottom <= 0;
       return away <= (above ? RULES.loadAbove : RULES.loadBelow);
@@ -119,8 +120,6 @@ function wanted(box: SlotBox, input: MountInput): boolean {
       if (!input.autoplay) return false;
       if (loaded) return away <= RULES.releaseTikTokBeyond;
       return box.key === input.candidate;
-    case "song":
-      return false;
   }
 }
 
