@@ -60,14 +60,6 @@ test.describe("feed", () => {
     await page.goto("/?range=day");
     await expect(page.locator("article").first()).toBeVisible();
   });
-
-  test("says sign-in is coming when a vote or save needs it", async ({ page }) => {
-    await page.goto("/");
-    const card = page.locator("article").first();
-    await card.getByRole("button", { name: "Upvote" }).locator("visible=true").click();
-    // The toast also keeps a hidden copy for screen readers.
-    await expect(page.getByText("Sign-in is coming soon.").first()).toBeVisible();
-  });
 });
 
 test.describe("post page", () => {
@@ -123,7 +115,8 @@ test.describe("profile", () => {
   test("shows name, karma, posts, and comments", async ({ page }) => {
     await page.goto("/u/quiet_otter_482");
     await expect(page.getByRole("heading", { name: "quiet_otter_482" })).toBeVisible();
-    await expect(page.getByText(/412 karma · joined [A-Z][a-z]{2} \d{4}/)).toBeVisible();
+    // Karma follows the votes other tests cast, so only its form is checked.
+    await expect(page.getByText(/^-?[\d,.k]+ karma · joined [A-Z][a-z]{2} \d{4}$/)).toBeVisible();
     await expect(page.locator("article h2").first()).toContainText("Big Buck Bunny");
     await expect(page.getByText("Two levels down.")).toBeVisible();
   });

@@ -1,7 +1,10 @@
 import { env } from "cloudflare:workers";
 
 import { newPage, postsByIds } from "~/lib/db/feed.server";
+import { viewerMarks } from "~/lib/db/marks.server";
 import { parseRange, parseSort } from "~/lib/feed";
+import type { PostCardData } from "~/lib/public-types";
+import { viewerOf } from "~/lib/viewer.server";
 
 import type { Route } from "./+types/feed-more";
 
@@ -9,8 +12,11 @@ import type { Route } from "./+types/feed-more";
  * The next page of the feed, for "Load more". Top asks for the next IDs of
  * the ranking snapshot it already holds; New sends its cursor.
  */
-export async function loader({ request }: Route.LoaderArgs) {
+export async function loader({ request, context }: Route.LoaderArgs) {
   const url = new URL(request.url);
+  const viewer = await viewerOf(context);
+  const marks = (posts: PostCardData[]) =>
+    viewerMarks(env.DB, viewer?.id ?? null, { posts: posts.map((post) => post.id) });
 
   if (parseSort(url.searchParams.get("sort")) === "new") {
     const page = await newPage(
@@ -19,12 +25,10 @@ export async function loader({ request }: Route.LoaderArgs) {
       Math.floor(Date.now() / 1000),
       url.searchParams.get("cursor"),
     );
-    return Response.json(page);
+    return Response.json({ ...page, marks: await marks(page.posts) });
   }
 
   const ids = (url.searchParams.get("ids") ?? "").split(",");
-  return Response.json({
-    posts: await postsByIds(env.DB, ids),
-    nextCursor: null,
-  });
+  const posts = await postsByIds(env.DB, ids);
+  return Response.json({ posts, nextCursor: null, marks: await marks(posts) });
 }

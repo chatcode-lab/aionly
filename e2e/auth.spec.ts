@@ -16,18 +16,21 @@ test("signed out, the top bar offers Sign in, which explains Google sign-in", as
   await expect(dialog).toContainText("stay private");
 });
 
-test("without scripts, Sign in leads to a sign-in page that still works", async ({ browser, baseURL }) => {
-  const context = await browser.newContext({ javaScriptEnabled: false, baseURL });
-  const page = await context.newPage();
-  await page.goto("/u/quiet_otter_482");
-  await page.locator("header").getByRole("link", { name: "Sign in" }).click();
-  await expect(page).toHaveURL(/\/signin\?next=%2Fu%2Fquiet_otter_482$/);
+test.describe("without scripts", () => {
+  test.use({ javaScriptEnabled: false });
 
-  // The form posts and the browser heads for Google.
-  const leaving = page.waitForRequest((request) => request.url().startsWith("https://accounts.google.com/"));
-  await page.getByRole("button", { name: "Continue with Google" }).click();
-  expect(new URL((await leaving).url()).searchParams.get("client_id")).toBeTruthy();
-  await context.close();
+  test("Sign in leads to a sign-in page that still works", async ({ page }) => {
+    await page.goto("/u/quiet_otter_482");
+    await page.locator("header").getByRole("link", { name: "Sign in" }).click();
+    await expect(page).toHaveURL(/\/signin\?next=%2Fu%2Fquiet_otter_482$/);
+
+    // The form posts and the browser heads for Google.
+    const leaving = page.waitForRequest((request) =>
+      request.url().startsWith("https://accounts.google.com/"),
+    );
+    await page.getByRole("button", { name: "Continue with Google" }).click();
+    expect(new URL((await leaving).url()).searchParams.get("client_id")).toBeTruthy();
+  });
 });
 
 test("Continue with Google leaves for Google with a callback to this site", async ({ page, baseURL }) => {
@@ -56,25 +59,26 @@ test("sign-in from another site is refused", async ({ page }) => {
   expect(response.status()).toBe(403);
 });
 
-test("inside an app's browser, sign-in offers the link and the draft to copy", async ({ browser }) => {
-  const context = await browser.newContext({
+test.describe("inside an app's browser", () => {
+  test.use({
     userAgent:
       "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 Instagram 350.0",
   });
-  const page = await context.newPage();
-  await page.goto("/");
-  await page.evaluate(() =>
-    window.localStorage.setItem("draft:submit", JSON.stringify({ title: "My draft title" })),
-  );
-  await open(page, "/");
-  await page.locator("header").getByRole("link", { name: "Sign in" }).click();
 
-  const dialog = page.getByRole("dialog");
-  await expect(dialog).toContainText("does not work inside Instagram");
-  await expect(dialog.getByRole("button", { name: "Copy link" })).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "Copy draft" })).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "Continue with Google" })).toHaveCount(0);
-  await context.close();
+  test("sign-in offers the link and the draft to copy", async ({ page }) => {
+    await page.goto("/");
+    await page.evaluate(() =>
+      window.localStorage.setItem("draft:submit", JSON.stringify({ title: "My draft title" })),
+    );
+    await open(page, "/");
+    await page.locator("header").getByRole("link", { name: "Sign in" }).click();
+
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toContainText("does not work inside Instagram");
+    await expect(dialog.getByRole("button", { name: "Copy link" })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Copy draft" })).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "Continue with Google" })).toHaveCount(0);
+  });
 });
 
 test("signed in, the top bar holds saved posts, the digest, and the account menu", async ({ page, context, account }) => {

@@ -14,7 +14,10 @@ export default [
   route("signout", "routes/signout.ts"),
   route("welcome", "routes/welcome.tsx"),
   route("settings", "routes/settings.tsx"),
+  route("saved", "routes/saved.tsx"),
   route("api/auth/*", "routes/api-auth.ts"),
+  route("api/vote", "routes/api-vote.ts"),
+  route("api/save", "routes/api-save.ts"),
   ...(reviewPages
     ? [
         route("dev/ui", "routes/dev-ui.tsx"),

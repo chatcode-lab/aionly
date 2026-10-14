@@ -21,6 +21,7 @@ export function UsernameForm({
   error,
   submitLabel,
   disabled = false,
+  onNameChange,
   children,
 }: {
   current: string;
@@ -29,6 +30,8 @@ export function UsernameForm({
   error?: string;
   submitLabel: string;
   disabled?: boolean;
+  /** Called with the name as typed, normalized, for a live preview. */
+  onNameChange?: (name: string) => void;
   /** Hidden fields to send along, such as where to go next. */
   children?: React.ReactNode;
 }) {
@@ -49,6 +52,7 @@ export function UsernameForm({
         onChange={(event) => {
           setValue(event.target.value);
           setEdited(true);
+          onNameChange?.(normalizeUsername(event.target.value));
         }}
         autoComplete="off"
         autoCapitalize="none"

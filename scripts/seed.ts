@@ -3,10 +3,12 @@
  * content. Run it through `npm run db:seed:local` or `db:seed:staging`;
  * never against production.
  *
- * Everything here is invented or links to public pages. Scores and comment
- * counts are written straight to the cached columns: there are no vote rows
- * behind them, which is fine until voting exists.
+ * Everything here is invented or links to public pages. Each sample score is
+ * backed by votes from sample voters, accounts with no name that never post,
+ * and karma is computed from those votes the way the board computes it, so
+ * a real vote on a sample post moves its score by one.
  */
+import { karmaSql } from "../app/lib/db/votes.server";
 import { resolveLink } from "../app/lib/links/resolve";
 import { parseSubmittedUrl } from "../app/lib/links/url";
 
@@ -26,7 +28,6 @@ const users = [
 ].map((username, index) => ({
   id: `s_user_${String(index + 1).padStart(2, "0")}`,
   username,
-  karma: [412, 96, 57, 23, 8, 3, 0, -4][index],
 }));
 
 interface SeedPost {
@@ -374,14 +375,17 @@ for (const [table, ...columns] of [
 }
 
 for (const user of users) {
-  insert("profiles", { user_id: user.id, karma: user.karma, created_at: now - 90 * DAY });
+  insert("profiles", { user_id: user.id, created_at: now - 90 * DAY });
   insert("usernames", { name: user.username, user_id: user.id, is_current: 1, created_at: now - 90 * DAY });
 }
 // One renamed account, to exercise the redirect from an old name.
 insert("usernames", { name: "old_otter_name", user_id: users[0].id, is_current: 0, created_at: now - 120 * DAY });
 // A moderator, to own the sample removals.
-insert("profiles", { user_id: "s_user_mod", karma: 0, role: "admin", created_at: now - 90 * DAY });
+insert("profiles", { user_id: "s_user_mod", role: "admin", created_at: now - 90 * DAY });
 insert("usernames", { name: "sample_moderator", user_id: "s_user_mod", is_current: 1, created_at: now - 90 * DAY });
+
+/** Every sample item with a score, to back with votes at the end. */
+const scored: Array<{ type: "post" | "comment"; id: string; score: number }> = [];
 
 let commentNumber = 0;
 const countComments = (comments: SeedComment[]): number =>
@@ -398,6 +402,7 @@ posts.forEach((post, index) => {
   const thread = threads[index] ?? [];
   const batch = post.state === "removed" ? `s_batch_post_${index + 1}` : null;
 
+  scored.push({ type: "post", id, score: post.score });
   insert("posts", {
     id,
     author_id: users[post.author].id,
@@ -434,6 +439,7 @@ posts.forEach((post, index) => {
       const commentId = `s_comment_${String(commentNumber).padStart(3, "0")}`;
       const at = createdAt + comment.after * 60;
       const commentBatch = comment.state === "removed" ? `s_batch_comment_${commentNumber}` : null;
+      scored.push({ type: "comment", id: commentId, score: comment.score });
       insert("comments", {
         id: commentId,
         post_id: id,
@@ -464,5 +470,26 @@ posts.forEach((post, index) => {
   };
   walk(thread, null, 0);
 });
+
+// Sample voters: enough that the highest score has one vote per voter.
+const voterCount = Math.max(...scored.map((item) => Math.abs(item.score)));
+const voter = (n: number) => `s_voter_${String(n).padStart(3, "0")}`;
+for (let n = 1; n <= voterCount; n += 1) {
+  insert("profiles", { user_id: voter(n), created_at: now - 120 * DAY });
+}
+for (const item of scored) {
+  for (let n = 1; n <= Math.abs(item.score); n += 1) {
+    insert("votes", {
+      voter_id: voter(n),
+      target_type: item.type,
+      target_id: item.id,
+      value: Math.sign(item.score),
+      created_at: now - 30 * DAY,
+    });
+  }
+}
+lines.push(
+  `UPDATE profiles SET karma = ${karmaSql("profiles.user_id").replace(/\s+/g, " ")} WHERE user_id LIKE 's\\_%' ESCAPE '\\';`,
+);
 
 console.log(lines.join("\n"));

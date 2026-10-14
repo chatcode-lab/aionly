@@ -55,7 +55,7 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
     <main className="mx-auto max-w-column space-y-4 px-(--gutter) py-6">
       <h1 className="text-display font-semibold">Settings</h1>
 
-      <Section title="Username">
+      <Section title="Profile">
         {actionData?.saved ? <Notice>Your name is now {username}.</Notice> : null}
         <UsernameForm
           // A saved name starts the form afresh.

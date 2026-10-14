@@ -29,6 +29,8 @@ export function CommentThread({
   postId,
   depth = 0,
   votes,
+  scoreOf,
+  canVote,
   onVote,
   onReply,
   readOnly = false,
@@ -44,7 +46,12 @@ export function CommentThread({
   readOnly?: boolean;
   /** The viewer's votes, by comment ID. */
   votes?: Record<string, Vote>;
+  /** The score to show, when it differs from the loaded one. */
+  scoreOf?: (comment: CommentData) => number;
+  /** False for comments the viewer cannot vote on, such as their own. */
+  canVote?: (comment: CommentData) => boolean;
   onVote?: (comment: CommentData, next: Vote) => void;
+  /** Without it, comments have no Reply button. */
   onReply?: (comment: CommentData) => void;
   renderMenu?: (comment: CommentData) => ReactNode;
   /** A mark beside the author, such as a nomination in an editor election. */
@@ -72,6 +79,8 @@ export function CommentThread({
           postId={postId}
           depth={depth}
           votes={votes}
+          scoreOf={scoreOf}
+          canVote={canVote}
           onVote={onVote}
           onReply={onReply}
           readOnly={readOnly}
@@ -90,6 +99,8 @@ function CommentItem({
   postId,
   depth,
   votes,
+  scoreOf,
+  canVote,
   onVote,
   onReply,
   readOnly,
@@ -103,6 +114,8 @@ function CommentItem({
   depth: number;
   readOnly: boolean;
   votes?: Record<string, Vote>;
+  scoreOf?: (comment: CommentData) => number;
+  canVote?: (comment: CommentData) => boolean;
   onVote?: (comment: CommentData, next: Vote) => void;
   onReply?: (comment: CommentData) => void;
   renderMenu?: (comment: CommentData) => ReactNode;
@@ -177,19 +190,22 @@ function CommentItem({
           {comment.state === "visible" && !readOnly ? (
             <div className="mt-1 -ml-1.5 flex items-center gap-1">
               <VoteControl
-                score={comment.score + vote}
+                score={scoreOf ? scoreOf(comment) : comment.score}
                 vote={vote}
                 onVote={(next) => onVote?.(comment, next)}
+                disabled={canVote ? !canVote(comment) : false}
                 orientation="horizontal"
                 subject="comment"
               />
-              <button
-                type="button"
-                onClick={() => onReply?.(comment)}
-                className="inline-flex h-8 items-center rounded-lg px-2 text-meta font-medium text-text-muted hover:bg-surface-2 hover:text-text pointer-coarse:h-(--touch)"
-              >
-                Reply
-              </button>
+              {onReply ? (
+                <button
+                  type="button"
+                  onClick={() => onReply(comment)}
+                  className="inline-flex h-8 items-center rounded-lg px-2 text-meta font-medium text-text-muted hover:bg-surface-2 hover:text-text pointer-coarse:h-(--touch)"
+                >
+                  Reply
+                </button>
+              ) : null}
               {renderAction?.(comment)}
               {renderMenu ? (
                 <div className="ml-auto">{renderMenu(comment)}</div>
@@ -205,6 +221,8 @@ function CommentItem({
             postId={postId}
             depth={depth + 1}
             votes={votes}
+            scoreOf={scoreOf}
+            canVote={canVote}
             onVote={onVote}
             onReply={onReply}
             readOnly={readOnly}

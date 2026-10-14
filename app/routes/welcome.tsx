@@ -1,11 +1,12 @@
 import { env } from "cloudflare:workers";
+import { useState } from "react";
 import { Link, redirect } from "react-router";
 
 import { Avatar } from "~/components/avatar";
 import { Button } from "~/components/ui/button";
 import { UsernameForm } from "~/components/username-form";
 import { applyRename } from "~/lib/accounts/rename.server";
-import { RENAME_INTERVAL_DAYS } from "~/lib/accounts/usernames";
+import { RENAME_INTERVAL_DAYS, usernameProblem } from "~/lib/accounts/usernames";
 import { renameStatus } from "~/lib/db/accounts.server";
 import { safeReturnPath } from "~/lib/security/request";
 import { requireAccount, requireParticipant } from "~/lib/viewer.server";
@@ -44,6 +45,9 @@ export async function action({ request, context }: Route.ActionArgs) {
  * with one free chance to change it.
  */
 export default function Welcome({ loaderData, actionData }: Route.ComponentProps) {
+  const [typed, setTyped] = useState(loaderData.username);
+  // The preview follows the name as typed, while it is a valid one.
+  const shown = usernameProblem(typed) ? loaderData.username : typed;
   return (
     <main className="mx-auto max-w-md space-y-6 px-(--gutter) py-10">
       <div>
@@ -54,8 +58,8 @@ export default function Welcome({ loaderData, actionData }: Route.ComponentProps
         </p>
       </div>
       <div className="flex items-center gap-3 rounded-xl border border-border bg-surface p-4">
-        <Avatar userId={loaderData.id} username={loaderData.username} size={40} />
-        <span className="text-title font-semibold">{loaderData.username}</span>
+        <Avatar userId={loaderData.id} username={shown} size={40} />
+        <span className="text-title font-semibold [overflow-wrap:anywhere]">{shown}</span>
       </div>
       {loaderData.canRename ? (
         <UsernameForm
@@ -63,6 +67,7 @@ export default function Welcome({ loaderData, actionData }: Route.ComponentProps
           hint={`Change it now if you like. After that, a name can change once every ${RENAME_INTERVAL_DAYS} days, and old names are never reused.`}
           error={actionData?.error}
           submitLabel="Continue"
+          onNameChange={setTyped}
         >
           <input type="hidden" name="next" value={loaderData.next} />
         </UsernameForm>

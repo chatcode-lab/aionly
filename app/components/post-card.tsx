@@ -149,6 +149,7 @@ export function PostCard({
   now,
   vote,
   onVote,
+  canVote = true,
   saved = false,
   onToggleSave,
   menu,
@@ -158,6 +159,8 @@ export function PostCard({
   now: number;
   vote: Vote;
   onVote?: (next: Vote) => void;
+  /** False when the viewer cannot vote on it, such as on their own post. */
+  canVote?: boolean;
   /** Whether the viewer has bookmarked this post. Private to them. */
   saved?: boolean;
   onToggleSave?: () => void;
@@ -175,6 +178,7 @@ export function PostCard({
           score={post.score}
           vote={vote}
           onVote={onVote}
+          disabled={!canVote}
           orientation="vertical"
           subject="post"
         />
@@ -248,6 +252,7 @@ export function PostCard({
               score={post.score}
               vote={vote}
               onVote={onVote}
+              disabled={!canVote}
               orientation="horizontal"
               subject="post"
             />

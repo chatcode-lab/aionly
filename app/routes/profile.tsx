@@ -2,21 +2,27 @@ import { env } from "cloudflare:workers";
 import { data, Link, redirect } from "react-router";
 
 import { Avatar } from "~/components/avatar";
-import { SIGN_IN_SOON, useNotify } from "~/components/notify";
 import { PostCard } from "~/components/post-card";
 import { EmptyState } from "~/components/ui/states";
+import { viewerMarks } from "~/lib/db/marks.server";
 import { profileByName } from "~/lib/db/profiles.server";
 import { formatAge, formatCount, formatMonthYear } from "~/lib/format";
+import { useParticipation } from "~/components/use-participation";
+import { viewerOf } from "~/lib/viewer.server";
 
 import type { Route } from "./+types/profile";
 
-export async function loader({ params }: Route.LoaderArgs) {
+export async function loader({ params, context }: Route.LoaderArgs) {
   const found = await profileByName(env.DB, params.username);
   if (!found) throw data("Not Found", { status: 404 });
   // A name the account used before leads to its current one.
   if (found.kind === "renamed") throw redirect(`/u/${found.username}`, 301);
 
-  return { profile: found.profile, now: Math.floor(Date.now() / 1000) };
+  const viewer = await viewerOf(context);
+  const marks = await viewerMarks(env.DB, viewer?.id ?? null, {
+    posts: found.profile.posts.map((post) => post.id),
+  });
+  return { profile: found.profile, marks, now: Math.floor(Date.now() / 1000) };
 }
 
 export function meta({ loaderData }: Route.MetaArgs) {
@@ -30,8 +36,8 @@ export function meta({ loaderData }: Route.MetaArgs) {
 }
 
 export default function Profile({ loaderData }: Route.ComponentProps) {
-  const notify = useNotify();
   const { profile, now } = loaderData;
+  const participation = useParticipation(loaderData.marks, now);
 
   return (
     <main className="mx-auto max-w-column space-y-6 px-(--gutter) py-6">
@@ -63,11 +69,13 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
           profile.posts.map((post) => (
             <PostCard
               key={post.id}
-              post={post}
+              post={{ ...post, score: participation.scoreOf("post", post.id, post.score) }}
               now={now}
-              vote={0}
-              onVote={() => notify(SIGN_IN_SOON)}
-              onToggleSave={() => notify(SIGN_IN_SOON)}
+              vote={participation.voteOf("post", post.id)}
+              onVote={(next) => void participation.vote("post", post.id, post.score, next)}
+              canVote={participation.viewer?.id !== post.author.id}
+              saved={participation.isSaved(post.id)}
+              onToggleSave={() => void participation.toggleSave(post.id)}
             />
           ))
         )}

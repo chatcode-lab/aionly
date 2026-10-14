@@ -2,11 +2,11 @@ import { env } from "cloudflare:workers";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 
-import { SIGN_IN_SOON, useNotify } from "~/components/notify";
 import { PostCard } from "~/components/post-card";
 import { Button } from "~/components/ui/button";
 import { EmptyState, Notice } from "~/components/ui/states";
 import { defaultRange, newPage, postsByIds, topSnapshot } from "~/lib/db/feed.server";
+import { viewerMarks } from "~/lib/db/marks.server";
 import {
   feedPath,
   PAGE_SIZE,
@@ -17,7 +17,10 @@ import {
   RANGES,
   SNAPSHOT_LIMIT,
 } from "~/lib/feed";
+import type { ViewerMarks } from "~/lib/participation";
 import type { PostCardData } from "~/lib/public-types";
+import { useParticipation } from "~/components/use-participation";
+import { viewerOf } from "~/lib/viewer.server";
 
 import type { Route } from "./+types/home";
 
@@ -34,8 +37,9 @@ export function meta(_: Route.MetaArgs) {
   ];
 }
 
-export async function loader({ request }: Route.LoaderArgs) {
+export async function loader({ request, context }: Route.LoaderArgs) {
   const url = new URL(request.url);
+  const viewer = await viewerOf(context);
   const now = Math.floor(Date.now() / 1000);
   const sort = parseSort(url.searchParams.get("sort"));
   const picked = parseRange(url.searchParams.get("range"));
@@ -44,20 +48,25 @@ export async function loader({ request }: Route.LoaderArgs) {
   const range = picked ?? (await defaultRange(env.DB, now));
   const base = { sort, range, rangePicked: picked !== null, now };
 
+  const marks = (posts: PostCardData[]) =>
+    viewerMarks(env.DB, viewer?.id ?? null, { posts: posts.map((post) => post.id) });
+
   if (sort === "new") {
     const page = await newPage(env.DB, range, now, null);
-    return { ...base, posts: page.posts, snapshot: null, nextCursor: page.nextCursor };
+    return {
+      ...base,
+      posts: page.posts,
+      marks: await marks(page.posts),
+      snapshot: null,
+      nextCursor: page.nextCursor,
+    };
   }
 
   // Top is cut from a fixed ranking, so later votes cannot skip or repeat
   // posts while someone pages through it.
   const snapshot = await topSnapshot(env.DB, range, now);
-  return {
-    ...base,
-    posts: await postsByIds(env.DB, snapshot.slice(0, PAGE_SIZE)),
-    snapshot,
-    nextCursor: null,
-  };
+  const posts = await postsByIds(env.DB, snapshot.slice(0, PAGE_SIZE));
+  return { ...base, posts, marks: await marks(posts), snapshot, nextCursor: null };
 }
 
 type FeedData = Awaited<ReturnType<typeof loader>>;
@@ -70,6 +79,8 @@ interface Loaded {
   offset: number;
   /** Where New continues from. */
   cursor: string | null;
+  /** The viewer's votes and saves on the extra pages. */
+  marks?: ViewerMarks;
 }
 
 // Loaded pages by feed address, so Back shows them again at once and the
@@ -92,13 +103,13 @@ export async function clientLoader({ request, serverLoader }: Route.ClientLoader
 }
 
 function FeedList({ data, address }: { data: FeedData; address: string }) {
-  const notify = useNotify();
   const restored = loadedPages.get(address);
   const start: Loaded =
     restored && restored.data === data
       ? restored
-      : { data, extra: [], offset: PAGE_SIZE, cursor: data.nextCursor };
+      : { data, extra: [], offset: PAGE_SIZE, cursor: data.nextCursor, marks: data.marks };
 
+  const participation = useParticipation(start.marks ?? data.marks, data.now);
   const [extra, setExtra] = useState(start.extra);
   const [offset, setOffset] = useState(start.offset);
   const [cursor, setCursor] = useState(start.cursor);
@@ -113,9 +124,10 @@ function FeedList({ data, address }: { data: FeedData; address: string }) {
     };
   }, []);
 
+  const [marks, setMarks] = useState<ViewerMarks>(start.marks ?? data.marks);
   useEffect(() => {
-    loadedPages.set(address, { data, extra, offset, cursor });
-  }, [address, data, extra, offset, cursor]);
+    loadedPages.set(address, { data, extra, offset, cursor, marks });
+  }, [address, data, extra, offset, cursor, marks]);
 
   const posts = [...data.posts, ...extra];
   const snapshot = data.snapshot;
@@ -136,8 +148,14 @@ function FeedList({ data, address }: { data: FeedData; address: string }) {
       const page = (await response.json()) as {
         posts: PostCardData[];
         nextCursor: string | null;
+        marks: ViewerMarks;
       };
       if (!mounted.current) return;
+      participation.absorb(page.marks);
+      setMarks((current) => ({
+        votes: { ...current.votes, ...page.marks.votes },
+        saved: [...current.saved, ...page.marks.saved],
+      }));
       const seen = new Set(posts.map((post) => post.id));
       setExtra((current) => [
         ...current,
@@ -181,11 +199,13 @@ function FeedList({ data, address }: { data: FeedData; address: string }) {
       {posts.map((post) => (
         <PostCard
           key={post.id}
-          post={post}
+          post={{ ...post, score: participation.scoreOf("post", post.id, post.score) }}
           now={data.now}
-          vote={0}
-          onVote={() => notify(SIGN_IN_SOON)}
-          onToggleSave={() => notify(SIGN_IN_SOON)}
+          vote={participation.voteOf("post", post.id)}
+          onVote={(next) => void participation.vote("post", post.id, post.score, next)}
+          canVote={participation.viewer?.id !== post.author.id}
+          saved={participation.isSaved(post.id)}
+          onToggleSave={() => void participation.toggleSave(post.id)}
         />
       ))}
 

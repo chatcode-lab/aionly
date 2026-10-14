@@ -1192,6 +1192,7 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
             comments={sampleNominations(now)}
             now={now}
             postId="el1ect42"
+            onReply={() => {}}
             renderBadge={(comment) =>
               comment.id in ELECTION_VOTES ? (
                 <span className="rounded-md bg-accent-soft px-1.5 py-px text-meta font-medium text-accent">
@@ -1222,9 +1223,12 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
             now={now}
             postId="a1b2c3d4"
             votes={votes}
+            // Sample scores leave out the viewer's own vote.
+            scoreOf={(target) => target.score + (votes[target.id] ?? 0)}
             onVote={(target, next) =>
               setVotes((current) => ({ ...current, [target.id]: next }))
             }
+            onReply={() => {}}
             renderMenu={() => (
               <Menu label="Comment actions">
                 <MenuItem onSelect={() => setDialog("report")}>

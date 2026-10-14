@@ -47,11 +47,6 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   };
 }
 
-/** The signed-in account, on any page; null when signed out. */
-export function useViewer(): ViewerSummary | null {
-  return useRouteLoaderData<typeof loader>("root")?.viewer ?? null;
-}
-
 function BanNotice({ ban }: { ban: NonNullable<ViewerSummary["ban"]> }) {
   return (
     <div className="mx-auto max-w-column px-(--gutter) pt-4">

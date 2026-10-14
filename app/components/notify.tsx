@@ -25,6 +25,3 @@ export function NotifyProvider({ children }: { children: ReactNode }) {
     </NotifyContext>
   );
 }
-
-/** What a control says when it needs sign-in, which is not built yet. */
-export const SIGN_IN_SOON = "Sign-in is coming soon.";
