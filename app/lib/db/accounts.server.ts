@@ -259,3 +259,13 @@ export async function renameUser(
     throw error;
   }
 }
+
+/**
+ * Deletes sign-in states that expired unused, such as a Google sign-in
+ * started and abandoned. Better Auth leaves them; the hourly sweep clears
+ * them so starting sign-ins over and over cannot grow the table.
+ */
+export async function sweepExpiredVerifications(db: D1Database, now: Date): Promise<number> {
+  const result = await db.prepare(`DELETE FROM "verification" WHERE "expiresAt" < ?1`).bind(now.toISOString()).run();
+  return result.meta.changes;
+}

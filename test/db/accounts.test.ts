@@ -4,6 +4,7 @@ import { usernameProblem } from "../../app/lib/accounts/usernames";
 import {
   accountRecord,
   createProfile,
+  sweepExpiredVerifications,
   participantCondition,
   renameStatus,
   renameUser,
@@ -167,5 +168,18 @@ describe("sign-up", async () => {
     await expect(
       auth.createUser({ name: "Twin", email: "SOMEONE@signup.invalid", emailVerified: true }, google),
     ).rejects.toThrow();
+  });
+});
+
+describe("sweepExpiredVerifications", () => {
+  it("deletes only sign-in states past their expiry", async () => {
+    await db.batch([
+      db.prepare(`DELETE FROM "verification"`),
+      db.prepare(`INSERT INTO "verification" ("id", "identifier", "value", "expiresAt", "createdAt", "updatedAt") VALUES ('old', 'state', 'x', ?1, ?1, ?1)`).bind("2026-01-01T00:00:00.000Z"),
+      db.prepare(`INSERT INTO "verification" ("id", "identifier", "value", "expiresAt", "createdAt", "updatedAt") VALUES ('new', 'state', 'y', ?1, ?1, ?1)`).bind("2026-01-01T00:20:00.000Z"),
+    ]);
+    expect(await sweepExpiredVerifications(db, new Date("2026-01-01T00:10:00.000Z"))).toBe(1);
+    const { results } = await db.prepare(`SELECT "id" FROM "verification"`).all();
+    expect(results).toEqual([{ id: "new" }]);
   });
 });

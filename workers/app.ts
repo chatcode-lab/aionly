@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { createRequestHandler, RouterContextProvider } from "react-router";
 
 import { nonceContext, viewerContext, waitUntilContext } from "../app/context";
+import { sweepExpiredVerifications } from "../app/lib/db/accounts.server";
 import { sweepDeletedPostImages, sweepPendingImages } from "../app/lib/images.server";
 import { createNonce } from "../app/lib/security/csp";
 import { withSecurityHeaders } from "../app/lib/security/headers";
@@ -95,11 +96,13 @@ export default {
     return secured;
   },
 
-  // Hourly: removes preview snapshots that were never published.
+  // Hourly: removes preview snapshots never published, pictures of deleted
+  // posts, and sign-in states that expired unused.
   async scheduled(_controller, workerEnv, ctx) {
     ctx.waitUntil(
       sweepPendingImages(workerEnv.DB, workerEnv.IMAGES, Math.floor(Date.now() / 1000)),
     );
     ctx.waitUntil(sweepDeletedPostImages(workerEnv.DB, workerEnv.IMAGES));
+    ctx.waitUntil(sweepExpiredVerifications(workerEnv.DB, new Date()));
   },
 } satisfies ExportedHandler<Env>;
