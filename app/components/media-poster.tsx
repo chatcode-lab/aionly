@@ -49,15 +49,16 @@ function PlayGlyph() {
 
 /**
  * The stand-in for a player. Every media card renders as a poster with a
- * fixed shape, so the feed never shifts, and a player is mounted only for the
- * card in focus or on click. With a provider it stands in for that
- * provider's embed; without one it stands in for media hosted by the board.
+ * fixed shape, so the feed never shifts when a frame loads in its place near
+ * the screen or on a tap. With a provider it stands in for that provider's
+ * embed; without one it stands in for media hosted by the board.
  */
 export function MediaPoster({
   provider,
   aspect,
   thumbUrl,
   duration,
+  height,
   onActivate,
 }: {
   provider?: Provider;
@@ -66,6 +67,8 @@ export function MediaPoster({
   thumbUrl?: string;
   /** Length in seconds, when known. */
   duration?: number;
+  /** For a post embed, the height to reserve: the embed's own, once known. */
+  height?: number;
   onActivate?: () => void;
 }) {
   const name = provider ? PROVIDER_LABEL[provider] : undefined;
@@ -103,7 +106,8 @@ export function MediaPoster({
       <button
         type="button"
         onClick={onActivate}
-        className="group relative flex h-44 w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-surface-2"
+        style={{ height: height ?? 176 }}
+        className="group relative flex w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-surface-2"
       >
         <Thumb src={thumbUrl} />
         <span className="relative rounded-lg bg-overlay px-3.5 py-2 text-body font-medium text-on-overlay">

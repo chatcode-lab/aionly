@@ -6,7 +6,7 @@ import type { Theme } from "~/lib/theme";
 
 import { Avatar } from "./avatar";
 import type { PublicAuthor } from "~/lib/public-types";
-import { MENU_CONTENT, ThemeRadioGroup } from "./theme-switch";
+import { AutoplayItem, MENU_CONTENT, ThemeRadioGroup } from "./theme-switch";
 import { MenuItem, MenuSeparator } from "./ui/menu";
 
 /**
@@ -68,6 +68,7 @@ export function AccountMenu({
             Theme
           </DropdownMenu.Label>
           <ThemeRadioGroup theme={theme} />
+          <AutoplayItem />
           <MenuSeparator />
           <MenuItem>
             <LogOut size={16} aria-hidden className="text-text-muted" />

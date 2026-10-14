@@ -61,25 +61,6 @@ test.describe("feed", () => {
     await expect(page.locator("article").first()).toBeVisible();
   });
 
-  test("plays one post at a time", async ({ page, problems }) => {
-    await page.goto("/");
-    const video = page.locator("article", { hasText: "Big Buck Bunny" });
-    await video.getByRole("button", { name: "Play video from YouTube" }).click();
-    await expect(page.locator("iframe")).toHaveCount(1);
-    await expect(video.locator("iframe")).toHaveAttribute(
-      "src",
-      /^https:\/\/www\.youtube-nocookie\.com\/embed\/aqz-KE-bpKQ\?.*autoplay=1/,
-    );
-
-    // Starting another post unloads the first.
-    const post = page.locator("article", { hasText: "a post on X" });
-    await post.getByRole("button", { name: "Load post from X" }).click();
-    await expect(page.locator("iframe")).toHaveCount(1);
-    await expect(post.locator("iframe")).toHaveAttribute("src", /platform\.twitter\.com/);
-    await expect(video.getByRole("button", { name: "Play video from YouTube" })).toBeVisible();
-    expect(problems.violations).toEqual([]);
-  });
-
   test("says sign-in is coming when a vote or save needs it", async ({ page }) => {
     await page.goto("/");
     const card = page.locator("article").first();

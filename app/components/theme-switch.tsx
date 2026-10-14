@@ -1,10 +1,14 @@
-import { Check, Monitor, Moon, Sun } from "lucide-react";
+import { Check, Monitor, Moon, Play, Sun } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
 import { useFetcher } from "react-router";
 
+import { cn } from "~/lib/cn";
+import { type PlaybackSettings, playbackController } from "~/lib/playback/controller";
+import { usePlaybackSettings } from "~/lib/playback/hooks";
 import { parseTheme, type Theme, THEMES } from "~/lib/theme";
 
 import { IconButton } from "./ui/button";
+import { MenuSeparator } from "./ui/menu";
 
 /** Shared so the document can apply the choice before the server confirms. */
 export const THEME_FETCHER_KEY = "theme";
@@ -64,6 +68,43 @@ export function ThemeRadioGroup({ theme }: { theme: Theme }) {
   );
 }
 
+const AUTOPLAY_BLOCKED: Record<
+  NonNullable<PlaybackSettings["blockedBy"]>,
+  string
+> = {
+  "reduced-motion": "Off while reduced motion is on",
+  "data-saver": "Off while data saver is on",
+};
+
+/**
+ * The autoplay switch, remembered in this browser. It sits with the theme,
+ * in the header's theme menu or the account menu.
+ */
+export function AutoplayItem() {
+  const { autoplay, blockedBy } = usePlaybackSettings();
+  return (
+    <DropdownMenu.CheckboxItem
+      checked={autoplay && blockedBy === null}
+      disabled={blockedBy !== null}
+      onCheckedChange={(checked) => playbackController()?.setAutoplay(checked)}
+      className={cn(MENU_RADIO_ITEM, blockedBy && "h-auto py-1.5")}
+    >
+      <Play size={16} aria-hidden className="text-text-muted" />
+      <span className="min-w-0">
+        Autoplay videos
+        {blockedBy ? (
+          <span className="block text-meta text-text-muted">
+            {AUTOPLAY_BLOCKED[blockedBy]}
+          </span>
+        ) : null}
+      </span>
+      <DropdownMenu.ItemIndicator className="ml-auto">
+        <Check size={16} aria-hidden />
+      </DropdownMenu.ItemIndicator>
+    </DropdownMenu.CheckboxItem>
+  );
+}
+
 export function ThemeSwitch({ theme }: { theme: Theme }) {
   const { Icon } = OPTIONS[theme];
 
@@ -78,9 +119,11 @@ export function ThemeSwitch({ theme }: { theme: Theme }) {
         <DropdownMenu.Content
           align="end"
           sideOffset={4}
-          className={`${MENU_CONTENT} min-w-40`}
+          className={`${MENU_CONTENT} min-w-48`}
         >
           <ThemeRadioGroup theme={theme} />
+          <MenuSeparator />
+          <AutoplayItem />
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>

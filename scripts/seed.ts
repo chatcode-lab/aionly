@@ -76,7 +76,7 @@ const posts: SeedPost[] = [
   {
     url: "https://x.com/jack/status/20",
     origin: "found",
-    title: "Sample post: a post on X, loaded on click",
+    title: "Sample post: a post on X",
     description: "Posts from X load on click, in the site theme.",
     age: 14,
     score: 12,

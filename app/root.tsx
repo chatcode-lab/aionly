@@ -13,7 +13,6 @@ import type { Route } from "./+types/root";
 import "./app.css";
 import { FeedToolbar } from "./components/feed-toolbar";
 import { NotifyProvider } from "./components/notify";
-import { PlaybackProvider } from "./components/post-media";
 import { SiteFooter, SiteHeader } from "./components/site-chrome";
 import { ThemeSwitch, useTheme } from "./components/theme-switch";
 import { ErrorState } from "./components/ui/states";
@@ -53,13 +52,11 @@ export function Layout({ children }: { children: React.ReactNode }) {
       <body className="flex min-h-dvh flex-col bg-bg text-text">
         <ToastProvider>
           <NotifyProvider>
-            <PlaybackProvider>
-              <SiteHeader toolbar={feedToolbar ? <FeedToolbar /> : undefined}>
-                <ThemeSwitch theme={theme} />
-              </SiteHeader>
-              <div className="flex-1">{children}</div>
-              <SiteFooter reviewPages={data?.reviewPages ?? false} />
-            </PlaybackProvider>
+            <SiteHeader toolbar={feedToolbar ? <FeedToolbar /> : undefined}>
+              <ThemeSwitch theme={theme} />
+            </SiteHeader>
+            <div className="flex-1">{children}</div>
+            <SiteFooter reviewPages={data?.reviewPages ?? false} />
           </NotifyProvider>
         </ToastProvider>
         <ScrollRestoration />
