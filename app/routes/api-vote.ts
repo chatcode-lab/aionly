@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 
 import { castVote, type TargetType, type VoteValue } from "~/lib/db/votes.server";
 import { readSmallJson, ROW_ID } from "~/lib/security/body";
+import { rateLimited, withinLimits } from "~/lib/security/rate-limit.server";
 import { requireParticipant } from "~/lib/viewer.server";
 
 import type { Route } from "./+types/api-vote";
@@ -19,6 +20,7 @@ const REFUSAL = {
  */
 export async function action({ request, context }: Route.ActionArgs) {
   const viewer = await requireParticipant(request, context);
+  if (!(await withinLimits(request, "vote", viewer.id))) return rateLimited();
   const body = (await readSmallJson(request)) as
     | { type?: unknown; id?: unknown; value?: unknown }
     | undefined;

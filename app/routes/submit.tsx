@@ -17,6 +17,7 @@ import { newPostId } from "~/lib/ids";
 import type { Aspect, Provider } from "~/lib/links/types";
 import type { PostCardData } from "~/lib/public-types";
 import { verifyTurnstile } from "~/lib/security/turnstile.server";
+import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { postPath } from "~/lib/slug";
 import type { CheckedLink, CheckResult } from "~/lib/submit/check.server";
 import { readReceipt } from "~/lib/submit/receipt.server";
@@ -76,6 +77,7 @@ function statusMessage(status: PostingStatus, now: number): string | null {
 
 export async function action({ request, context }: Route.ActionArgs): Promise<ActionResult | Response> {
   const viewer = await requireParticipant(request, context);
+  if (!(await withinLimits(request, "write", viewer.id))) return { errors: {}, message: RATE_LIMITED_MESSAGE };
   const now = Math.floor(Date.now() / 1000);
   const form = await request.formData();
   const field = (name: string) => String(form.get(name) ?? "");

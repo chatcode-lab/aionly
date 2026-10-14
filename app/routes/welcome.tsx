@@ -9,6 +9,7 @@ import { applyRename } from "~/lib/accounts/rename.server";
 import { RENAME_INTERVAL_DAYS, usernameProblem } from "~/lib/accounts/usernames";
 import { renameStatus } from "~/lib/db/accounts.server";
 import { safeReturnPath } from "~/lib/security/request";
+import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { requireAccount, requireParticipant } from "~/lib/viewer.server";
 
 import type { Route } from "./+types/welcome";
@@ -34,6 +35,7 @@ export async function action({ request, context }: Route.ActionArgs) {
   const url = new URL(request.url);
   const form = await request.formData();
   const next = safeReturnPath(String(form.get("next") ?? ""), url.origin);
+  if (!(await withinLimits(request, "write", viewer.id))) return { error: RATE_LIMITED_MESSAGE };
 
   const error = await applyRename(viewer.id, String(form.get("username") ?? ""));
   if (error) return { error };

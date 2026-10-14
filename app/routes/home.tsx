@@ -3,10 +3,12 @@ import { useEffect, useRef, useState } from "react";
 import { Link, type ShouldRevalidateFunctionArgs } from "react-router";
 
 import { PostMenu } from "~/components/author-menus";
+import { PinnedPost } from "~/components/pinned-post";
 import { PostCard } from "~/components/post-card";
 import { Button } from "~/components/ui/button";
 import { EmptyState, Notice } from "~/components/ui/states";
 import { defaultRange, newPage, postsByIds, topSnapshot } from "~/lib/db/feed.server";
+import { announcement } from "~/lib/db/pins.server";
 import { viewerMarks } from "~/lib/db/marks.server";
 import {
   feedPath,
@@ -47,17 +49,26 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   // With no range in the URL, the board picks the narrowest one that can
   // fill a first screen.
   const range = picked ?? (await defaultRange(env.DB, now));
-  const base = { sort, range, rangePicked: picked !== null, now };
+  // The announcement sits above the feed and is not repeated in it. A reader
+  // who collapsed this pin gets it collapsed from the server, with no shift.
+  const pin = await announcement(env.DB);
+  const pinnedId = pin?.post.id ?? null;
+  const pinCollapsed =
+    pinnedId !== null && /(?:^|;\s*)pin_collapsed=([^;]+)/.exec(request.headers.get("Cookie") ?? "")?.[1] === pinnedId;
+  const base = { sort, range, rangePicked: picked !== null, now, pin, pinCollapsed };
 
   const marks = (posts: PostCardData[]) =>
-    viewerMarks(env.DB, viewer?.id ?? null, { posts: posts.map((post) => post.id) });
+    viewerMarks(env.DB, viewer?.id ?? null, {
+      posts: [...posts.map((post) => post.id), ...(pinnedId ? [pinnedId] : [])],
+    });
 
   if (sort === "new") {
     const page = await newPage(env.DB, range, now, null);
+    const posts = page.posts.filter((post) => post.id !== pinnedId);
     return {
       ...base,
-      posts: page.posts,
-      marks: await marks(page.posts),
+      posts,
+      marks: await marks(posts),
       snapshot: null,
       nextCursor: page.nextCursor,
     };
@@ -65,7 +76,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 
   // Top is cut from a fixed ranking, so later votes cannot skip or repeat
   // posts while someone pages through it.
-  const snapshot = await topSnapshot(env.DB, range, now);
+  const snapshot = (await topSnapshot(env.DB, range, now)).filter((id) => id !== pinnedId);
   const posts = await postsByIds(env.DB, snapshot.slice(0, PAGE_SIZE));
   return { ...base, posts, marks: await marks(posts), snapshot, nextCursor: null };
 }
@@ -214,7 +225,13 @@ function FeedList({ data, address }: { data: FeedData; address: string }) {
           canVote={participation.viewer?.id !== post.author.id}
           saved={participation.isSaved(post.id)}
           onToggleSave={() => void participation.toggleSave(post.id)}
-          menu={<PostMenu post={post} onDeleted={() => participation.markGone(post.id)} />}
+          menu={
+            <PostMenu
+              post={post}
+              onDeleted={() => participation.markGone(post.id)}
+              onRemoved={() => participation.markGone(post.id)}
+            />
+          }
         />
       ))}
 
@@ -237,6 +254,40 @@ function FeedList({ data, address }: { data: FeedData; address: string }) {
   );
 }
 
+/** The announcement pinned above the feed, collapsible to one line. */
+function Announcement({ data }: { data: FeedData }) {
+  const pin = data.pin!;
+  const participation = useParticipation(data.marks, data.now);
+  const [collapsed, setCollapsed] = useState(data.pinCollapsed);
+  const post = pin.post;
+  return (
+    <div className="mb-3">
+      <PinnedPost
+        label="Announcement"
+        title={post.title}
+        note={pin.note ?? undefined}
+        collapsed={collapsed}
+        onCollapsedChange={(next) => {
+          setCollapsed(next);
+          // Remembered per pin: a new announcement starts expanded.
+          document.cookie = `pin_collapsed=${next ? post.id : ""}; path=/; max-age=31536000; samesite=lax`;
+        }}
+      >
+        <PostCard
+          post={{ ...post, score: participation.scoreOf("post", post.id, post.score) }}
+          now={data.now}
+          vote={participation.voteOf("post", post.id)}
+          onVote={(next) => void participation.vote("post", post.id, post.score, next)}
+          canVote={participation.viewer?.id !== post.author.id}
+          saved={participation.isSaved(post.id)}
+          onToggleSave={() => void participation.toggleSave(post.id)}
+          menu={<PostMenu post={post} />}
+        />
+      </PinnedPost>
+    </div>
+  );
+}
+
 export default function Feed({ loaderData }: Route.ComponentProps) {
   const address = feedPath(
     loaderData.sort,
@@ -249,6 +300,9 @@ export default function Feed({ loaderData }: Route.ComponentProps) {
         {loaderData.sort === "top" ? "Top" : "New"} posts,{" "}
         {RANGE_LABEL[loaderData.range].toLowerCase()}
       </h1>
+      {loaderData.pin ? (
+        <Announcement data={loaderData} />
+      ) : null}
       {/* A new ranking or a different feed starts the list afresh. */}
       <FeedList
         key={`${address}:${loaderData.now}`}

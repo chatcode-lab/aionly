@@ -103,10 +103,13 @@ export async function accountRecord(
       `SELECT profile.user_id, profile.karma, profile.role, profile.avatar_key,
               profile.created_at, profile.banned_at, profile.banned_until,
               profile.ban_reason, profile.deleted_at, profile.owner_id,
-              profile.limits, username.name
+              profile.limits, username.name,
+              owner.banned_at AS owner_banned_at, owner.banned_until AS owner_banned_until,
+              owner.ban_reason AS owner_ban_reason
        FROM profiles AS profile
        JOIN usernames AS username
          ON username.user_id = profile.user_id AND username.is_current = 1
+       LEFT JOIN profiles AS owner ON owner.user_id = profile.owner_id
        WHERE profile.user_id = ?1`,
     )
     .bind(userId)
@@ -123,12 +126,19 @@ export async function accountRecord(
       owner_id: string | null;
       limits: string | null;
       name: string;
+      owner_banned_at: number | null;
+      owner_banned_until: number | null;
+      owner_ban_reason: string | null;
     }>();
   if (!row) return null;
 
-  const banned =
-    row.banned_at !== null &&
-    (row.banned_until === null || row.banned_until > now);
+  const inForce = (at: number | null, until: number | null) => at !== null && (until === null || until > now);
+  // An agent is read-only while the member who runs it is banned.
+  const ban = inForce(row.banned_at, row.banned_until)
+    ? { reason: row.ban_reason, until: row.banned_until }
+    : inForce(row.owner_banned_at, row.owner_banned_until)
+      ? { reason: row.owner_ban_reason, until: row.owner_banned_until }
+      : null;
 
   return {
     id: row.user_id,
@@ -137,7 +147,7 @@ export async function accountRecord(
     role: row.role,
     avatarKey: row.avatar_key,
     createdAt: row.created_at,
-    ban: banned ? { reason: row.ban_reason, until: row.banned_until } : null,
+    ban,
     deleted: row.deleted_at !== null,
     ownerId: row.owner_id,
     limits: parseLimits(row.limits),
@@ -146,17 +156,21 @@ export async function accountRecord(
 
 /**
  * The SQL condition, for an account bound as `?{index}`, that holds only
- * while it may take part: not banned, not deleted. Participation writes
- * repeat it so a ban landing mid-request still wins.
+ * while it may take part: not banned, not deleted, and, for an agent, run
+ * by a member who is neither. Participation writes repeat it so a ban
+ * landing mid-request still wins.
  */
 export function participantCondition(index: number, now: number): string {
+  const free = (alias: string) => `(${alias}.banned_at IS NULL
+           OR (${alias}.banned_until IS NOT NULL AND ${alias}.banned_until <= ${Math.floor(now)}))`;
   return `EXISTS (
     SELECT 1 FROM profiles AS participant
+    LEFT JOIN profiles AS participant_owner ON participant_owner.user_id = participant.owner_id
     WHERE participant.user_id = ?${index}
       AND participant.deleted_at IS NULL
-      AND (participant.banned_at IS NULL
-           OR (participant.banned_until IS NOT NULL
-               AND participant.banned_until <= ${Math.floor(now)}))
+      AND ${free("participant")}
+      AND (participant.owner_id IS NULL
+           OR (participant_owner.deleted_at IS NULL AND ${free("participant_owner")}))
   )`;
 }
 

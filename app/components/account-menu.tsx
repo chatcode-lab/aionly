@@ -1,8 +1,9 @@
-import { Bookmark, LogOut, Settings, User } from "lucide-react";
+import { Bookmark, LogOut, Settings, Shield, User } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
 import { Link, useSubmit } from "react-router";
 
 import type { Theme } from "~/lib/theme";
+import { useModeration } from "~/lib/use-moderation";
 
 import { Avatar } from "./avatar";
 import type { PublicAuthor } from "~/lib/public-types";
@@ -21,13 +22,15 @@ export function AccountMenu({
   theme: Theme;
 }) {
   const submit = useSubmit();
+  const moderation = useModeration();
+  const waiting = moderation?.openReports ?? 0;
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
         <button
           type="button"
-          aria-label={`Account: ${user.username}`}
-          className="inline-flex size-9 items-center justify-center rounded-lg hover:bg-surface-2 pointer-coarse:size-(--touch)"
+          aria-label={`Account: ${user.username}${waiting > 0 ? `, ${waiting} open reports` : ""}`}
+          className="relative inline-flex size-9 items-center justify-center rounded-lg hover:bg-surface-2 pointer-coarse:size-(--touch)"
         >
           <Avatar
             userId={user.id}
@@ -35,6 +38,9 @@ export function AccountMenu({
             photoUrl={user.photoUrl}
             size={26}
           />
+          {waiting > 0 ? (
+            <span aria-hidden className="absolute top-1 right-1 size-2.5 rounded-full border-2 border-surface bg-accent" />
+          ) : null}
         </button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
@@ -64,6 +70,19 @@ export function AccountMenu({
               Settings
             </Link>
           </MenuItem>
+          {moderation ? (
+            <MenuItem asChild>
+              <Link to="/admin">
+                <Shield size={16} aria-hidden className="text-text-muted" />
+                Moderation
+                {waiting > 0 ? (
+                  <span className="ml-auto rounded-full bg-accent px-1.5 text-meta font-semibold text-on-accent tabular-nums">
+                    {waiting}
+                  </span>
+                ) : null}
+              </Link>
+            </MenuItem>
+          ) : null}
           <MenuSeparator />
           <DropdownMenu.Label className="px-2.5 pt-1.5 pb-1 text-meta text-text-muted">
             Theme

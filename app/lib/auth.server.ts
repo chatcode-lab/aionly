@@ -92,17 +92,13 @@ function createAuth(origin: string) {
 
 export type Auth = ReturnType<typeof createAuth>;
 
-// One instance per site address. The Worker answers on its own hostnames
-// only, so the request's origin is the site's; callbacks then match the
-// address the visitor is on, with no hostname kept in configuration.
-const instances = new Map<string, Auth>();
-
+/**
+ * Better Auth for one request. A new instance each time: an instance keeps
+ * promises made while serving the request that created it, and Workers
+ * refuse to let another request use them. The request's origin is the
+ * site's, since the Worker answers on its own hostnames only, so callbacks
+ * match the address the visitor is on with no hostname in configuration.
+ */
 export function authFor(request: Request): Auth {
-  const origin = new URL(request.url).origin;
-  let auth = instances.get(origin);
-  if (!auth) {
-    auth = createAuth(origin);
-    instances.set(origin, auth);
-  }
-  return auth;
+  return createAuth(new URL(request.url).origin);
 }

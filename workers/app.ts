@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { createRequestHandler, RouterContextProvider } from "react-router";
 
-import { nonceContext, viewerContext } from "../app/context";
+import { nonceContext, viewerContext, waitUntilContext } from "../app/context";
 import { sweepDeletedPostImages, sweepPendingImages } from "../app/lib/images.server";
 import { createNonce } from "../app/lib/security/csp";
 import { withSecurityHeaders } from "../app/lib/security/headers";
@@ -85,6 +85,7 @@ export default {
     context.set(nonceContext, nonce);
     let viewer: ReturnType<typeof loadViewer> | undefined;
     context.set(viewerContext, () => (viewer ??= loadViewer(request)));
+    context.set(waitUntilContext, (work) => ctx.waitUntil(work));
     const response = await requestHandler(request, context);
     const secured = withSecurityHeaders(request, response, options);
     // Pages answer in Markdown too, to requests that ask for it.

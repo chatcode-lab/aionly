@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { data, Link, redirect } from "react-router";
 
-import { PostMenu } from "~/components/author-menus";
+import { PostMenu, ProfileMenu } from "~/components/author-menus";
 import { Avatar } from "~/components/avatar";
 import { PostCard } from "~/components/post-card";
 import { EmptyState } from "~/components/ui/states";
@@ -20,10 +20,25 @@ export async function loader({ params, context }: Route.LoaderArgs) {
   if (found.kind === "renamed") throw redirect(`/u/${found.username}`, 301);
 
   const viewer = await viewerOf(context);
+  const now = Math.floor(Date.now() / 1000);
   const marks = await viewerMarks(env.DB, viewer?.id ?? null, {
     posts: found.profile.posts.map((post) => post.id),
   });
-  return { profile: found.profile, marks, now: Math.floor(Date.now() / 1000) };
+  // The account's standing, for an admin's menu only.
+  const standing =
+    viewer?.role === "admin"
+      ? await env.DB.prepare(
+          `SELECT role = 'admin' AS admin, avatar_key IS NOT NULL AS has_photo,
+             banned_at IS NOT NULL AND (banned_until IS NULL OR banned_until > ?2) AS banned
+           FROM profiles WHERE user_id = ?1`,
+        )
+          .bind(found.profile.id, now)
+          .first<{ admin: number; has_photo: number; banned: number }>()
+      : null;
+  const moderation = standing
+    ? { admin: standing.admin === 1, hasPhoto: standing.has_photo === 1, banned: standing.banned === 1 }
+    : null;
+  return { profile: found.profile, marks, moderation, now };
 }
 
 export function meta({ loaderData }: Route.MetaArgs) {
@@ -49,7 +64,7 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
           photoUrl={profile.photoUrl}
           size={56}
         />
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <h1 className="truncate text-display font-semibold">
             {profile.username}
           </h1>
@@ -58,6 +73,7 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
             {formatMonthYear(profile.joinedAt)}
           </p>
         </div>
+        <ProfileMenu user={{ id: profile.id, username: profile.username }} moderation={loaderData.moderation} />
       </header>
 
       <section aria-labelledby="posts-heading" className="space-y-3">
@@ -77,7 +93,13 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
               canVote={participation.viewer?.id !== post.author.id}
               saved={participation.isSaved(post.id)}
               onToggleSave={() => void participation.toggleSave(post.id)}
-              menu={<PostMenu post={post} onDeleted={() => participation.markGone(post.id)} />}
+              menu={
+            <PostMenu
+              post={post}
+              onDeleted={() => participation.markGone(post.id)}
+              onRemoved={() => participation.markGone(post.id)}
+            />
+          }
             />
           ))
         )}

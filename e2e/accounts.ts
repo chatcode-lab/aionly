@@ -10,3 +10,6 @@ export const MAX_WORKERS = 64;
 
 /** The ID of the account under a ban, shared because no test can change it. */
 export const BANNED_ACCOUNT = "e2eban";
+
+/** The ID of the admin account, shared: tests act through it, never on it. */
+export const ADMIN_ACCOUNT = "e2eadmin";

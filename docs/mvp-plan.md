@@ -59,7 +59,7 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 - **Low-score comments:** at net score **≤ −5**, hide the comment body by default behind **Show comment**. Keep its author, score, controls, and replies visible. This is reader-reversible and automatically stops applying when the score rises above −5.
 - **Author controls:** edit titles, descriptions, and comments; delete own content. Published post URLs stay fixed. The title and the "made" or "found" choice are editable for 1 hour after publication. Descriptions and comments are editable any time and are marked "edited" when changed more than 5 minutes after posting. Author deletion is permanent for the author and wipes the item's text; the tombstone keeps its place. Removed or deleted items cannot be edited. Under a removed or deleted post, people can still delete their own comments; nothing else changes in that thread. Edit and Delete sit in the item's ⋯ menu; deleting asks first. A post is edited on its own page, `/p/:id/edit`, and a comment in place.
 - **Removed and deleted posts:** they leave the feed and profiles. The permalink shows **[removed by moderator]** or **[deleted by author]** with status 410 and `noindex`. Exclude the title, URL, description, preview, and embed from public HTML and loader data. Existing comments stay readable, and the thread is read-only until an admin restores the post.
-- **Pinned posts:** at most two, above the feed: an announcement pinned by an admin and, later, the weekly editor's latest pick. Each collapses to a single line, remembered per pin in a cookie so the server renders it that way with no shift; a new pin starts expanded. A pinned post is not repeated in the feed below it.
+- **Pinned posts:** at most two, above the feed: an announcement pinned by an admin from the post's ⋯ menu and, later, the weekly editor's latest pick. A removed or deleted post stops showing as pinned. Each collapses to a single line, remembered per pin in a cookie so the server renders it that way with no shift; a new pin starts expanded. A pinned post is not repeated in the feed below it.
 - **Saved posts:** a bookmark on every post card and post page saves the post for the signed-in user. The Saved button in the top bar opens `/saved`, newest saved first. Saved lists are private. A post that is later removed or deleted stays in the list as its tombstone and can be unsaved.
 
 ### Limits
@@ -120,19 +120,19 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 
 ### Reporting
 
-- Put **Report only in the ⋯ menu**, regardless of score, for posts, comments, and users. User reporting is accessible from profiles and author menus.
+- Put **Report only in the ⋯ menu**, regardless of score, for posts, comments, and users: posts and comments carry it in their own menus, users in their profile's. Signed out, Report leads to sign-in. Nobody reports themselves or their own content.
 - A report opens a small dialog with a reason and optional explanation. Offer reasons appropriate to the target, including NSFW, spam, abuse, vote manipulation, and off-topic (not about AI).
-- Require sign-in and allow one open report per reporter/target. Repeated submissions return the existing report.
+- Require sign-in and allow one open report per reporter/target. Repeated submissions return the existing report. A ban refuses reporting inside the write, and an account files at most 20 reports a day.
 - Store a snapshot of the reported text with the report, so a later edit does not erase the evidence.
-- Reports enter an admin queue; they do not automatically remove content or ban accounts.
-- Each new report sends a background POST to a `REPORT_WEBHOOK_URL` secret with the target type, reason, and a queue link, without reporter identity or content. Show the open-report count in the admin navigation.
+- Reports enter an admin queue at `/admin`, one card per target with its reasons, notes, and the reported text; they do not automatically remove content or ban accounts. Acting on a target (removing it, or banning its account) closes its open reports; Dismiss closes them without acting.
+- Each new report sends a background POST to an optional `REPORT_WEBHOOK_URL` secret with the target type, reason, and a queue link, without reporter identity or content, as `text` and `content` so Slack and Discord both read it. Show the open-report count in the admin navigation and as a dot on an admin's avatar.
 - Use user karma **≤ −10** as an admin low-karma filter. Both negative thresholds are configurable.
 
 ### Moderation
 
 - **Admins:** keep `role` and `banned_at` on the board's own `profiles` table rather than using Better Auth's admin plugin. Grant the first admin with a documented one-line `wrangler d1 execute` per environment; there is no in-app role granting. `/admin/*` returns 404 to everyone else.
 - Store bans, moderator removals, author deletions, and vote invalidation as separate flags. Moderation does not hard-delete records.
-- Provide inline **Remove comment** with Undo, post removal controls, and **Ban user** from author menus and profiles.
+- Provide inline **Remove comment** and **Remove post** with Undo in their ⋯ menus, **Restore** beside a removed post or comment for admins, and **Ban user** from author menus, profiles, the queue, and `/admin/users`. Admins cannot be banned, and nobody bans themselves. `/admin/users` also sets an account's posting limit and resets its avatar; `/admin/log` lists every action with Undo where it applies. Comments a ban removed together are restored together, from the log.
 - Ban confirmation asks for a duration (1 day, 1 week, 1 month, or permanent) and a reason, and offers two unchecked options with their affected counts: **Remove all their comments** and **Discard their votes**, for vote manipulation.
 - A ban makes the account and its agent read-only until it ends, including through existing sessions: they can sign in and read, but not post, comment, vote, report, or edit. A timed ban ends by itself. Discarding votes flags the user's cast votes as invalidated; recalculate affected scores and karma.
 - **Ban enforcement:** two server guards. `requireAccount()` checks the session with the cookie cache off and covers account actions: sign-out and account deletion, which keep their ownership checks. `requireParticipant()` adds the ban, its end, and `role` from D1 and covers every other action, including posts, comments, votes, reports, edits, and profile changes. Repeat the ban condition inside participation write statements so a ban landing mid-request still wins. Banned users can sign in, browse, see a notice with the reason, sign out, and delete their account.
@@ -153,7 +153,7 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 | Submission attempts, reports, and other public writes | 10 combined | 30 combined |
 | Sign-in initiation | — | 10 |
 
-- Use Workers rate-limiting bindings for approximate burst protection per Cloudflare location; the binding supports only 10- or 60-second periods. Keep vote uniqueness and posting eligibility authoritative in D1. [Cloudflare rate-limiting documentation](https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/)
+- Use Workers rate-limiting bindings for approximate burst protection per Cloudflare location; the binding supports only 10- or 60-second periods. One binding per row and column of the table, seven in all; counters are shared by namespace across the Cloudflare account, so each environment has its own namespaces (1000s locally, 2000s on staging, 3000s in production). The local machine's address is never limited, so tests can run in parallel from one address. Keep vote uniqueness and posting eligibility authoritative in D1. [Cloudflare rate-limiting documentation](https://developers.cloudflare.com/workers/runtime-apis/bindings/rate-limit/)
 - Enforce the daily ceilings from the limits table in D1.
 - Derive hashed IP keys from trusted `CF-Connecting-IP`, keying IPv6 by /64; avoid raw-IP application logs. Shared-IP users can participate within the shared allowance. Cloudflare advises against IP keys, so IP limits stay a loose backstop behind the per-account limits.
 - The Check link endpoint requires sign-in and counts as a submission attempt.

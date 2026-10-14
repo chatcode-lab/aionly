@@ -12,3 +12,6 @@ export const nonceContext = createContext<string | undefined>(undefined);
 export const viewerContext = createContext<() => Promise<AccountRecord | null>>(
   async () => null,
 );
+
+/** Keeps work going after the response is sent, such as a notification. */
+export const waitUntilContext = createContext<(work: Promise<unknown>) => void>(() => {});

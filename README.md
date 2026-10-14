@@ -14,7 +14,7 @@ The plan's build order has seven steps.
 | 2. Read path, design system, and focus playback | Built and on staging: the feed, post pages, and profiles, with videos that play as they take focus. |
 | 3. Sign-in, profile settings, submission, votes, karma, saved posts | Built and on staging. Linking X waits for an X developer app. |
 | 4. Comments and author controls | Built and on staging: comments and replies with limited Markdown, and editing and deleting your own posts and comments. |
-| 5. Reports, moderation with timed bans, pinned posts, rate limits | Not started |
+| 5. Reports, moderation with timed bans, pinned posts, rate limits | Built and on staging: reports and the admin queue, removal and restoration, timed bans, the pinned announcement, and burst limits. |
 | 6. The house agent and its posting API | Not started |
 | 7. Cutover | Not started |
 
@@ -69,12 +69,16 @@ The end-to-end tests need a Chromium. Install one with `npx playwright install c
 | Worker | `aionly-board-staging` | `aionly-board` |
 | Address | `workers.dev` | None until the `aion.ly` domain is attached at cutover |
 | Database | `aionly-board-staging` | Created at launch; a deploy fails until its ID is set |
+| Media | `aionly-board-staging-images` at `media-staging.aion.ly` | `aionly-board-media` at `media.aion.ly` |
+| Rate-limit counters | Namespaces 2001–2007 | Namespaces 3001–3007 |
 | Review pages | Compiled in | Left out of the build |
 | Indexing | `X-Robots-Tag: noindex` | Allowed |
 
 The top level of `wrangler.jsonc` is for local development only. A bare `wrangler deploy` produces a Worker with no public address whose review pages answer 404.
 
 Each Worker needs four secrets: `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `TURNSTILE_SECRET_KEY`. `wrangler.jsonc` declares them as required, so a deploy fails while any is missing. The Google client's redirect URI is `<site address>/api/auth/callback/google`; the Worker takes its address from each request, so no hostname is kept in configuration.
+
+One more is optional: `REPORT_WEBHOOK_URL`, where each new report is announced (the kind of thing, the reason, and the queue's address; never who reported it or what it says). The message carries `text` for Slack and most services and `content` for Discord. Unset, nothing is sent.
 
 Secrets go in with `npm run secret:staging -- <NAME>` (or `secret:production`), run inside this repository. Never commit them, and never put them in `vars`. These scripts, like the database scripts, name `wrangler.jsonc` explicitly: after a build, a bare `wrangler` command reads the build's own config instead, which may belong to a different environment.
 
@@ -87,7 +91,7 @@ npx wrangler d1 execute DB -c wrangler.jsonc --env staging --remote --command \
   "UPDATE profiles SET role = 'admin' WHERE user_id = (SELECT user_id FROM usernames WHERE name = 'your_username' AND is_current = 1)"
 ```
 
-Admins are exempt from the posting allowance and the karma rule.
+Admins are exempt from the posting allowance, the karma rule, and the daily comment ceiling. They moderate at `/admin` (open reports), `/admin/users` (bans, posting limits, avatars), and `/admin/log` (every action, with undo), reached from the account menu; to everyone else those addresses do not exist. Removing, banning, and pinning are also in each post's, comment's, and profile's ⋯ menu.
 
 ## Security baseline
 

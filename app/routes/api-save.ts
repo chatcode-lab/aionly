@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 
+import { rateLimited, withinLimits } from "~/lib/security/rate-limit.server";
 import { setSaved } from "~/lib/db/bookmarks.server";
 import { readSmallJson, ROW_ID } from "~/lib/security/body";
 import { requireParticipant } from "~/lib/viewer.server";
@@ -9,6 +10,7 @@ import type { Route } from "./+types/api-save";
 /** Saves or unsaves a post for the signed-in account. */
 export async function action({ request, context }: Route.ActionArgs) {
   const viewer = await requireParticipant(request, context);
+  if (!(await withinLimits(request, "write", viewer.id))) return rateLimited();
   const body = (await readSmallJson(request)) as
     | { id?: unknown; saved?: unknown }
     | undefined;

@@ -2,26 +2,38 @@ import { createContext, type ReactNode, useCallback, useContext, useState } from
 
 import { Toast } from "./ui/toast";
 
-const NotifyContext = createContext<(message: string) => void>(() => {});
+type ToastAction = { label: string; onAction: () => void };
+type Notify = (message: string, action?: ToastAction) => void;
 
-/** Shows a short message in the toast area. One at a time is enough. */
-export function useNotify(): (message: string) => void {
+const NotifyContext = createContext<Notify>(() => {});
+
+/**
+ * Shows a short message in the toast area, with an optional action such as
+ * Undo. One at a time is enough.
+ */
+export function useNotify(): Notify {
   return useContext(NotifyContext);
 }
 
 export function NotifyProvider({ children }: { children: ReactNode }) {
-  const [message, setMessage] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ message: string; action?: ToastAction; key: number } | null>(null);
   const [open, setOpen] = useState(false);
 
-  const notify = useCallback((next: string) => {
-    setMessage(next);
+  const notify = useCallback<Notify>((message, action) => {
+    setToast((current) => ({ message, action, key: (current?.key ?? 0) + 1 }));
     setOpen(true);
   }, []);
 
   return (
     <NotifyContext value={notify}>
       {children}
-      <Toast open={open} onOpenChange={setOpen} message={message ?? ""} />
+      <Toast
+        key={toast?.key}
+        open={open}
+        onOpenChange={setOpen}
+        message={toast?.message ?? ""}
+        action={toast?.action}
+      />
     </NotifyContext>
   );
 }

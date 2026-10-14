@@ -96,3 +96,17 @@ export async function requireParticipant(
   }
   return viewer;
 }
+
+/**
+ * The signed-in admin, for moderation. Everyone else, signed in or not, is
+ * told there is nothing here, so admin pages and actions stay unseen.
+ */
+export async function requireAdmin(
+  request: Request,
+  context: Readonly<RouterContextProvider>,
+): Promise<AccountRecord> {
+  const viewer = await viewerOf(context);
+  if (viewer?.role === "admin" && !viewer.ban) return viewer;
+  if (isDataRequest(request)) throw Response.json({ error: "not_found" }, { status: 404 });
+  throw new Response("Not Found", { status: 404 });
+}

@@ -25,7 +25,10 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       Math.floor(Date.now() / 1000),
       url.searchParams.get("cursor"),
     );
-    return Response.json({ ...page, marks: await marks(page.posts) });
+    // The announcement is pinned above the feed, not repeated in it.
+    const pinned = await env.DB.prepare(`SELECT post_id FROM pins WHERE slot = 'announcement'`).first<{ post_id: string }>();
+    const posts = page.posts.filter((post) => post.id !== pinned?.post_id);
+    return Response.json({ ...page, posts, marks: await marks(posts) });
   }
 
   const ids = (url.searchParams.get("ids") ?? "").split(",");

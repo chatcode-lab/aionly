@@ -1,13 +1,20 @@
-import { Pencil, Trash2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { Ban, Flag, Pencil, Pin, PinOff, ShieldX, Trash2, UserRoundX } from "lucide-react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Link, useFetcher } from "react-router";
 
 import type { AuthoringResult } from "~/lib/authoring";
 import type { CommentData, PostCardData } from "~/lib/public-types";
+import type { ReportTarget } from "~/lib/reports";
+import { useModeration } from "~/lib/use-moderation";
 import { useViewer } from "~/lib/use-viewer";
 
+import { BanDialog } from "./ban-dialog";
+import { useNotify } from "./notify";
+import { ReportDialog } from "./report-dialog";
+import { useSignIn } from "./sign-in";
 import { ConfirmDialog } from "./ui/confirm";
 import { Menu, MenuItem, MenuSeparator } from "./ui/menu";
+import { useModerate } from "./use-moderate";
 
 /** Submits one deletion to the post page's action and reports the outcome. */
 function useDeletion(postId: string, onDeleted?: () => void) {
@@ -41,43 +48,177 @@ function useDeletion(postId: string, onDeleted?: () => void) {
   };
 }
 
-/**
- * The ⋯ menu on a post, for now only on its author's own: Edit and Delete.
- * Reporting arrives with moderation.
- */
-export function PostMenu({ post, onDeleted }: { post: PostCardData; onDeleted?: () => void }) {
+/** Who is looking, and what they may do to something by `authorId`. */
+function useRoles(authorId: string | undefined) {
   const viewer = useViewer();
-  const deletion = useDeletion(post.id, onDeleted);
-  if (!viewer || viewer.ban || viewer.id !== post.author.id) return null;
+  const active = viewer !== null && !viewer.ban;
+  const own = viewer !== null && viewer.id === authorId;
+  return {
+    viewer,
+    own,
+    /** Editing and deleting: the author, while not banned. */
+    author: own && active,
+    /** Reporting: anyone else; signed out, it leads to sign-in. */
+    reporter: !own && (viewer === null || active),
+    admin: active && viewer.role === "admin",
+  };
+}
 
+/** Report, for anyone signed in; signed out, it opens sign-in. */
+function useReporting(type: ReportTarget, id: string) {
+  const viewer = useViewer();
+  const signIn = useSignIn();
+  const [open, setOpen] = useState(false);
+  return {
+    item: (label = "Report") => (
+      <MenuItem
+        onSelect={() => (viewer ? setOpen(true) : signIn({ title: "Sign in to report" }))}
+      >
+        <Flag size={16} aria-hidden /> {label}
+      </MenuItem>
+    ),
+    dialog: viewer ? <ReportDialog type={type} id={id} open={open} onOpenChange={setOpen} /> : null,
+  };
+}
+
+/** Ban, for admins, against an author who is not themselves or deleted. */
+function useBanning(author: { id: string; username: string } | null) {
+  const [open, setOpen] = useState(false);
+  return {
+    item: () =>
+      author ? (
+        <MenuItem danger onSelect={() => setOpen(true)}>
+          <Ban size={16} aria-hidden /> Ban {author.username}
+        </MenuItem>
+      ) : null,
+    dialog: author ? <BanDialog user={author} open={open} onOpenChange={setOpen} /> : null,
+  };
+}
+
+function Sections({ sections }: { sections: ReactNode[][] }) {
+  const shown = sections.map((items) => items.filter(Boolean)).filter((items) => items.length > 0);
   return (
     <>
-      <Menu label="Post actions">
-        <MenuItem asChild>
-          <Link to={`/p/${post.id}/edit`}>
-            <Pencil size={16} aria-hidden /> Edit
-          </Link>
-        </MenuItem>
-        <MenuSeparator />
-        <MenuItem danger onSelect={() => deletion.setOpen(true)}>
-          <Trash2 size={16} aria-hidden /> Delete
-        </MenuItem>
-      </Menu>
-      <ConfirmDialog
-        open={deletion.open}
-        onOpenChange={deletion.setOpen}
-        title="Delete this post?"
-        description="It leaves the feed and your profile for good, and its link can be posted again. Its comments stay, read-only."
-        confirmLabel="Delete post"
-        busy={deletion.busy}
-        error={deletion.error}
-        onConfirm={() => deletion.submit({ intent: "delete-post" })}
-      />
+      {shown.map((items, index) => (
+        <div key={index}>
+          {index > 0 ? <MenuSeparator /> : null}
+          {items}
+        </div>
+      ))}
     </>
   );
 }
 
-/** The ⋯ menu on a comment, for now only on its author's own. */
+/**
+ * The ⋯ menu on a post: Edit and Delete for its author, Report for anyone
+ * else, and pinning, removal, and banning for admins.
+ */
+export function PostMenu({
+  post,
+  onDeleted,
+  onRemoved,
+}: {
+  post: PostCardData;
+  onDeleted?: () => void;
+  /** An admin removed it: lists drop it at once. */
+  onRemoved?: () => void;
+}) {
+  const roles = useRoles(post.author.id);
+  const moderation = useModeration();
+  const notify = useNotify();
+  const deletion = useDeletion(post.id, onDeleted);
+  const reporting = useReporting("post", post.id);
+  const { run } = useModerate();
+  const author = roles.admin && !roles.own && post.author.username !== "[deleted]" ? post.author : null;
+  const banning = useBanning(author);
+  if (!roles.author && !roles.reporter && !roles.admin) return null;
+  const pinned = moderation?.pinnedPostId === post.id;
+
+  return (
+    <>
+      <Menu label="Post actions">
+        <Sections
+          sections={[
+            roles.author
+              ? [
+                  <MenuItem key="edit" asChild>
+                    <Link to={`/p/${post.id}/edit`}>
+                      <Pencil size={16} aria-hidden /> Edit
+                    </Link>
+                  </MenuItem>,
+                ]
+              : [],
+            roles.reporter ? [<div key="report">{reporting.item()}</div>] : [],
+            roles.admin
+              ? [
+                  <MenuItem
+                    key="pin"
+                    onSelect={() =>
+                      run(pinned ? { action: "unpin" } : { action: "pin", id: post.id }, () =>
+                        notify(pinned ? "Unpinned." : "Pinned above the feed as the announcement."),
+                      )
+                    }
+                  >
+                    {pinned ? <PinOff size={16} aria-hidden /> : <Pin size={16} aria-hidden />}
+                    {pinned ? "Unpin" : "Pin as announcement"}
+                  </MenuItem>,
+                  roles.own ? null : (
+                    <MenuItem
+                      key="remove"
+                      danger
+                      onSelect={() =>
+                        run(
+                          { action: "remove_post", id: post.id },
+                          (answer) => {
+                            onRemoved?.();
+                            notify("Post removed.", {
+                              label: "Undo",
+                              onAction: () => void run({ action: "restore", actionId: String(answer.actionId) }),
+                            });
+                          },
+                          // A list drops the card itself and keeps what it loaded.
+                          { refresh: !onRemoved },
+                        )
+                      }
+                    >
+                      <ShieldX size={16} aria-hidden /> Remove post
+                    </MenuItem>
+                  ),
+                  <div key="ban">{banning.item()}</div>,
+                ]
+              : [],
+            roles.author
+              ? [
+                  <MenuItem key="delete" danger onSelect={() => deletion.setOpen(true)}>
+                    <Trash2 size={16} aria-hidden /> Delete
+                  </MenuItem>,
+                ]
+              : [],
+          ]}
+        />
+      </Menu>
+      {reporting.dialog}
+      {banning.dialog}
+      {roles.author ? (
+        <ConfirmDialog
+          open={deletion.open}
+          onOpenChange={deletion.setOpen}
+          title="Delete this post?"
+          description="It leaves the feed and your profile for good, and its link can be posted again. Its comments stay, read-only."
+          confirmLabel="Delete post"
+          busy={deletion.busy}
+          error={deletion.error}
+          onConfirm={() => deletion.submit({ intent: "delete-post" })}
+        />
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * The ⋯ menu on a comment: Edit and Delete for its author, Report for anyone
+ * else, and removal and banning for admins.
+ */
 export function CommentMenu({
   postId,
   comment,
@@ -88,35 +229,121 @@ export function CommentMenu({
   /** Absent where the thread is read-only: deleting is still possible. */
   onEdit?: () => void;
 }) {
-  const viewer = useViewer();
+  const roles = useRoles(comment.author?.id);
+  const notify = useNotify();
   const deletion = useDeletion(postId);
-  if (!viewer || viewer.ban || !comment.author || viewer.id !== comment.author.id) return null;
+  const reporting = useReporting("comment", comment.id);
+  const { run } = useModerate();
+  const author = roles.admin && !roles.own && comment.author && comment.author.username !== "[deleted]" ? comment.author : null;
+  const banning = useBanning(author);
+  if (!comment.author || (!roles.author && !roles.reporter && !roles.admin)) return null;
 
   return (
     <>
       <Menu label="Comment actions">
-        {onEdit ? (
-          <>
-            <MenuItem onSelect={onEdit}>
-              <Pencil size={16} aria-hidden /> Edit
-            </MenuItem>
-            <MenuSeparator />
-          </>
-        ) : null}
-        <MenuItem danger onSelect={() => deletion.setOpen(true)}>
-          <Trash2 size={16} aria-hidden /> Delete
-        </MenuItem>
+        <Sections
+          sections={[
+            roles.author && onEdit
+              ? [
+                  <MenuItem key="edit" onSelect={onEdit}>
+                    <Pencil size={16} aria-hidden /> Edit
+                  </MenuItem>,
+                ]
+              : [],
+            roles.reporter ? [<div key="report">{reporting.item()}</div>] : [],
+            roles.admin && !roles.own
+              ? [
+                  <MenuItem
+                    key="remove"
+                    danger
+                    onSelect={() =>
+                      run({ action: "remove_comment", id: comment.id }, (answer) =>
+                        notify("Comment removed.", {
+                          label: "Undo",
+                          onAction: () => void run({ action: "restore", actionId: String(answer.actionId) }),
+                        }),
+                      )
+                    }
+                  >
+                    <ShieldX size={16} aria-hidden /> Remove comment
+                  </MenuItem>,
+                  <div key="ban">{banning.item()}</div>,
+                ]
+              : [],
+            roles.author
+              ? [
+                  <MenuItem key="delete" danger onSelect={() => deletion.setOpen(true)}>
+                    <Trash2 size={16} aria-hidden /> Delete
+                  </MenuItem>,
+                ]
+              : [],
+          ]}
+        />
       </Menu>
-      <ConfirmDialog
-        open={deletion.open}
-        onOpenChange={deletion.setOpen}
-        title="Delete this comment?"
-        description="It is replaced by [deleted by author] for good. Replies to it stay."
-        confirmLabel="Delete comment"
-        busy={deletion.busy}
-        error={deletion.error}
-        onConfirm={() => deletion.submit({ intent: "delete-comment", id: comment.id })}
-      />
+      {reporting.dialog}
+      {banning.dialog}
+      {roles.author ? (
+        <ConfirmDialog
+          open={deletion.open}
+          onOpenChange={deletion.setOpen}
+          title="Delete this comment?"
+          description="It is replaced by [deleted by author] for good. Replies to it stay."
+          confirmLabel="Delete comment"
+          busy={deletion.busy}
+          error={deletion.error}
+          onConfirm={() => deletion.submit({ intent: "delete-comment", id: comment.id })}
+        />
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * The ⋯ menu on a profile: Report for anyone else, and for admins banning
+ * or unbanning, and resetting the avatar.
+ */
+export function ProfileMenu({
+  user,
+  moderation,
+}: {
+  user: { id: string; username: string };
+  /** Only for admins: the account's standing. */
+  moderation?: { banned: boolean; admin: boolean; hasPhoto: boolean } | null;
+}) {
+  const roles = useRoles(user.id);
+  const notify = useNotify();
+  const reporting = useReporting("user", user.id);
+  const { run } = useModerate();
+  const banning = useBanning(roles.admin && !roles.own && moderation && !moderation.admin && !moderation.banned ? user : null);
+  if (!roles.reporter && !roles.admin) return null;
+
+  return (
+    <>
+      <Menu label="Profile actions">
+        <Sections
+          sections={[
+            roles.reporter ? [<div key="report">{reporting.item("Report user")}</div>] : [],
+            roles.admin && moderation
+              ? [
+                  moderation.banned ? (
+                    <MenuItem key="unban" onSelect={() => run({ action: "unban", userId: user.id }, () => notify(`${user.username} is unbanned.`))}>
+                      <Ban size={16} aria-hidden /> Unban {user.username}
+                    </MenuItem>
+                  ) : (
+                    <div key="ban">{banning.item()}</div>
+                  ),
+                  moderation.hasPhoto ? (
+                    <MenuItem key="avatar" onSelect={() => run({ action: "reset_avatar", userId: user.id }, () => notify("Avatar reset to the letter."))}>
+                      <UserRoundX size={16} aria-hidden /> Reset avatar
+                    </MenuItem>
+                  ) : null,
+                ]
+              : [],
+          ]}
+        />
+      </Menu>
+      {reporting.dialog}
+      {banning.dialog}
     </>
   );
 }

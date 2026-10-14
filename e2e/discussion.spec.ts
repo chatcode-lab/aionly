@@ -154,10 +154,13 @@ test("the author edits and then deletes their own comment, and others get no men
   await expect(page.getByText(edited, { exact: true })).toHaveCount(0);
   await expect(item).toContainText("[deleted by author]");
 
-  // Sample comments by other people have no menu for this account.
+  // Other people's comments offer Report, never Edit or Delete.
   const others = page.locator("li[id^='c-s_comment']");
   if ((await others.count()) > 0) {
-    await expect(others.first().getByRole("button", { name: "Comment actions" })).toHaveCount(0);
+    await others.first().getByRole("button", { name: "Comment actions" }).first().click();
+    await expect(page.getByRole("menuitem", { name: "Report" })).toBeVisible();
+    await expect(page.getByRole("menuitem", { name: /Edit|Delete/ })).toHaveCount(0);
+    await page.keyboard.press("Escape");
   }
 });
 
@@ -208,10 +211,13 @@ test("a post deleted from a list leaves it at once", async ({ page, context, acc
   await expect(page.locator("article", { hasText: title })).toHaveCount(0);
 });
 
-test("someone else's post has no edit page and no author menu", async ({ page, context, account }) => {
+test("someone else's post has no edit page, and its menu only reports", async ({ page, context, account }) => {
   await account.signIn(context);
   await open(page, POST);
-  await expect(page.locator("article").first().getByRole("button", { name: "Post actions" })).toHaveCount(0);
+  await page.locator("article").first().getByRole("button", { name: "Post actions" }).click();
+  await expect(page.getByRole("menuitem", { name: "Report" })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: /Edit|Delete|Remove|Pin/ })).toHaveCount(0);
+  await page.keyboard.press("Escape");
   const response = await page.request.get(`${POST}/edit`);
   expect(response.status()).toBe(404);
 });

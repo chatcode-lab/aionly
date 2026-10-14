@@ -3,6 +3,7 @@ import { redirect } from "react-router";
 import { SignInPanel } from "~/components/sign-in";
 import { authFor } from "~/lib/auth.server";
 import { detectInAppBrowser } from "~/lib/in-app-browser";
+import { withinLimits } from "~/lib/security/rate-limit.server";
 import { safeReturnPath } from "~/lib/security/request";
 import { viewerOf } from "~/lib/viewer.server";
 
@@ -19,6 +20,7 @@ const ERRORS: Record<string, string> = {
   email_not_verified: "Google has not verified this account's email. Verify it with Google, then try again.",
   // Another Google account already signed up with the same email.
   account_not_linked: "That email already belongs to an account here, made with a different Google account.",
+  rate_limited: "Too many sign-ins from this network just now. Wait a minute, then try again.",
 };
 
 export async function loader({ request, context }: Route.LoaderArgs) {
@@ -44,6 +46,9 @@ export async function action({ request }: Route.ActionArgs) {
   const origin = new URL(request.url).origin;
   const form = await request.formData();
   const next = safeReturnPath(String(form.get("next") ?? ""), origin);
+  if (!(await withinLimits(request, "signin", null))) {
+    throw redirect(`/signin?${new URLSearchParams({ next, error: "rate_limited" })}`);
+  }
 
   const response = await authFor(request).api.signInSocial({
     body: {

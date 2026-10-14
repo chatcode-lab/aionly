@@ -362,6 +362,8 @@ const insert = (table: string, row: Record<string, string | number | null | unde
 // Clear earlier sample rows, children first: the rows this script made, and
 // whatever real accounts attached to them since, such as votes and saves.
 for (const [table, ...columns] of [
+  ["pins", "post_id"],
+  ["reports", "target_id"],
   ["mod_actions", "id"],
   ["bookmarks", "user_id", "post_id"],
   ["votes", "voter_id", "target_id"],

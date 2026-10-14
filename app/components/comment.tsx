@@ -40,6 +40,7 @@ export function CommentThread({
   renderAction,
   renderBody,
   renderAfter,
+  renderTombstone,
 }: {
   comments: CommentData[];
   now: number;
@@ -66,6 +67,8 @@ export function CommentThread({
   renderBody?: (comment: CommentData) => ReactNode;
   /** Under the controls, above the replies, such as a reply box. */
   renderAfter?: (comment: CommentData) => ReactNode;
+  /** Beside a removed or deleted comment's marker, such as Restore for admins. */
+  renderTombstone?: (comment: CommentData) => ReactNode;
 }) {
   return (
     <ul
@@ -97,6 +100,7 @@ export function CommentThread({
           renderAction={renderAction}
           renderBody={renderBody}
           renderAfter={renderAfter}
+          renderTombstone={renderTombstone}
         />
       ))}
     </ul>
@@ -119,6 +123,7 @@ function CommentItem({
   renderAction,
   renderBody,
   renderAfter,
+  renderTombstone,
 }: {
   comment: CommentData;
   now: number;
@@ -136,6 +141,7 @@ function CommentItem({
   renderAction?: (comment: CommentData) => ReactNode;
   renderBody?: (comment: CommentData) => ReactNode;
   renderAfter?: (comment: CommentData) => ReactNode;
+  renderTombstone?: (comment: CommentData) => ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [revealed, setRevealed] = useState(false);
@@ -174,10 +180,11 @@ function CommentItem({
             {renderBadge?.(comment)}
           </AuthorLine>
         ) : (
-          <p className="text-meta text-text-faint">
+          <p className="flex items-center gap-2 text-meta text-text-faint">
             {comment.state === "removed"
               ? "[removed by moderator]"
               : "[deleted by author]"}
+            {renderTombstone?.(comment)}
           </p>
         )}
         {collapsed ? (
@@ -253,6 +260,7 @@ function CommentItem({
             renderAction={renderAction}
             renderBody={renderBody}
             renderAfter={renderAfter}
+            renderTombstone={renderTombstone}
           />
         ) : null}
         </>

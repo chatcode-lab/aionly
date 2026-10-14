@@ -1,5 +1,6 @@
 import { defaultRange, newPage, postsByIds, topSnapshot } from "../db/feed.server";
 import { mentionNames } from "../db/mentions.server";
+import { announcement } from "../db/pins.server";
 import { postPage } from "../db/posts.server";
 import { profileByName } from "../db/profiles.server";
 import { PAGE_SIZE, parseRange, parseSort, RANGE_LABEL } from "../feed";
@@ -63,10 +64,12 @@ async function feedMarkdown(db: D1Database, url: URL): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
   const sort = parseSort(url.searchParams.get("sort"));
   const range = parseRange(url.searchParams.get("range")) ?? (await defaultRange(db, now));
-  const posts =
+  const pin = await announcement(db);
+  const posts = (
     sort === "new"
       ? (await newPage(db, range, now, null)).posts
-      : await postsByIds(db, (await topSnapshot(db, range, now)).slice(0, PAGE_SIZE));
+      : await postsByIds(db, (await topSnapshot(db, range, now)).filter((id) => id !== pin?.post.id).slice(0, PAGE_SIZE))
+  ).filter((post) => post.id !== pin?.post.id);
   const names = await mentionNames(db, mentionIds(...posts.map((post) => post.excerpt)));
   const label = RANGE_LABEL[range].toLowerCase();
 
@@ -80,6 +83,10 @@ async function feedMarkdown(db: D1Database, url: URL): Promise<string> {
       .join(", ")}`,
     "",
   ];
+  if (pin) {
+    const [first, ...rest] = cardLines(pin.post, url.origin, names);
+    lines.push(`Pinned announcement${pin.note ? `: ${pin.note}` : ""}`, "", `- ${first}`, ...rest.map((line) => `  ${line}`), "");
+  }
   if (posts.length === 0) lines.push("Nothing posted in this range.");
   posts.forEach((post, index) => {
     const [first, ...rest] = cardLines(post, url.origin, names);

@@ -1,3 +1,4 @@
+import { env } from "cloudflare:workers";
 import { useEffect } from "react";
 import {
   isRouteErrorResponse,
@@ -50,7 +51,17 @@ export async function loader({ request, context }: Route.LoaderArgs) {
         ban: account.ban,
       }
     : null;
+  // What admins need on every page: the queue's size for the menu, and the
+  // pinned post, so its menu offers Unpin. Nobody else pays for the query.
+  const moderation =
+    account?.role === "admin"
+      ? await env.DB.prepare(
+          `SELECT (SELECT COUNT(*) FROM reports WHERE status = 'open') AS open_reports,
+                  (SELECT post_id FROM pins WHERE slot = 'announcement') AS pinned`,
+        ).first<{ open_reports: number; pinned: string | null }>()
+      : null;
   return {
+    moderation: moderation ? { openReports: moderation.open_reports, pinnedPostId: moderation.pinned } : null,
     // Links to this host in posts and comments are followed in the app.
     host: new URL(request.url).host,
     theme: readTheme(request.headers.get("Cookie")),

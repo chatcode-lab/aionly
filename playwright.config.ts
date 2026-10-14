@@ -3,7 +3,7 @@ import { defineConfig, devices } from "@playwright/test";
 const PORT = 4173;
 
 // Tests that publish posts or add comments.
-const WRITES = /(submit|discussion)\.spec\.ts/;
+const WRITES = /(submit|discussion|moderation)\.spec\.ts/;
 
 // Point this at an existing Chromium to skip `npx playwright install chromium`.
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH;
@@ -16,10 +16,6 @@ const executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH;
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
-  // The local preview now and then fails to hand a request to the Workers
-  // runtime ("TypeError: fetch failed" from Miniflare), so the app never sees
-  // it. One retry absorbs that; a test that needed it is reported as flaky.
-  retries: 1,
   forbidOnly: Boolean(process.env.CI),
   reporter: "list",
   use: {
@@ -54,7 +50,7 @@ export default defineConfig({
   webServer: {
     // Builds for staging, fills a local copy of its database with sample
     // posts, and serves the result.
-    command: `CLOUDFLARE_ENV=staging npm run build && npm run db:prepare:e2e && npx vite preview --port ${PORT} --strictPort`,
+    command: `CLOUDFLARE_ENV=staging npm run build && npm run db:prepare:e2e && NODE_OPTIONS="--require ./e2e/support/preview-fixes.cjs" npx vite preview --port ${PORT} --strictPort`,
     url: `http://localhost:${PORT}`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

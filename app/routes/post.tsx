@@ -6,8 +6,10 @@ import { CommentMenu, PostMenu } from "~/components/author-menus";
 import { CommentThread } from "~/components/comment";
 import { CommentBox, CommentEditor } from "~/components/comment-box";
 import { MentionsProvider } from "~/components/mentions";
+import { useNotify } from "~/components/notify";
 import { PostCard, PostTombstone } from "~/components/post-card";
 import { useSignIn } from "~/components/sign-in";
+import { useModerate } from "~/components/use-moderate";
 import { useParticipation } from "~/components/use-participation";
 import type { AuthoringIntent, AuthoringResult } from "~/lib/authoring";
 import { cleanComment, commentProblem } from "~/lib/comments/rules";
@@ -26,6 +28,7 @@ import { newId } from "~/lib/ids";
 import type { CommentData } from "~/lib/public-types";
 import { mentionIds, replaceMentions } from "~/lib/text/mentions";
 import { ROW_ID } from "~/lib/security/body";
+import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { viewerOf } from "~/lib/viewer.server";
 
 import type { Route } from "./+types/post";
@@ -108,6 +111,9 @@ export async function action({ params, request, context }: Route.ActionArgs) {
   const viewer = await viewerOf(context);
   if (!viewer) return refuse("Sign in to continue.", 401);
   if (viewer.ban) return refuse("Your account is read-only while the ban lasts.", 403);
+  if (!(await withinLimits(request, intent === "comment" ? "comment" : "write", viewer.id))) {
+    return refuse(RATE_LIMITED_MESSAGE, 429);
+  }
 
   const now = Math.floor(Date.now() / 1000);
   const postId = params.id;
@@ -220,6 +226,22 @@ function countAll(comments: Route.ComponentProps["loaderData"]["comments"]): num
   return comments.reduce((total, comment) => total + 1 + countAll(comment.replies), 0);
 }
 
+/** Restores a removed post or comment, for admins; single removals only. */
+function RestoreButton({ type, id }: { type: "post" | "comment"; id: string }) {
+  const { run, busy } = useModerate();
+  const notify = useNotify();
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={() => run({ action: "restore_target", type, id }, () => notify(type === "post" ? "Post restored." : "Comment restored."))}
+      className="rounded-md px-1.5 py-0.5 text-meta font-medium text-accent hover:bg-accent-soft"
+    >
+      Restore
+    </button>
+  );
+}
+
 export default function Post({ loaderData }: Route.ComponentProps) {
   const participation = useParticipation(loaderData.marks, loaderData.now);
   const signIn = useSignIn();
@@ -233,6 +255,7 @@ export default function Post({ loaderData }: Route.ComponentProps) {
   const closeReply = useCallback(() => setReplyingTo(null), []);
   const closeEditor = useCallback(() => setEditing(null), []);
   const own = (comment: CommentData) => viewerId !== undefined && comment.author?.id === viewerId;
+  const admin = participation.viewer?.role === "admin" && !participation.viewer.ban;
 
   return (
     <MentionsProvider names={loaderData.mentions}>
@@ -255,7 +278,9 @@ export default function Post({ loaderData }: Route.ComponentProps) {
             menu={<PostMenu post={loaderData.post} />}
           />
         ) : (
-          <PostTombstone state={loaderData.state} />
+          <PostTombstone state={loaderData.state}>
+            {admin && loaderData.state === "removed" ? <RestoreButton type="post" id={postId} /> : null}
+          </PostTombstone>
         )}
 
         <section aria-labelledby="comments-heading" className="space-y-3">
@@ -290,7 +315,9 @@ export default function Post({ loaderData }: Route.ComponentProps) {
                   setReplyingTo((current) => (current === comment.id ? null : comment.id));
                 }}
                 renderMenu={(comment) =>
-                  own(comment) ? (
+                  // Under a removed or deleted post, only an author's own
+                  // comments keep a menu, for deleting them.
+                  live || own(comment) ? (
                     <CommentMenu
                       postId={postId}
                       comment={comment}
@@ -304,6 +331,9 @@ export default function Post({ loaderData }: Route.ComponentProps) {
                       }
                     />
                   ) : null
+                }
+                renderTombstone={(comment) =>
+                  admin && comment.state === "removed" ? <RestoreButton type="comment" id={comment.id} /> : null
                 }
                 renderBody={(comment) =>
                   live && editing === comment.id ? (

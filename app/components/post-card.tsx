@@ -300,10 +300,11 @@ export function PostCard({
  * What a permalink shows once a post is removed or deleted. The title, URL,
  * description, preview, and embed never reach this component.
  */
-export function PostTombstone({ state }: { state: "removed" | "deleted" }) {
+export function PostTombstone({ state, children }: { state: "removed" | "deleted"; children?: ReactNode }) {
   return (
     <article className="rounded-xl border border-dashed border-border-strong px-4 py-6 text-center text-body text-text-muted">
       {state === "removed" ? "[removed by moderator]" : "[deleted by author]"}
+      {children ? <div className="mt-3 flex justify-center">{children}</div> : null}
     </article>
   );
 }

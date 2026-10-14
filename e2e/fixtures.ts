@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { test as base, type BrowserContext, expect, type Page } from "@playwright/test";
 
-import { ACCOUNTS_PER_WORKER, BANNED_ACCOUNT, MAX_WORKERS } from "./accounts";
+import { ACCOUNTS_PER_WORKER, ADMIN_ACCOUNT, BANNED_ACCOUNT, MAX_WORKERS } from "./accounts";
 
 export interface PageProblems {
   /** Console errors and uncaught exceptions. */
@@ -159,6 +159,17 @@ function testAccount(id: string, username: string, baseURL: string): TestAccount
 // one and can change it freely. See scripts/e2e-accounts.ts.
 let accountsTaken = 0;
 
+function nextAccount(baseURL: string, workerIndex: number): TestAccount {
+  if (accountsTaken >= ACCOUNTS_PER_WORKER || workerIndex >= MAX_WORKERS) {
+    throw new Error("out of test accounts: raise the counts in e2e/accounts.ts");
+  }
+  // The worker index is unique over the whole run, so no two workers,
+  // even one replacing another, hand out the same account.
+  const n = workerIndex * ACCOUNTS_PER_WORKER + accountsTaken;
+  accountsTaken += 1;
+  return testAccount(`e2e${n}`, `e2e_user_${n}`, baseURL);
+}
+
 /**
  * Turnstile's script, standing in for Cloudflare's: it shows a box and passes
  * at once with the token Cloudflare's test keys produce.
@@ -188,20 +199,25 @@ export const test = base.extend<{
   problems: PageProblems;
   /** A fresh account of the test's own, not yet signed in. */
   account: TestAccount;
+  /** A second fresh account, for what one account does to another's. */
+  otherAccount: TestAccount;
   /** An account under a permanent ban, shared by every test. */
   bannedAccount: TestAccount;
+  /** The admin, shared by every test that moderates. */
+  adminAccount: TestAccount;
 }>({
   fakePlayers: [false, { option: true }],
 
   account: async ({ baseURL }, use, testInfo) => {
-    if (accountsTaken >= ACCOUNTS_PER_WORKER || testInfo.workerIndex >= MAX_WORKERS) {
-      throw new Error("out of test accounts: raise the counts in e2e/accounts.ts");
-    }
-    // The worker index is unique over the whole run, so no two workers,
-    // even one replacing another, hand out the same account.
-    const n = testInfo.workerIndex * ACCOUNTS_PER_WORKER + accountsTaken;
-    accountsTaken += 1;
-    await use(testAccount(`e2e${n}`, `e2e_user_${n}`, baseURL!));
+    await use(nextAccount(baseURL!, testInfo.workerIndex));
+  },
+
+  otherAccount: async ({ baseURL }, use, testInfo) => {
+    await use(nextAccount(baseURL!, testInfo.workerIndex));
+  },
+
+  adminAccount: async ({ baseURL }, use) => {
+    await use(testAccount(ADMIN_ACCOUNT, "e2e_admin", baseURL!));
   },
 
   bannedAccount: async ({ baseURL }, use) => {

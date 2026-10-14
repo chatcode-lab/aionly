@@ -12,6 +12,7 @@ import { renameStatus } from "~/lib/db/accounts.server";
 import { formatDate } from "~/lib/format";
 import { setGooglePhoto } from "~/lib/images.server";
 import { imageAddress } from "~/lib/media.server";
+import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { requireAccount, requireParticipant } from "~/lib/viewer.server";
 
 import type { Route } from "./+types/settings";
@@ -44,6 +45,11 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 export async function action({ request, context }: Route.ActionArgs) {
   const viewer = await requireParticipant(request, context);
   const form = await request.formData();
+  if (!(await withinLimits(request, "write", viewer.id))) {
+    return form.get("intent") === "photo"
+      ? { photoError: RATE_LIMITED_MESSAGE }
+      : { error: RATE_LIMITED_MESSAGE, saved: false };
+  }
 
   if (form.get("intent") === "photo") {
     const result = await setGooglePhoto(env.DB, env.IMAGES, {

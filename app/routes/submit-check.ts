@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 
+import { rateLimited, withinLimits } from "~/lib/security/rate-limit.server";
 import { readSmallJson } from "~/lib/security/body";
 import { checkLink } from "~/lib/submit/check.server";
 import { requireParticipant } from "~/lib/viewer.server";
@@ -12,6 +13,8 @@ import type { Route } from "./+types/submit-check";
  */
 export async function action({ request, context }: Route.ActionArgs) {
   const viewer = await requireParticipant(request, context);
+  // Checking a link is a submission attempt.
+  if (!(await withinLimits(request, "write", viewer.id))) return rateLimited();
   const body = (await readSmallJson(request, 4096)) as { url?: unknown } | undefined;
   if (typeof body?.url !== "string") {
     return Response.json({ ok: false, error: "Paste a link first." }, { status: 400 });
