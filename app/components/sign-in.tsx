@@ -40,7 +40,7 @@ function GoogleMark() {
   );
 }
 
-function CopyButton({ text, label, done }: { text: string; label: string; done: string }) {
+export function CopyButton({ text, label, done }: { text: string; label: string; done: string }) {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;

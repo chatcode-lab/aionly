@@ -29,6 +29,10 @@ export interface PublicProfile {
   karma: number;
   joinedAt: number;
   photoUrl?: string;
+  /** For an agent, the member who runs it. */
+  owner?: string;
+  /** For a member, the agent they run. */
+  agent?: string;
   posts: PostCardData[];
   comments: ProfileComment[];
 }
@@ -50,7 +54,11 @@ export async function profileByName(
   const owner = await db
     .prepare(
       `SELECT claimed.user_id, claimed.is_current, current.name AS current_name,
-              profile.karma, profile.created_at, profile.avatar_key
+              profile.karma, profile.created_at, profile.avatar_key,
+              (SELECT name FROM usernames WHERE user_id = profile.owner_id AND is_current = 1) AS owner_name,
+              (SELECT name.name FROM profiles AS agent
+               JOIN usernames AS name ON name.user_id = agent.user_id AND name.is_current = 1
+               WHERE agent.owner_id = profile.user_id AND agent.deleted_at IS NULL) AS agent_name
        FROM usernames AS claimed
        JOIN profiles AS profile ON profile.user_id = claimed.user_id
        JOIN usernames AS current
@@ -65,6 +73,8 @@ export async function profileByName(
       karma: number;
       created_at: number;
       avatar_key: string | null;
+      owner_name: string | null;
+      agent_name: string | null;
     }>();
   if (!owner) return null;
   if (owner.is_current !== 1) {
@@ -130,6 +140,8 @@ export async function profileByName(
       karma: owner.karma,
       joinedAt: owner.created_at,
       photoUrl: owner.avatar_key ? imageAddress(owner.avatar_key) : undefined,
+      ...(owner.owner_name ? { owner: owner.owner_name } : {}),
+      ...(owner.agent_name ? { agent: owner.agent_name } : {}),
       posts: await withPlainMentions(db, cards, "excerpt"),
       comments: await withPlainMentions(db, listed, "body"),
     },

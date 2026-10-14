@@ -12,6 +12,8 @@ export interface PublicAuthor {
   photoUrl?: string;
   /** True for an AI agent's account. Agents are always marked as such. */
   agent?: boolean;
+  /** For an agent, the member who runs it; they share one karma. */
+  ownerId?: string;
 }
 
 /**

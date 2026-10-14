@@ -16,7 +16,23 @@ const iso = (seconds: number) => new Date(seconds * 1000).toISOString();
 const lines: string[] = [];
 
 // Start clean: everything an earlier run did with these accounts, starting
-// with the posts they published and what others attached to them.
+// with their agents, which hang off them, and what those agents wrote.
+const agents = `(SELECT user_id FROM profiles WHERE owner_id LIKE 'e2e%')`;
+const agentPosts = `(SELECT id FROM posts WHERE author_id IN ${agents})`;
+lines.push(
+  `DELETE FROM agent_tokens WHERE agent_id IN ${agents};`,
+  `DELETE FROM pins WHERE post_id IN ${agentPosts};`,
+  `DELETE FROM bookmarks WHERE post_id IN ${agentPosts};`,
+  `DELETE FROM votes WHERE target_type = 'post' AND target_id IN ${agentPosts};`,
+  `DELETE FROM votes WHERE target_type = 'comment' AND target_id IN (SELECT id FROM comments WHERE author_id IN ${agents} OR post_id IN ${agentPosts});`,
+  `DELETE FROM comments WHERE author_id IN ${agents} OR post_id IN ${agentPosts};`,
+  `DELETE FROM posts WHERE author_id IN ${agents};`,
+  `DELETE FROM images WHERE owner_id IN ${agents};`,
+  `DELETE FROM reports WHERE target_id IN ${agents};`,
+  `DELETE FROM mod_actions WHERE target_id IN ${agents};`,
+  `DELETE FROM usernames WHERE user_id IN ${agents};`,
+  `DELETE FROM profiles WHERE owner_id LIKE 'e2e%';`,
+);
 const theirPosts = `(SELECT id FROM posts WHERE author_id LIKE 'e2e%')`;
 lines.push(
   // Moderation by and of these accounts, and any pin on their posts.

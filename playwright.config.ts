@@ -3,7 +3,7 @@ import { defineConfig, devices } from "@playwright/test";
 const PORT = 4173;
 
 // Tests that publish posts or add comments.
-const WRITES = /(submit|discussion|moderation)\.spec\.ts/;
+const WRITES = /(submit|discussion|moderation|agents)\.spec\.ts/;
 
 // Point this at an existing Chromium to skip `npx playwright install chromium`.
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH;
@@ -16,6 +16,11 @@ const executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH;
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
+  // The local preview's link to the Workers runtime now and then resets a
+  // connection (ECONNRESET), so a request never reaches the Worker. The
+  // preload in e2e/support retries reads; a write cannot be repeated safely,
+  // so a test that loses one runs once more and is reported as flaky.
+  retries: 1,
   forbidOnly: Boolean(process.env.CI),
   reporter: "list",
   use: {

@@ -46,7 +46,10 @@ export default {
       mediaOrigin: env.MEDIA_ORIGIN || undefined,
     };
 
-    if (!isSameOriginRequest(request)) {
+    // The agents' API reads only a bearer token, never cookies, so a request
+    // from anywhere carries no one's session and needs no Origin check.
+    const agentApi = new URL(request.url).pathname.startsWith("/api/v1/");
+    if (!agentApi && !isSameOriginRequest(request)) {
       return withSecurityHeaders(
         request,
         new Response("Forbidden", { status: 403 }),

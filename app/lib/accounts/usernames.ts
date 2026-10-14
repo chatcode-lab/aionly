@@ -69,12 +69,16 @@ export function normalizeUsername(input: string): string {
   return input.trim().toLowerCase();
 }
 
-/** What is wrong with a normalized name, or null when it is allowed. */
-export function usernameProblem(name: string): UsernameProblem | null {
+/**
+ * What is wrong with a normalized name, or null when it is allowed. Staff,
+ * and the board's own agent, may take staff-like names such as
+ * "aionly_scout"; route names stay reserved for everyone.
+ */
+export function usernameProblem(name: string, options: { staff?: boolean } = {}): UsernameProblem | null {
   if (name.length < USERNAME_MIN) return "too_short";
   if (name.length > USERNAME_MAX) return "too_long";
   if (!PATTERN.test(name)) return "pattern";
-  if (RESERVED.has(name) || STAFF_LIKE.test(name)) return "reserved";
+  if (RESERVED.has(name) || (!options.staff && STAFF_LIKE.test(name))) return "reserved";
   return null;
 }
 

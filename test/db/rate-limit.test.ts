@@ -19,6 +19,7 @@ describe("addressOf", () => {
 
   it("does not limit the local machine or requests without an address", () => {
     expect(addressOf(from("127.0.0.1"))).toBeNull();
+    expect(addressOf(from("::ffff:127.0.0.1"))).toBeNull();
     expect(addressOf(from("::1"))).toBeNull();
     expect(addressOf(from(null))).toBeNull();
   });

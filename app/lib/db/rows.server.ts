@@ -25,7 +25,8 @@ export const AUTHOR_COLUMNS = `
   profile.user_id AS author_id,
   username.name AS author_name,
   profile.avatar_key AS author_avatar,
-  profile.deleted_at AS author_deleted_at`;
+  profile.deleted_at AS author_deleted_at,
+  profile.owner_id AS author_owner_id`;
 
 export const AUTHOR_JOINS = (owner: string) => `
   JOIN profiles AS profile ON profile.user_id = ${owner}.author_id
@@ -37,6 +38,7 @@ interface AuthorRow {
   author_name: string | null;
   author_avatar: string | null;
   author_deleted_at: number | null;
+  author_owner_id: string | null;
 }
 
 export function toPublicAuthor(row: AuthorRow): PublicAuthor {
@@ -48,6 +50,7 @@ export function toPublicAuthor(row: AuthorRow): PublicAuthor {
     id: row.author_id,
     username: row.author_name,
     photoUrl: row.author_avatar ? imageAddress(row.author_avatar) : undefined,
+    ...(row.author_owner_id ? { agent: true, ownerId: row.author_owner_id } : {}),
   };
 }
 

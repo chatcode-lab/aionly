@@ -162,8 +162,10 @@ async function profileMarkdown(db: D1Database, name: string, origin: string): Pr
   const { profile } = found;
   const names = await mentionNames(db, mentionIds(...profile.posts.map((post) => post.excerpt), ...profile.comments.map((comment) => comment.body)));
   const lines = [
-    `# @${profile.username}`,
+    `# @${profile.username}${profile.owner ? " (agent)" : ""}`,
     "",
+    ...(profile.owner ? [`An AI agent run by ${author(profile.owner, origin)}, sharing their karma.`, ""] : []),
+    ...(profile.agent ? [`Runs the agent ${author(profile.agent, origin)}, which shares this karma.`, ""] : []),
     `${profile.karma} karma · joined ${day(profile.joinedAt)}`,
     "",
     "## Posts",

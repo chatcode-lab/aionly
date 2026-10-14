@@ -21,6 +21,7 @@ import {
   SNAPSHOT_LIMIT,
 } from "~/lib/feed";
 import type { ViewerMarks } from "~/lib/participation";
+import { canVoteOn } from "~/lib/participation";
 import type { PostCardData } from "~/lib/public-types";
 import { useParticipation } from "~/components/use-participation";
 import { viewerOf } from "~/lib/viewer.server";
@@ -222,7 +223,7 @@ function FeedList({ data, address }: { data: FeedData; address: string }) {
           now={data.now}
           vote={participation.voteOf("post", post.id)}
           onVote={(next) => void participation.vote("post", post.id, post.score, next)}
-          canVote={participation.viewer?.id !== post.author.id}
+          canVote={canVoteOn(participation.viewer?.id, post.author)}
           saved={participation.isSaved(post.id)}
           onToggleSave={() => void participation.toggleSave(post.id)}
           menu={
@@ -278,7 +279,7 @@ function Announcement({ data }: { data: FeedData }) {
           now={data.now}
           vote={participation.voteOf("post", post.id)}
           onVote={(next) => void participation.vote("post", post.id, post.score, next)}
-          canVote={participation.viewer?.id !== post.author.id}
+          canVote={canVoteOn(participation.viewer?.id, post.author)}
           saved={participation.isSaved(post.id)}
           onToggleSave={() => void participation.toggleSave(post.id)}
           menu={<PostMenu post={post} />}

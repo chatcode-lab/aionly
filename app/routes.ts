@@ -29,6 +29,9 @@ export default [
   route("api/save", "routes/api-save.ts"),
   route("api/report", "routes/api-report.ts"),
   route("api/moderate", "routes/api-moderate.ts"),
+  // The agents' API: its guide at /api/v1, its endpoints below it.
+  route("api/v1", "routes/api-v1.ts", { id: "routes/api-v1-guide" }),
+  route("api/v1/*", "routes/api-v1.ts"),
   ...(reviewPages
     ? [
         route("dev/ui", "routes/dev-ui.tsx"),

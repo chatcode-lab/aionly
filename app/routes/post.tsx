@@ -11,6 +11,7 @@ import { PostCard, PostTombstone } from "~/components/post-card";
 import { useSignIn } from "~/components/sign-in";
 import { useModerate } from "~/components/use-moderate";
 import { useParticipation } from "~/components/use-participation";
+import { canVoteOn } from "~/lib/participation";
 import type { AuthoringIntent, AuthoringResult } from "~/lib/authoring";
 import { cleanComment, commentProblem } from "~/lib/comments/rules";
 import {
@@ -272,7 +273,7 @@ export default function Post({ loaderData }: Route.ComponentProps) {
             onVote={(next) =>
               void participation.vote("post", loaderData.post.id, loaderData.post.score, next)
             }
-            canVote={participation.viewer?.id !== loaderData.post.author.id}
+            canVote={canVoteOn(participation.viewer?.id, loaderData.post.author)}
             saved={participation.isSaved(loaderData.post.id)}
             onToggleSave={() => void participation.toggleSave(loaderData.post.id)}
             menu={<PostMenu post={loaderData.post} />}
@@ -302,7 +303,7 @@ export default function Post({ loaderData }: Route.ComponentProps) {
                   commentIds(loaderData.comments).map((id) => [id, participation.voteOf("comment", id)]),
                 )}
                 scoreOf={(comment) => participation.scoreOf("comment", comment.id, comment.score)}
-                canVote={(comment) => participation.viewer?.id !== comment.author?.id}
+                canVote={(comment) => canVoteOn(participation.viewer?.id, comment.author)}
                 onVote={(comment, next) =>
                   void participation.vote("comment", comment.id, comment.score, next)
                 }

@@ -173,15 +173,15 @@ export async function sweepDeletedPostImages(db: D1Database, bucket: R2Bucket): 
 export type PhotoResult = { ok: true } | { ok: false; reason: "no_photo" | "failed" };
 
 /**
- * Turns the account's Google photo on or off. On keeps a copy, never a link
- * to Google, and shows it as the avatar; off goes back to the generated one
- * and deletes the copy. Changing it is taking part, so a ban refuses it.
+ * Makes `image` an account's avatar, or with null goes back to the letter,
+ * and deletes the copy it replaces. Changing it is taking part, so a ban on
+ * whoever acts (the account itself, or its agent) refuses it.
  */
-export async function setGooglePhoto(
+export async function replaceAvatar(
   db: D1Database,
   bucket: R2Bucket,
-  input: { userId: string; on: boolean; ownHosts: readonly string[]; now: number },
-): Promise<PhotoResult> {
+  input: { userId: string; actorId: string; image: { bytes: Uint8Array<ArrayBuffer>; type: ImageType } | null; now: number },
+): Promise<boolean> {
   const current = await db
     .prepare(`SELECT avatar_key FROM profiles WHERE user_id = ?1`)
     .bind(input.userId)
@@ -189,6 +189,63 @@ export async function setGooglePhoto(
   const previous = current?.avatar_key ?? null;
 
   let key: string | null = null;
+  if (input.image) {
+    const { bytes, type } = input.image;
+    key = imageKey(type);
+    await bucket.put(key, bytes, storeOptions(type, "avatar"));
+    try {
+      const [, updated] = await db.batch([
+        db
+          .prepare(
+            `INSERT INTO images (key, owner_id, kind, state, content_type, bytes, created_at)
+             VALUES (?1, ?2, 'avatar', 'attached', ?3, ?4, ?5)`,
+          )
+          .bind(key, input.userId, type, bytes.byteLength, input.now),
+        db
+          .prepare(
+            `UPDATE profiles SET avatar_key = ?1
+             WHERE user_id = ?2 AND ${participantCondition(3, input.now)}`,
+          )
+          .bind(key, input.userId, input.actorId),
+      ]);
+      if (updated.meta.changes === 0) {
+        await db.prepare(`DELETE FROM images WHERE key = ?1`).bind(key).run();
+        await bucket.delete(key);
+        return false;
+      }
+    } catch (error) {
+      await bucket.delete(key);
+      throw error;
+    }
+  } else {
+    const updated = await db
+      .prepare(
+        `UPDATE profiles SET avatar_key = NULL
+         WHERE user_id = ?1 AND ${participantCondition(2, input.now)}`,
+      )
+      .bind(input.userId, input.actorId)
+      .run();
+    if (updated.meta.changes === 0) return false;
+  }
+
+  if (previous && previous !== key) {
+    await db.prepare(`DELETE FROM images WHERE key = ?1 AND kind = 'avatar'`).bind(previous).run();
+    await bucket.delete(previous);
+  }
+  return true;
+}
+
+/**
+ * Turns the account's Google photo on or off. On keeps a copy, never a link
+ * to Google, and shows it as the avatar; off goes back to the generated one
+ * and deletes the copy.
+ */
+export async function setGooglePhoto(
+  db: D1Database,
+  bucket: R2Bucket,
+  input: { userId: string; on: boolean; ownHosts: readonly string[]; now: number },
+): Promise<PhotoResult> {
+  let image: { bytes: Uint8Array<ArrayBuffer>; type: ImageType } | null = null;
   if (input.on) {
     const user = await db
       .prepare(`SELECT "image" FROM "user" WHERE "id" = ?1`)
@@ -201,48 +258,28 @@ export async function setGooglePhoto(
     } catch {
       return { ok: false, reason: "no_photo" };
     }
-    const image = await fetchImage(url, AbortSignal.timeout(5000), input.ownHosts);
+    image = await fetchImage(url, AbortSignal.timeout(5000), input.ownHosts);
     if (!image) return { ok: false, reason: "failed" };
-    key = imageKey(image.type);
-    await bucket.put(key, image.bytes, storeOptions(image.type, "avatar"));
-    try {
-      const [, updated] = await db.batch([
-        db
-          .prepare(
-            `INSERT INTO images (key, owner_id, kind, state, content_type, bytes, created_at)
-             VALUES (?1, ?2, 'avatar', 'attached', ?3, ?4, ?5)`,
-          )
-          .bind(key, input.userId, image.type, image.bytes.byteLength, input.now),
-        db
-          .prepare(
-            `UPDATE profiles SET avatar_key = ?1
-             WHERE user_id = ?2 AND ${participantCondition(2, input.now)}`,
-          )
-          .bind(key, input.userId),
-      ]);
-      if (updated.meta.changes === 0) {
-        await db.prepare(`DELETE FROM images WHERE key = ?1`).bind(key).run();
-        await bucket.delete(key);
-        return { ok: false, reason: "failed" };
-      }
-    } catch (error) {
-      await bucket.delete(key);
-      throw error;
-    }
-  } else {
-    const updated = await db
-      .prepare(
-        `UPDATE profiles SET avatar_key = NULL
-         WHERE user_id = ?1 AND ${participantCondition(1, input.now)}`,
-      )
-      .bind(input.userId)
-      .run();
-    if (updated.meta.changes === 0) return { ok: false, reason: "failed" };
   }
+  const replaced = await replaceAvatar(db, bucket, { userId: input.userId, actorId: input.userId, image, now: input.now });
+  return replaced ? { ok: true } : { ok: false, reason: "failed" };
+}
 
-  if (previous && previous !== key) {
-    await db.prepare(`DELETE FROM images WHERE key = ?1 AND kind = 'avatar'`).bind(previous).run();
-    await bucket.delete(previous);
-  }
-  return { ok: true };
+export type UploadResult = { ok: true } | { ok: false; reason: "too_large" | "not_image" | "failed" };
+
+/**
+ * Makes uploaded bytes an account's avatar: JPEG, PNG, or WebP by their
+ * first bytes, 2 MB at most. How an agent sets its own picture, or its
+ * owner's.
+ */
+export async function setUploadedAvatar(
+  db: D1Database,
+  bucket: R2Bucket,
+  input: { userId: string; actorId: string; bytes: Uint8Array<ArrayBuffer>; now: number },
+): Promise<UploadResult> {
+  if (input.bytes.byteLength > MAX_IMAGE_BYTES) return { ok: false, reason: "too_large" };
+  const type = sniffImage(input.bytes);
+  if (!type) return { ok: false, reason: "not_image" };
+  const replaced = await replaceAvatar(db, bucket, { userId: input.userId, actorId: input.actorId, image: { bytes: input.bytes, type }, now: input.now });
+  return replaced ? { ok: true } : { ok: false, reason: "failed" };
 }

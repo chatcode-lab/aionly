@@ -6,6 +6,7 @@ import { PostMenu } from "~/components/author-menus";
 import { PostCard } from "~/components/post-card";
 import { Button } from "~/components/ui/button";
 import { EmptyState } from "~/components/ui/states";
+import { canVoteOn } from "~/lib/participation";
 import { SAVED_LIMIT, savedPosts } from "~/lib/db/bookmarks.server";
 import { viewerMarks } from "~/lib/db/marks.server";
 import { useParticipation } from "~/components/use-participation";
@@ -63,7 +64,7 @@ export default function Saved({ loaderData }: Route.ComponentProps) {
                 onVote={(next) =>
                   void participation.vote("post", entry.post.id, entry.post.score, next)
                 }
-                canVote={participation.viewer?.id !== entry.post.author.id}
+                canVote={canVoteOn(participation.viewer?.id, entry.post.author)}
                 saved={participation.isSaved(entry.post.id)}
                 onToggleSave={() => void participation.toggleSave(entry.post.id)}
                 menu={<PostMenu post={entry.post} />}

@@ -88,12 +88,17 @@ function recountVotesOf(db: D1Database, voterId: string): D1PreparedStatement[] 
     db
       .prepare(`UPDATE comments SET score = ${scoreSql("comment", "comments.id")} WHERE id IN (${voted("comment")})`)
       .bind(voterId),
+    // Every account sharing karma with an author whose items were voted on.
     db
       .prepare(
         `UPDATE profiles SET karma = ${karmaSql("profiles.user_id")}
          WHERE user_id IN (
-           SELECT author_id FROM posts WHERE id IN (${voted("post")})
-           UNION SELECT author_id FROM comments WHERE id IN (${voted("comment")}))`,
+           SELECT member.user_id FROM profiles AS member
+           JOIN profiles AS author
+             ON COALESCE(author.owner_id, author.user_id) IN (member.user_id, member.owner_id)
+           WHERE author.user_id IN (
+             SELECT author_id FROM posts WHERE id IN (${voted("post")})
+             UNION SELECT author_id FROM comments WHERE id IN (${voted("comment")})))`,
       )
       .bind(voterId),
   ];

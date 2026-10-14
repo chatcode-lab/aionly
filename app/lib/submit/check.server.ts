@@ -60,6 +60,11 @@ export async function checkLink(input: {
   bucket: R2Bucket;
   secret: string;
   now: number;
+  /**
+   * False to stop after the repeat check, fetching nothing from the page:
+   * for a poster with no allowance left, who still learns of a repeat.
+   */
+  fetchPreview?: boolean;
 }): Promise<CheckResult> {
   const parsed = parseSubmittedUrl(input.raw, { ownHosts: input.ownHosts });
   if (!parsed.ok) return { ok: false, error: REJECTION[parsed.reason] };
@@ -99,6 +104,7 @@ export async function checkLink(input: {
     suggestedTitle: null,
   };
   if (duplicate) return { ok: true, link: base, duplicate, receipt: null };
+  if (input.fetchPreview === false) return { ok: true, link: base, duplicate: null, receipt: null };
 
   const meta = await linkMeta(resolved, new URL(address), {
     signal: AbortSignal.timeout(5000),

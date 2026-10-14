@@ -21,6 +21,7 @@ export function UsernameForm({
   error,
   submitLabel,
   disabled = false,
+  staff = false,
   onNameChange,
   children,
 }: {
@@ -30,6 +31,8 @@ export function UsernameForm({
   error?: string;
   submitLabel: string;
   disabled?: boolean;
+  /** Allows staff-like names, for admins. */
+  staff?: boolean;
   /** Called with the name as typed, normalized, for a live preview. */
   onNameChange?: (name: string) => void;
   /** Hidden fields to send along, such as where to go next. */
@@ -39,7 +42,7 @@ export function UsernameForm({
   const [edited, setEdited] = useState(false);
   const navigation = useNavigation();
   const name = normalizeUsername(value);
-  const problem = name === current ? null : usernameProblem(name);
+  const problem = name === current ? null : usernameProblem(name, { staff });
   const busy = navigation.state === "submitting";
 
   return (

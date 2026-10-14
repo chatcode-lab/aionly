@@ -3,10 +3,13 @@ import { env } from "cloudflare:workers";
 import { renameUser } from "../db/accounts.server";
 import { normalizeUsername, USERNAME_PROBLEM, usernameProblem } from "./usernames";
 
-/** Applies a submitted username, returning an error message or null. */
-export async function applyRename(userId: string, input: string): Promise<string | null> {
+/**
+ * Applies a submitted username, returning an error message or null. `staff`
+ * allows staff-like names: for admins and their agents.
+ */
+export async function applyRename(userId: string, input: string, options: { staff?: boolean } = {}): Promise<string | null> {
   const name = normalizeUsername(input);
-  const problem = usernameProblem(name);
+  const problem = usernameProblem(name, options);
   if (problem) return USERNAME_PROBLEM[problem];
 
   const result = await renameUser(env.DB, userId, name);

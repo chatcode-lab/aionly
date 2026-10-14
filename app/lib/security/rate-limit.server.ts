@@ -23,9 +23,12 @@ function limiters(kind: LimitKind): { account?: RateLimit; address: RateLimit } 
  */
 export function addressOf(request: Request): string | null {
   const ip = request.headers.get("CF-Connecting-IP");
-  if (!ip || ip === "127.0.0.1" || ip === "::1") return null;
-  // IPv4, including when written in IPv6 form.
-  if (ip.includes(".")) return ip.slice(ip.lastIndexOf(":") + 1);
+  if (!ip || ip === "::1") return null;
+  // IPv4, including when written in IPv6 form, as a local server may.
+  if (ip.includes(".")) {
+    const v4 = ip.slice(ip.lastIndexOf(":") + 1);
+    return v4.startsWith("127.") ? null : v4;
+  }
   const [head = "", tail = ""] = ip.split("::");
   const front = head ? head.split(":") : [];
   const back = tail ? tail.split(":") : [];
@@ -46,10 +49,17 @@ async function addressKey(address: string): Promise<string> {
  * hold exactly, such as one vote per account or the posting allowance, is
  * kept in the database.
  */
-export async function withinLimits(request: Request, kind: LimitKind, accountId: string | null): Promise<boolean> {
+export async function withinLimits(
+  request: Request,
+  kind: LimitKind,
+  accountId: string | null,
+  options: { trusted?: boolean } = {},
+): Promise<boolean> {
   const { account, address } = limiters(kind);
   const checks: Array<Promise<{ success: boolean }>> = [];
-  if (account && accountId) checks.push(account.limit({ key: accountId }));
+  // A trusted account, such as the board's own agent posting a batch, is
+  // held only by its address and its daily allowance.
+  if (account && accountId && !options.trusted) checks.push(account.limit({ key: accountId }));
   const where = addressOf(request);
   if (where) checks.push(address.limit({ key: await addressKey(where) }));
   const results = await Promise.all(checks);

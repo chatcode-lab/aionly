@@ -11,6 +11,7 @@ import { renameStatus } from "~/lib/db/accounts.server";
 import { safeReturnPath } from "~/lib/security/request";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { requireAccount, requireParticipant } from "~/lib/viewer.server";
+import { useViewer } from "~/lib/use-viewer";
 
 import type { Route } from "./+types/welcome";
 
@@ -37,7 +38,7 @@ export async function action({ request, context }: Route.ActionArgs) {
   const next = safeReturnPath(String(form.get("next") ?? ""), url.origin);
   if (!(await withinLimits(request, "write", viewer.id))) return { error: RATE_LIMITED_MESSAGE };
 
-  const error = await applyRename(viewer.id, String(form.get("username") ?? ""));
+  const error = await applyRename(viewer.id, String(form.get("username") ?? ""), { staff: viewer.role === "admin" });
   if (error) return { error };
   throw redirect(next);
 }
@@ -47,6 +48,8 @@ export async function action({ request, context }: Route.ActionArgs) {
  * with one free chance to change it.
  */
 export default function Welcome({ loaderData, actionData }: Route.ComponentProps) {
+  // Admins may take staff-like names.
+  const staff = useViewer()?.role === "admin";
   const [typed, setTyped] = useState(loaderData.username);
   // The preview follows the name as typed, while it is a valid one.
   const shown = usernameProblem(typed) ? loaderData.username : typed;
@@ -66,6 +69,7 @@ export default function Welcome({ loaderData, actionData }: Route.ComponentProps
       {loaderData.canRename ? (
         <UsernameForm
           current={loaderData.username}
+          staff={staff}
           hint={`Change it now if you like. After that, a name can change once every ${RENAME_INTERVAL_DAYS} days, and old names are never reused.`}
           error={actionData?.error}
           submitLabel="Continue"
