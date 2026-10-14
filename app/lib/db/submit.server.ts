@@ -1,3 +1,4 @@
+import { nextTier, postsPerDayFor } from "../submit/rules";
 import type { AccountRecord } from "./accounts.server";
 import { participantCondition } from "./accounts.server";
 
@@ -6,15 +7,22 @@ const DAY = 24 * 3600;
 export type PostingStatus =
   | { allowed: true }
   | { allowed: false; reason: "banned" | "karma" }
-  | { allowed: false; reason: "wait"; nextAt: number };
+  | {
+      allowed: false;
+      reason: "wait";
+      nextAt: number;
+      /** What the account may post a day now, and at the next karma tier. */
+      perDay: number;
+      next: { karma: number; postsPerDay: number } | null;
+    };
 
 /**
- * Publications allowed per rolling 24 hours: one, unless an admin set
- * another number or lifted the limit (null) for this account.
+ * Publications allowed per rolling 24 hours: by karma tier, unless an admin
+ * set another number or lifted the limit (null) for this account.
  */
 function dailyLimit(account: AccountRecord): number | null {
   const set = account.limits.postsPerDay;
-  return set === undefined ? 1 : set;
+  return set === undefined ? postsPerDayFor(Math.max(account.karma, 0)) : set;
 }
 
 /**
@@ -32,7 +40,9 @@ export async function postingStatus(
   if (account.karma < 0) return { allowed: false, reason: "karma" };
   const limit = dailyLimit(account);
   if (limit === null) return { allowed: true };
-  if (limit === 0) return { allowed: false, reason: "wait", nextAt: now + DAY };
+  // Tiers apply only where an admin has not set the account's limit.
+  const next = account.limits.postsPerDay === undefined ? nextTier(account.karma) : null;
+  if (limit === 0) return { allowed: false, reason: "wait", nextAt: now + DAY, perDay: 0, next };
 
   // The publication that, once it is a day old, frees the next one.
   const row = await db
@@ -43,7 +53,9 @@ export async function postingStatus(
     )
     .bind(account.id, now - DAY, limit - 1)
     .first<{ created_at: number }>();
-  return row ? { allowed: false, reason: "wait", nextAt: row.created_at + DAY } : { allowed: true };
+  return row
+    ? { allowed: false, reason: "wait", nextAt: row.created_at + DAY, perDay: limit, next }
+    : { allowed: true };
 }
 
 export type Existing = { id: string; state: "live" | "removed" };

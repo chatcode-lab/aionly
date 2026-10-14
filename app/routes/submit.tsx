@@ -70,8 +70,13 @@ function statusMessage(status: PostingStatus, now: number): string | null {
       return "Your account is read-only while the ban lasts.";
     case "karma":
       return "Posting is paused while your karma is below 0. Comments and votes still count.";
-    case "wait":
-      return `Next post available in ${formatWait(status.nextAt - now)}. Your draft is saved.`;
+    case "wait": {
+      const wait = `Next post available in ${formatWait(status.nextAt - now)}. Your draft is saved.`;
+      const times = (count: number) => (count === 1 ? "once" : count === 2 ? "twice" : `${count} times`);
+      return status.next
+        ? `${wait} At ${status.next.karma} karma you can post ${times(status.next.postsPerDay)} a day.`
+        : wait;
+    }
   }
 }
 

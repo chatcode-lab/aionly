@@ -246,7 +246,13 @@ describe("posting", () => {
     expect(await publishPost(db, newPost(author, { id: "first" }))).toEqual({ ok: true, id: "first" });
     await db.prepare(`UPDATE posts SET deleted_at = ?1 WHERE id = 'first'`).bind(NOW + 1).run();
 
-    expect(await postingStatus(db, author, NOW + 3600)).toEqual({ allowed: false, reason: "wait", nextAt: NOW + DAY });
+    expect(await postingStatus(db, author, NOW + 3600)).toEqual({
+      allowed: false,
+      reason: "wait",
+      nextAt: NOW + DAY,
+      perDay: 1,
+      next: { karma: 50, postsPerDay: 2 },
+    });
     expect(
       await publishPost(db, newPost(author, { id: "second", canonicalKey: "url:example.com/2", now: NOW + 3600 })),
     ).toEqual({ ok: false, reason: "not_allowed" });
@@ -264,6 +270,20 @@ describe("posting", () => {
     expect(await postingStatus(db, admin, NOW)).toEqual({ allowed: true });
     expect((await publishPost(db, newPost(admin, { id: "a1" }))).ok).toBe(true);
     expect((await publishPost(db, newPost(admin, { id: "a2", canonicalKey: "url:example.com/a2" }))).ok).toBe(true);
+  });
+
+  it("raises the allowance with karma", async () => {
+    await db.prepare(`UPDATE profiles SET karma = 60 WHERE user_id = 'u1'`).run();
+    const trusted = (await accountRecord(db, "u1", NOW))!;
+    for (const n of [1, 2]) {
+      expect((await publishPost(db, newPost(trusted, { id: `k${n}`, canonicalKey: `url:example.com/k${n}` }))).ok).toBe(true);
+    }
+    expect((await publishPost(db, newPost(trusted, { id: "k3", canonicalKey: "url:example.com/k3" }))).ok).toBe(false);
+    expect(await postingStatus(db, trusted, NOW)).toMatchObject({ reason: "wait", perDay: 2, next: { karma: 200, postsPerDay: 3 } });
+
+    // An admin's setting wins over the tier, and names no next tier.
+    await db.prepare(`UPDATE profiles SET karma = 5000, limits = '{"postsPerDay":2}' WHERE user_id = 'u1'`).run();
+    expect(await postingStatus(db, (await accountRecord(db, "u1", NOW))!, NOW)).toMatchObject({ perDay: 2, next: null });
   });
 
   it("honors a per-account limit an admin set, for that account only", async () => {

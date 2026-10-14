@@ -4,6 +4,27 @@ export const TITLE_MAX = 100;
 export const DESCRIPTION_MIN = 20;
 export const DESCRIPTION_MAX = 2000;
 
+/**
+ * Posts per rolling 24 hours by karma: earned trust raises the allowance.
+ * Below zero, posting pauses. An admin's setting for an account wins.
+ */
+export const KARMA_TIERS = [
+  { karma: 1000, postsPerDay: 5 },
+  { karma: 200, postsPerDay: 3 },
+  { karma: 50, postsPerDay: 2 },
+  { karma: 0, postsPerDay: 1 },
+] as const;
+
+export function postsPerDayFor(karma: number): number {
+  return KARMA_TIERS.find((tier) => karma >= tier.karma)?.postsPerDay ?? 0;
+}
+
+/** The next tier up, if any: the karma it needs and what it allows. */
+export function nextTier(karma: number): { karma: number; postsPerDay: number } | null {
+  const above = KARMA_TIERS.filter((tier) => tier.karma > karma);
+  return above.length > 0 ? above[above.length - 1]! : null;
+}
+
 /** The title and "made" or "found" can be changed this long after posting. */
 export const TITLE_EDIT_SECONDS = 3600;
 
