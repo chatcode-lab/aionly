@@ -1,5 +1,6 @@
 import { type Aspect, PROVIDERS, type Provider } from "../links/types";
 import { displayHost } from "../links/url";
+import { postPath } from "../slug";
 import { plainText } from "../text/markdown";
 import type {
   CommentData,
@@ -72,8 +73,9 @@ export interface PostRow extends AuthorRow {
 
 function excerptOf(description: string): string {
   const flat = plainText(description);
+  // A cut never splits a mention token, which is written in as a name later.
   return flat.length > EXCERPT_LENGTH
-    ? `${flat.slice(0, EXCERPT_LENGTH - 1).trimEnd()}…`
+    ? `${flat.slice(0, EXCERPT_LENGTH - 1).replace(/<@[A-Za-z0-9_-]*$/, "").trimEnd()}…`
     : flat;
 }
 
@@ -87,6 +89,7 @@ export function toPublicPost(row: PostRow): PostDetail {
 
   return {
     id: row.id,
+    path: postPath(row),
     title: row.title,
     url: row.url,
     host: displayHost(new URL(row.url)),

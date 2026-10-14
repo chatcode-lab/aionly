@@ -50,6 +50,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       }
     : null;
   return {
+    // Links to this host in posts and comments are followed in the app.
+    host: new URL(request.url).host,
     theme: readTheme(request.headers.get("Cookie")),
     reviewPages: appEnvironment() !== "production",
     inAppBrowser: detectInAppBrowser(request.headers.get("User-Agent") ?? ""),

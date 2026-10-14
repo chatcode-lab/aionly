@@ -6,6 +6,8 @@ import { Button } from "~/components/ui/button";
 import { TextArea, TextField } from "~/components/ui/field";
 import { Notice } from "~/components/ui/states";
 import { editablePost, editPost } from "~/lib/db/authoring.server";
+import { linkMentions, mentionHosts, unlinkMentions } from "~/lib/db/mentions.server";
+import { postPath } from "~/lib/slug";
 import { formatWait } from "~/lib/format";
 import {
   cleanDescription,
@@ -33,6 +35,8 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
   const post = await editablePost(env.DB, params.id, viewer.id);
   if (!post) throw data("Not Found", { status: 404 });
   const now = Math.floor(Date.now() / 1000);
+  // Mentions are edited as "@name".
+  post.description = await unlinkMentions(env.DB, post.description);
   return { post, banned: viewer.ban !== null, titleOpenUntil: post.createdAt + TITLE_EDIT_SECONDS, now };
 }
 
@@ -59,8 +63,9 @@ export async function action({ params, request, context }: Route.ActionArgs) {
   if (!origin) errors.origin = "Say whether you made it or found it.";
   if (Object.keys(errors).length > 0 || !origin) return { errors };
 
-  const result = await editPost(env.DB, { id: post.id, authorId: viewer.id, title, origin, description, now });
-  if (result.ok) throw redirect(`/p/${post.id}`);
+  const stored = await linkMentions(env.DB, description, mentionHosts(request));
+  const result = await editPost(env.DB, { id: post.id, authorId: viewer.id, title, origin, description: stored, now });
+  if (result.ok) throw redirect(postPath({ id: post.id, title }));
   return {
     errors,
     message:

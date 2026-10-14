@@ -44,6 +44,47 @@ describe("parseInline", () => {
     expect(parseInline("[x](javascript:alert(1))").every((node) => node.type === "text")).toBe(true);
   });
 
+  it("reads strikethrough, but not a single tilde", () => {
+    expect(parseInline("~~old~~ new ~1 km")).toEqual([
+      { type: "strike", children: [{ type: "text", text: "old" }] },
+      { type: "text", text: " new ~1 km" },
+    ]);
+  });
+
+  it("reads stored mentions", () => {
+    expect(parseInline("thanks <@u_01> and <@x>!")).toEqual([
+      { type: "text", text: "thanks " },
+      { type: "mention", id: "u_01" },
+      { type: "text", text: " and " },
+      { type: "mention", id: "x" },
+      { type: "text", text: "!" },
+    ]);
+    expect(plainText("hi <@u_01>")).toBe("hi <@u_01>");
+  });
+
+  it("finds bare addresses without the punctuation after them", () => {
+    expect(parseInline("see https://example.com/a_b_c, then (https://en.wikipedia.org/wiki/Mars_(planet)).")).toEqual([
+      { type: "text", text: "see " },
+      { type: "url", href: "https://example.com/a_b_c" },
+      { type: "text", text: ", then (" },
+      { type: "url", href: "https://en.wikipedia.org/wiki/Mars_(planet)" },
+      { type: "text", text: ")." },
+    ]);
+    expect(parseInline("xhttps://example.com and https://localhost")).toEqual([
+      { type: "text", text: "xhttps://example.com and https://localhost" },
+    ]);
+  });
+
+  it("keeps a written link's label and address apart", () => {
+    expect(parseInline("[**the** post](https://aion.ly/p/abc1234)")).toEqual([
+      {
+        type: "link",
+        href: "https://aion.ly/p/abc1234",
+        children: [{ type: "strong", children: [{ type: "text", text: "the" }] }, { type: "text", text: " post" }],
+      },
+    ]);
+  });
+
   it("keeps markup inside code, and backslash escapes", () => {
     expect(parseInline("`*not em*` \\*literal\\*")).toEqual([
       { type: "code", text: "*not em*" },

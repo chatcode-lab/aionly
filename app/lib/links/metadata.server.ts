@@ -8,6 +8,8 @@ export interface LinkMeta {
   title?: string;
   /** A picture for the poster or preview card, to be snapshotted. */
   image?: URL;
+  /** The address the page declares as its own, from its canonical link. */
+  canonical?: URL;
 }
 
 // A page's head is near its start; this much is plenty and bounds the work.
@@ -70,8 +72,16 @@ export async function readPageMeta(
   const tags = new Map<string, string>();
   let title = "";
   let inTitle = false;
+  let canonical: string | undefined;
 
   const rewriter = new HTMLRewriter()
+    .on("link", {
+      element(element) {
+        const rel = (element.getAttribute("rel") ?? "").toLowerCase().split(/\s+/);
+        const href = element.getAttribute("href");
+        if (!canonical && href && rel.includes("canonical")) canonical = href;
+      },
+    })
     .on("meta", {
       element(element) {
         const name = (element.getAttribute("property") ?? element.getAttribute("name") ?? "").toLowerCase();
@@ -100,6 +110,7 @@ export async function readPageMeta(
       base,
       ownHosts,
     ),
+    canonical: imageUrl(canonical ?? tags.get("og:url"), base, ownHosts),
   };
 }
 
@@ -186,8 +197,11 @@ export async function linkMeta(
           return { title: cleanText(text(data.title)) };
         }
         case "suno":
-        case "telegram":
-          return await fetchPageMeta(url, context);
+        case "telegram": {
+          // Provider addresses are already reduced to the post itself.
+          const { canonical: _canonical, ...meta } = await fetchPageMeta(url, context);
+          return meta;
+        }
       }
     }
     return await fetchPageMeta(url, context);

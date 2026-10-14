@@ -1,5 +1,7 @@
 import type { PostCardData } from "../public-types";
+import { postPath } from "../slug";
 import { plainText } from "../text/markdown";
+import { withPlainMentions } from "./mentions.server";
 import {
   AUTHOR_JOINS,
   POST_COLUMNS,
@@ -16,6 +18,8 @@ export interface ProfileComment {
   createdAt: number;
   postId: string;
   postTitle: string;
+  /** The post's canonical path, for the comment's permalink. */
+  postPath: string;
 }
 
 export interface PublicProfile {
@@ -93,6 +97,30 @@ export async function profileByName(
       .bind(owner.user_id, LISTING_LIMIT),
   ]);
 
+  const cards = (posts.results as PostRow[]).map((row) => {
+    const { description: _description, ...card } = toPublicPost(row);
+    return card;
+  });
+  const listed = (
+    comments.results as Array<{
+      id: string;
+      body: string;
+      score: number;
+      created_at: number;
+      post_id: string;
+      post_title: string;
+    }>
+  ).map((row) => ({
+    id: row.id,
+    // Listed clamped to a few lines, without the markup.
+    body: plainText(row.body),
+    score: row.score,
+    createdAt: row.created_at,
+    postId: row.post_id,
+    postTitle: row.post_title,
+    postPath: postPath({ id: row.post_id, title: row.post_title }),
+  }));
+
   return {
     kind: "profile",
     profile: {
@@ -101,28 +129,8 @@ export async function profileByName(
       karma: owner.karma,
       joinedAt: owner.created_at,
       photoUrl: owner.avatar_key ? `/img/${owner.avatar_key}` : undefined,
-      posts: (posts.results as PostRow[]).map((row) => {
-        const { description: _description, ...card } = toPublicPost(row);
-        return card;
-      }),
-      comments: (
-        comments.results as Array<{
-          id: string;
-          body: string;
-          score: number;
-          created_at: number;
-          post_id: string;
-          post_title: string;
-        }>
-      ).map((row) => ({
-        id: row.id,
-        // Listed clamped to a few lines, without the markup.
-        body: plainText(row.body),
-        score: row.score,
-        createdAt: row.created_at,
-        postId: row.post_id,
-        postTitle: row.post_title,
-      })),
+      posts: await withPlainMentions(db, cards, "excerpt"),
+      comments: await withPlainMentions(db, listed, "body"),
     },
   };
 }

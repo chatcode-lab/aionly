@@ -9,6 +9,8 @@ export default [
   route("feed/more", "routes/feed-more.ts"),
   route("p/:id", "routes/post.tsx"),
   route("p/:id/edit", "routes/post-edit.tsx"),
+  // The same page under its canonical address, with the title's slug.
+  route("p/:id/:slug", "routes/post.tsx", { id: "routes/post-slug" }),
   route("u/:username", "routes/profile.tsx"),
   route("theme", "routes/theme.ts"),
   route("signin", "routes/signin.tsx"),

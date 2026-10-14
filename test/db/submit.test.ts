@@ -62,6 +62,15 @@ describe("readPageMeta", () => {
     expect(await readPageMeta(bare, new URL("https://example.com/"), OWN)).toEqual({ title: "Just a title", image: undefined });
   });
 
+  it("reads the canonical link, or og:url without one", async () => {
+    const page = new TextEncoder().encode(`<link rel="Canonical" href="/a/b?id=2"><meta property="og:url" content="https://example.com/other">`);
+    expect((await readPageMeta(page, new URL("https://example.com/a/b?id=2&ref=x"), OWN)).canonical).toEqual(
+      new URL("https://example.com/a/b?id=2"),
+    );
+    const og = new TextEncoder().encode(`<meta property="og:url" content="https://example.com/a">`);
+    expect((await readPageMeta(og, new URL("https://example.com/a?x=1"), OWN)).canonical).toEqual(new URL("https://example.com/a"));
+  });
+
   it("ignores images that are not public https addresses", async () => {
     const page = new TextEncoder().encode(`<meta property="og:image" content="http://example.com/a.png">`);
     expect((await readPageMeta(page, new URL("https://example.com/"), OWN)).image).toBeUndefined();
@@ -356,6 +365,30 @@ describe("checkLink", () => {
     const down = await check("https://example.com/down");
     expect(down.ok && down.link).toMatchObject({ url: "https://example.com/down", pageTitle: null, thumbUrl: null });
     expect(down.ok && down.receipt).toBeTruthy();
+  });
+
+  it("stores a page the way its canonical link names it, when that is the same page", async () => {
+    stubFetch({
+      "https://example.com/article": () =>
+        html(`<link rel="canonical" href="https://www.example.com/article?id=1"><title>Article</title>`),
+      "https://example.com/home-canonical": () => html(`<link rel="canonical" href="https://example.com/">`),
+    });
+    const adopted = await check("https://example.com/article?id=1&cmp=newsletter-7");
+    expect(adopted.ok && adopted.link.url).toBe("https://www.example.com/article?id=1");
+    const receipt = await readReceipt(adopted.ok ? adopted.receipt! : "", SECRET, "u1", NOW);
+    expect(receipt?.canonicalKey).toBe("url:example.com/article?id=1");
+
+    const ignored = await check("https://example.com/home-canonical?x=1");
+    expect(ignored.ok && ignored.link.url).toBe("https://example.com/home-canonical?x=1");
+  });
+
+  it("finds a repeat through the canonical link", async () => {
+    await post("first", { author: "u2", key: "url:example.com/story" });
+    stubFetch({
+      "https://example.com/story": () => html(`<link rel="canonical" href="https://example.com/story">`),
+    });
+    const result = await check("https://example.com/story?campaign=spring");
+    expect(result).toMatchObject({ ok: true, duplicate: { id: "first", state: "live" }, receipt: null });
   });
 
   it("follows a provider's short link to the post it names", async () => {

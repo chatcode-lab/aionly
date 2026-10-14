@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { mediaUrl, resolveLink } from "./resolve";
 import type { ResolvedLink } from "./types";
-import { canonicalizePageUrl, cleanPageUrl, MAX_URL_LENGTH, parseSubmittedUrl } from "./url";
+import { canonicalizePageUrl, cleanPageUrl, isSamePage, MAX_URL_LENGTH, parseSubmittedUrl } from "./url";
 
 function resolve(input: string): ResolvedLink {
   const parsed = parseSubmittedUrl(input);
@@ -96,8 +96,29 @@ describe("canonicalizePageUrl", () => {
 
   it("keeps meaningful query parameters and path case", () => {
     expect(
-      canonicalizePageUrl(new URL("https://example.com/Play?game=7&ref=home")),
-    ).toBe("example.com/Play?game=7&ref=home");
+      canonicalizePageUrl(new URL("https://example.com/Play?game=7&page=2")),
+    ).toBe("example.com/Play?game=7&page=2");
+  });
+
+  it("drops referral, affiliate, and analytics parameters", () => {
+    const url = new URL(
+      "https://example.com/tool?id=4&ref=producthunt&affid=77&refid=x&si=abc&pk_campaign=a&mtm_source=b&hsa_ad=1&_gl=z&srsltid=q",
+    );
+    expect(canonicalizePageUrl(url)).toBe("example.com/tool?id=4");
+    expect(cleanPageUrl(url)).toBe("https://example.com/tool?id=4");
+  });
+});
+
+describe("isSamePage", () => {
+  const submitted = new URL("https://example.com/post/42?source=rss&campaign=x");
+  it("accepts the same page, www and a trailing slash aside", () => {
+    expect(isSamePage(new URL("https://www.example.com/post/42/"), submitted)).toBe(true);
+    expect(isSamePage(new URL("https://example.com/post/42?lang=en"), submitted)).toBe(true);
+  });
+  it("ignores a canonical that points elsewhere", () => {
+    expect(isSamePage(new URL("https://example.com/"), submitted)).toBe(false);
+    expect(isSamePage(new URL("https://other.example/post/42"), submitted)).toBe(false);
+    expect(isSamePage(new URL("http://example.com/post/42"), submitted)).toBe(false);
   });
 });
 

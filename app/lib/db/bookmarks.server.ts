@@ -1,5 +1,6 @@
 import type { PostCardData } from "../public-types";
 import { participantCondition } from "./accounts.server";
+import { withPlainMentions } from "./mentions.server";
 import {
   AUTHOR_JOINS,
   POST_COLUMNS,
@@ -105,10 +106,11 @@ export async function savedPosts(
       )
       .bind(JSON.stringify(liveIds))
       .all<PostRow>();
-    for (const row of rows) {
+    const cards = rows.map((row) => {
       const { description: _description, ...card } = toPublicPost(row);
-      live.set(row.id, card);
-    }
+      return card;
+    });
+    for (const card of await withPlainMentions(db, cards, "excerpt")) live.set(card.id, card);
   }
 
   return results.map((row): SavedEntry => {

@@ -1,15 +1,22 @@
 /**
- * The limited Markdown descriptions and comments may use: emphasis, lists,
- * quotes, and code. It parses to plain data that is rendered as React
- * elements, never as HTML, so markup in the text is only ever text. Links
- * stay inert: `[label](url)` reads "label (url)", and images likewise.
+ * The limited Markdown descriptions and comments may use: emphasis,
+ * strikethrough, lists, quotes, and code, plus mentions. It parses to plain
+ * data that is rendered as React elements, never as HTML, so markup in the
+ * text is only ever text. Links, written `[label](url)` or bare, are kept as
+ * links here; the renderer decides which may be followed. Images are links
+ * to their address, never shown.
  */
 
 export type Inline =
   | { type: "text"; text: string }
-  | { type: "strong" | "em"; children: Inline[] }
+  | { type: "strong" | "em" | "strike"; children: Inline[] }
   | { type: "code"; text: string }
-  | { type: "break" };
+  | { type: "break" }
+  // A stored mention: `<@user-id>`.
+  | { type: "mention"; id: string }
+  // `[label](href)`, with the label parsed, or a bare address.
+  | { type: "link"; href: string; children: Inline[] }
+  | { type: "url"; href: string };
 
 export type Block =
   | { type: "paragraph"; children: Inline[] }
@@ -25,7 +32,9 @@ const QUOTE = /^ {0,3}> ?(.*)$/;
 const BULLET = /^ {0,3}[-*+][ \t]+(.*)$/;
 const NUMBERED = /^ {0,3}(\d{1,9})[.)][ \t]+(.*)$/;
 const LINK = /^\[([^\]\n]{0,500})\]\(([^()\s]{1,2048})(?:[ \t]+"[^"\n]{0,200}")?\)/;
-const ESCAPABLE = /[\\`*_[\]()>#+\-.!~]/;
+const ESCAPABLE = /[\\`*_[\]()>#+\-.!~<@]/;
+const MENTION_TOKEN = /^<@([A-Za-z0-9_-]{1,32})>/;
+const BARE_URL = /^https?:\/\/[^\s<>"'`]+/;
 const WORD = /[\p{L}\p{N}]/u;
 
 function isBlank(line: string): boolean {
@@ -156,19 +165,39 @@ export function parseInline(source: string, nesting = 0): Inline[] {
       continue;
     }
 
+    if (char === "<") {
+      const mention = MENTION_TOKEN.exec(source.slice(index, index + 40));
+      if (mention) {
+        flush();
+        out.push({ type: "mention", id: mention[1]! });
+        index += mention[0].length;
+        continue;
+      }
+    }
+
     const image = char === "!" && source[index + 1] === "[";
     if (char === "[" || image) {
       const link = LINK.exec(source.slice(image ? index + 1 : index));
       if (link) {
         flush();
-        out.push(...parseInline(link[1]!, nesting + 1));
-        text = `${link[1] ? " " : ""}(${link[2]})`;
+        out.push({ type: "link", href: link[2]!, children: parseInline(link[1]!, nesting + 1) });
         index += link[0].length + (image ? 1 : 0);
         continue;
       }
     }
 
-    if ((char === "*" || char === "_") && nesting < MAX_NESTING) {
+    if (char === "h" && (index === 0 || !WORD.test(source[index - 1]!))) {
+      const url = bareUrl(source.slice(index, index + 2100));
+      if (url) {
+        flush();
+        out.push({ type: "url", href: url });
+        index += url.length;
+        continue;
+      }
+    }
+
+    const strike = char === "~" && source[index + 1] === "~";
+    if ((char === "*" || char === "_" || strike) && nesting < MAX_NESTING) {
       const delimiter = source[index + 1] === char ? char + char : char;
       if (!unclosed.has(delimiter) && canOpen(source, index, delimiter)) {
         const close = findClose(source, index + delimiter.length, delimiter);
@@ -177,7 +206,7 @@ export function parseInline(source: string, nesting = 0): Inline[] {
         } else {
           flush();
           out.push({
-            type: delimiter.length === 2 ? "strong" : "em",
+            type: strike ? "strike" : delimiter.length === 2 ? "strong" : "em",
             children: parseInline(source.slice(index + delimiter.length, close), nesting + 1),
           });
           index = close + delimiter.length;
@@ -194,6 +223,23 @@ export function parseInline(source: string, nesting = 0): Inline[] {
   }
   flush();
   return out;
+}
+
+/**
+ * A bare address at the start of the text, without the punctuation that
+ * usually follows one in a sentence. A closing parenthesis stays when the
+ * address opened one, as Wikipedia's often do.
+ */
+function bareUrl(text: string): string | null {
+  let url = BARE_URL.exec(text)?.[0];
+  if (!url) return null;
+  for (;;) {
+    const last = url.at(-1)!;
+    if (".,;:!?'\"".includes(last)) url = url.slice(0, -1);
+    else if (last === ")" && (url.match(/\(/g)?.length ?? 0) < (url.match(/\)/g)?.length ?? 0)) url = url.slice(0, -1);
+    else break;
+  }
+  return /^https?:\/\/[^/?#]+\.[^/?#]+/.test(url) ? url : null;
 }
 
 function findCodeClose(source: string, from: number, fence: string): number {
@@ -232,13 +278,26 @@ function findClose(source: string, from: number, delimiter: string): number {
 
 function inlineText(nodes: Inline[]): string {
   return nodes
-    .map((node) =>
-      node.type === "text" || node.type === "code"
-        ? node.text
-        : node.type === "break"
-          ? " "
-          : inlineText(node.children),
-    )
+    .map((node) => {
+      switch (node.type) {
+        case "text":
+        case "code":
+          return node.text;
+        case "break":
+          return " ";
+        // Kept as a token; listings write in the current name.
+        case "mention":
+          return `<@${node.id}>`;
+        case "url":
+          return node.href;
+        case "link": {
+          const label = inlineText(node.children);
+          return label && label !== node.href ? `${label} (${node.href})` : node.href;
+        }
+        default:
+          return inlineText(node.children);
+      }
+    })
     .join("");
 }
 

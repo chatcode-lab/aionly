@@ -86,7 +86,7 @@ test.describe("post page", () => {
     );
     await expect(page.locator('link[rel="canonical"]')).toHaveAttribute(
       "href",
-      `${baseURL}/p/s_post_07`,
+      `${baseURL}/p/s_post_07/the-source-for-this-board-built-in-chatcode-lab-sessions`,
     );
   });
 

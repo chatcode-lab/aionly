@@ -165,6 +165,6 @@ test("a banned account cannot vote or save", async ({ page, context, bannedAccou
     ["/api/save", { id: "s_post_01", saved: true }],
   ] as const) {
     const response = await page.request.post(path, { data, headers: { Origin: baseURL! } });
-    expect(response.status()).toBe(403);
+    expect(response.status(), await response.text()).toBe(403);
   }
 });

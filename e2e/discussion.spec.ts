@@ -28,7 +28,7 @@ async function publish(page: Page, account: TestAccount, title: string): Promise
   await page.getByLabel(/made with AI or about AI/).check();
   await expect(page.getByText("Turnstile stand-in")).toBeVisible();
   await page.getByRole("button", { name: "Publish" }).click();
-  await expect(page).toHaveURL(/\/p\/[0-9A-Za-z]{12}$/);
+  await expect(page).toHaveURL(/\/p\/[0-9a-z]{7}\/[0-9a-z-]+$/);
   await page.locator("html[data-hydrated]").waitFor({ state: "attached" });
   return new URL(page.url()).pathname;
 }
@@ -42,7 +42,7 @@ test("signed out, the discussion opens with a single Sign in to comment row", as
   await expect(page.getByRole("dialog", { name: "Sign in to comment" })).toBeVisible();
 });
 
-test("a comment is added with its formatting, links stay text, and the draft is cleared", async ({ page, context, account }, testInfo) => {
+test("a comment is added with its formatting, outside links are not followed, and the draft is cleared", async ({ page, context, account }, testInfo) => {
   await account.signIn(context);
   await open(page, POST);
   const text = `Formatted by ${account.username} in ${testInfo.project.name}`;
@@ -53,7 +53,8 @@ test("a comment is added with its formatting, links stay text, and the draft is 
 
   const item = page.locator("li[id^='c-']", { has: page.locator("strong", { hasText: text }) });
   await expect(item).toBeVisible();
-  await expect(item.getByText("see the paper (https://arxiv.org/abs/1706.03762)")).toBeVisible();
+  await expect(item.getByText("see the paper")).toBeVisible();
+  await expect(item.getByRole("button", { name: "Copy link https://arxiv.org/abs/1706.03762" })).toBeVisible();
   await expect(item.locator("a[href*='arxiv']")).toHaveCount(0);
   await expect(item.locator("ul li")).toHaveCount(2);
   await expect(page).toHaveURL(new RegExp(`#c-[0-9A-Za-z]{12}$`));
@@ -65,6 +66,39 @@ test("a comment is added with its formatting, links stay text, and the draft is 
 
   await page.reload();
   await expect(page.getByLabel("Comment", { exact: true })).toHaveValue("");
+});
+
+test("mentions, strikethrough, site links, and copyable outside links", async ({ page, context, account }, testInfo) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await account.signIn(context);
+  await open(page, POST);
+  const marker = `Links from ${account.username} in ${testInfo.project.name}`;
+  await page.getByLabel("Comment", { exact: true }).fill(
+    `${marker}: ~~old~~ thanks @Quiet_Otter_482, see https://example.com/a/very/long/path?with=query and [our source](https://aion.ly/p/s_post_07) or [the paper](https://arxiv.org/abs/1706.03762)`,
+  );
+  await page.getByRole("button", { name: "Comment", exact: true }).click();
+  const item = page.locator("li[id^='c-']", { hasText: marker });
+  await expect(item).toBeVisible();
+
+  await expect(item.locator("del")).toHaveText("old");
+  const mention = item.getByRole("link", { name: "User quiet_otter_482" });
+  await expect(mention).toHaveAttribute("href", "/u/quiet_otter_482");
+  await expect(mention.locator("svg")).toHaveCount(1);
+  await expect(item.getByRole("link", { name: "our source" })).toHaveAttribute("href", "/p/s_post_07");
+  // Outside addresses are never links; a tap copies them.
+  await expect(item.locator("a[href*='example.com'], a[href*='arxiv']")).toHaveCount(0);
+  await expect(item.getByText("the paper")).toBeVisible();
+  const copy = item.getByRole("button", { name: "Copy link https://example.com/a/very/long/path?with=query" });
+  await copy.click();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("https://example.com/a/very/long/path?with=query");
+  await expect(item.getByRole("button", { name: "Copy link https://arxiv.org/abs/1706.03762" })).toBeVisible();
+
+  // Editing shows the mention by name, and saving keeps it a mention.
+  await item.getByRole("button", { name: "Comment actions" }).first().click();
+  await page.getByRole("menuitem", { name: "Edit" }).click();
+  await expect(item.getByLabel("Edit comment")).toHaveValue(/thanks @quiet_otter_482, see/);
+  await item.getByRole("button", { name: "Save" }).click();
+  await expect(item.getByRole("link", { name: "User quiet_otter_482" })).toBeVisible();
 });
 
 test("an unsent comment survives a reload", async ({ page, context, account }) => {
@@ -130,16 +164,18 @@ test("the author edits and then deletes their own comment, and others get no men
 test("the author edits their post and then deletes it", async ({ page, context, account, request }) => {
   await account.signIn(context);
   const path = await publish(page, account, `Editable post by ${account.username}`);
+  const short = path.split("/").slice(0, 3).join("/");
 
   await page.locator("article").first().getByRole("button", { name: "Post actions" }).click();
   await page.getByRole("menuitem", { name: "Edit" }).click();
-  await expect(page).toHaveURL(new RegExp(`${path}/edit$`));
+  await expect(page).toHaveURL(new RegExp(`${short}/edit$`));
   await page.getByLabel("Title").fill(`Edited post by ${account.username}`);
   await page.getByLabel("Description").fill("The description, changed by its *author* after posting.");
   await page.getByLabel("I found this").check();
   await page.getByRole("button", { name: "Save" }).click();
 
-  await expect(page).toHaveURL(new RegExp(`${path}$`));
+  // The new title gives the post a new canonical address.
+  await expect(page).toHaveURL(new RegExp(`${short}/edited-post-by-`));
   const card = page.locator("article").first();
   await expect(card.locator("h2")).toContainText(`Edited post by ${account.username}`);
   await expect(card.locator("em", { hasText: "author" })).toBeVisible();
@@ -151,11 +187,11 @@ test("the author edits their post and then deletes it", async ({ page, context, 
   await expect(page.getByText("[deleted by author]")).toBeVisible();
   await expect(page.getByText(`Edited post by ${account.username}`)).toHaveCount(0);
 
-  const gone = await request.get(path);
+  const gone = await request.get(short);
   expect(gone.status()).toBe(410);
   expect(await gone.text()).not.toContain(`Edited post by ${account.username}`);
   // Nobody else can open its edit page.
-  expect((await request.get(`${path}/edit`, { maxRedirects: 0 })).status()).toBe(302);
+  expect((await request.get(`${short}/edit`, { maxRedirects: 0 })).status()).toBe(302);
 });
 
 test("a post deleted from a list leaves it at once", async ({ page, context, account }) => {

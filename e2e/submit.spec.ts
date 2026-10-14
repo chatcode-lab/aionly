@@ -41,7 +41,7 @@ test("a link is checked, previewed, published, and then the day's allowance show
   await fillPost(page, title);
   await page.getByRole("button", { name: "Publish" }).click();
 
-  await expect(page).toHaveURL(/\/p\/[0-9A-Za-z]{12}$/);
+  await expect(page).toHaveURL(/\/p\/[0-9a-z]{7}\/[0-9a-z-]+$/);
   const card = page.locator("article").first();
   await expect(card.locator("h2")).toContainText(title);
   // The stored link has no tracking and no fragment.

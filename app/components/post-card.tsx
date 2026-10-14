@@ -170,7 +170,7 @@ export function PostCard({
   /** The whole description, shown in place of the excerpt on the post's page. */
   description?: string;
 }) {
-  const permalink = `/p/${post.id}`;
+  const permalink = post.path;
 
   return (
     <article className="rounded-xl border border-border bg-surface p-3 sm:flex sm:gap-3 sm:p-4">
@@ -286,7 +286,8 @@ export function PostCard({
                 fill={saved ? "currentColor" : "none"}
               />
             </button>
-            <CopyLinkButton path={permalink} />
+            {/* The short address, for sharing; it shows the same page. */}
+            <CopyLinkButton path={`/p/${post.id}`} />
             {menu}
           </div>
         </div>

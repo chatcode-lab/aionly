@@ -1,5 +1,6 @@
 import { PAGE_SIZE, type Range, SNAPSHOT_LIMIT } from "../feed";
 import type { PostCardData } from "../public-types";
+import { withPlainMentions } from "./mentions.server";
 import {
   AUTHOR_JOINS,
   LIVE,
@@ -36,13 +37,13 @@ function toCard(row: PostRow): PostCardData {
  * and all time that has enough posts to fill a first screen.
  */
 export async function defaultRange(db: D1Database, now: number): Promise<Range> {
+  // Each count stops at the minimum, reading a handful of rows by date
+  // rather than every post.
+  const enough = (index: number) => `(SELECT COUNT(*) FROM (
+    SELECT 1 FROM posts WHERE created_at >= ?${index} AND ${LIVE}
+    LIMIT ${COLD_START_MINIMUM}))`;
   const counts = await db
-    .prepare(
-      `SELECT
-         COALESCE(SUM(created_at >= ?1), 0) AS week,
-         COALESCE(SUM(created_at >= ?2), 0) AS month
-       FROM posts WHERE ${LIVE}`,
-    )
+    .prepare(`SELECT ${enough(1)} AS week, ${enough(2)} AS month`)
     .bind(since("week", now), since("month", now))
     .first<{ week: number; month: number }>();
 
@@ -61,9 +62,12 @@ export async function topSnapshot(
   range: Range,
   now: number,
 ): Promise<string[]> {
+  // A day, week, or month reads only its own posts, by date, and sorts
+  // them; left to choose, SQLite walks the score index across all time.
+  // All time walks that index and stops at the limit.
   const { results } = await db
     .prepare(
-      `SELECT id FROM posts
+      `SELECT id FROM posts ${range === "all" ? "" : "INDEXED BY posts_new"}
        WHERE ${LIVE} AND created_at >= ?1
        ORDER BY score DESC, created_at DESC, id DESC
        LIMIT ?2`,
@@ -97,10 +101,11 @@ export async function postsByIds(
     .all<PostRow>();
 
   const byId = new Map(results.map((row) => [row.id, row]));
-  return wanted.flatMap((id) => {
+  const cards = wanted.flatMap((id) => {
     const row = byId.get(id);
     return row ? [toCard(row)] : [];
   });
+  return withPlainMentions(db, cards, "excerpt");
 }
 
 interface NewCursor {
@@ -156,7 +161,7 @@ export async function newPage(
   const page = results.slice(0, PAGE_SIZE);
   const last = page[page.length - 1];
   return {
-    posts: page.map(toCard),
+    posts: await withPlainMentions(db, page.map(toCard), "excerpt"),
     nextCursor:
       results.length > PAGE_SIZE && last
         ? encodeCursor({ createdAt: last.created_at, id: last.id })

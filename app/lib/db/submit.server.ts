@@ -82,6 +82,8 @@ export interface NewPost {
 
 export type PublishResult =
   | { ok: true; id: string }
+  // Another post already has this ID: publish again with a new one.
+  | { ok: false; reason: "id_taken" }
   | { ok: false; reason: "duplicate"; existing: Existing }
   | { ok: false; reason: "not_allowed" };
 
@@ -139,6 +141,7 @@ export async function publishPost(db: D1Database, post: NewPost): Promise<Publis
     return { ok: true, id: post.id };
   } catch (error) {
     if (!String(error).includes("UNIQUE")) throw error;
+    if (String(error).includes("posts.id")) return { ok: false, reason: "id_taken" };
     const existing = await findDuplicate(db, post.canonicalKey);
     if (!existing) throw error;
     return { ok: false, reason: "duplicate", existing };

@@ -88,6 +88,7 @@ function samplePosts(now: number): PostCardData[] {
   return [
     {
       id: "a1b2c3d4",
+      path: "/p/a1b2c3d4",
       title: "A four-minute stop-motion short, every frame generated",
       url: "https://www.youtube.com/watch?v=jNQXAC9IVRw",
       host: "youtube.com",
@@ -107,6 +108,7 @@ function samplePosts(now: number): PostCardData[] {
     },
     {
       id: "e5f6g7h8",
+      path: "/p/e5f6g7h8",
       title: "This looping city timelapse is entirely synthetic",
       url: "https://www.tiktok.com/@scout2015/video/6718335390845095173",
       host: "tiktok.com",
@@ -127,6 +129,7 @@ function samplePosts(now: number): PostCardData[] {
     },
     {
       id: "i9j0k1l2",
+      path: "/p/i9j0k1l2",
       title: "Lo-fi track written around a single generated vocal take",
       url: "https://suno.com/song/1b2c3d4e-5f60-4a7b-8c9d-0e1f2a3b4c5d",
       host: "suno.com",
@@ -146,6 +149,7 @@ function samplePosts(now: number): PostCardData[] {
     },
     {
       id: "m3n4o5p6",
+      path: "/p/m3n4o5p6",
       title: "Thread: one sketch redrawn in twelve generated styles",
       url: "https://x.com/jack/status/20",
       host: "x.com",
@@ -159,6 +163,7 @@ function samplePosts(now: number): PostCardData[] {
     },
     {
       id: "y5z6a7b8",
+      path: "/p/y5z6a7b8",
       title: "A community canvas, rebuilt frame by frame from prompts",
       url: "https://www.reddit.com/r/place/comments/tqbguc/412022/",
       host: "reddit.com",
@@ -173,6 +178,7 @@ function samplePosts(now: number): PostCardData[] {
     },
     {
       id: "q7r8s9t0",
+      path: "/p/q7r8s9t0",
       title: "A tiny browser roguelike, built in an afternoon of prompting",
       url: "https://example.com/roguelike",
       host: "example.com",
@@ -192,6 +198,7 @@ function samplePosts(now: number): PostCardData[] {
     },
     {
       id: "u1v2w3x4",
+      path: "/p/u1v2w3x4",
       title: "Plain-text adventure with a generated narrator",
       url: "https://example.org/narrator",
       host: "example.org",
@@ -212,6 +219,7 @@ function sampleUploads(now: number): PostCardData[] {
   return [
     {
       id: "up1mage1",
+      path: "/p/up1mage1",
       title: "Poster series: twelve cities that do not exist",
       url: "/p/up1mage1",
       origin: "made",
@@ -230,6 +238,7 @@ function sampleUploads(now: number): PostCardData[] {
     },
     {
       id: "up2video2",
+      path: "/p/up2video2",
       title: "Forty seconds of rain on a street that was never filmed",
       url: "/p/up2video2",
       origin: "made",
@@ -247,6 +256,7 @@ function sampleUploads(now: number): PostCardData[] {
     },
     {
       id: "up3audio3",
+      path: "/p/up3audio3",
       title: "Field recording of an imaginary forest",
       url: "/p/up3audio3",
       origin: "made",
@@ -269,6 +279,7 @@ function sampleUploads(now: number): PostCardData[] {
 function sampleScoutPost(now: number): PostCardData {
   return {
     id: "sc1out2a",
+    path: "/p/sc1out2a",
     title: "Open-weights video model released, with a 30-second clip limit",
     url: "https://example.net/releases/video-model",
     host: "example.net",
@@ -291,6 +302,7 @@ function sampleScoutPost(now: number): PostCardData {
 function samplePickedPost(now: number): PostCardData {
   return {
     id: "pk1ck2ed",
+    path: "/p/pk1ck2ed",
     title: "A pop-up book whose pages were all generated, then cut by hand",
     url: "https://example.com/pop-up",
     host: "example.com",
@@ -447,6 +459,7 @@ function AgentSettingsSample() {
 function sampleAnnouncement(now: number): PostCardData {
   return {
     id: "an1nounc",
+    path: "/p/an1nounc",
     title: "Welcome: what belongs on aion.ly",
     url: "/p/an1nounc",
     origin: "made",
@@ -512,6 +525,7 @@ function PinnedSample({ now }: { now: number }) {
 function sampleElectionPost(now: number): PostCardData {
   return {
     id: "el1ect42",
+    path: "/p/el1ect42",
     title: "Editor election, week 42: nominate yourself here",
     url: "/p/el1ect42",
     origin: "made",
@@ -566,6 +580,7 @@ const ELECTION_VOTES: Record<string, number> = { n1: 12, n2: 7 };
 function sampleWrapUp(now: number): PostCardData {
   return {
     id: "wr1apup4",
+    path: "/p/wr1apup4",
     title: "Week 41 wrap-up: paper_lark_17 as editor",
     url: "/p/wr1apup4",
     origin: "made",
@@ -1191,7 +1206,7 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
           <CommentThread
             comments={sampleNominations(now)}
             now={now}
-            postId="el1ect42"
+            postPath="/p/el1ect42"
             onReply={() => {}}
             renderBadge={(comment) =>
               comment.id in ELECTION_VOTES ? (
@@ -1221,7 +1236,7 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
           <CommentThread
             comments={sampleComments(now)}
             now={now}
-            postId="a1b2c3d4"
+            postPath="/p/a1b2c3d4"
             votes={votes}
             // Sample scores leave out the viewer's own vote.
             scoreOf={(target) => target.score + (votes[target.id] ?? 0)}

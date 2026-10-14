@@ -4,7 +4,7 @@ import { FetchRefused, fetchPublic } from "../links/fetch.server";
 import { linkMeta } from "../links/metadata.server";
 import { mediaUrl, resolveLink } from "../links/resolve";
 import type { Aspect, MediaLink, PageLink, Provider, UrlRejection } from "../links/types";
-import { cleanPageUrl, displayHost, parseSubmittedUrl } from "../links/url";
+import { cleanPageUrl, displayHost, isSamePage, parseSubmittedUrl } from "../links/url";
 import { RECEIPT_SECONDS, signReceipt } from "./receipt.server";
 
 const REJECTION: Record<UrlRejection, string> = {
@@ -82,12 +82,12 @@ export async function checkLink(input: {
       return { ok: false, error: "That short link didn't lead to a post. Paste the full link instead." };
     }
   }
-  const resolved: MediaLink | PageLink = link;
+  let resolved: MediaLink | PageLink = link;
   // A media link is stored as its provider's plain address for it; a page as
   // given, without tracking or a fragment.
-  const address = resolved.kind === "page" ? cleanPageUrl(url) : mediaUrl(resolved, url);
+  let address = resolved.kind === "page" ? cleanPageUrl(url) : mediaUrl(resolved, url);
 
-  const duplicate = await findDuplicate(input.db, resolved.canonicalKey);
+  let duplicate = await findDuplicate(input.db, resolved.canonicalKey);
   const base: CheckedLink = {
     url: address,
     host: displayHost(new URL(address)),
@@ -103,6 +103,22 @@ export async function checkLink(input: {
     signal: AbortSignal.timeout(5000),
     ownHosts: input.ownHosts,
   });
+
+  // A page that names itself without some of the query, such as a referral
+  // code, is stored the way it names itself, and checked again for repeats.
+  if (resolved.kind === "page" && meta.canonical && isSamePage(meta.canonical, new URL(address))) {
+    const declared = resolveLink(meta.canonical);
+    if (declared.kind === "page" && declared.canonicalKey !== resolved.canonicalKey) {
+      resolved = declared;
+      address = cleanPageUrl(meta.canonical);
+      duplicate = await findDuplicate(input.db, resolved.canonicalKey);
+      if (duplicate) {
+        return { ok: true, link: { ...base, url: address, host: displayHost(new URL(address)) }, duplicate, receipt: null };
+      }
+    } else if (declared.kind === "page") {
+      address = cleanPageUrl(meta.canonical);
+    }
+  }
   const thumbKey = meta.image
     ? await snapshotImage(input.db, input.bucket, {
         ownerId: input.userId,
@@ -115,6 +131,8 @@ export async function checkLink(input: {
 
   const checked: CheckedLink = {
     ...base,
+    url: address,
+    host: displayHost(new URL(address)),
     // Only a preview card shows the page's own title.
     pageTitle: resolved.kind === "page" ? (meta.title ?? null) : null,
     thumbUrl: thumbKey ? `/img/${thumbKey}` : null,

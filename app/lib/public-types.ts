@@ -41,6 +41,8 @@ export type PostMedia =
 
 export interface PostCardData {
   id: string;
+  /** The post's canonical path on the board: its ID and title slug. */
+  path: string;
   title: string;
   /** The original link, or the post's own page when the board hosts the media. */
   url: string;

@@ -18,27 +18,82 @@ const NON_PUBLIC_TLDS = new Set([
   "test",
 ]);
 
+// Parameters that say where a visitor came from, never which page it is.
 const TRACKING_PARAMS = new Set([
+  "__hsfp",
+  "__hssc",
+  "__hstc",
+  "_ga",
+  "_gl",
   "_hsenc",
   "_hsmi",
+  "aff",
+  "aff_id",
+  "affid",
+  "affiliate",
+  "affiliate_id",
+  "clickid",
+  "cmpid",
   "dclid",
+  "ef_id",
+  "epik",
   "fbclid",
   "gbraid",
   "gclid",
+  "icid",
   "igsh",
   "igshid",
+  "irclickid",
+  "li_fat_id",
   "mc_cid",
   "mc_eid",
+  "mkt_tok",
   "msclkid",
+  "ncid",
+  "ocid",
+  "oly_anon_id",
+  "oly_enc_id",
+  "rb_clickid",
+  "ref",
+  "ref_id",
+  "ref_src",
+  "ref_url",
+  "referral",
+  "refid",
+  "s_cid",
+  "s_kwcid",
+  "si",
+  "spm",
+  "srsltid",
+  "trk",
   "ttclid",
   "twclid",
+  "vero_id",
   "wbraid",
   "yclid",
 ]);
 
+// Families of tracking parameters: Google, Matomo, HubSpot, Adobe, and more.
+const TRACKING_PREFIXES = ["utm_", "pk_", "mtm_", "hsa_", "sc_", "piwik_", "matomo_"];
+
 function isTrackingParam(name: string): boolean {
   const lower = name.toLowerCase();
-  return lower.startsWith("utm_") || TRACKING_PARAMS.has(lower);
+  return TRACKING_PARAMS.has(lower) || TRACKING_PREFIXES.some((prefix) => lower.startsWith(prefix));
+}
+
+/**
+ * True when a page's declared canonical address is the same page as the
+ * one submitted: the same host, `www.` aside, and the same path, a trailing
+ * slash aside. Its query then says which parameters matter. A canonical
+ * pointing elsewhere, such as a site's home page, is ignored.
+ */
+export function isSamePage(canonical: URL, submitted: URL): boolean {
+  const path = (url: URL) => url.pathname.replace(/\/+$/, "") || "/";
+  return (
+    canonical.protocol === "https:" &&
+    displayHost(canonical) === displayHost(submitted) &&
+    path(canonical) === path(submitted)
+  );
 }
 
 /** Lowercased hostname without a trailing root dot. */

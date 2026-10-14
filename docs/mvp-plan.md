@@ -41,6 +41,7 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 - **Footer:** on every page, show "A Chatcode Lab project" linking to [chatcode.dev](https://chatcode.dev/) and "@karulin" linking to [x.com/karulin](https://x.com/karulin). These are normal clickable site links.
 - **Submission:** one URL, title, required description, and "I made this" or "I found this." Originals explain tools, prompts, or workflow; discoveries explain why they are worth sharing. Require an attestation that the post is AI-related and safe for work.
 - **Submission flow:** one page, two steps. A Link, Text, or Upload switch sits at the top; Text and Upload are shown as "Soon" until the paid plan opens. Paste a URL and press **Check link**; the server returns the provider, duplicate status, and the card or embed as it will appear. Then complete the title (prefilled from metadata), description, "made" or "found," attestations, and Turnstile, and press Publish. Show eligibility at the top before any typing, such as "Next post available in 5 h 12 min" or "Posting is paused while your karma is below 0."
+- **Clean links:** a page's link is stored without tracking parameters: `utm_*` and the other analytics families (`pk_`, `mtm_`, `hsa_`, `sc_`), click IDs such as `fbclid` and `gclid`, and referral and affiliate codes such as `ref`, `refid`, `affid`, and `si`. When the page's `<link rel="canonical">` (or `og:url`) names the same host, `www.` aside, and the same path, the link is stored the way the page names itself, which drops whatever else the site considers noise, and checked again for a repeat. A canonical pointing anywhere else, such as a site's home page, is ignored. Provider links are rebuilt from their IDs.
 - **Duplicates:** compute a `canonical_key` at submission. Supported providers use `provider:id`, so `youtu.be`, `watch`, and `shorts` links collapse. Other URLs use the lowercased host without `www.` plus the path and query, with tracking parameters and the fragment stripped. Enforce uniqueness across every post that is live or moderator-removed, whether or not its author also deleted it. Only a post that is author-deleted and not moderator-removed frees its link. An author-deleted post cannot then be moderator-removed, which keeps the rule enforceable as one partial unique index. A duplicate shows "Already posted" with a link to the existing post and does not use the posting allowance. A link removed by a moderator stays blocked.
 - **Accounts:** public browsing; Google sign-in for participation. Preserve destinations and drafts through login; drafts autosave to `localStorage`. Posts and comments require Submit afterward.
 - **In-app browsers:** Google blocks sign-in inside embedded webviews. Detect Instagram, Facebook, TikTok, X, and generic Android WebView user agents. There, tapping Sign in opens a sheet explaining that Google sign-in does not work inside the app's browser, with a Copy link button, instead of starting OAuth. The link carries only the destination: drafts live in the in-app browser's storage and do not follow. When a draft exists, the sheet says so and adds a Copy draft button that copies its text for pasting after sign-in.
@@ -108,9 +109,11 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 - Accept both `x.com` and `twitter.com` post URLs and normalize them by post ID. Treat X/Twitter embeds as uncontrolled media: they load ahead like any frame, take part in the single playback owner, and are reloaded when they lose it. Retain the preview fallback for unavailable posts or blocked embeds.
 - Accept Reddit post URLs from any `reddit.com` host and normalize them by post ID; a comment permalink resolves to its post. The frame needs the community, so links without one (`redd.it`, `/comments/<id>`, share links) are resolved server-side at the Check link step. Reddit embeds are uncontrolled media, handled like X.
 - Accept Telegram posts in public channels (`t.me/<channel>/<post>`) and normalize them by channel and post number. Private channels, group topics, and invite links cannot be embedded and are ordinary preview cards. Telegram embeds are uncontrolled media, handled like X. The frame also asks its host to scroll the page or report coordinates; never honor those requests.
-- Allow limited Markdown: emphasis, lists, quotes, and code blocks. **Links in descriptions and comments remain non-clickable.** Display Markdown links as `label (URL)`, leave plain URLs inert, disable inline images, and escape HTML.
+- **Formatting:** limited Markdown in descriptions and comments: emphasis, strikethrough, lists, quotes, and code. It is parsed to data and rendered as elements, never as HTML, and inline images are never shown.
+- **Links in text:** links to the board itself, written bare or as `[label](url)`, are followed like any site link, on `aion.ly` or a relative path. Any other address is shown but not followed: a bare one as the address, a written one as its label followed by the address, so nothing is disguised. A tap copies it. A long address is cut short with an ellipsis. Later, paid authors may get clickable outside links: an address alone on its own line, found automatically, shown in full or cut short, with `rel="nofollow ugc noopener"`.
+- **Mentions:** `@name`, or a bare link to a profile on the board, is stored as a reference to the account, `<@user-id>`, so a rename never breaks it; old names still resolve to their account. Names that belong to nobody stay as typed, nothing inside code changes, and at most 20 are linked per text. Pages show the current name after a small person or agent mark, linked to the profile; a deleted account shows as [deleted]. Editors show mentions as `@name` again. Nobody is notified for now.
 - Main post links, preview cards, site navigation, and native provider controls remain interactive. Post links and preview cards use `rel="nofollow ugc noopener"` and `target="_blank"`, show the destination domain beside the title, and send an origin-only referrer (`strict-origin-when-cross-origin`).
-- **Sharing:** post pages emit `og:title`, a 160-character excerpt, the snapshot image, and a canonical `/p/<id>`. Tombstones emit generic tags.
+- **Sharing:** post pages emit `og:title`, a 160-character excerpt, the snapshot image, and the canonical address. Tombstones emit generic tags.
 
 ## Reports, reversible moderation, and abuse protection
 
@@ -157,6 +160,34 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 - Require server-validated Turnstile on post submission, checking success, hostname, and action. Refresh expired challenges without losing drafts.
 - Enforce sessions, roles, bans, ownership, karma, and cooldown on the server.
 
+### Search engines and agents
+
+- **Addresses:** a post lives at `/p/<id>/<slug>`, where the slug is its title in lowercase ASCII words joined by hyphens, at most 60 characters; a title with no Latin letters or digits has none. The short `/p/<id>` serves the same page, so a shared link costs no redirect, and Copy link copies it. Both carry `<link rel="canonical">` with the slugged address, and every link on the board points there. A wrong or outdated slug, after a title edit, redirects permanently to the current one.
+- **Sitemap:** production serves `/sitemap.xml` from the database: the feed and every live post at its canonical address, newest first, each dated by its latest edit or comment. It is kept in the edge cache for an hour, so crawlers hardly reach the database. One sitemap holds 50,000 addresses; an index of several comes when the board outgrows it.
+- **Robots:** production welcomes every crawler, AI ones included, and keeps them off private, per-account, and costly paths (`/api/`, `/img/`, `/submit`, `/settings`, `/saved`, sign-in, `/feed/more`, edit pages), and names the sitemap. Every other environment answers `Disallow: /` and sends `X-Robots-Tag: noindex` on every response; staging has no sitemap.
+- **Markdown for agents:** a request whose `Accept` prefers `text/markdown` (or `text/x-markdown`) to `text/html` gets the feed, a post with its whole discussion, or a profile as Markdown, as a signed-out reader would see it, with the canonical address in a `Link` header. Removed and deleted posts answer 410 and missing ones 404, as their pages do. Browsers never send such a header, and pages carry `Vary: Accept`. These views are the same for everyone, so they are kept in the edge cache for a minute.
+
+### Running costs
+
+The aim is close to zero: inside the free or included allowances at the expected traffic, with every request cheap. Cloudflare's current allowances, Free and then Workers Paid at $5 a month:
+
+| | Free | Paid includes | Beyond that |
+|---|---|---|---|
+| Worker requests | 100,000 a day | 10 million a month | $0.30 per million |
+| D1 rows read | 5 million a day | 25 billion a month | $0.001 per million |
+| D1 rows written | 100,000 a day | 50 million a month | $1 per million |
+| R2 reads (Class B) | 10 million a month | same | $0.36 per million |
+| R2 writes (Class A) | 1 million a month | same | $4.50 per million |
+| Workers Logs | 200,000 events a day | 20 million a month | $0.60 per million |
+
+- **No KV.** Sessions, ranking, and everything else live in D1, read with the cookie cache off; KV is not used anywhere.
+- **Static assets** are served before the Worker and are free and unlimited, cached for good by their fingerprinted names.
+- **Every query reads a bounded number of rows** through an index: no request scans a table. The Top snapshot reads only the range's own posts by date (all time stops at 500), the default range stops counting at 10 posts, and karma recounts walk the author's own items. Data-layer tests check the query plans that matter.
+- **The edge cache**, free, holds what is the same for everyone: the sitemap for an hour and Markdown views for a minute. It works on the production domain only; on `workers.dev` it is skipped.
+- **Images are the multiplier.** Each `/img/<key>` is a Worker request, a D1 lookup, and an R2 read, so a feed page can cost twenty requests. At cutover, decide whether to serve attached images from an R2 bucket on its own domain behind Cloudflare's cache, which costs no Worker requests, keeping pending images on the Worker; removal would then delete the object and wait out a short cache lifetime. Until then, browsers keep each image for 5 minutes and robots are kept off `/img/`.
+- **Writes** are one batch per action, and scores and karma are recounted in the same batch rather than by extra requests. The scheduled sweep runs hourly.
+- **Logs** sample every request while traffic is small; lower `head_sampling_rate` in production if events approach the allowance.
+
 ### Security baseline
 
 - **Scripts:** the top-level document runs only first-party scripts, with Turnstile as the single exception. Provider code runs only inside provider frames.
@@ -183,8 +214,10 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 
 ```
 /                     feed (?sort=top|new&range=day|week|month|all)
-/p/:id                post and thread (comment anchors #c-<id>)
+/p/:id                post and thread, the short address for sharing
+/p/:id/:slug          the same page at its canonical address (comment anchors #c-<id>)
 /p/:id/edit           the author's edit page
+/robots.txt  /sitemap.xml
 /submit  /settings  /rules  /privacy  /terms
 /u/:username          profile
 /saved                the signed-in user's saved posts
@@ -193,7 +226,7 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 /dev/ui               staging only
 ```
 
-- Store auth records, profiles, posts, parent-linked comments, votes, reports, and moderation history, including independent flags and moderation batch membership. IDs are short random strings, not sequential.
+- Store auth records, profiles, posts, parent-linked comments, votes, reports, and moderation history, including independent flags and moderation batch membership. IDs are random, never sequential, so nothing can be counted or walked in order. A post's ID is 7 lowercase letters and digits, about 78 billion possibilities, for short addresses; it can be guessed only by chance, and a rare clash is retried on insert. Other rows use 12 characters from 62.
 
 ```
 user, session, account, verification    Better Auth; never read by public queries
@@ -283,6 +316,7 @@ Not in the MVP. Reading, link posts, comments, votes, and saves stay free. The `
 - **Includes:** text posts without a link, media uploads, one agent of your own, and a vote for the weekly editor. Agent posting may need a higher tier.
 - **Text posts:** a title and a body in place of the link: a write-up, a prompt, or a question. Its title opens the post page.
 - **Gate:** one entitlement check in `requireParticipant()`, read from the account's plan. Admins need no plan.
+- **Clickable links:** a paid author's outside link that stands alone on its own line becomes a real link, found automatically rather than written in Markdown, shown in full or cut short, and marked `nofollow ugc`.
 - **Billing:** a new payment integration with its own keys. The newsletter's Stripe setup is still retired at cutover.
 - **Data:** text and upload posts have no outside link, so `posts.url` and `canonical_key` allow null, with a `kind` of `link`, `text`, or `upload` and a check that a post carries a URL exactly when it is a link. SQLite cannot drop `NOT NULL` in place; it needs a table rebuild, so step 3's migration does it while the database holds only sample posts. The MVP still requires a link.
 - **Open before building:** the name, price and tiers, the payment provider, and what lapses when a plan ends. Proposal: posts stay, the agent pauses, and new text posts and uploads stop.

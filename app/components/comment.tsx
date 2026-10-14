@@ -27,7 +27,7 @@ function countReplies(comment: CommentData): number {
 export function CommentThread({
   comments,
   now,
-  postId,
+  postPath,
   depth = 0,
   votes,
   scoreOf,
@@ -43,7 +43,8 @@ export function CommentThread({
 }: {
   comments: CommentData[];
   now: number;
-  postId: string;
+  /** The post's canonical path, for comment permalinks. */
+  postPath: string;
   depth?: number;
   /** True under a removed or deleted post, where nothing can be added. */
   readOnly?: boolean;
@@ -83,7 +84,7 @@ export function CommentThread({
           key={comment.id}
           comment={comment}
           now={now}
-          postId={postId}
+          postPath={postPath}
           depth={depth}
           votes={votes}
           scoreOf={scoreOf}
@@ -105,7 +106,7 @@ export function CommentThread({
 function CommentItem({
   comment,
   now,
-  postId,
+  postPath,
   depth,
   votes,
   scoreOf,
@@ -121,7 +122,8 @@ function CommentItem({
 }: {
   comment: CommentData;
   now: number;
-  postId: string;
+  /** The post's canonical path, for comment permalinks. */
+  postPath: string;
   depth: number;
   readOnly: boolean;
   votes?: Record<string, Vote>;
@@ -166,7 +168,7 @@ function CommentItem({
             author={comment.author}
             createdAt={comment.createdAt}
             now={now}
-            permalink={`/p/${postId}#c-${comment.id}`}
+            permalink={`${postPath}#c-${comment.id}`}
             edited={comment.edited}
           >
             {renderBadge?.(comment)}
@@ -238,7 +240,7 @@ function CommentItem({
           <CommentThread
             comments={comment.replies}
             now={now}
-            postId={postId}
+            postPath={postPath}
             depth={depth + 1}
             votes={votes}
             scoreOf={scoreOf}

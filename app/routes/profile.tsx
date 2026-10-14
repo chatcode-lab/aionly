@@ -96,7 +96,7 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
                 <p className="text-meta text-text-muted">
                   On{" "}
                   <Link
-                    to={`/p/${comment.postId}#c-${comment.id}`}
+                    to={`${comment.postPath}#c-${comment.id}`}
                     className="font-medium text-text hover:underline"
                   >
                     {comment.postTitle}

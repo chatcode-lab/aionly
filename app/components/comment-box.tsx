@@ -6,8 +6,10 @@ import { cn } from "~/lib/cn";
 import { COMMENT_MAX, commentProblem } from "~/lib/comments/rules";
 import { clearDraft, readDraft, saveDraft } from "~/lib/drafts";
 import { length } from "~/lib/submit/rules";
+import { replaceMentions } from "~/lib/text/mentions";
 import { useViewer } from "~/lib/use-viewer";
 
+import { useMentionNames } from "./mentions";
 import { useSignIn } from "./sign-in";
 import { Button } from "./ui/button";
 
@@ -214,7 +216,11 @@ export function CommentEditor({
   onDone: () => void;
 }) {
   const fetcher = useFetcher<AuthoringResult>();
-  const [body, setBody] = useState(initial);
+  const names = useMentionNames();
+  // Mentions are edited as "@name" and stored again as references on save.
+  const [body, setBody] = useState(() =>
+    replaceMentions(initial, names, (name) => (name.deleted ? "@[deleted]" : `@${name.username}`)),
+  );
   const [refusal, setRefusal] = useState<string>();
   const handled = useRef<AuthoringResult | undefined>(undefined);
 

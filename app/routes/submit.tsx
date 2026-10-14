@@ -9,13 +9,15 @@ import { Button } from "~/components/ui/button";
 import { TextArea, TextField } from "~/components/ui/field";
 import { Segmented } from "~/components/ui/segmented";
 import { Notice, SoonBadge } from "~/components/ui/states";
+import { linkMentions, mentionHosts } from "~/lib/db/mentions.server";
 import { type Existing, postingStatus, type PostingStatus, publishPost } from "~/lib/db/submit.server";
 import { clearDraft, readDraft, saveDraft } from "~/lib/drafts";
 import { formatWait } from "~/lib/format";
-import { newId } from "~/lib/ids";
+import { newPostId } from "~/lib/ids";
 import type { Aspect, Provider } from "~/lib/links/types";
 import type { PostCardData } from "~/lib/public-types";
 import { verifyTurnstile } from "~/lib/security/turnstile.server";
+import { postPath } from "~/lib/slug";
 import type { CheckedLink, CheckResult } from "~/lib/submit/check.server";
 import { readReceipt } from "~/lib/submit/receipt.server";
 import {
@@ -108,8 +110,9 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
   const blocked = statusMessage(status, now);
   if (blocked) return { errors: {}, message: blocked };
 
-  const result = await publishPost(env.DB, {
-    id: newId(),
+  const storedDescription = await linkMentions(env.DB, description, mentionHosts(request));
+  const publish = () => publishPost(env.DB, {
+    id: newPostId(),
     author: viewer,
     url: receipt.url,
     canonicalKey: receipt.canonicalKey,
@@ -119,10 +122,16 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
     thumbKey: receipt.thumbKey,
     origin,
     title,
-    description,
+    description: storedDescription,
     now,
   });
-  if (result.ok) throw redirect(`/p/${result.id}`);
+  // Short IDs can clash, rarely; a clash is tried again with a new one.
+  let result = await publish();
+  for (let attempt = 0; attempt < 3 && !result.ok && result.reason === "id_taken"; attempt += 1) {
+    result = await publish();
+  }
+  if (result.ok) throw redirect(postPath({ id: result.id, title }));
+  if (result.reason === "id_taken") return { errors: {}, message: "That did not publish. Try again." };
   if (result.reason === "duplicate") return { errors: {}, duplicate: result.existing };
   // The allowance changed between the check and the write.
   const again = statusMessage(await postingStatus(env.DB, viewer, now), now);
@@ -147,6 +156,7 @@ function DuplicateNotice({ duplicate }: { duplicate: NonNullable<ActionResult["d
 function Preview({ link, title }: { link: CheckedLink; title: string }) {
   const post: PostCardData = {
     id: "preview",
+    path: "/submit",
     title: title || "Your title",
     url: link.url,
     host: link.host,
