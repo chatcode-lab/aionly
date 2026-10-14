@@ -125,5 +125,7 @@ export function PostMediaView({ post }: { post: PostCardData }) {
           duration={media.duration}
         />
       );
+    case "text":
+      return null;
   }
 }

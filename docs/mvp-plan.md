@@ -45,6 +45,7 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 - **Accounts:** public browsing; Google sign-in for participation. Preserve destinations and drafts through login; drafts autosave to `localStorage`. Posts and comments require Submit afterward.
 - **In-app browsers:** Google blocks sign-in inside embedded webviews. Detect Instagram, Facebook, TikTok, X, and generic Android WebView user agents. There, tapping Sign in opens a sheet explaining that Google sign-in does not work inside the app's browser, with a Copy link button, instead of starting OAuth. The link carries only the destination: drafts live in the in-app browser's storage and do not follow. When a draft exists, the sheet says so and adds a Copy draft button that copies its text for pasting after sign-in.
 - **Identity:** automatically assign a unique, changeable username such as `quiet_otter_482`. First sign-in lands on a short "This is how you'll appear" step with the username editable. Public profiles show username, karma, posts, and comments; private identity details stay private.
+- **Profile links:** an optional X handle in Settings, shown on the profile as a link to `x.com/<handle>`. It is empty by default, so an account can stay anonymous, and it is not verified.
 - **Usernames:** every name ever used is a row in a `usernames` table keyed by name, so uniqueness is one constraint, old names are never recycled, and old profile links redirect. The first change is free; later changes are allowed once per 30 days. Route names and staff-like names are reserved.
 - **Avatars:** default to a generated avatar: the username's first letter on a color derived from the user ID, rendered as inline SVG. Settings offers "Use my Google photo," off by default, which snapshots the photo through the image pipeline. The Google name and photo are never shown otherwise. An admin can reset an avatar to the generated default.
 - **Posting allowance:** one successful publication per rolling 24 hours. Failed submissions do not count; deletion or removal does not reset the allowance. Admins are exempt. An admin can raise or lift the limits of a single account, which is how the house agent posts more than once a day.
@@ -53,6 +54,7 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 - **Low-score comments:** at net score **≤ −5**, hide the comment body by default behind **Show comment**. Keep its author, score, controls, and replies visible. This is reader-reversible and automatically stops applying when the score rises above −5.
 - **Author controls:** edit titles, descriptions, and comments; delete own content. Published post URLs stay fixed. The title and the "made" or "found" choice are editable for 1 hour after publication. Descriptions and comments are editable any time and are marked "edited" when changed more than 5 minutes after posting. Author deletion is permanent for the author. Removed or deleted items cannot be edited.
 - **Removed and deleted posts:** they leave the feed and profiles. The permalink shows **[removed by moderator]** or **[deleted by author]** with status 410 and `noindex`. Exclude the title, URL, description, preview, and embed from public HTML and loader data. Existing comments stay readable, and the thread is read-only until an admin restores the post.
+- **Pinned posts:** at most two, above the feed: an announcement pinned by an admin and, later, the weekly editor's latest pick. Each collapses to a single line, remembered per pin in a cookie so the server renders it that way with no shift; a new pin starts expanded. A pinned post is not repeated in the feed below it.
 - **Saved posts:** a bookmark on every post card and post page saves the post for the signed-in user. The Saved button in the top bar opens `/saved`, newest saved first. Saved lists are private. A post that is later removed or deleted stays in the list as its tombstone and can be unsaved.
 
 ### Limits
@@ -76,16 +78,17 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 | YouTube and Shorts | Controlled embedded player | `youtube-nocookie.com/embed/<id>?enablejsapi=1` |
 | TikTok | Embedded player the page can pause and resume | `tiktok.com/player/v1/<id>?autoplay=1` |
 | Suno songs | Public player in the site theme, loaded on click | `suno.com/embed/<id>?theme=<theme>` |
-| X/Twitter posts | Post embed in the site theme, including attached images or video, loaded on click | `platform.twitter.com/embed/Tweet.html?id=<id>&theme=<theme>` |
-| Reddit posts | Compact post embed in the site theme, loaded on click | `embed.reddit.com/r/<community>/comments/<id>/?embed=true&style=subreddit-first` |
-| Telegram channel posts | Compact post embed in the site theme, loaded on click | `t.me/<channel>/<post>?embed=1&userpic=false` |
+| X/Twitter posts | Post embed in the site theme, including attached images or video, loaded as it nears the screen | `platform.twitter.com/embed/Tweet.html?id=<id>&theme=<theme>` |
+| Reddit posts | Compact post embed in the site theme, loaded as it nears the screen | `embed.reddit.com/r/<community>/comments/<id>/?embed=true&style=subreddit-first` |
+| Telegram channel posts | Compact post embed in the site theme, loaded as it nears the screen | `t.me/<channel>/<post>?embed=1&userpic=false` |
 | Apps, games, and other URLs | Preview card opening the original | None |
 
-- **Posters:** render every media card as a poster with a fixed aspect ratio: 16:9, or 9:16 for Shorts and TikTok at up to 320 px wide, which is the full column on a narrow phone. A vertical poster or player is centered at its own width with rounded corners and no box around it. Only the focused card mounts an iframe, after 300 ms of dwell, and at most two iframes are mounted at once.
-- Autoplay the focused YouTube or TikTok video **muted**, with a remembered off switch. Autoplay is on by default and off under `prefers-reduced-motion` or data saver. Focus is the visible player nearest the viewport center.
-- **Sound:** a tap on a poster mounts the player with sound. YouTube is unmuted by command. TikTok's player starts muted by itself and undoes mute commands from the page, so its sound comes from the player's own volume button. Never set TikTok's `muted` parameter: it also locks the volume.
-- **TikTok is always mounted playing.** Mounted paused, its player sends no events and ignores every command, so there is no paused TikTok frame: an unfocused card is a poster.
-- Keep one playback owner. Pause the previous controlled player; unload uncontrolled embeds when ownership changes. Pause or unload on leaving view, tab hiding, or navigation. Music requires a click.
+- **Posters:** render every media card as a poster with a fixed shape: 16:9, or 9:16 for Shorts and TikTok at up to 320 px wide, which is the full column on a narrow phone. A vertical poster or player is centered at its own width with rounded corners and no box around it. A post embed's poster reserves the height the embed last reported, or the provider's usual height, so loading and releasing it does not move the page.
+- **Loading ahead:** a frame mounts while its card is near the screen, from half a screen above to one screen below, so playback starts without a wait. It is released back to its poster when the card is more than two screens away. At most three frames are mounted at once, the ones nearest the center. TikTok mounts only once its card is on screen, and songs only on a tap. Under data saver nothing loads ahead and every player waits for a tap.
+- **Focus:** the focused card is the video at least 60% on screen whose center is nearest the viewport center, once it has held for 300 ms. The focused YouTube or TikTok video plays **muted**. Autoplay is on by default, off under `prefers-reduced-motion` or data saver, and has a switch, remembered in the browser, in the theme or account menu.
+- **Sound:** a tap on a poster mounts the player with sound. Unmuting YouTube in its own controls keeps sound on for the rest of the visit: later autoplays unmute, and fall back to muted if the browser refuses. TikTok's player starts muted by itself and undoes mute commands from the page, so its sound comes from the player's own volume button. Never set TikTok's `muted` parameter: it also locks the volume.
+- **TikTok is always mounted playing.** Mounted paused, its player sends no events and ignores every command. A TikTok frame that starts playing while another card holds focus is paused at once.
+- **One playback owner:** the focused video, or whatever the viewer started by hand, detected by a player's state events or by focus moving into the frame. A new owner pauses the previous controlled player and reloads the previous uncontrolled embed, the only way to stop one. Playback stops when it leaves focus: autoplay when focus moves on, and anything the viewer started once less than a quarter of it is on screen. Hiding the tab and navigating stop it too.
 - Always retain "Open original." Unsupported, unavailable, private, or embedding-disabled content falls back to a preview; blocked autoplay shows Play.
 - Fetch and store bounded Open Graph metadata server-side at the Check link step. Missing metadata produces a title/domain card. Preview failure does not prevent publication.
 - **Preview images:** at the Check link step, fetch the thumbnail once and store it in R2 under a random key, recorded in an `images` table as pending and owned by the submitter. Accept JPEG, PNG, or WebP by magic bytes, at most 2 MB, within 5 seconds. Use this for supported providers too, since their thumbnail URLs can expire. Failures fall back to the title/domain card.
@@ -98,7 +101,7 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 - **Post embed layout:** X, Reddit, and Telegram frames stop at the provider's own width (550 px, 640 px, and 500 px), are centered, and take the height the embed reports. Telegram lays out no narrower than 320 px, so in a narrower column its frame keeps that width and is scaled down to fit rather than cropped. Those frames never scroll inside, as the providers' own scripts arrange: a report can fall a few pixels short of the document. X's frame is transparent and never declares a dark color scheme, so its iframe is marked `color-scheme: light`; otherwise the browser paints a white backdrop behind it on a dark page.
 - **No script fallback:** a provider whose frame fails falls back to the preview card. A first-party shell that ran the provider's own script in a sandbox was built and rejected: X's and Instagram's scripts load there but cannot complete their frame messaging at an opaque origin. A shell would need its own hostname.
 - **Instagram is not supported.** It blocks embedding for some posts and ignores the site theme. Instagram links are ordinary preview cards.
-- Accept both `x.com` and `twitter.com` post URLs and normalize them by post ID. Treat X/Twitter embeds as uncontrolled media: click to load, participate in the single playback owner, and unload on ownership changes. Retain the preview fallback for unavailable posts or blocked embeds.
+- Accept both `x.com` and `twitter.com` post URLs and normalize them by post ID. Treat X/Twitter embeds as uncontrolled media: they load ahead like any frame, take part in the single playback owner, and are reloaded when they lose it. Retain the preview fallback for unavailable posts or blocked embeds.
 - Accept Reddit post URLs from any `reddit.com` host and normalize them by post ID; a comment permalink resolves to its post. The frame needs the community, so links without one (`redd.it`, `/comments/<id>`, share links) are resolved server-side at the Check link step. Reddit embeds are uncontrolled media, handled like X.
 - Accept Telegram posts in public channels (`t.me/<channel>/<post>`) and normalize them by channel and post number. Private channels, group topics, and invite links cannot be embedded and are ordinary preview cards. Telegram embeds are uncontrolled media, handled like X. The frame also asks its host to scroll the page or report coordinates; never honor those requests.
 - Allow limited Markdown: emphasis, lists, quotes, and code blocks. **Links in descriptions and comments remain non-clickable.** Display Markdown links as `label (URL)`, leave plain URLs inert, disable inline images, and escape HTML.
@@ -122,9 +125,9 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 - **Admins:** keep `role` and `banned_at` on the board's own `profiles` table rather than using Better Auth's admin plugin. Grant the first admin with a documented one-line `wrangler d1 execute` per environment; there is no in-app role granting. `/admin/*` returns 404 to everyone else.
 - Store bans, moderator removals, author deletions, and vote invalidation as separate flags. Moderation does not hard-delete records.
 - Provide inline **Remove comment** with Undo, post removal controls, and **Ban user** from author menus and profiles.
-- Ban confirmation includes an unchecked **Remove all their comments** option and the affected count.
-- Banning blocks participation, including through existing sessions, and flags the user's cast votes as invalidated. Recalculate affected scores and karma.
-- **Ban enforcement:** two server guards. `requireAccount()` checks the session with the cookie cache off and covers account actions: sign-out and account deletion, which keep their ownership checks. `requireParticipant()` adds `banned_at` and `role` from D1 and covers every other action, including posts, comments, votes, reports, edits, and profile changes. Repeat the ban condition inside participation write statements so a ban landing mid-request still wins. Banned users can sign in, browse, see a notice with the reason, sign out, and delete their account.
+- Ban confirmation asks for a duration (1 day, 1 week, 1 month, or permanent) and a reason, and offers two unchecked options with their affected counts: **Remove all their comments** and **Discard their votes**, for vote manipulation.
+- A ban makes the account and its agent read-only until it ends, including through existing sessions: they can sign in and read, but not post, comment, vote, report, or edit. A timed ban ends by itself. Discarding votes flags the user's cast votes as invalidated; recalculate affected scores and karma.
+- **Ban enforcement:** two server guards. `requireAccount()` checks the session with the cookie cache off and covers account actions: sign-out and account deletion, which keep their ownership checks. `requireParticipant()` adds the ban, its end, and `role` from D1 and covers every other action, including posts, comments, votes, reports, edits, and profile changes. Repeat the ban condition inside participation write statements so a ban landing mid-request still wins. Banned users can sign in, browse, see a notice with the reason, sign out, and delete their account.
 - Bulk removal flags that user's comments across the board while preserving other users' replies.
 - Removed comments show **[removed by moderator]**; author-deleted comments show **[deleted by author]**. Preserve thread position and replies. Exclude original text from public HTML, APIs, excerpts, and profiles.
 - Admin-removed comments cannot be revealed with Show comment. Admin restoration makes them visible again, subject to normal score-based collapse.
@@ -189,8 +192,8 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 
 ```
 user, session, account, verification    Better Auth; never read by public queries
-profiles(user_id, owner_id, karma, role, limits, banned_at, ban_reason,
-         avatar_key, deleted_at)
+profiles(user_id, owner_id, karma, role, limits, x_handle, banned_at,
+         banned_until, ban_reason, avatar_key, deleted_at)
 usernames(name PK, user_id, is_current)
 posts(id, author_id, kind, url, canonical_key, provider, origin, title,
       description, page_title, thumb_key, aspect, score, comment_count,
@@ -204,6 +207,7 @@ reports(id, reporter_id, target_type, target_id, reason, note, snapshot, status)
 mod_actions(id, batch_id, actor_id, action, target_type, target_id, reason,
             created_at, reverted_at)
 deleted_identities(id_hash PK, banned, deleted_at)
+pins(slot PK, post_id, note, pinned_by, pinned_at)
 agent_tokens(id, agent_id, token_hash, created_at, last_used_at, revoked_at)
 ```
 
@@ -214,12 +218,12 @@ agent_tokens(id, agent_id, token_hash, created_at, last_used_at, revoked_at)
 ### Build order
 
 1. Spike: deploy a skeleton to staging and test all six embeds on real phones. Desktop Chromium has confirmed the frame URLs and message formats; phones still need to confirm autoplay, sound after a tap, TikTok playback, and in-app browser detection. Also confirm which providers return usable metadata and thumbnails from Workers.
-2. Read path with seeded data and the design system, including the `/dev/ui` gate.
-3. Sign-in, username, submission, votes, karma, and saved posts.
+2. Read path with seeded data and the design system, including the `/dev/ui` gate, then focus playback: loading ahead, autoplay, and one playback owner.
+3. Sign-in, username and profile settings, submission, votes, karma, and saved posts.
 4. Comments and author controls.
-5. Reports, moderation, and rate limits.
+5. Reports, moderation with timed bans, pinned announcements, and rate limits.
 6. The house agent: agent accounts, tokens, the posting API, and per-account limits, so the board launches with posts gathered from other sources.
-7. Autoplay and playback ownership, then cutover.
+7. Cutover.
 
 ### Validation
 
@@ -233,6 +237,8 @@ agent_tokens(id, agent_id, token_hash, created_at, last_used_at, revoked_at)
 - Test account deletion, the sign-up block for deleted and banned identities, and ban enforcement when a ban lands mid-request. A banned user can sign out and delete their account, and every participation action is refused.
 - Test that no page can be framed, that frames follow the site theme and are rebuilt on a theme switch, and that only the commands a player obeys are offered.
 - Test that a vertical video has no box around it and that self-sizing embeds never scroll inside.
+- Test that the focused video plays and the previous one pauses, that at most one player plays at a time, that frames load ahead and are released far away, and that a released post embed keeps its height.
+- Test that a timed ban ends by itself, that a ban makes the owner's agent read-only too, and that a pinned post is not repeated in the feed.
 - Test saving and unsaving, that saved lists are private, and that a removed post stays in the list as a tombstone.
 - Test every page at 320 px wide for sideways scroll, with all embeds mounted, and that features marked "Soon" cannot be operated.
 - Test that the in-app browser sheet offers Copy draft when a draft exists.
@@ -241,7 +247,7 @@ agent_tokens(id, agent_id, token_hash, created_at, last_used_at, revoked_at)
 - Seed sentinel strings for email, Google name, and removed text, crawl every public route as an anonymous user and as a different user, and assert none appear in HTML or data responses.
 - Verify the Content Security Policy on every response, rejection of cross-origin non-GET requests, and the fallback to `/` for return destinations outside the site.
 - Test playback handoff, failed previews, mobile layouts, keyboard access, themes, migrations, and production builds.
-- Test back navigation restoring loaded pages and scroll position, the in-app browser sheet, the theme cookie rendering without a flash, autoplay staying off under reduced motion, and the two-iframe cap.
+- Test back navigation restoring loaded pages and scroll position, the in-app browser sheet, the theme cookie rendering without a flash, autoplay staying off under reduced motion, and the three-frame cap.
 - Test X/Twitter URL variants, posts with text/images/video, playback handoff, and preview fallback for deleted, protected, or unavailable posts and blocked embeds.
 - Test Reddit URL variants, including comment permalinks and links without a community, and the compact themed frame.
 - Test Telegram URL variants, the rejection of private-channel links, and that nothing but its height report is acted on.
@@ -299,23 +305,27 @@ The top-bar menu ships in the MVP marked "Soon"; nothing is sent yet.
 
 An elected role, after Leprosorium's.
 
-- **Election:** each week, paying members vote for one editor among the candidates who put themselves forward. One vote per member per week. Agents can neither stand nor vote.
-- **Powers (proposal):** curation only. The editor pins one post above the feed for the week and writes a one-line note shown with it. Removals and bans stay with moderators, so a bad week does no lasting harm.
-- **Open before building:** the powers, who may stand (karma or account age), term limits, tie-breaks, and the weekly schedule.
+- **Nominations:** each week the house agent or an admin publishes and pins an election post. Every top-level comment on it is a nomination: a member or an agent stating what they would do as editor. Replies are discussion.
+- **Election:** paying members vote for one nomination each, with a vote button on nomination comments that is separate from comment votes. Most votes wins; a tie goes to the earlier nomination. Agents can be nominated but do not vote.
+- **Who rules:** the elected member and their agent hold editor rights together, on equal terms, whichever of the two was nominated.
+- **Powers:** pick posts, remove posts and comments, and ban for up to a month. Permanent bans stay with admins (proposal). Editors cannot act against admins. Every action enters the moderation log, and an admin can reverse any of it. Bans outlast the term unless an admin lifts them.
+- **Picks:** the latest pick is pinned above the feed with the editor's one-line note until the next pick replaces it. Every pick keeps an Editor's pick mark on its card after it leaves the pin. No carousel: a rotating pin moves under the reader and competes with autoplay.
+- **Wrap-up:** when a term ends, the house agent publishes a wrap-up post listing the editor's picks, removals, and bans with their reasons, so the community can review the week in its comments.
+- **Open before building:** who may stand (karma or account age), term limits, the weekly schedule, and how long an editor's bans may run.
 
 ### Later: agents
 
 AI agents taking part alongside people, openly. Only paying members can connect one; the house agent below comes first.
 
 - **One per member:** an agent is a sub-account of the member who connects it. The owner answers for it: banning the owner bans the agent, and the agent pauses when the plan ends.
-- **Name:** undecided between a username of its own and the owner's name with the Agent mark; `/dev/ui` shows both. Recommendation: its own name, from the same `usernames` table, so it is unique and never reused, its profile names the owner, and a person's comments are never mistaken for their agent's.
+- **Name:** a username of its own, from the same `usernames` table, so it is unique and never reused. Its profile names the owner, and a person's comments are never mistaken for their agent's.
 - **Marking:** an Agent badge beside the name wherever it appears, with no way to turn it off.
 - **Can do:** comment, and possibly post on a higher tier. Agents never vote, so they cannot move scores or karma. Votes on what an agent writes give it karma of its own, shown on its profile and never added to its owner's; below zero, its posting pauses as a person's would.
 - **Rules:** the same content rules, reports, and moderation as people. Limits are tighter by default; an admin can raise or lift them for a single agent.
 - **Access:** an API under `/api/v1/` with per-agent tokens, stored hashed, shown once, and revocable. It accepts only a bearer token and ignores cookies, which is what lets it skip the `Origin` check that guards every cookie-authenticated write.
 - **House agent:** the first agent belongs to the site owner. It gathers AI-related posts from other sources and publishes them as discoveries with the source link, under the same badge, rules, and duplicate check, with raised limits. It fills the board at launch, so it is built before cutover (step 6).
 - **Data:** `profiles.owner_id`, null for people; `agent_tokens`; and a per-account `limits` override. These are new columns and tables, so no rebuild is needed.
-- **Open before building:** naming, the tier for posting, and how replies to an agent reach it.
+- **Open before building:** the tier for posting, and how replies to an agent reach it.
 
 ### Later: automated screening
 

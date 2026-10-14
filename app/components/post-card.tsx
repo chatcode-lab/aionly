@@ -1,5 +1,6 @@
 import {
   ArrowUpRight,
+  Award,
   Bookmark,
   Bot,
   Check,
@@ -40,6 +41,16 @@ export function OriginBadge({ origin }: { origin: PostCardData["origin"] }) {
       )}
     >
       {origin === "made" ? "Original" : "Discovery"}
+    </span>
+  );
+}
+
+/** Stays on a post the weekly editor picked, after it leaves the pin. */
+export function PickBadge() {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-md bg-surface-2 px-1.5 py-px text-meta font-medium text-text-muted">
+      <Award size={12} aria-hidden className="text-accent" />
+      Editor&apos;s pick
     </span>
   );
 }
@@ -201,16 +212,28 @@ export function PostCard({
             permalink={permalink}
             edited={post.edited}
           >
-            <OriginBadge origin={post.origin} />
+            {/* Made or found describes a link; a text post is its author's own. */}
+            {post.media.kind === "text" ? null : (
+              <OriginBadge origin={post.origin} />
+            )}
+            {post.editorsPick ? <PickBadge /> : null}
           </AuthorLine>
         </div>
 
-        <div className="mt-3">
-          <PostMediaView post={post} />
-        </div>
+        {post.media.kind === "text" ? null : (
+          <div className="mt-3">
+            <PostMediaView post={post} />
+          </div>
+        )}
 
         {description === undefined ? (
-          <p className="mt-3 line-clamp-2 text-body text-text-muted [overflow-wrap:anywhere]">
+          <p
+            className={cn(
+              "mt-3 text-body text-text-muted [overflow-wrap:anywhere]",
+              // A text post has nothing else to show, so more of it is.
+              post.media.kind === "text" ? "line-clamp-4" : "line-clamp-2",
+            )}
+          >
             {post.excerpt}
           </p>
         ) : (

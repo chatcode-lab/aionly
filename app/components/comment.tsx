@@ -33,6 +33,8 @@ export function CommentThread({
   onReply,
   readOnly = false,
   renderMenu,
+  renderBadge,
+  renderAction,
 }: {
   comments: CommentData[];
   now: number;
@@ -45,6 +47,10 @@ export function CommentThread({
   onVote?: (comment: CommentData, next: Vote) => void;
   onReply?: (comment: CommentData) => void;
   renderMenu?: (comment: CommentData) => ReactNode;
+  /** A mark beside the author, such as a nomination in an editor election. */
+  renderBadge?: (comment: CommentData) => ReactNode;
+  /** An extra control after Reply, such as an election vote. */
+  renderAction?: (comment: CommentData) => ReactNode;
 }) {
   return (
     <ul
@@ -70,6 +76,8 @@ export function CommentThread({
           onReply={onReply}
           readOnly={readOnly}
           renderMenu={renderMenu}
+          renderBadge={renderBadge}
+          renderAction={renderAction}
         />
       ))}
     </ul>
@@ -86,6 +94,8 @@ function CommentItem({
   onReply,
   readOnly,
   renderMenu,
+  renderBadge,
+  renderAction,
 }: {
   comment: CommentData;
   now: number;
@@ -96,6 +106,8 @@ function CommentItem({
   onVote?: (comment: CommentData, next: Vote) => void;
   onReply?: (comment: CommentData) => void;
   renderMenu?: (comment: CommentData) => ReactNode;
+  renderBadge?: (comment: CommentData) => ReactNode;
+  renderAction?: (comment: CommentData) => ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [revealed, setRevealed] = useState(false);
@@ -128,7 +140,9 @@ function CommentItem({
             now={now}
             permalink={`/p/${postId}#c-${comment.id}`}
             edited={comment.edited}
-          />
+          >
+            {renderBadge?.(comment)}
+          </AuthorLine>
         ) : (
           <p className="text-meta text-text-faint">
             {comment.state === "removed"
@@ -176,6 +190,7 @@ function CommentItem({
               >
                 Reply
               </button>
+              {renderAction?.(comment)}
               {renderMenu ? (
                 <div className="ml-auto">{renderMenu(comment)}</div>
               ) : null}
@@ -194,6 +209,8 @@ function CommentItem({
             onReply={onReply}
             readOnly={readOnly}
             renderMenu={renderMenu}
+            renderBadge={renderBadge}
+            renderAction={renderAction}
           />
         ) : null}
         </>

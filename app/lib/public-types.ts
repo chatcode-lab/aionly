@@ -17,6 +17,8 @@ export interface PublicAuthor {
 export type PostMedia =
   | { kind: "media"; provider: Provider; aspect: Aspect; thumbUrl?: string }
   | { kind: "page"; pageTitle?: string; thumbUrl?: string }
+  // A text post: no link and no media. Not offered in the MVP.
+  | { kind: "text" }
   // Media hosted by the board. Not offered in the MVP; the feed has room for it.
   | { kind: "image"; src: string; width: number; height: number }
   | {
@@ -42,6 +44,8 @@ export interface PostCardData {
   commentCount: number;
   excerpt: string;
   media: PostMedia;
+  /** True once a weekly editor has picked the post, pinned or not. */
+  editorsPick?: boolean;
 }
 
 /** A post on its own page, with the whole description. */

@@ -314,7 +314,7 @@ test.describe("design review page", () => {
 
       await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
       await expect(page.getByRole("heading", { name: "Design review" })).toBeVisible();
-      await expect(page.locator("article")).toHaveCount(14);
+      await expect(page.locator("article")).toHaveCount(16);
 
       await page.screenshot({
         path: testInfo.outputPath(`dev-ui-${theme}.png`),
@@ -327,7 +327,7 @@ test.describe("design review page", () => {
 
   test("votes toggle and report opens from the comment menu", async ({ page }) => {
     await page.goto("/dev/ui");
-    const first = page.locator("article").first();
+    const first = page.locator("article", { hasText: "A four-minute stop-motion short" });
     const upvote = first.getByRole("button", { name: "Upvote" }).locator("visible=true");
 
     await expect(upvote).toHaveAttribute("aria-pressed", "true");
@@ -365,14 +365,14 @@ test.describe("design review page", () => {
 
   test("copies a post's link from its card", async ({ page }) => {
     await page.goto("/dev/ui");
-    const card = page.locator("article").first();
+    const card = page.locator("article", { hasText: "A four-minute stop-motion short" });
     await card.getByRole("button", { name: "Copy link" }).click();
     await expect(card.getByRole("status")).toHaveText("Link copied");
   });
 
   test("saves a post from its card", async ({ page }) => {
     await page.goto("/dev/ui");
-    const card = page.locator("article").first();
+    const card = page.locator("article", { hasText: "A four-minute stop-motion short" });
 
     const save = card.getByRole("button", { name: "Save post" });
     await expect(save).toHaveAttribute("aria-pressed", "false");
@@ -403,18 +403,12 @@ test.describe("design review page", () => {
     await expect(form.getByRole("button", { name: "Publish" })).toBeDisabled();
   });
 
-  test("shows the supporter plan, agents, and the editor vote as coming soon", async ({ page }) => {
+  test("shows the supporter plan and agents as coming soon", async ({ page }) => {
     await page.goto("/dev/ui");
 
     await expect(page.getByRole("button", { name: "Become a supporter" })).toBeDisabled();
     await expect(page.getByRole("textbox", { name: "Agent name" })).toBeDisabled();
     await expect(page.getByRole("button", { name: "Create token" })).toBeDisabled();
-    await expect(page.getByRole("button", { name: "Vote", exact: true })).toBeDisabled();
-    const candidates = page.locator('input[name="editor"]');
-    await expect(candidates).toHaveCount(3);
-    for (const candidate of await candidates.all()) {
-      await expect(candidate).toBeDisabled();
-    }
 
     await page.getByRole("button", { name: "Text", exact: true }).click();
     await expect(page.getByText("Write a text post")).toBeVisible();
@@ -426,13 +420,43 @@ test.describe("design review page", () => {
 
   test("marks every agent, including the board's own", async ({ page }) => {
     await page.goto("/dev/ui");
-    const scout = page.locator("article", { hasText: "aionly_scout" });
+    const scout = page.locator("article", { hasText: "Open-weights video model" });
     await expect(scout.getByText("Agent", { exact: true })).toBeVisible();
-    for (const option of ["A: its own name", "B: the owner's name, marked"]) {
-      const sample = page.locator("div", {
-        has: page.getByRole("heading", { name: option }),
-      }).last();
-      await expect(sample.getByText("Agent", { exact: true })).toBeVisible();
+  });
+
+  test("pinned posts collapse to one line and open again", async ({ page }) => {
+    await page.goto("/dev/ui");
+    const announcement = page.getByRole("region", { name: "Announcement" });
+    await expect(announcement.locator("article")).toBeVisible();
+    await announcement.getByRole("button", { name: "Collapse announcement" }).click();
+
+    const line = page.getByRole("button", { name: /^Announcement Welcome/ });
+    await expect(line).toHaveAttribute("aria-expanded", "false");
+    await line.click();
+    await expect(page.getByRole("region", { name: "Announcement" }).locator("article")).toBeVisible();
+
+    // The editor's pick starts collapsed, and keeps its mark when opened.
+    await page.getByRole("button", { name: /^Editor's pick A pop-up book/ }).click();
+    const pick = page.getByRole("region", { name: "Editor's pick" });
+    await expect(pick.getByText("Editor's pick", { exact: true }).last()).toBeVisible();
+  });
+
+  test("a ban asks for a duration and can discard votes", async ({ page }) => {
+    await page.goto("/dev/ui");
+    await page.getByRole("button", { name: "Open ban dialog" }).click();
+    const dialog = page.getByRole("dialog", { name: /^Ban / });
+    await expect(dialog.getByRole("radio", { name: "1 week" })).toBeChecked();
+    for (const duration of ["1 day", "1 month", "Permanent"]) {
+      await expect(dialog.getByRole("radio", { name: duration })).toBeVisible();
+    }
+    await expect(dialog.getByRole("checkbox", { name: /Discard their votes/ })).not.toBeChecked();
+  });
+
+  test("nominations carry an election vote that is not open yet", async ({ page }) => {
+    await page.goto("/dev/ui");
+    await expect(page.getByText("Nomination", { exact: true })).toHaveCount(2);
+    for (const button of await page.getByRole("button", { name: /^Vote · / }).all()) {
+      await expect(button).toBeDisabled();
     }
   });
 

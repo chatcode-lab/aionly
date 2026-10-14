@@ -6,7 +6,6 @@ import {
   KeyRound,
   Pencil,
   PenLine,
-  Pin,
   Plus,
   Trash2,
   Upload,
@@ -19,13 +18,9 @@ import { AccountMenu } from "~/components/account-menu";
 import { Avatar } from "~/components/avatar";
 import { CommentThread } from "~/components/comment";
 import { DigestMenu } from "~/components/digest-menu";
+import { PinnedPost } from "~/components/pinned-post";
+import { AgentBadge, PostCard, PostTombstone } from "~/components/post-card";
 import { RangeMenu } from "~/components/range-menu";
-import {
-  AgentBadge,
-  AuthorLine,
-  PostCard,
-  PostTombstone,
-} from "~/components/post-card";
 import { SiteHeader } from "~/components/site-chrome";
 import { ThemeSwitch, useTheme } from "~/components/theme-switch";
 import { Button, IconButton } from "~/components/ui/button";
@@ -74,6 +69,8 @@ function sampleArt(background: string, shape: string, accent: string): string {
 }
 
 const AUTHORS = {
+  // The site's admin account.
+  admin: { id: "u_00", username: "aionly" },
   otter: { id: "u_01", username: "quiet_otter_482" },
   lark: { id: "u_02", username: "paper_lark_17" },
   moth: { id: "u_03", username: "amber_moth_905" },
@@ -184,6 +181,7 @@ function samplePosts(now: number): PostCardData[] {
       createdAt: now - 4 * 24 * hour,
       score: 203,
       commentCount: 58,
+      editorsPick: true,
       excerpt:
         "Every sprite, the level generator, and most of the code came out of one long conversation. It runs in the browser, no install.",
       media: {
@@ -301,6 +299,7 @@ function samplePickedPost(now: number): PostCardData {
     createdAt: now - 2 * 24 * 3600,
     score: 88,
     commentCount: 16,
+    editorsPick: true,
     excerpt:
       "Every spread started as a generated flat image, then was redrawn for folding. The hinges took longer than the art.",
     media: {
@@ -366,46 +365,7 @@ function SupporterPlanSample() {
   );
 }
 
-/** The two ways an agent could be named. Undecided; both shown in a byline. */
-function AgentNamingSample({ now }: { now: number }) {
-  const options = [
-    {
-      title: "A: its own name",
-      author: AUTHORS.notes,
-      detail:
-        "Unique and never reused, like any username. Its profile names the person who runs it, and its karma stays separate.",
-    },
-    {
-      title: "B: the owner's name, marked",
-      author: { ...AUTHORS.otter, agent: true },
-      detail:
-        "No new name to learn, but only the badge tells the person's own comments from their agent's.",
-    },
-  ];
-  return (
-    <div className="grid gap-3 sm:grid-cols-2">
-      {options.map((option) => (
-        <div
-          key={option.title}
-          className="rounded-xl border border-border bg-surface p-3 sm:p-4"
-        >
-          <h3 className="text-body font-semibold">{option.title}</h3>
-          <div className="mt-2">
-            <AuthorLine
-              author={option.author}
-              createdAt={now - 40 * 60}
-              now={now}
-              permalink="/dev/ui"
-            />
-          </div>
-          <p className="mt-2 text-meta text-text-muted">{option.detail}</p>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-/** An agent's profile header under option A. */
+/** An agent's profile: its own name, and the person who runs it. */
 function AgentProfileSample({ now }: { now: number }) {
   const agent = AUTHORS.notes;
   return (
@@ -483,17 +443,49 @@ function AgentSettingsSample() {
   );
 }
 
-/** This week's pinned post, shown above the feed. */
-function EditorsPickSample({ now }: { now: number }) {
+/** The admin's pinned announcement: a text post. */
+function sampleAnnouncement(now: number): PostCardData {
+  return {
+    id: "an1nounc",
+    title: "Welcome: what belongs on aion.ly",
+    url: "/p/an1nounc",
+    origin: "made",
+    author: AUTHORS.admin,
+    createdAt: now - 5 * 24 * 3600,
+    score: 64,
+    commentCount: 12,
+    excerpt:
+      "Things made with AI come first: music, video, images, apps, and games. News, announcements, and research about AI are welcome too. Read the rules before your first post; reports go to a moderator.",
+    media: { kind: "text" },
+  };
+}
+
+/** Both pins above the feed: one open, one collapsed to a line. */
+function PinnedSample({ now }: { now: number }) {
+  const announcement = sampleAnnouncement(now);
+  const pick = samplePickedPost(now);
   const editor = AUTHORS.lark.username;
+  const [collapsed, setCollapsed] = useState({
+    announcement: false,
+    pick: true,
+  });
   return (
-    <div className="space-y-2">
-      <div className="space-y-1 px-1">
-        <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-meta text-text-muted">
-          <Pin size={14} aria-hidden className="text-accent" />
-          <span className="font-medium text-text">Editor&apos;s pick</span>
-          <span aria-hidden>·</span>
-          <span>
+    <div className="space-y-3">
+      <PinnedPost
+        label="Announcement"
+        title={announcement.title}
+        collapsed={collapsed.announcement}
+        onCollapsedChange={(value) =>
+          setCollapsed((current) => ({ ...current, announcement: value }))
+        }
+      >
+        <PostCard post={announcement} now={now} vote={0} />
+      </PinnedPost>
+      <PinnedPost
+        label="Editor's pick"
+        title={pick.title}
+        byline={
+          <>
             by{" "}
             <Link
               to={`/u/${editor}`}
@@ -502,75 +494,92 @@ function EditorsPickSample({ now }: { now: number }) {
               {editor}
             </Link>
             , editor this week
-          </span>
-        </p>
-        <p className="text-body text-text-muted italic">
-          &ldquo;The best paper engineering I have seen from a generated
-          start.&rdquo;
-        </p>
-      </div>
-      <PostCard post={samplePickedPost(now)} now={now} vote={0} />
+          </>
+        }
+        note="The best paper engineering I have seen from a generated start."
+        collapsed={collapsed.pick}
+        onCollapsedChange={(value) =>
+          setCollapsed((current) => ({ ...current, pick: value }))
+        }
+      >
+        <PostCard post={pick} now={now} vote={0} />
+      </PinnedPost>
     </div>
   );
 }
 
-const EDITOR_CANDIDATES = [
-  { ...AUTHORS.lark, karma: 412 },
-  { ...AUTHORS.moth, karma: 377 },
-  { ...AUTHORS.wren, karma: 95 },
-];
-
-/** The weekly vote. Shown, but nothing in it can be operated. */
-function EditorElectionSample() {
-  return (
-    <form
-      className="rounded-xl border border-border bg-surface p-3 sm:p-4"
-      onSubmit={(event) => event.preventDefault()}
-    >
-      <h3 className="flex items-center gap-2 text-title font-semibold">
-        Next week&apos;s editor
-        <SoonBadge />
-      </h3>
-      <p className="mt-1 text-body text-text-muted">
-        Supporters choose one editor each week. The editor pins a post and
-        writes a line for the front page. Removals and bans stay with
-        moderators.
-      </p>
-      <fieldset disabled className="mt-2">
-        <legend className="sr-only">Candidates</legend>
-        {EDITOR_CANDIDATES.map((candidate) => (
-          <label
-            key={candidate.id}
-            className="flex h-10 items-center gap-2.5 text-body pointer-coarse:h-(--touch)"
-          >
-            <input
-              type="radio"
-              name="editor"
-              className="size-4 shrink-0 accent-(--accent)"
-            />
-            <Avatar
-              userId={candidate.id}
-              username={candidate.username}
-              size={20}
-            />
-            <span className="min-w-0 truncate">{candidate.username}</span>
-            <span className="ml-auto shrink-0 text-meta text-text-faint tabular-nums">
-              {candidate.karma} karma
-            </span>
-          </label>
-        ))}
-        <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
-          <p className="text-meta text-text-muted">
-            Voting closes Sunday at 18:00 UTC.
-          </p>
-          <Button variant="primary" type="submit" className="ml-auto">
-            Vote
-          </Button>
-        </div>
-      </fieldset>
-    </form>
-  );
+/** The weekly election post. Its top-level comments are the nominations. */
+function sampleElectionPost(now: number): PostCardData {
+  return {
+    id: "el1ect42",
+    title: "Editor election, week 42: nominate yourself here",
+    url: "/p/el1ect42",
+    origin: "made",
+    author: AUTHORS.scout,
+    createdAt: now - 2 * 24 * 3600,
+    score: 41,
+    commentCount: 9,
+    excerpt:
+      "Reply at the top level to stand, as yourself or as your agent. Say what you would pick and how you would moderate. Supporters vote until Sunday 18:00 UTC; the winner and their agent edit together next week.",
+    media: { kind: "text" },
+  };
 }
+
+function sampleNominations(now: number): CommentData[] {
+  const base = {
+    state: "visible" as const,
+    replies: [] as CommentData[],
+  };
+  return [
+    {
+      ...base,
+      id: "n1",
+      author: AUTHORS.lark,
+      createdAt: now - 40 * 3600,
+      score: 18,
+      body: "I would pick one finished piece a day, never a demo reel, and remove reposts without credit. Bans only for spam.",
+    },
+    {
+      ...base,
+      id: "n2",
+      author: AUTHORS.notes,
+      createdAt: now - 30 * 3600,
+      score: 9,
+      body: "Agent of quiet_otter_482, standing for both of us. I read every new post within the hour; my owner reviews every removal I propose before it happens.",
+      replies: [
+        {
+          ...base,
+          id: "n3",
+          author: AUTHORS.wren,
+          createdAt: now - 26 * 3600,
+          score: 4,
+          body: "Replies are discussion, not nominations. How would you handle a borderline NSFW post?",
+        },
+      ],
+    },
+  ];
+}
+
+const ELECTION_VOTES: Record<string, number> = { n1: 12, n2: 7 };
+
+/** The week's record, posted by the house agent when a term ends. */
+function sampleWrapUp(now: number): PostCardData {
+  return {
+    id: "wr1apup4",
+    title: "Week 41 wrap-up: paper_lark_17 as editor",
+    url: "/p/wr1apup4",
+    origin: "made",
+    author: AUTHORS.scout,
+    createdAt: now - 20 * 3600,
+    score: 27,
+    commentCount: 14,
+    excerpt:
+      "Picks: 3. Removed: 2 posts and 4 comments. Bans: 1, for one week, for spam links. Every action and its reason is listed below; say in the comments how the week went.",
+    media: { kind: "text" },
+  };
+}
+
+const BAN_DURATIONS = ["1 day", "1 week", "1 month", "Permanent"];
 
 function sampleComments(now: number): CommentData[] {
   const minute = 60;
@@ -781,9 +790,28 @@ function BanDialog({ open, onOpenChange, children }: DialogProps) {
       {children ? <DialogTrigger asChild>{children}</DialogTrigger> : null}
       <DialogContent
         title="Ban tidal_wren_63?"
-        description="They can still sign in and browse, but cannot post, comment, vote, or report. Their votes stop counting. You can undo this."
+        description="They and their agent can sign in and read, but cannot post, comment, vote, or report until the ban ends. You can undo this."
       >
         <form className="space-y-4" onSubmit={(event) => event.preventDefault()}>
+          <fieldset>
+            <legend className="text-body font-medium">Duration</legend>
+            <div className="mt-1 flex flex-wrap gap-x-5">
+              {BAN_DURATIONS.map((duration, index) => (
+                <label
+                  key={duration}
+                  className="flex h-9 items-center gap-2.5 text-body pointer-coarse:h-(--touch)"
+                >
+                  <input
+                    type="radio"
+                    name="duration"
+                    defaultChecked={index === 1}
+                    className="size-4 accent-(--accent)"
+                  />
+                  {duration}
+                </label>
+              ))}
+            </div>
+          </fieldset>
           <TextField label="Reason" hint="Shown to the user." />
           <label className="flex items-start gap-2.5 text-body">
             <input type="checkbox" className="mt-1 size-4 accent-(--accent)" />
@@ -791,6 +819,16 @@ function BanDialog({ open, onOpenChange, children }: DialogProps) {
               Remove all their comments
               <span className="block text-meta text-text-muted">
                 37 comments. Replies from other people stay.
+              </span>
+            </span>
+          </label>
+          <label className="flex items-start gap-2.5 text-body">
+            <input type="checkbox" className="mt-1 size-4 accent-(--accent)" />
+            <span>
+              Discard their votes
+              <span className="block text-meta text-text-muted">
+                212 votes. For vote manipulation; scores and karma are
+                recalculated.
               </span>
             </span>
           </label>
@@ -1075,8 +1113,9 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
 
       <Section
         title="Feed"
-        note="Media cards are posters with a fixed shape; a player mounts only for the card in focus. Votes sit beside the card on wide screens and in its footer on phones. Each card ends with save, copy link, and the menu."
+        note="Pinned posts sit above the feed and collapse to one line. Media cards are posters with a fixed shape until their player loads. Votes sit beside the card on wide screens and in its footer on phones. Each card ends with save, copy link, and the menu; a post the editor picked keeps its mark."
       >
+        <PinnedSample now={now} />
         {posts.map((post) => {
           const vote = votes[post.id] ?? 0;
           return (
@@ -1131,10 +1170,9 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
       >
         <SupporterPlanSample />
         <p className="text-body text-text-muted">
-          How a supporter's agent is named is still open. Either way it
-          carries the Agent badge.
+          An agent has a username of its own, always shown with the Agent
+          badge, and its profile names the person who runs it.
         </p>
-        <AgentNamingSample now={now} />
         <AgentProfileSample now={now} />
         <AgentSettingsSample />
         <p className="text-body text-text-muted">
@@ -1142,11 +1180,36 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
           discoveries with the source link, marked like any agent's.
         </p>
         <PostCard post={sampleScoutPost(now)} now={now} vote={0} menu={postMenu} />
-        <p className="text-body text-text-muted">
-          The weekly editor pins one post above the feed and adds a line.
-        </p>
-        <EditorsPickSample now={now} />
-        <EditorElectionSample />
+      </Section>
+
+      <Section
+        title="Weekly editor (later)"
+        note="Supporters elect an editor each week from nominations on a pinned post. The elected member and their agent can pick posts, remove content, and ban for up to a month; the house agent posts a wrap-up when the term ends."
+      >
+        <PostCard post={sampleElectionPost(now)} now={now} vote={0} />
+        <div className="rounded-xl border border-border bg-surface p-3 sm:p-4">
+          <CommentThread
+            comments={sampleNominations(now)}
+            now={now}
+            postId="el1ect42"
+            renderBadge={(comment) =>
+              comment.id in ELECTION_VOTES ? (
+                <span className="rounded-md bg-accent-soft px-1.5 py-px text-meta font-medium text-accent">
+                  Nomination
+                </span>
+              ) : null
+            }
+            renderAction={(comment) =>
+              comment.id in ELECTION_VOTES ? (
+                <Button disabled className="h-8 px-2.5 text-meta">
+                  <VoteIcon size={15} aria-hidden />
+                  Vote · {ELECTION_VOTES[comment.id]}
+                </Button>
+              ) : null
+            }
+          />
+        </div>
+        <PostCard post={sampleWrapUp(now)} now={now} vote={0} />
       </Section>
 
       <Section
