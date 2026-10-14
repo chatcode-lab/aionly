@@ -36,7 +36,7 @@ export function SiteHeader({
 }
 
 /** Shown on every page. Both links are ordinary site links. */
-export function SiteFooter() {
+export function SiteFooter({ reviewPages = false }: { reviewPages?: boolean }) {
   return (
     <footer className="mx-auto w-full max-w-column px-(--gutter) pt-10 pb-8 text-meta text-text-muted">
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -53,6 +53,19 @@ export function SiteFooter() {
         >
           @karulin
         </a>
+        {/* Staging and local development only. */}
+        {reviewPages ? (
+          <>
+            <span aria-hidden>·</span>
+            <Link to="/dev/ui" className="hover:text-text">
+              Design review
+            </Link>
+            <span aria-hidden>·</span>
+            <Link to="/dev/embeds" className="hover:text-text">
+              Embed spike
+            </Link>
+          </>
+        ) : null}
       </p>
     </footer>
   );

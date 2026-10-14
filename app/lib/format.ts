@@ -34,6 +34,20 @@ export function formatDuration(seconds: number): string {
     : `${minutes}:${rest}`;
 }
 
+const MONTHS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+/**
+ * "Oct 2026", from epoch seconds. Fixed to UTC and English so the server and
+ * the browser always render the same text.
+ */
+export function formatMonthYear(seconds: number): string {
+  const date = new Date(seconds * 1000);
+  return `${MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
+}
+
 /** "5 h 12 min", for posting-allowance and retry messages. */
 export function formatWait(seconds: number): string {
   const total = Math.max(0, Math.ceil(seconds));

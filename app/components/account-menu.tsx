@@ -5,7 +5,7 @@ import { Link } from "react-router";
 import type { Theme } from "~/lib/theme";
 
 import { Avatar } from "./avatar";
-import type { PublicAuthor } from "./post-card";
+import type { PublicAuthor } from "~/lib/public-types";
 import { MENU_CONTENT, ThemeRadioGroup } from "./theme-switch";
 import { MenuItem, MenuSeparator } from "./ui/menu";
 

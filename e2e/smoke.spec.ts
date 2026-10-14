@@ -238,7 +238,15 @@ test.describe("narrow screens", () => {
           document.documentElement.clientWidth,
       );
 
-    for (const path of ["/", "/dev/ui", "/dev/embeds"]) {
+    for (const path of [
+      "/",
+      "/?range=all",
+      "/p/s_post_01",
+      "/p/s_post_17",
+      "/u/quiet_otter_482",
+      "/dev/ui",
+      "/dev/embeds",
+    ]) {
       await page.goto(path);
       expect(await overflow(), path).toBeLessThanOrEqual(0);
     }

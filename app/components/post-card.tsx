@@ -12,24 +12,12 @@ import { Link } from "react-router";
 import { copyText } from "~/lib/clipboard";
 import { cn } from "~/lib/cn";
 import { formatAge, formatCount } from "~/lib/format";
-import type { Aspect, Provider } from "~/lib/links/types";
+import type { PostCardData, PublicAuthor } from "~/lib/public-types";
 
 import { Avatar } from "./avatar";
-import {
-  MediaPoster,
-  OUTBOUND_REL,
-  PreviewCard,
-  UploadedImage,
-} from "./media-poster";
+import { OUTBOUND_REL } from "./media-poster";
+import { PostMediaView } from "./post-media";
 import { type Vote, VoteControl } from "./vote-control";
-
-export interface PublicAuthor {
-  id: string;
-  username: string;
-  photoUrl?: string;
-  /** True for an AI agent's account. Agents are always marked as such. */
-  agent?: boolean;
-}
 
 /** Shown beside every agent's name, wherever the name appears. */
 export function AgentBadge() {
@@ -39,36 +27,6 @@ export function AgentBadge() {
       Agent
     </span>
   );
-}
-
-export type PostMedia =
-  | { kind: "media"; provider: Provider; aspect: Aspect; thumbUrl?: string }
-  | { kind: "page"; pageTitle?: string; thumbUrl?: string }
-  // Media hosted by the board. Not offered in the MVP; the feed has room for it.
-  | { kind: "image"; src: string; width: number; height: number }
-  | {
-      kind: "video" | "audio";
-      aspect: Aspect;
-      thumbUrl?: string;
-      duration?: number;
-    };
-
-export interface PostCardData {
-  id: string;
-  title: string;
-  /** The original link, or the post's own page when the board hosts the media. */
-  url: string;
-  /** Absent for posts whose media the board hosts: there is no outside link. */
-  host?: string;
-  /** "made" for originals, "found" for discoveries. */
-  origin: "made" | "found";
-  author: PublicAuthor;
-  createdAt: number;
-  edited?: boolean;
-  score: number;
-  commentCount: number;
-  excerpt: string;
-  media: PostMedia;
 }
 
 export function OriginBadge({ origin }: { origin: PostCardData["origin"] }) {
@@ -174,47 +132,6 @@ function CopyLinkButton({ path }: { path: string }) {
   );
 }
 
-function PostMediaView({ post }: { post: PostCardData }) {
-  const { media } = post;
-  switch (media.kind) {
-    case "media":
-      return (
-        <MediaPoster
-          provider={media.provider}
-          aspect={media.aspect}
-          thumbUrl={media.thumbUrl}
-        />
-      );
-    case "page":
-      return (
-        <PreviewCard
-          url={post.url}
-          host={post.host ?? ""}
-          pageTitle={media.pageTitle}
-          thumbUrl={media.thumbUrl}
-        />
-      );
-    case "image":
-      return (
-        <UploadedImage
-          src={media.src}
-          width={media.width}
-          height={media.height}
-          alt={post.title}
-        />
-      );
-    case "video":
-    case "audio":
-      return (
-        <MediaPoster
-          aspect={media.aspect}
-          thumbUrl={media.thumbUrl}
-          duration={media.duration}
-        />
-      );
-  }
-}
-
 /** One post in the feed: votes, title, media or preview, excerpt, and meta. */
 export function PostCard({
   post,
@@ -224,6 +141,7 @@ export function PostCard({
   saved = false,
   onToggleSave,
   menu,
+  description,
 }: {
   post: PostCardData;
   now: number;
@@ -234,6 +152,8 @@ export function PostCard({
   onToggleSave?: () => void;
   /** The ⋯ menu for this post. */
   menu?: ReactNode;
+  /** The whole description, shown in place of the excerpt on the post's page. */
+  description?: string;
 }) {
   const permalink = `/p/${post.id}`;
 
@@ -289,9 +209,15 @@ export function PostCard({
           <PostMediaView post={post} />
         </div>
 
-        <p className="mt-3 line-clamp-2 text-body text-text-muted [overflow-wrap:anywhere]">
-          {post.excerpt}
-        </p>
+        {description === undefined ? (
+          <p className="mt-3 line-clamp-2 text-body text-text-muted [overflow-wrap:anywhere]">
+            {post.excerpt}
+          </p>
+        ) : (
+          <p className="mt-3 text-body whitespace-pre-wrap [overflow-wrap:anywhere]">
+            {description}
+          </p>
+        )}
 
         <div className="mt-2 -mb-1 flex items-center gap-0.5 max-sm:-mx-1.5 sm:-ml-2 sm:gap-1">
           <div className="sm:hidden">

@@ -5,19 +5,27 @@ import {
   Outlet,
   Scripts,
   ScrollRestoration,
+  useMatches,
   useRouteLoaderData,
 } from "react-router";
 
 import type { Route } from "./+types/root";
 import "./app.css";
+import { FeedToolbar } from "./components/feed-toolbar";
+import { NotifyProvider } from "./components/notify";
+import { PlaybackProvider } from "./components/post-media";
 import { SiteFooter, SiteHeader } from "./components/site-chrome";
 import { ThemeSwitch, useTheme } from "./components/theme-switch";
 import { ErrorState } from "./components/ui/states";
 import { ToastProvider } from "./components/ui/toast";
+import { appEnvironment } from "./lib/env.server";
 import { readTheme } from "./lib/theme";
 
 export function loader({ request }: Route.LoaderArgs) {
-  return { theme: readTheme(request.headers.get("Cookie")) };
+  return {
+    theme: readTheme(request.headers.get("Cookie")),
+    reviewPages: appEnvironment() !== "production",
+  };
 }
 
 export function Layout({ children }: { children: React.ReactNode }) {
@@ -25,6 +33,10 @@ export function Layout({ children }: { children: React.ReactNode }) {
   // The server renders the remembered theme into the document, and CSS
   // resolves "system", so the first paint is already correct.
   const theme = useTheme(data?.theme);
+  // A route asks for the feed's sort and range controls through its handle.
+  const feedToolbar = useMatches().some(
+    (match) => (match.handle as { feedToolbar?: boolean } | undefined)?.feedToolbar,
+  );
 
   return (
     <html lang="en" data-theme={theme}>
@@ -40,11 +52,15 @@ export function Layout({ children }: { children: React.ReactNode }) {
       </head>
       <body className="flex min-h-dvh flex-col bg-bg text-text">
         <ToastProvider>
-          <SiteHeader>
-            <ThemeSwitch theme={theme} />
-          </SiteHeader>
-          <div className="flex-1">{children}</div>
-          <SiteFooter />
+          <NotifyProvider>
+            <PlaybackProvider>
+              <SiteHeader toolbar={feedToolbar ? <FeedToolbar /> : undefined}>
+                <ThemeSwitch theme={theme} />
+              </SiteHeader>
+              <div className="flex-1">{children}</div>
+              <SiteFooter reviewPages={data?.reviewPages ?? false} />
+            </PlaybackProvider>
+          </NotifyProvider>
         </ToastProvider>
         <ScrollRestoration />
         <Scripts />

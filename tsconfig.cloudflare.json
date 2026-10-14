@@ -6,7 +6,8 @@
     "app/**/.server/**/*",
     "app/**/.client/**/*",
     "workers/**/*",
-    "worker-configuration.d.ts"
+    "worker-configuration.d.ts",
+    "test/**/*"
   ],
   "compilerOptions": {
     "composite": true,
@@ -17,7 +18,8 @@
       "ES2022"
     ],
     "types": [
-      "vite/client"
+      "vite/client",
+      "@cloudflare/vitest-plugin/types"
     ],
     "target": "ES2022",
     "module": "ES2022",

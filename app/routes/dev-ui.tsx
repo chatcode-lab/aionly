@@ -11,14 +11,10 @@ import { type ReactNode, useState } from "react";
 import { useRouteLoaderData, useSearchParams } from "react-router";
 
 import { AccountMenu } from "~/components/account-menu";
-import { type CommentData, CommentThread } from "~/components/comment";
+import { CommentThread } from "~/components/comment";
 import { DigestMenu } from "~/components/digest-menu";
 import { RangeMenu } from "~/components/range-menu";
-import {
-  PostCard,
-  type PostCardData,
-  PostTombstone,
-} from "~/components/post-card";
+import { PostCard, PostTombstone } from "~/components/post-card";
 import { SiteHeader } from "~/components/site-chrome";
 import { ThemeSwitch, useTheme } from "~/components/theme-switch";
 import { Button, IconButton } from "~/components/ui/button";
@@ -43,6 +39,7 @@ import { Toast } from "~/components/ui/toast";
 import type { Vote } from "~/components/vote-control";
 import { assertDevRoutes } from "~/lib/env.server";
 import { formatWait } from "~/lib/format";
+import type { CommentData, PostCardData } from "~/lib/public-types";
 import type { Theme } from "~/lib/theme";
 
 import type { Route } from "./+types/dev-ui";
@@ -803,6 +800,10 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
             comments={sampleComments(now)}
             now={now}
             postId="a1b2c3d4"
+            votes={votes}
+            onVote={(target, next) =>
+              setVotes((current) => ({ ...current, [target.id]: next }))
+            }
             renderMenu={() => (
               <Menu label="Comment actions">
                 <MenuItem onSelect={() => setDialog("report")}>

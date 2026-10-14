@@ -26,6 +26,15 @@
 	"vars": {
 		"ENVIRONMENT": "production"
 	},
+	// Local development and tests use a simulated database under this name.
+	"d1_databases": [
+		{
+			"binding": "DB",
+			"database_name": "aionly-board-local",
+			"database_id": "local",
+			"migrations_dir": "migrations"
+		}
+	],
 	"env": {
 		"staging": {
 			"name": "aionly-board-staging",
@@ -33,7 +42,15 @@
 			"preview_urls": false,
 			"vars": {
 				"ENVIRONMENT": "staging"
-			}
+			},
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "aionly-board-staging",
+					"database_id": "976382e7-1d1e-4b19-add5-921ac53b931f",
+					"migrations_dir": "migrations"
+				}
+			]
 		},
 		"production": {
 			"name": "aionly-board",
@@ -43,7 +60,18 @@
 			"preview_urls": false,
 			"vars": {
 				"ENVIRONMENT": "production"
-			}
+			},
+			// The production database is created at launch. Until its ID is
+			// filled in here, a production deploy fails rather than run without
+			// a database.
+			"d1_databases": [
+				{
+					"binding": "DB",
+					"database_name": "aionly-board",
+					"database_id": "create-at-launch",
+					"migrations_dir": "migrations"
+				}
+			]
 		}
 	}
 }

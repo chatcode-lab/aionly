@@ -191,9 +191,9 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 user, session, account, verification    Better Auth; never read by public queries
 profiles(user_id, karma, role, banned_at, ban_reason, avatar_key, deleted_at)
 usernames(name PK, user_id, is_current)
-posts(id, author_id, url, canonical_key, provider, kind, title, description,
-      thumb_key, aspect, score, comment_count, created_at, edited_at,
-      deleted_at, removed_batch_id)
+posts(id, author_id, url, canonical_key, provider, origin, title, description,
+      page_title, thumb_key, aspect, score, comment_count, created_at,
+      edited_at, deleted_at, removed_batch_id)
 comments(id, post_id, parent_id, author_id, body, depth, score,
          created_at, edited_at, deleted_at, removed_batch_id)
 votes(voter_id, target_type, target_id, value, invalidated_batch_id)

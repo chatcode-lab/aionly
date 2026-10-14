@@ -3,21 +3,10 @@ import { type ReactNode, useState } from "react";
 
 import { cn } from "~/lib/cn";
 
-import { AuthorLine, type PublicAuthor } from "./post-card";
-import { type Vote, VoteControl } from "./vote-control";
+import type { CommentData } from "~/lib/public-types";
 
-export interface CommentData {
-  id: string;
-  /** Absent once the comment is removed or deleted. */
-  author: PublicAuthor | null;
-  createdAt: number;
-  edited?: boolean;
-  score: number;
-  /** Absent once the comment is removed or deleted; the text never ships. */
-  body: string | null;
-  state: "visible" | "removed" | "deleted";
-  replies: CommentData[];
-}
+import { AuthorLine } from "./post-card";
+import { type Vote, VoteControl } from "./vote-control";
 
 /** At or below this net score a comment's body starts hidden. */
 export const LOW_SCORE_THRESHOLD = -5;
@@ -39,12 +28,22 @@ export function CommentThread({
   now,
   postId,
   depth = 0,
+  votes,
+  onVote,
+  onReply,
+  readOnly = false,
   renderMenu,
 }: {
   comments: CommentData[];
   now: number;
   postId: string;
   depth?: number;
+  /** True under a removed or deleted post, where nothing can be added. */
+  readOnly?: boolean;
+  /** The viewer's votes, by comment ID. */
+  votes?: Record<string, Vote>;
+  onVote?: (comment: CommentData, next: Vote) => void;
+  onReply?: (comment: CommentData) => void;
   renderMenu?: (comment: CommentData) => ReactNode;
 }) {
   return (
@@ -66,6 +65,10 @@ export function CommentThread({
           now={now}
           postId={postId}
           depth={depth}
+          votes={votes}
+          onVote={onVote}
+          onReply={onReply}
+          readOnly={readOnly}
           renderMenu={renderMenu}
         />
       ))}
@@ -78,17 +81,25 @@ function CommentItem({
   now,
   postId,
   depth,
+  votes,
+  onVote,
+  onReply,
+  readOnly,
   renderMenu,
 }: {
   comment: CommentData;
   now: number;
   postId: string;
   depth: number;
+  readOnly: boolean;
+  votes?: Record<string, Vote>;
+  onVote?: (comment: CommentData, next: Vote) => void;
+  onReply?: (comment: CommentData) => void;
   renderMenu?: (comment: CommentData) => ReactNode;
 }) {
   const [collapsed, setCollapsed] = useState(false);
   const [revealed, setRevealed] = useState(false);
-  const [vote, setVote] = useState<Vote>(0);
+  const vote = votes?.[comment.id] ?? 0;
 
   const hiddenByScore =
     comment.state === "visible" && comment.score <= LOW_SCORE_THRESHOLD;
@@ -149,17 +160,18 @@ function CommentItem({
             </p>
           )}
 
-          {comment.state === "visible" ? (
+          {comment.state === "visible" && !readOnly ? (
             <div className="mt-1 -ml-1.5 flex items-center gap-1">
               <VoteControl
                 score={comment.score + vote}
                 vote={vote}
-                onVote={setVote}
+                onVote={(next) => onVote?.(comment, next)}
                 orientation="horizontal"
                 subject="comment"
               />
               <button
                 type="button"
+                onClick={() => onReply?.(comment)}
                 className="inline-flex h-8 items-center rounded-lg px-2 text-meta font-medium text-text-muted hover:bg-surface-2 hover:text-text pointer-coarse:h-(--touch)"
               >
                 Reply
@@ -177,6 +189,10 @@ function CommentItem({
             now={now}
             postId={postId}
             depth={depth + 1}
+            votes={votes}
+            onVote={onVote}
+            onReply={onReply}
+            readOnly={readOnly}
             renderMenu={renderMenu}
           />
         ) : null}

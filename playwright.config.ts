@@ -30,7 +30,9 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: `CLOUDFLARE_ENV=staging npm run build && npx vite preview --port ${PORT} --strictPort`,
+    // Builds for staging, fills a local copy of its database with sample
+    // posts, and serves the result.
+    command: `CLOUDFLARE_ENV=staging npm run build && npm run db:prepare:e2e && npx vite preview --port ${PORT} --strictPort`,
     url: `http://localhost:${PORT}`,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
