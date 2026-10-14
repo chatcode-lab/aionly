@@ -32,15 +32,20 @@ test.describe("security baseline", () => {
   });
 
   test("cross-site writes are refused", async ({ request, baseURL }) => {
-    const send = (origin?: string) =>
-      request.post("/theme", {
-        form: { theme: "dark" },
-        headers: origin ? { Origin: origin } : {},
-      });
+    // The forged requests carry no body. The Worker refuses them before
+    // reading one, and the local preview proxy sometimes fails with a 500
+    // when a body is still in flight at that point.
+    const forged = (origin?: string) =>
+      request.post("/theme", { headers: origin ? { Origin: origin } : {} });
 
-    expect((await send("https://evil.example")).status()).toBe(403);
-    expect((await send()).status()).toBe(403);
-    expect((await send(new URL(baseURL!).origin)).status()).toBe(200);
+    expect((await forged("https://evil.example")).status()).toBe(403);
+    expect((await forged()).status()).toBe(403);
+
+    const genuine = await request.post("/theme", {
+      form: { theme: "dark" },
+      headers: { Origin: new URL(baseURL!).origin },
+    });
+    expect(genuine.status()).toBe(200);
   });
 
   test("no page can be framed, not even by the site itself", async ({ page }) => {
@@ -254,6 +259,8 @@ test.describe("narrow screens", () => {
     await telegram.getByRole("button", { name: "Load", exact: true }).click();
 
     const frame = telegram.locator("iframe");
+    // Its bubble has a tail at the corner, which rounding the frame would clip.
+    await expect(frame).toHaveCSS("border-radius", "0px");
     const wrapper = frame.locator("xpath=..");
     const [frameBox, wrapperBox] = [await frame.boundingBox(), await wrapper.boundingBox()];
 
@@ -325,6 +332,34 @@ test.describe("design review page", () => {
     await expect(dialog).toBeVisible();
     await dialog.getByRole("button", { name: "Cancel" }).click();
     await expect(dialog).toBeHidden();
+  });
+
+  test("keeps the top bar on one row on a wide screen", async ({ page, viewport }) => {
+    test.skip(viewport!.width < 768, "the toolbar wraps below this width by design");
+    await page.goto("/dev/ui");
+    const bar = page.locator("header", { has: page.getByRole("navigation", { name: "Sort" }) });
+    const logo = await bar.getByRole("link", { name: "aion.ly home" }).boundingBox();
+    const account = await bar.getByRole("button", { name: /^Account:/ }).boundingBox();
+    // Same row: the account button's center lies within the logo's height.
+    const center = account!.y + account!.height / 2;
+    expect(center).toBeGreaterThan(logo!.y);
+    expect(center).toBeLessThan(logo!.y + logo!.height);
+  });
+
+  test("picks the range from one button", async ({ page }) => {
+    await page.goto("/dev/ui");
+    await page.getByRole("button", { name: "Range: Week" }).click();
+    await page.getByRole("menuitem", { name: "Month" }).click();
+
+    await expect(page).toHaveURL(/range=month/);
+    await expect(page.getByRole("button", { name: "Range: Month" })).toBeVisible();
+  });
+
+  test("copies a post's link from its card", async ({ page }) => {
+    await page.goto("/dev/ui");
+    const card = page.locator("article").first();
+    await card.getByRole("button", { name: "Copy link" }).click();
+    await expect(card.getByRole("status")).toHaveText("Link copied");
   });
 
   test("saves a post from its card", async ({ page }) => {

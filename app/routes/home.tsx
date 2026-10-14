@@ -12,7 +12,7 @@ export function meta(_: Route.MetaArgs) {
     {
       name: "description",
       content:
-        "A public board for everything AI: what people make with it, and the news about it.",
+        "A public board for things made with AI, and the AI news worth sharing.",
     },
   ];
 }
@@ -23,7 +23,7 @@ export function loader() {
 
 export default function Home({ loaderData }: Route.ComponentProps) {
   return (
-    <main className="mx-auto max-w-column px-3 py-10 sm:px-4">
+    <main className="mx-auto max-w-column px-(--gutter) py-10">
       <EmptyState
         title="The board is being built"
         action={
@@ -39,8 +39,7 @@ export default function Home({ loaderData }: Route.ComponentProps) {
           ) : undefined
         }
       >
-        A public board for everything AI: what people make with it, and the
-        news about it.
+        A public board for things made with AI, and the AI news worth sharing.
       </EmptyState>
     </main>
   );

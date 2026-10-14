@@ -221,12 +221,12 @@ function ProviderSpike({
         </Button>
         {/* TikTok always starts playing, so it has no start choice. */}
         {provider === "youtube" ? (
-          <label className="flex h-9 max-w-full min-w-0 items-center gap-2 text-body pointer-coarse:h-11">
+          <label className="flex h-9 max-w-full min-w-0 items-center gap-2 text-body pointer-coarse:h-(--touch)">
             Start
             <select
               value={start}
               onChange={(event) => setStart(event.target.value as Start)}
-              className="h-9 min-w-0 flex-1 rounded-lg border border-border-strong bg-surface px-2 text-body pointer-coarse:h-11 pointer-coarse:text-[1rem]"
+              className="h-9 min-w-0 flex-1 rounded-lg border border-border-strong bg-surface px-2 text-body pointer-coarse:h-(--touch) pointer-coarse:text-[1rem]"
             >
               <option value="paused">Paused</option>
               <option value="muted">Autoplay muted (card in focus)</option>
@@ -291,7 +291,7 @@ export default function DevEmbeds({ loaderData }: Route.ComponentProps) {
   const inApp = detectInAppBrowser(loaderData.userAgent);
 
   return (
-    <main className="mx-auto max-w-column space-y-4 px-3 py-6 sm:px-4">
+    <main className="mx-auto max-w-column space-y-4 px-(--gutter) py-6">
       <div>
         <h1 className="text-display font-semibold">Embed spike</h1>
         <p className="mt-1 text-body text-text-muted">

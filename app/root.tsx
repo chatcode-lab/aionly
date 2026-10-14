@@ -75,7 +75,7 @@ export function ErrorBoundary({ error }: Route.ErrorBoundaryProps) {
   }
 
   return (
-    <main className="mx-auto max-w-column px-3 py-10 sm:px-4">
+    <main className="mx-auto max-w-column px-(--gutter) py-10">
       <ErrorState title={title}>{details}</ErrorState>
       {stack ? (
         <pre className="mt-6 overflow-x-auto rounded-xl border border-border bg-surface p-4 font-mono text-meta">

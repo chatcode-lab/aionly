@@ -3,8 +3,7 @@ import { Link } from "react-router";
 
 /**
  * The slim sticky header. On wide screens the toolbar (sort and range) sits
- * in the same row; on narrow ones it wraps to a second row that scrolls
- * sideways rather than squeezing the actions.
+ * in the same row; on narrow ones it wraps to a second row of its own.
  */
 export function SiteHeader({
   toolbar,
@@ -16,15 +15,17 @@ export function SiteHeader({
 }) {
   return (
     <header className="sticky top-0 z-40 border-b border-border bg-bg">
-      <div className="mx-auto flex max-w-column flex-wrap items-center gap-x-3 px-3 sm:px-4">
+      <div className="mx-auto flex max-w-column flex-wrap items-center gap-x-3 px-(--gutter)">
         <Link
           to="/"
+          // The wordmark is split for its colored dot, so name it in one piece.
+          aria-label="aion.ly home"
           className="flex h-13 items-center rounded-md text-title font-bold tracking-tight"
         >
           aion<span className="text-accent">.</span>ly
         </Link>
         {toolbar ? (
-          <div className="order-last -mx-3 flex w-[calc(100%+1.5rem)] items-center gap-2 overflow-x-auto px-3 pb-2 md:order-none md:mx-0 md:w-auto md:overflow-visible md:px-0 md:pb-0">
+          <div className="order-last flex w-full items-center gap-2 pb-2 md:order-none md:w-auto md:pb-0">
             {toolbar}
           </div>
         ) : null}
@@ -37,7 +38,7 @@ export function SiteHeader({
 /** Shown on every page. Both links are ordinary site links. */
 export function SiteFooter() {
   return (
-    <footer className="mx-auto w-full max-w-column px-3 pt-10 pb-8 text-meta text-text-muted sm:px-4">
+    <footer className="mx-auto w-full max-w-column px-(--gutter) pt-10 pb-8 text-meta text-text-muted">
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <a
           href="https://chatcode.dev/"

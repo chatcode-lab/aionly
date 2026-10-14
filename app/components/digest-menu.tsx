@@ -1,4 +1,4 @@
-import { Check, Mail } from "lucide-react";
+import { Check, Newspaper } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
 
 import { MENU_CONTENT, MENU_RADIO_ITEM } from "./theme-switch";
@@ -34,7 +34,7 @@ export function DigestMenu({
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
         <IconButton aria-label={`Email digest: ${LABEL[value]}`}>
-          <Mail size={18} aria-hidden />
+          <Newspaper size={18} aria-hidden />
         </IconButton>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>

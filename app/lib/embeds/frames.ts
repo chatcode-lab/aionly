@@ -119,6 +119,11 @@ export interface FrameLayout {
   /** The height to reserve until the embed reports its own. */
   initialHeight?: number;
   /**
+   * True when the embed draws its own outline right up to the frame's edge.
+   * Rounding the frame would clip it, as it did the tail of Telegram's bubble.
+   */
+  ownOutline?: boolean;
+  /**
    * True when the embed reports its height. Its frame then never scrolls
    * inside: the provider's own script does the same, since the report can
    * fall a few pixels short of the document.
@@ -143,6 +148,7 @@ export const FRAME_LAYOUT: Record<Provider, FrameLayout> = {
     minWidth: 320,
     initialHeight: 300,
     selfSizing: true,
+    ownOutline: true,
   },
 };
 

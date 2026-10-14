@@ -142,6 +142,9 @@ describe("frameUrl", () => {
     expect(FRAME_LAYOUT.telegram.maxWidth).toBe(500);
     // Telegram lays out no narrower than this; the frame is scaled to fit.
     expect(FRAME_LAYOUT.telegram.minWidth).toBe(320);
+    // Telegram draws its own bubble, tail included, so its frame is not rounded.
+    expect(FRAME_LAYOUT.telegram.ownOutline).toBe(true);
+    expect(FRAME_LAYOUT.reddit.ownOutline).toBeUndefined();
     expect(FRAME_LAYOUT.youtube.lightScheme).toBeUndefined();
   });
 

@@ -26,7 +26,7 @@ export function AccountMenu({
         <button
           type="button"
           aria-label={`Account: ${user.username}`}
-          className="inline-flex size-9 items-center justify-center rounded-lg hover:bg-surface-2 pointer-coarse:size-11"
+          className="inline-flex size-9 items-center justify-center rounded-lg hover:bg-surface-2 pointer-coarse:size-(--touch)"
         >
           <Avatar
             userId={user.id}

@@ -126,6 +126,29 @@
     }
   }
 
+  :root {
+    /*
+     * Touch targets are 44 px, or 40 px on the narrowest phones, where a
+     * post's row of controls would not otherwise fit.
+     */
+    --touch: 2.75rem;
+    /* The space between the column and the edge of the screen. */
+    --gutter: 0.75rem;
+  }
+
+  @media (max-width: 22.5rem) {
+    :root {
+      --touch: 2.5rem;
+      --gutter: 0.5rem;
+    }
+  }
+
+  @media (min-width: 40rem) {
+    :root {
+      --gutter: 1rem;
+    }
+  }
+
   html {
     background-color: var(--bg);
     color: var(--text);

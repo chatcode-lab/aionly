@@ -38,7 +38,7 @@ export function Toast({
           <button
             type="button"
             onClick={action.onAction}
-            className="h-9 rounded-lg px-3 text-body font-semibold text-accent hover:bg-accent-soft pointer-coarse:h-11"
+            className="h-9 rounded-lg px-3 text-body font-semibold text-accent hover:bg-accent-soft pointer-coarse:h-(--touch)"
           >
             {action.label}
           </button>

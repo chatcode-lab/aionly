@@ -19,7 +19,7 @@ export const MENU_CONTENT =
   "z-50 rounded-xl border border-border bg-surface p-1 shadow-lg";
 
 export const MENU_RADIO_ITEM =
-  "flex h-9 cursor-default items-center gap-2.5 rounded-lg px-2.5 text-body outline-none select-none data-disabled:opacity-50 data-highlighted:bg-surface-2 pointer-coarse:h-11";
+  "flex h-9 cursor-default items-center gap-2.5 rounded-lg px-2.5 text-body outline-none select-none data-disabled:opacity-50 data-highlighted:bg-surface-2 pointer-coarse:h-(--touch)";
 
 /** The theme currently in effect, counting a change still being saved. */
 export function useTheme(saved: Theme | undefined): Theme {

@@ -8,8 +8,8 @@ type Variant = "primary" | "secondary" | "ghost" | "danger";
 const BASE =
   "inline-flex shrink-0 items-center justify-center gap-2 rounded-lg text-body font-medium whitespace-nowrap select-none transition-colors duration-150 disabled:pointer-events-none disabled:opacity-50";
 
-// 36 px with a pointer, 44 px on touch screens.
-const HEIGHT = "h-9 pointer-coarse:h-11";
+// 36 px with a pointer; on touch screens, the touch-target size token.
+const HEIGHT = "h-9 pointer-coarse:h-(--touch)";
 
 const VARIANTS: Record<Variant, string> = {
   primary: "bg-accent-solid text-on-accent hover:opacity-90 active:opacity-80",
@@ -60,7 +60,7 @@ export function IconButton({
       className={cn(
         BASE,
         HEIGHT,
-        "w-9 pointer-coarse:w-11",
+        "w-9 pointer-coarse:w-(--touch)",
         VARIANTS[variant],
         className,
       )}

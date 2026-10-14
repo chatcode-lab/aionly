@@ -1,7 +1,15 @@
-import { ArrowUpRight, Bookmark, Bot, MessageSquare } from "lucide-react";
-import type { ReactNode } from "react";
+import {
+  ArrowUpRight,
+  Bookmark,
+  Bot,
+  Check,
+  Link2,
+  MessageSquare,
+} from "lucide-react";
+import { type ReactNode, useEffect, useState } from "react";
 import { Link } from "react-router";
 
+import { copyText } from "~/lib/clipboard";
 import { cn } from "~/lib/cn";
 import { formatAge, formatCount } from "~/lib/format";
 import type { Aspect, Provider } from "~/lib/links/types";
@@ -122,6 +130,47 @@ export function AuthorLine({
       ) : null}
       {children}
     </p>
+  );
+}
+
+const FOOTER_BUTTON =
+  "inline-flex size-9 items-center justify-center rounded-lg transition-colors duration-150 pointer-coarse:size-(--touch)";
+
+/** Copies the post's own address on the board, and confirms it briefly. */
+function CopyLinkButton({ path }: { path: string }) {
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Copy link"
+        onClick={async () => {
+          setCopied(await copyText(new URL(path, window.location.origin).href));
+        }}
+        className={cn(
+          FOOTER_BUTTON,
+          copied
+            ? "text-accent"
+            : "text-text-muted hover:bg-surface-2 hover:text-text",
+        )}
+      >
+        {copied ? (
+          <Check size={17} aria-hidden />
+        ) : (
+          <Link2 size={17} aria-hidden />
+        )}
+      </button>
+      <span role="status" className="sr-only">
+        {copied ? "Link copied" : ""}
+      </span>
+    </>
   );
 }
 
@@ -256,7 +305,7 @@ export function PostCard({
           </div>
           <Link
             to={permalink}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2 text-meta font-medium text-text-muted hover:bg-surface-2 hover:text-text pointer-coarse:h-11"
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2 text-meta font-medium text-text-muted hover:bg-surface-2 hover:text-text max-sm:px-1.5 pointer-coarse:h-(--touch)"
           >
             <MessageSquare size={16} aria-hidden />
             {formatCount(post.commentCount)}
@@ -272,7 +321,7 @@ export function PostCard({
               aria-label={saved ? "Remove from saved" : "Save post"}
               onClick={onToggleSave}
               className={cn(
-                "inline-flex size-9 items-center justify-center rounded-lg transition-colors duration-150 pointer-coarse:size-11",
+                FOOTER_BUTTON,
                 saved
                   ? "text-accent hover:bg-accent-soft"
                   : "text-text-muted hover:bg-surface-2 hover:text-text",
@@ -284,6 +333,7 @@ export function PostCard({
                 fill={saved ? "currentColor" : "none"}
               />
             </button>
+            <CopyLinkButton path={permalink} />
             {menu}
           </div>
         </div>

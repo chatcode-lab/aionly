@@ -2,7 +2,6 @@ import {
   Ban,
   Bookmark,
   Flag,
-  Link2,
   Pencil,
   Plus,
   Trash2,
@@ -14,6 +13,7 @@ import { useRouteLoaderData, useSearchParams } from "react-router";
 import { AccountMenu } from "~/components/account-menu";
 import { type CommentData, CommentThread } from "~/components/comment";
 import { DigestMenu } from "~/components/digest-menu";
+import { RangeMenu } from "~/components/range-menu";
 import {
   PostCard,
   type PostCardData,
@@ -423,7 +423,7 @@ function ReportDialog({ open, onOpenChange, children }: DialogProps) {
               {REPORT_REASONS.map((reason, index) => (
                 <label
                   key={reason}
-                  className="flex h-9 items-center gap-2.5 text-body pointer-coarse:h-11"
+                  className="flex h-9 items-center gap-2.5 text-body pointer-coarse:h-(--touch)"
                 >
                   <input
                     type="radio"
@@ -564,7 +564,7 @@ function SubmitFormSample() {
         {["I made this", "I found this"].map((label, index) => (
           <label
             key={label}
-            className="flex h-9 items-center gap-2.5 text-body pointer-coarse:h-11"
+            className="flex h-9 items-center gap-2.5 text-body pointer-coarse:h-(--touch)"
           >
             <input
               type="radio"
@@ -592,7 +592,7 @@ function SubmitFormSample() {
 /** Icon alone on the narrowest phones, where the top bar is tight. */
 function SubmitButton() {
   return (
-    <Button variant="primary" className="max-[23rem]:w-11 max-[23rem]:px-0">
+    <Button variant="primary" className="max-[23rem]:w-(--touch) max-[23rem]:px-0">
       <Plus size={18} aria-hidden className="min-[23.0625rem]:hidden" />
       <span className="max-[23rem]:sr-only">Submit</span>
     </Button>
@@ -624,9 +624,6 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
   const postMenu = (
     <Menu label="Post actions">
       <MenuItem>
-        <Link2 size={16} aria-hidden /> Copy link
-      </MenuItem>
-      <MenuItem>
         <Pencil size={16} aria-hidden /> Edit
       </MenuItem>
       <MenuItem>
@@ -640,7 +637,7 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
   );
 
   return (
-    <main className="mx-auto max-w-column space-y-8 px-3 py-6 sm:px-4">
+    <main className="mx-auto max-w-column space-y-8 px-(--gutter) py-6">
       <div>
         <h1 className="text-display font-semibold">Design review</h1>
         <p className="mt-1 text-body text-text-muted">
@@ -699,7 +696,7 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
 
       <Section
         title="Top bar"
-        note="Signed in: saved posts, the email digest, Submit, and the account menu, which holds the theme. Sort and range share the row on wide screens and wrap to a second, scrollable row on phones."
+        note="Signed in: saved posts, the email digest, Submit, and the account menu, which holds the theme. Sort and the range button share the row on wide screens and wrap to a second row on phones."
       >
         <div className="overflow-hidden rounded-xl border border-border [&>header]:static [&>header]:z-0">
           <SiteHeader
@@ -713,11 +710,9 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
                     { label: "New", to: feedLink("new", range) },
                   ]}
                 />
-                <LinkTabs
-                  label="Range"
-                  variant="text"
+                <RangeMenu
                   current={feedLink(sort, range)}
-                  tabs={[
+                  options={[
                     { label: "Today", to: feedLink(sort, "day") },
                     { label: "Week", to: feedLink(sort, "week") },
                     { label: "Month", to: feedLink(sort, "month") },
@@ -749,7 +744,7 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
 
       <Section
         title="Feed"
-        note="Media cards are posters with a fixed shape; a player mounts only for the card in focus. Votes sit beside the card on wide screens and in its footer on phones. The bookmark saves a post privately."
+        note="Media cards are posters with a fixed shape; a player mounts only for the card in focus. Votes sit beside the card on wide screens and in its footer on phones. Each card ends with save, copy link, and the menu."
       >
         {posts.map((post) => {
           const vote = votes[post.id] ?? 0;

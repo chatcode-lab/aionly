@@ -6,7 +6,7 @@ import { formatCount } from "~/lib/format";
 export type Vote = -1 | 0 | 1;
 
 const BUTTON =
-  "inline-flex size-8 items-center justify-center rounded-lg transition-colors duration-150 disabled:pointer-events-none disabled:opacity-50 pointer-coarse:size-11";
+  "inline-flex size-8 items-center justify-center rounded-lg transition-colors duration-150 disabled:pointer-events-none disabled:opacity-50 pointer-coarse:size-(--touch)";
 
 /**
  * Up and down votes around the net score. Pressing the active direction

@@ -81,7 +81,8 @@ export function EmbedFrame({
         }}
         // The frame is exactly the media: rounded corners, no surrounding box.
         className={cn(
-          "block overflow-hidden rounded-xl border-0",
+          "block border-0",
+          !layout.ownOutline && "overflow-hidden rounded-xl",
           link.aspect === "16:9" && "aspect-video w-full bg-surface-2",
           // As wide as the column allows, up to 320 px; the height follows.
           link.aspect === "9:16" && "aspect-[9/16] w-full max-w-80 bg-surface-2",

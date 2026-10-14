@@ -79,7 +79,7 @@ export function TextField({
         aria-describedby={describedBy(id, hint, error)}
         className={cn(
           CONTROL,
-          "h-10 pointer-coarse:h-11",
+          "h-10 pointer-coarse:h-(--touch)",
           controlBorder(Boolean(error)),
           className,
         )}

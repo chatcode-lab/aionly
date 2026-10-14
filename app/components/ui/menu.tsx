@@ -43,7 +43,7 @@ export function MenuItem({
   return (
     <DropdownMenu.Item
       className={cn(
-        "flex h-9 cursor-default items-center gap-2.5 rounded-lg px-2.5 text-body outline-none select-none pointer-coarse:h-11",
+        "flex h-9 cursor-default items-center gap-2.5 rounded-lg px-2.5 text-body outline-none select-none pointer-coarse:h-(--touch)",
         danger
           ? "text-danger data-highlighted:bg-danger-soft"
           : "text-text data-highlighted:bg-surface-2",
