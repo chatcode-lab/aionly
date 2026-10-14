@@ -15,6 +15,10 @@ export function meta(_: Route.MetaArgs) {
 const ERRORS: Record<string, string> = {
   // Better Auth's names for a refused or abandoned Google sign-in.
   access_denied: "Sign-in was cancelled. Try again when you are ready.",
+  email_not_found: "Your Google account did not share an email address, which an account here needs.",
+  email_not_verified: "Google has not verified this account's email. Verify it with Google, then try again.",
+  // Another Google account already signed up with the same email.
+  account_not_linked: "That email already belongs to an account here, made with a different Google account.",
 };
 
 export async function loader({ request, context }: Route.LoaderArgs) {

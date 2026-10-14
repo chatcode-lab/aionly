@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { betterAuth } from "better-auth";
+import { APIError } from "better-auth/api";
 
 import { createProfile } from "./db/accounts.server";
 import { newId } from "./ids";
@@ -7,6 +8,20 @@ import { newId } from "./ids";
 // A session lasts 30 days and is extended once a day while in use.
 const SESSION_SECONDS = 30 * 24 * 3600;
 const SESSION_REFRESH_SECONDS = 24 * 3600;
+
+/**
+ * An account's email is its sign-in email for good: required, unique, and
+ * kept for a later email sign-in. Only one Google has verified is accepted,
+ * so nobody can claim an address that is not theirs.
+ */
+export function requireVerifiedEmail(user: { email?: string | null; emailVerified?: boolean | null }) {
+  if (!user.email || user.emailVerified !== true) {
+    throw APIError.from("FORBIDDEN", {
+      code: "email_not_verified",
+      message: "The Google account's email is not verified.",
+    });
+  }
+}
 
 /** Provider tokens are never kept: the board needs only who signed in. */
 function withoutTokens<T extends Record<string, unknown>>(account: T): T {
@@ -57,6 +72,9 @@ function createAuth(origin: string) {
     databaseHooks: {
       user: {
         create: {
+          before: async (user) => {
+            requireVerifiedEmail(user);
+          },
           // Every account gets its public profile and a generated name as
           // it is created. A failure here is repaired on the next request.
           after: async (user) => {

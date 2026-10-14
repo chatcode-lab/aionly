@@ -140,3 +140,32 @@ describe("pagePath", async () => {
     expect(pagePath(new Request("https://aion.ly/settings"))).toBe("/settings");
   });
 });
+
+describe("sign-up", async () => {
+  const { authFor } = await import("../../app/lib/auth.server");
+  const adapter = async () => (await authFor(new Request("http://localhost/")).$context).internalAdapter;
+  const google = { method: "oauth", oauth: { providerId: "google" } } as const;
+
+  beforeEach(async () => {
+    await db.prepare(`DELETE FROM "user" WHERE "email" LIKE '%@signup.invalid'`).run();
+  });
+
+  it("refuses an email Google has not verified", async () => {
+    const auth = await adapter();
+    await expect(
+      auth.createUser({ name: "Someone", email: "someone@signup.invalid", emailVerified: false }, google),
+    ).rejects.toMatchObject({ body: { code: "email_not_verified" } });
+    const row = await db.prepare(`SELECT 1 FROM "user" WHERE "email" = 'someone@signup.invalid'`).first();
+    expect(row).toBeNull();
+  });
+
+  it("keeps the email lowercased and one account per email", async () => {
+    const auth = await adapter();
+    const created = await auth.createUser({ name: "Someone", email: "Someone@Signup.invalid", emailVerified: true }, google);
+    expect(created.email).toBe("someone@signup.invalid");
+    expect(await currentName(created.id)).toBeDefined();
+    await expect(
+      auth.createUser({ name: "Twin", email: "SOMEONE@signup.invalid", emailVerified: true }, google),
+    ).rejects.toThrow();
+  });
+});

@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { useId } from "react";
 import { Form, useNavigation } from "react-router";
 
 import { Avatar } from "~/components/avatar";
@@ -21,12 +22,16 @@ export function meta(_: Route.MetaArgs) {
 export async function loader({ request, context }: Route.LoaderArgs) {
   const viewer = await requireAccount(request, context);
   const status = await renameStatus(env.DB, viewer.id);
-  const google = await env.DB.prepare(`SELECT "image" IS NOT NULL AS has_photo FROM "user" WHERE "id" = ?1`)
+  // The one page that shows the account's email, and only to its owner.
+  const google = await env.DB.prepare(
+    `SELECT "email", "image" IS NOT NULL AS has_photo FROM "user" WHERE "id" = ?1`,
+  )
     .bind(viewer.id)
-    .first<{ has_photo: number }>();
+    .first<{ email: string; has_photo: number }>();
   return {
     id: viewer.id,
     username: viewer.username,
+    email: google?.email ?? "",
     photoUrl: viewer.avatarKey ? `/img/${viewer.avatarKey}` : undefined,
     hasGooglePhoto: google?.has_photo === 1,
     banned: viewer.ban !== null,
@@ -80,11 +85,11 @@ function PhotoForm({
   const on = photoUrl !== undefined;
 
   return (
-    <Form method="post" className="flex items-center gap-3">
+    <Form method="post" className="flex flex-wrap items-center gap-3">
       <input type="hidden" name="intent" value="photo" />
       <input type="hidden" name="photo" value={on ? "off" : "on"} />
       <Avatar userId={id} username={username} photoUrl={photoUrl} size={40} />
-      <div className="min-w-0 flex-1">
+      <div className="min-w-0 flex-1 basis-48">
         <p className="text-body font-medium">Profile photo</p>
         <p className="text-meta text-text-muted">
           {on
@@ -107,16 +112,17 @@ function PhotoForm({
 }
 
 function Section({ title, children }: { title: React.ReactNode; children: React.ReactNode }) {
+  const heading = useId();
   return (
-    <section className="space-y-3 rounded-xl border border-border bg-surface p-4">
-      <h2 className="flex items-center gap-2 text-title font-semibold">{title}</h2>
+    <section aria-labelledby={heading} className="space-y-3 rounded-xl border border-border bg-surface p-4">
+      <h2 id={heading} className="flex items-center gap-2 text-title font-semibold">{title}</h2>
       {children}
     </section>
   );
 }
 
 export default function Settings({ loaderData, actionData }: Route.ComponentProps) {
-  const { id, username, photoUrl, hasGooglePhoto, banned, firstChange, nextChangeAt } = loaderData;
+  const { id, username, email, photoUrl, hasGooglePhoto, banned, firstChange, nextChangeAt } = loaderData;
   const renamed = actionData && "saved" in actionData ? actionData : undefined;
   const photo = actionData && "photoError" in actionData ? actionData : undefined;
   const hint = firstChange
@@ -167,8 +173,15 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
         <Button disabled>Link X account</Button>
       </Section>
 
-      <Section title="Session">
-        <Form method="post" action="/signout" reloadDocument>
+      <Section title="Account">
+        <dl>
+          <dt className="text-body font-medium">Email</dt>
+          <dd className="text-body break-all">{email}</dd>
+          <dd className="text-meta text-text-muted">
+            From the Google account you sign in with. Only you can see it.
+          </dd>
+        </dl>
+        <Form method="post" action="/signout" reloadDocument className="border-t border-border pt-3">
           <Button type="submit">Sign out</Button>
         </Form>
       </Section>

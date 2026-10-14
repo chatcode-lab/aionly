@@ -179,17 +179,30 @@ test("without a Google photo, the letter avatar stays and the switch says why", 
   await expect(page.getByRole("button", { name: "Use my Google photo" })).toBeDisabled();
 });
 
-test("the Google name and email never reach a page, for the account or anyone else", async ({ page, context, account, request }) => {
+test("the email shows only in the account's own Settings, and the Google name nowhere", async ({ page, context, account, request }) => {
   // The test accounts carry these as their Google identity.
-  const secrets = [`${account.id}@example.invalid`, `Test ${account.id}`];
-  const pages = ["/", "/settings", "/saved", "/submit", "/welcome", `/u/${account.username}`, "/p/s_post_01"];
+  const email = `${account.id}@example.invalid`;
+  const name = `Test ${account.id}`;
+  const pages = ["/", "/saved", "/submit", "/welcome", `/u/${account.username}`, "/p/s_post_01"];
 
   await account.signIn(context);
+  await open(page, "/settings");
+  const accountSection = page.getByRole("region", { name: "Account", exact: true });
+  await expect(accountSection.getByRole("definition").first()).toHaveText(email);
+  await expect(accountSection.getByRole("button", { name: "Change" })).toHaveCount(0);
+  expect(await (await page.request.get("/settings")).text()).not.toContain(name);
+
   for (const path of pages) {
-    const response = await page.request.get(path);
-    const body = await response.text();
-    for (const secret of secrets) expect(body, `${secret} on ${path}`).not.toContain(secret);
+    const body = await (await page.request.get(path)).text();
+    for (const secret of [email, name]) expect(body, `${secret} on ${path}`).not.toContain(secret);
   }
   const anonymous = await request.get(`/u/${account.username}`);
-  for (const secret of secrets) expect(await anonymous.text()).not.toContain(secret);
+  for (const secret of [email, name]) expect(await anonymous.text()).not.toContain(secret);
+});
+
+test("a refused Google sign-in says why", async ({ page }) => {
+  await page.goto("/signin?error=email_not_verified");
+  await expect(page.getByText("Google has not verified this account's email.")).toBeVisible();
+  await page.goto("/signin?error=account_not_linked");
+  await expect(page.getByText("That email already belongs to an account here")).toBeVisible();
 });
