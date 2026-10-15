@@ -4,7 +4,7 @@ import { Form, Link, redirect, useNavigation } from "react-router";
 import { Mail } from "~/components/legal";
 import { Button } from "~/components/ui/button";
 import { Notice } from "~/components/ui/states";
-import { billingOpen, freshStartCheckoutUrl } from "~/lib/billing/plan.server";
+import { billingOpen, BUSY, CheckoutBusy, freshStartCheckoutUrl } from "~/lib/billing/plan.server";
 import { freshStartStatus } from "~/lib/db/fresh-starts.server";
 import { formatDate } from "~/lib/format";
 import { pageMeta } from "~/lib/meta";
@@ -41,6 +41,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     open: billingOpen(),
     done: url.searchParams.has("done"),
     pending: url.searchParams.has("pending"),
+    refunded: url.searchParams.has("refunded"),
   };
 }
 
@@ -57,6 +58,7 @@ export async function action({ request, context }: Route.ActionArgs) {
   try {
     return redirect(await freshStartCheckoutUrl(viewer, new URL(request.url).origin, now), 303);
   } catch (error) {
+    if (error instanceof CheckoutBusy) return { error: BUSY };
     console.error("stripe fresh start checkout", error);
     return { error: TROUBLE };
   }
@@ -92,6 +94,12 @@ export default function FreshStart({ loaderData, actionData }: Route.ComponentPr
       ) : null}
       {loaderData.pending ? (
         <Notice tone="wait">Your payment is being confirmed. Your fresh start applies in a minute.</Notice>
+      ) : null}
+      {loaderData.refunded ? (
+        <Notice tone="wait">
+          You had a fresh start in the last {FRESH_START_DAYS} days, so this payment did not count. It is refunded in
+          full.
+        </Notice>
       ) : null}
       {error ? <Notice tone="danger">{error}</Notice> : null}
 

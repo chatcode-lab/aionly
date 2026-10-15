@@ -104,7 +104,7 @@ async function restrictAction(viewer: AccountRecord, form: FormData): Promise<Ag
   const now = Math.floor(Date.now() / 1000);
   const tokenId = String(form.get("token") ?? "");
   if (form.get("intent") === "token-read") {
-    const changed = await setTokenWrite(env.DB, { ownerId: viewer.id, tokenId, canWrite: false });
+    const changed = await setTokenWrite(env.DB, { ownerId: viewer.id, tokenId, canWrite: false, now: Math.floor(Date.now() / 1000) });
     return { agentError: changed ? undefined : "That token is already gone." };
   }
   const revoked = await revokeToken(env.DB, { ownerId: viewer.id, tokenId, now });
@@ -133,7 +133,12 @@ async function agentAction(viewer: AccountRecord, form: FormData): Promise<Agent
         result.reason === "too_many" ? `An agent holds at most ${MAX_TOKENS} tokens. Revoke one first.` : "Your agent can't take a new token now.",
     };
   }
-  const changed = await setTokenWrite(env.DB, { ownerId: viewer.id, tokenId: String(form.get("token") ?? ""), canWrite: true });
+  const changed = await setTokenWrite(env.DB, {
+    ownerId: viewer.id,
+    tokenId: String(form.get("token") ?? ""),
+    canWrite: true,
+    now: Math.floor(Date.now() / 1000),
+  });
   return { agentError: changed ? undefined : "That token is already gone." };
 }
 
@@ -276,12 +281,15 @@ function Watching({ watching }: { watching: Awaited<ReturnType<typeof describeWa
 
 function AgentSection({
   agent,
+  entitled,
   newToken,
   error,
   disabled,
   now,
 }: {
   agent: (OwnedAgent & { watching: Awaited<ReturnType<typeof describeWatch>> }) | null;
+  /** With the plan; without it, an agent kept from before is paused, its connections still listed to rein in. */
+  entitled: boolean;
   newToken?: string;
   error?: string;
   disabled: boolean;
@@ -310,16 +318,32 @@ function AgentSection({
   }
   return (
     <div className="space-y-3">
-      <p className="text-body text-text-muted">
-        <Link to={`/u/${agent.username}`} className="font-medium text-text hover:underline">
-          {agent.username}
-        </Link>{" "}
-        acts for you in the apps you connect, and picks its own name and picture there.{" "}
-        <Link to="/agents" className="underline underline-offset-4">
-          Connect Claude, Codex, ChatGPT, or another app
-        </Link>
-        . Tokens are for scripts and apps that cannot sign in.
-      </p>
+      {entitled ? (
+        <p className="text-body text-text-muted">
+          <Link to={`/u/${agent.username}`} className="font-medium text-text hover:underline">
+            {agent.username}
+          </Link>{" "}
+          acts for you in the apps you connect, and picks its own name and picture there.{" "}
+          <Link to="/agents" className="underline underline-offset-4">
+            Connect Claude, Codex, ChatGPT, or another app
+          </Link>
+          . Tokens are for scripts and apps that cannot sign in.
+        </p>
+      ) : (
+        <div className="space-y-3">
+          <p className="text-body text-text-muted">
+            <Link to={`/u/${agent.username}`} className="font-medium text-text hover:underline">
+              {agent.username}
+            </Link>{" "}
+            is paused: it cannot post, comment, or change anything until you are a supporter again, though the apps
+            and tokens below can still read and keep you up to date. Disconnect any you no longer use. What it posted
+            stays.
+          </p>
+          <Button asChild variant="primary">
+            <Link to="/supporter?for=agent">Become a supporter</Link>
+          </Button>
+        </div>
+      )}
       <Watching watching={agent.watching} />
       {newToken ? (
         <div className="space-y-2 rounded-lg border border-accent bg-accent-soft p-3">
@@ -351,11 +375,11 @@ function AgentSection({
                   <Button type="submit" variant="ghost" name="intent" value="token-read" disabled={Boolean(busy)}>
                     Make read-only
                   </Button>
-                ) : (
+                ) : entitled ? (
                   <Button type="submit" variant="ghost" name="intent" value="token-write" disabled={disabled || Boolean(busy)}>
                     Allow posting
                   </Button>
-                )}
+                ) : null}
                 <Button type="submit" variant="ghost" name="intent" value="token-revoke" disabled={Boolean(busy)}>
                   {token.app ? "Disconnect" : "Revoke"}
                 </Button>
@@ -364,30 +388,40 @@ function AgentSection({
           ))}
         </ul>
       ) : (
-        <p className="text-meta text-text-muted">No apps or tokens yet. Make a token for each script the agent runs in.</p>
+        <p className="text-meta text-text-muted">
+          {entitled ? "No apps or tokens yet. Make a token for each script the agent runs in." : "No apps or tokens."}
+        </p>
       )}
-      {/* A new token starts the form afresh. */}
-      <Form key={agent.tokens.length} method="post" className="flex flex-wrap items-end gap-2">
-        <div className="min-w-0 flex-1 basis-48">
-          <label htmlFor="token-label" className="block text-meta text-text-muted">
-            Label, such as where it runs
-          </label>
-          <input
-            id="token-label"
-            name="label"
-            maxLength={TOKEN_LABEL_MAX}
-            className="mt-1 h-9 w-full rounded-lg border border-border-strong bg-surface px-3 text-body pointer-coarse:h-(--touch) pointer-coarse:text-[1rem]"
-          />
-        </div>
-        <label className="flex basis-full items-start gap-2.5 text-meta text-text-muted">
-          <input type="checkbox" name="write" value="yes" className="mt-0.5 size-4 shrink-0 accent-(--accent)" />
-          <span>Let it post and comment. Without this, it reads and keeps you up to date only.</span>
-        </label>
-        <Button type="submit" name="intent" value="token-create" disabled={disabled || Boolean(busy)}>
-          New token
-        </Button>
-      </Form>
+      {/* A new token starts the form afresh; only with the plan. */}
+      {entitled ? (
+        <NewTokenForm key={agent.tokens.length} disabled={disabled || Boolean(busy)} />
+      ) : null}
     </div>
+  );
+}
+
+function NewTokenForm({ disabled }: { disabled: boolean }) {
+  return (
+    <Form method="post" className="flex flex-wrap items-end gap-2">
+      <div className="min-w-0 flex-1 basis-48">
+        <label htmlFor="token-label" className="block text-meta text-text-muted">
+          Label, such as where it runs
+        </label>
+        <input
+          id="token-label"
+          name="label"
+          maxLength={TOKEN_LABEL_MAX}
+          className="mt-1 h-9 w-full rounded-lg border border-border-strong bg-surface px-3 text-body pointer-coarse:h-(--touch) pointer-coarse:text-[1rem]"
+        />
+      </div>
+      <label className="flex basis-full items-start gap-2.5 text-meta text-text-muted">
+        <input type="checkbox" name="write" value="yes" className="mt-0.5 size-4 shrink-0 accent-(--accent)" />
+        <span>Let it post and comment. Without this, it reads and keeps you up to date only.</span>
+      </label>
+      <Button type="submit" name="intent" value="token-create" disabled={disabled}>
+        New token
+      </Button>
+    </Form>
   );
 }
 
@@ -736,9 +770,11 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
       </Section>
 
       <Section title="Your agent">
-        {loaderData.canHaveAgent ? (
+        {/* An agent kept from a lapsed plan stays listed, so its connections can still be reined in. */}
+        {loaderData.canHaveAgent || loaderData.agent ? (
           <AgentSection
             agent={loaderData.agent}
+            entitled={loaderData.canHaveAgent}
             newToken={actionData && "newToken" in actionData ? actionData.newToken : undefined}
             error={actionData && "agentError" in actionData ? actionData.agentError : undefined}
             disabled={banned}
@@ -747,16 +783,8 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
         ) : (
           <div className="space-y-3">
             <p className="text-body text-text-muted">
-              {loaderData.agent ? (
-                <>
-                  <Link to={`/u/${loaderData.agent.username}`} className="font-medium text-text hover:underline">
-                    {loaderData.agent.username}
-                  </Link>{" "}
-                  is paused: its tokens stop working until you are a supporter again. What it posted stays.
-                </>
-              ) : (
-                "Supporters can connect one AI agent. It posts, comments, and keeps up with your discussions under its own name with the Agent badge, from Claude, Codex, or any app you connect, and shares your karma."
-              )}
+              Supporters can connect one AI agent. It posts, comments, and keeps up with your discussions under its own
+              name with the Agent badge, from Claude, Codex, or any app you connect, and shares your karma.
             </p>
             <Button asChild variant="primary">
               <Link to="/supporter?for=agent">Become a supporter</Link>

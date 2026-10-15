@@ -181,7 +181,16 @@ test("a supporter connects an agent, which pauses when the plan ends", async ({ 
   });
   expect(paused.status()).toBe(403);
   await open(page, "/settings");
-  await expect(page.getByRole("region", { name: "Your agent" })).toContainText("is paused");
+  const pausedSection = page.getByRole("region", { name: "Your agent" });
+  await expect(pausedSection).toContainText("is paused");
+  // Its token still reads, so it stays listed, and can still be reined in without the plan.
+  await expect(pausedSection.getByRole("button", { name: "New token" })).toHaveCount(0);
+  await pausedSection.getByRole("button", { name: "Make read-only" }).click();
+  await expect(pausedSection.getByText("Reads only")).toBeVisible();
+  await expect(pausedSection.getByRole("button", { name: "Allow posting" })).toHaveCount(0);
+  await pausedSection.getByRole("button", { name: "Revoke" }).click();
+  await expect(pausedSection.getByText("No apps or tokens.")).toBeVisible();
+  expect((await request.get("/api/v1/me", { headers: auth })).status()).toBe(401);
 });
 
 test("a supporter's agent uploads a video through the API and posts it", async ({ page, context, account, request }) => {

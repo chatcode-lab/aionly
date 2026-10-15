@@ -36,6 +36,16 @@ describe("deleting a removed post's files", () => {
     expect(await db.prepare(`SELECT action, target_id FROM mod_actions`).first()).toEqual({ action: "purge_media", target_id: "p1" });
   });
 
+  it("keeps the post naming its files when the bucket fails, so asking again finishes", async () => {
+    const { thumb, media } = await withFiles("p3", true);
+    const failing = { delete: async () => Promise.reject(new Error("R2 is down")) } as unknown as R2Bucket;
+    await expect(purgePostMedia(db, failing, { postId: "p3", actorId: "admin", now: NOW })).rejects.toThrow("R2 is down");
+    expect(await db.prepare(`SELECT thumb_key, media_key FROM posts WHERE id = 'p3'`).first()).toEqual({ thumb_key: thumb, media_key: media });
+    expect(await db.prepare(`SELECT COUNT(*) AS n FROM mod_actions`).first<{ n: number }>()).toEqual({ n: 0 });
+    expect(await purgePostMedia(db, bucket, { postId: "p3", actorId: "admin", now: NOW })).toEqual([thumb, media]);
+    expect(await bucket.get(media)).toBeNull();
+  });
+
   it("leaves a live post alone: it must be removed first", async () => {
     const { media } = await withFiles("p2", false);
     expect(await purgePostMedia(db, bucket, { postId: "p2", actorId: "admin", now: NOW })).toBeNull();

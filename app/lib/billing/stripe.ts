@@ -177,6 +177,7 @@ export interface StripeCheckoutSession {
   mode: string;
   client_reference_id: string | null;
   payment_status: string;
+  payment_intent?: string | null;
   metadata?: Record<string, string> | null;
 }
 
@@ -223,14 +224,42 @@ export function getSubscription(client: StripeClient, id: string): Promise<Strip
 /** Stripe statuses under which a subscription may still charge. */
 const RUNNING = new Set(["active", "trialing", "past_due", "incomplete", "unpaid", "paused"]);
 
+/** Whether a subscription may still charge. */
+export function isRunning(subscription: StripeSubscription): boolean {
+  return RUNNING.has(subscription.status);
+}
+
+/** Pages of a list read at most: 2,000 items, far more than one customer has. */
+const MAX_PAGES = 20;
+
+/**
+ * Every item of one of Stripe's lists, page after page. It throws rather
+ * than answer with part of a list, since callers act on all of it.
+ */
+async function listAll<T extends { id: string }>(
+  client: StripeClient,
+  path: string,
+  params: Record<string, Param>,
+): Promise<T[]> {
+  const items: T[] = [];
+  let after: string | undefined;
+  for (let page = 0; page < MAX_PAGES; page += 1) {
+    const { data, has_more } = await client.request<{ data: T[]; has_more?: boolean }>("GET", path, {
+      ...params,
+      limit: 100,
+      starting_after: after,
+    });
+    items.push(...data);
+    if (!has_more || data.length === 0) return items;
+    after = data[data.length - 1]!.id;
+  }
+  throw new StripeError(500, "list_too_long", `${path} lists more than ${MAX_PAGES * 100} items`);
+}
+
 /** The customer's subscriptions that may still charge, whatever the board has recorded. */
 export async function runningSubscriptions(client: StripeClient, customerId: string): Promise<StripeSubscription[]> {
-  const { data } = await client.request<{ data: StripeSubscription[] }>("GET", "/subscriptions", {
-    customer: customerId,
-    status: "all",
-    limit: 20,
-  });
-  return data.filter((subscription) => RUNNING.has(subscription.status));
+  const all = await listAll<StripeSubscription>(client, "/subscriptions", { customer: customerId, status: "all" });
+  return all.filter(isRunning);
 }
 
 /**
@@ -238,13 +267,28 @@ export async function runningSubscriptions(client: StripeClient, customerId: str
  * unfinished, so only the next one can be paid.
  */
 export async function expireOpenCheckouts(client: StripeClient, customerId: string): Promise<void> {
-  const { data } = await client.request<{ data: Array<{ id: string }> }>("GET", "/checkout/sessions", {
-    customer: customerId,
-    status: "open",
-    limit: 20,
-  });
-  for (const session of data) {
+  const open = await listAll<{ id: string }>(client, "/checkout/sessions", { customer: customerId, status: "open" });
+  for (const session of open) {
     await client.request("POST", `/checkout/sessions/${encodeURIComponent(session.id)}/expire`);
+  }
+}
+
+/**
+ * Refunds a one-time payment in full, once however often it is asked for:
+ * a fresh start paid for within the cooldown of the last one.
+ */
+export async function refundPayment(client: StripeClient, paymentIntent: string, reason: string): Promise<void> {
+  try {
+    await client.request(
+      "POST",
+      "/refunds",
+      { payment_intent: paymentIntent, reason: "duplicate", metadata: { why: reason } },
+      `refund-${paymentIntent}`,
+    );
+  } catch (error) {
+    // Refunded already, as by an earlier call: done.
+    if (error instanceof StripeError && error.code === "charge_already_refunded") return;
+    throw error;
   }
 }
 

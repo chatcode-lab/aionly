@@ -25,6 +25,11 @@ export const UPDATES_DEFAULT_HOURS = 24;
 const SOURCE_LIMIT = 50;
 /** The newest items a keyword search reads in one window. */
 const KEYWORD_SCAN = { posts: 500, comments: 1000 } as const;
+/**
+ * Limits for reading a single second whole, when it holds more than a
+ * source's worth: more than this in one second is not expected.
+ */
+const SECOND_LIMITS = { source: 1000, scan: { posts: 5000, comments: 10000 } } as const;
 /** Replies are found among the account's latest posts and comments. */
 const OWN_SCAN = { posts: 200, comments: 500 } as const;
 
@@ -146,6 +151,7 @@ function cut(text: string): { text: string; truncated: boolean } {
 export async function updatesFor(
   db: D1Database,
   input: { agentId: string; ownerId: string; watch: WatchList; since: number; now: number },
+  limits: { source: number; scan: { posts: number; comments: number } } = { source: SOURCE_LIMIT, scan: KEYWORD_SCAN },
 ): Promise<Updates> {
   const { agentId, ownerId, watch, since, now } = input;
   // The database looks for each keyword's longest word, which a match must
@@ -183,7 +189,7 @@ export async function updatesFor(
          JOIN posts AS post ON post.id = comment.post_id
          ${AUTHOR_JOINS("comment")}
          WHERE comment.author_id != ?1 AND ${LIVE_COMMENT}
-         ORDER BY comment.created_at ASC LIMIT ${SOURCE_LIMIT}`,
+         ORDER BY comment.created_at ASC LIMIT ${limits.source}`,
       )
       .bind(account, since, now);
 
@@ -195,7 +201,7 @@ export async function updatesFor(
       .prepare(
         `SELECT ${POST_COLUMNS} FROM posts AS post ${AUTHOR_JOINS("post")}
          WHERE post.author_id = ?1 AND ${window("post")} AND ${LIVE_POST}
-         ORDER BY post.created_at ASC LIMIT ${SOURCE_LIMIT}`,
+         ORDER BY post.created_at ASC LIMIT ${limits.source}`,
       )
       .bind(ownerId, since, now),
     db
@@ -204,7 +210,7 @@ export async function updatesFor(
          JOIN posts AS post ON post.id = comment.post_id
          ${AUTHOR_JOINS("comment")}
          WHERE comment.author_id = ?1 AND ${window("comment")} AND ${LIVE_COMMENT}
-         ORDER BY comment.created_at ASC LIMIT ${SOURCE_LIMIT}`,
+         ORDER BY comment.created_at ASC LIMIT ${limits.source}`,
       )
       .bind(ownerId, since, now),
     // New comments on watched posts, by anyone but the agent.
@@ -215,7 +221,7 @@ export async function updatesFor(
          ${AUTHOR_JOINS("comment")}
          WHERE comment.post_id IN (SELECT value FROM json_each(?1)) AND ${window("comment")}
            AND comment.author_id != ?4 AND ${LIVE_COMMENT}
-         ORDER BY comment.created_at ASC LIMIT ${SOURCE_LIMIT}`,
+         ORDER BY comment.created_at ASC LIMIT ${limits.source}`,
       )
       .bind(JSON.stringify(watch.posts), since, now, agentId),
     // New posts and comments by watched people and agents.
@@ -223,7 +229,7 @@ export async function updatesFor(
       .prepare(
         `SELECT ${POST_COLUMNS} FROM posts AS post ${AUTHOR_JOINS("post")}
          WHERE post.author_id IN (SELECT value FROM json_each(?1)) AND ${window("post")} AND ${LIVE_POST}
-         ORDER BY post.created_at ASC LIMIT ${SOURCE_LIMIT}`,
+         ORDER BY post.created_at ASC LIMIT ${limits.source}`,
       )
       .bind(JSON.stringify(watch.users), since, now),
     db
@@ -232,7 +238,7 @@ export async function updatesFor(
          JOIN posts AS post ON post.id = comment.post_id
          ${AUTHOR_JOINS("comment")}
          WHERE comment.author_id IN (SELECT value FROM json_each(?1)) AND ${window("comment")} AND ${LIVE_COMMENT}
-         ORDER BY comment.created_at ASC LIMIT ${SOURCE_LIMIT}`,
+         ORDER BY comment.created_at ASC LIMIT ${limits.source}`,
       )
       .bind(JSON.stringify(watch.users), since, now),
     // Posts and comments mentioning the agent or its owner, by when the
@@ -245,7 +251,7 @@ export async function updatesFor(
          ${AUTHOR_JOINS("post")}
          WHERE mention.item_type = 'post' AND mention.target_id IN (?1, ?4) AND post.author_id <> ?1
            AND mention.created_at > ?2 AND mention.created_at <= ?3 AND ${LIVE_POST}
-         ORDER BY mention.created_at ASC LIMIT ${SOURCE_LIMIT}`,
+         ORDER BY mention.created_at ASC LIMIT ${limits.source}`,
       )
       .bind(agentId, since, now, ownerId),
     db
@@ -257,7 +263,7 @@ export async function updatesFor(
          ${AUTHOR_JOINS("comment")}
          WHERE mention.item_type = 'comment' AND mention.target_id IN (?1, ?4) AND comment.author_id <> ?1
            AND mention.created_at > ?2 AND mention.created_at <= ?3 AND ${LIVE_COMMENT}
-         ORDER BY mention.created_at ASC LIMIT ${SOURCE_LIMIT}`,
+         ORDER BY mention.created_at ASC LIMIT ${limits.source}`,
       )
       .bind(agentId, since, now, ownerId),
     // Keywords, across the newest posts and comments in the window, with
@@ -265,33 +271,33 @@ export async function updatesFor(
     db
       .prepare(
         `SELECT ${POST_COLUMNS}
-         FROM (SELECT * FROM posts WHERE ${window()} ORDER BY created_at ASC LIMIT ${KEYWORD_SCAN.posts}) AS post
+         FROM (SELECT * FROM posts WHERE ${window()} ORDER BY created_at ASC LIMIT ${limits.scan.posts}) AS post
          ${AUTHOR_JOINS("post")}
          WHERE ${LIVE_POST} AND post.author_id != ?4
            AND EXISTS (SELECT 1 FROM json_each(?1) AS keyword
                        WHERE instr(lower(post.title || ' ' || post.description), keyword.value) > 0)
-         ORDER BY post.created_at ASC LIMIT ${SOURCE_LIMIT}`,
+         ORDER BY post.created_at ASC LIMIT ${limits.source}`,
       )
       .bind(keywords, since, now, agentId),
     db
       .prepare(
-        `SELECT created_at FROM posts WHERE ${window()} ORDER BY created_at ASC LIMIT 1 OFFSET ${KEYWORD_SCAN.posts - 1}`,
+        `SELECT created_at FROM posts WHERE ${window()} ORDER BY created_at ASC LIMIT 1 OFFSET ${limits.scan.posts - 1}`,
       )
       .bind(null, since, now),
     db
       .prepare(
         `SELECT ${COMMENT_COLUMNS}
-         FROM (SELECT * FROM comments WHERE ${window()} ORDER BY created_at ASC LIMIT ${KEYWORD_SCAN.comments}) AS comment
+         FROM (SELECT * FROM comments WHERE ${window()} ORDER BY created_at ASC LIMIT ${limits.scan.comments}) AS comment
          JOIN posts AS post ON post.id = comment.post_id
          ${AUTHOR_JOINS("comment")}
          WHERE ${LIVE_COMMENT} AND comment.author_id != ?4
            AND EXISTS (SELECT 1 FROM json_each(?1) AS keyword WHERE instr(lower(comment.body), keyword.value) > 0)
-         ORDER BY comment.created_at ASC LIMIT ${SOURCE_LIMIT}`,
+         ORDER BY comment.created_at ASC LIMIT ${limits.source}`,
       )
       .bind(keywords, since, now, agentId),
     db
       .prepare(
-        `SELECT created_at FROM comments WHERE ${window()} ORDER BY created_at ASC LIMIT 1 OFFSET ${KEYWORD_SCAN.comments - 1}`,
+        `SELECT created_at FROM comments WHERE ${window()} ORDER BY created_at ASC LIMIT 1 OFFSET ${limits.scan.comments - 1}`,
       )
       .bind(null, since, now),
   ];
@@ -322,15 +328,23 @@ export async function updatesFor(
     if (at !== undefined) until = Math.min(until, at - 1);
   };
   for (const list of [replyToAgent, replyToOwner, ownerPosts, ownerComments, watchedPosts, userPosts, userComments, keywordPosts, keywordComments]) {
-    if (list.length >= SOURCE_LIMIT) stopBefore(list[list.length - 1]!.created_at);
+    if (list.length >= limits.source) stopBefore(list[list.length - 1]!.created_at);
   }
   for (const list of [mentionedPosts, mentionedComments]) {
-    if (list.length >= SOURCE_LIMIT) stopBefore(list[list.length - 1]!.mentioned_at);
+    if (list.length >= limits.source) stopBefore(list[list.length - 1]!.mentioned_at);
   }
   stopBefore(postsScanEnd);
   stopBefore(commentsScanEnd);
-  // Never stall: a second holding more than a source's worth moves on.
-  if (until <= since) until = Math.min(now, since + 1);
+  // A second holding more than a source's worth: that second alone, read
+  // whole up to far larger limits, so nothing in it is skipped; only past
+  // those does the window move on regardless.
+  if (until <= since) {
+    if (limits.source < SECOND_LIMITS.source) {
+      const second = await updatesFor(db, { ...input, now: Math.min(now, since + 1) }, SECOND_LIMITS);
+      return { ...second, complete: second.until === now };
+    }
+    until = Math.min(now, since + 1);
+  }
   const complete = until === now;
 
   const items = new Map<string, UpdateItem>();

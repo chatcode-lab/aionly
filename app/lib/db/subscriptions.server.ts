@@ -100,7 +100,12 @@ export async function applySubscription(
            -- A late word about an old subscription never displaces one in force.
            AND (subscriptions.subscription_id IS NULL
              OR subscriptions.subscription_id = excluded.subscription_id
-             OR subscriptions.status NOT IN ('active', 'trialing', 'past_due'))`,
+             OR subscriptions.status NOT IN ('active', 'trialing', 'past_due'))
+           -- Stripe never revives an ended subscription, so an earlier read
+           -- of it, applied late in the same second, cannot either.
+           AND NOT (subscriptions.subscription_id IS excluded.subscription_id
+             AND COALESCE(subscriptions.status, '') IN ('canceled', 'incomplete_expired')
+             AND excluded.status NOT IN ('canceled', 'incomplete_expired'))`,
       )
       .bind(
         owner.user_id,
@@ -120,11 +125,39 @@ export async function applySubscription(
       .prepare(
         `UPDATE profiles SET plan_until = CASE WHEN ?5 THEN ?2 ELSE MIN(COALESCE(plan_until, ?2), ?2) END
          WHERE user_id = ?1 AND EXISTS (
-           SELECT 1 FROM subscriptions WHERE user_id = ?1 AND subscription_id = ?3 AND event_at = ?4)`,
+           SELECT 1 FROM subscriptions WHERE user_id = ?1 AND subscription_id = ?3 AND event_at = ?4 AND status = ?6)`,
       )
-      .bind(owner.user_id, until, subscription.id, input.eventAt, IN_FORCE.has(subscription.status) ? 1 : 0),
+      .bind(owner.user_id, until, subscription.id, input.eventAt, IN_FORCE.has(subscription.status) ? 1 : 0, subscription.status),
   ]);
   return true;
+}
+
+/** How long a checkout being made holds off another of the member's, at most. */
+const CLAIM_SECONDS = 60;
+
+export type CheckoutKind = "plan" | "fresh_start";
+
+/**
+ * Holds the member's checkout of one kind while it is made, from looking
+ * for a plan or an open checkout to making the new one, so two tabs cannot
+ * both find nothing and both make one. False while another request holds
+ * it; a claim a minute old is taken over, should its request have died.
+ */
+export async function claimCheckout(db: D1Database, userId: string, kind: CheckoutKind, now: number): Promise<boolean> {
+  const claimed = await db
+    .prepare(
+      `INSERT INTO checkout_claims (user_id, kind, claimed_at) VALUES (?1, ?2, ?3)
+       ON CONFLICT (user_id, kind) DO UPDATE SET claimed_at = excluded.claimed_at
+       WHERE checkout_claims.claimed_at <= excluded.claimed_at - ${CLAIM_SECONDS}`,
+    )
+    .bind(userId, kind, now)
+    .run();
+  return claimed.meta.changes > 0;
+}
+
+/** Lets the member's next checkout of this kind be made. */
+export async function releaseCheckout(db: D1Database, userId: string, kind: CheckoutKind): Promise<void> {
+  await db.prepare(`DELETE FROM checkout_claims WHERE user_id = ?1 AND kind = ?2`).bind(userId, kind).run();
 }
 
 /** The subscription to cancel when an account is deleted, if one is running. */

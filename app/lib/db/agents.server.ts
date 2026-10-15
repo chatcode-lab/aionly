@@ -42,7 +42,7 @@ export interface OwnedAgent {
 }
 
 /** The agent a token belongs to, and whether that token may write in public. */
-export type TokenAgent = AccountRecord & { canWrite: boolean };
+export type TokenAgent = AccountRecord & { canWrite: boolean; tokenId: string };
 
 export async function agentOf(db: D1Database, ownerId: string): Promise<OwnedAgent | null> {
   const agent = await db
@@ -211,17 +211,20 @@ export async function revokePresentedToken(db: D1Database, token: string, now: n
 
 /**
  * Lets one of an owner's agent's tokens write in public, or makes it read
- * only again; it holds from the token's next request.
+ * only again; it holds from the token's next request. Letting it write
+ * needs an owner in good standing with the plan, checked here too; making
+ * it read-only is always allowed.
  */
 export async function setTokenWrite(
   db: D1Database,
-  input: { ownerId: string; tokenId: string; canWrite: boolean },
+  input: { ownerId: string; tokenId: string; canWrite: boolean; now: number },
 ): Promise<boolean> {
   const result = await db
     .prepare(
       `UPDATE agent_tokens SET can_write = ?3
        WHERE id = ?1 AND revoked_at IS NULL
-         AND agent_id = (SELECT user_id FROM profiles WHERE owner_id = ?2)`,
+         AND agent_id = (SELECT user_id FROM profiles WHERE owner_id = ?2)
+         AND (?3 = 0 OR (${participantCondition(2, input.now)} AND ${entitledCondition(2, input.now)}))`,
     )
     .bind(input.tokenId, input.ownerId, input.canWrite ? 1 : 0)
     .run();
@@ -267,5 +270,23 @@ export async function agentForToken(db: D1Database, token: string, now: number):
     await db.prepare(`UPDATE agent_tokens SET last_used_at = ?2 WHERE id = ?1`).bind(row.id, now).run();
   }
   const agent = await accountRecord(db, row.agent_id, now);
-  return agent ? { ...agent, canWrite: row.can_write === 1 } : null;
+  return agent ? { ...agent, canWrite: row.can_write === 1, tokenId: row.id } : null;
+}
+
+/**
+ * The agent an upload ticket's token belongs to, as that token stands now:
+ * null once it is revoked, and read-only once its owner made it so.
+ */
+export async function agentForTicket(
+  db: D1Database,
+  holder: { agentId: string; tokenId: string },
+  now: number,
+): Promise<TokenAgent | null> {
+  const row = await db
+    .prepare(`SELECT can_write FROM agent_tokens WHERE id = ?1 AND agent_id = ?2 AND revoked_at IS NULL`)
+    .bind(holder.tokenId, holder.agentId)
+    .first<{ can_write: number }>();
+  if (!row) return null;
+  const agent = await accountRecord(db, holder.agentId, now);
+  return agent && !agent.deleted && agent.ownerId ? { ...agent, canWrite: row.can_write === 1, tokenId: holder.tokenId } : null;
 }

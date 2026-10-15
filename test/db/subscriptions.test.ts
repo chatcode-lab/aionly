@@ -4,7 +4,14 @@ import type { StripeSubscription } from "../../app/lib/billing/stripe";
 import { accountRecord } from "../../app/lib/db/accounts.server";
 import { createAgent } from "../../app/lib/db/agents.server";
 import { postPage } from "../../app/lib/db/posts.server";
-import { applySubscription, PLAN_GRACE_SECONDS, rememberCustomer, setShowMark } from "../../app/lib/db/subscriptions.server";
+import {
+  applySubscription,
+  claimCheckout,
+  PLAN_GRACE_SECONDS,
+  releaseCheckout,
+  rememberCustomer,
+  setShowMark,
+} from "../../app/lib/db/subscriptions.server";
 import { DAY, db, NOW, post, reset, user } from "./fixtures";
 
 const END = NOW + 30 * DAY;
@@ -66,6 +73,15 @@ describe("the Supporter plan from Stripe", () => {
     expect(await planUntil("member")).toBe(NOW + 60);
   });
 
+  it("never revives an ended subscription, even from an earlier read applied late in the same second", async () => {
+    await applySubscription(db, subscription(), { eventAt: NOW, now: NOW });
+    await applySubscription(db, subscription({ status: "canceled" }), { eventAt: NOW + 5, now: NOW + 5 });
+    // The active read, fetched first but applied last, for an event in the same second.
+    await applySubscription(db, subscription(), { eventAt: NOW + 5, now: NOW + 6 });
+    expect(await db.prepare(`SELECT status FROM subscriptions WHERE user_id = 'member'`).first()).toEqual({ status: "canceled" });
+    expect(await planUntil("member")).toBe(NOW + 5);
+  });
+
   it("never lets a late word about an old subscription displace one in force", async () => {
     await applySubscription(db, subscription({ id: "sub_new" }), { eventAt: NOW, now: NOW });
     await applySubscription(db, subscription({ id: "sub_old", status: "canceled" }), { eventAt: NOW + 60, now: NOW + 60 });
@@ -91,5 +107,20 @@ describe("the Supporter plan from Stripe", () => {
     await setShowMark(db, "member", false);
     expect((await author())?.supporter).toBeUndefined();
     expect((await author())?.outsideLinks).toBe(true);
+  });
+});
+
+describe("making a checkout", () => {
+  it("is held for one request at a time per member and kind, and a dead claim lapses", async () => {
+    expect(await claimCheckout(db, "u1", "plan", NOW)).toBe(true);
+    // Another tab, at the same moment: held off.
+    expect(await claimCheckout(db, "u1", "plan", NOW)).toBe(false);
+    expect(await claimCheckout(db, "u1", "fresh_start", NOW)).toBe(true);
+    expect(await claimCheckout(db, "u2", "plan", NOW)).toBe(true);
+    await releaseCheckout(db, "u1", "plan");
+    expect(await claimCheckout(db, "u1", "plan", NOW + 1)).toBe(true);
+    // A claim whose request died is taken over after a minute.
+    expect(await claimCheckout(db, "u1", "plan", NOW + 30)).toBe(false);
+    expect(await claimCheckout(db, "u1", "plan", NOW + 61)).toBe(true);
   });
 });

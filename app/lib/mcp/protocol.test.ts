@@ -79,6 +79,16 @@ describe("the handshake era", () => {
     expect(missing.error.code).toBe(-32602);
   });
 
+  it("refuses a batch of more than 10 messages, and a caller past its limit", async () => {
+    const many = Array.from({ length: 11 }, (_, index) => ({ jsonrpc: "2.0", id: index, method: "tools/list" }));
+    const refused = await post(many);
+    expect(refused.status).toBe(400);
+    expect((await refused.json()).error.message).toBe("A batch holds at most 10 messages.");
+    const ten = await (await post(many.slice(0, 10))).json();
+    expect(ten).toHaveLength(10);
+    expect(ten[0].result.tools).toEqual(ten[9].result.tools);
+  });
+
   it("answers a batch from early clients, leaving out notifications", async () => {
     const answers = await (
       await post([

@@ -33,17 +33,28 @@ export async function freshStartStatus(db: D1Database, userId: string, now: numb
   return { lastAt: row.applied_at, nextAt: next > now ? next : null };
 }
 
+/** What became of a fresh start: applied, or declined for coming too soon after the last paid one. */
+export type FreshStartOutcome = "applied" | "declined" | "none";
+
 /**
  * Applies a fresh start once, however often it is reported: Stripe's return
  * page and its webhook both call this with the checkout's ID. The floor of
  * the member and their agent goes to the room below their karma, and never
- * up. True when this call or an earlier one applied it.
+ * up. A paid one within 30 days of the last paid one applied is declined
+ * instead, in the same batch, however the two payments came about, so it
+ * can be refunded; an admin's grant is never declined.
  */
 export async function applyFreshStart(
   db: D1Database,
   input: { id: string; userId: string; source: "stripe" | "admin"; now: number },
-): Promise<boolean> {
+): Promise<FreshStartOutcome> {
   const floor = `MIN(COALESCE(karma_floor, ${KARMA_FLOOR}), karma - ${FRESH_START_ROOM})`;
+  // ?1 the fresh start, ?2 the member, ?3 now.
+  const tooSoon = `(EXISTS (SELECT 1 FROM fresh_starts AS this WHERE this.id = ?1 AND this.source = 'stripe')
+    AND EXISTS (SELECT 1 FROM fresh_starts AS other
+      WHERE other.user_id = ?2 AND other.source = 'stripe' AND other.id <> ?1
+        AND other.applied_at > ?3 - ${FRESH_START_DAYS * DAY}))`;
+  const waiting = `EXISTS (SELECT 1 FROM fresh_starts WHERE id = ?1 AND user_id = ?2 AND applied_at IS NULL AND declined_at IS NULL)`;
   await db.batch([
     db
       .prepare(
@@ -51,28 +62,27 @@ export async function applyFreshStart(
          ON CONFLICT (id) DO NOTHING`,
       )
       .bind(input.id, input.userId, input.source, input.now),
-    // Only while this fresh start is not yet applied, so a repeat changes nothing.
     db
-      .prepare(
-        `UPDATE profiles SET karma_floor = ${floor}
-         WHERE user_id IN ${karmaGroupSql("?2")}
-           AND EXISTS (SELECT 1 FROM fresh_starts WHERE id = ?1 AND user_id = ?2 AND applied_at IS NULL)`,
-      )
+      .prepare(`UPDATE fresh_starts SET declined_at = ?3 WHERE id = ?1 AND user_id = ?2 AND ${waiting} AND ${tooSoon}`)
+      .bind(input.id, input.userId, input.now),
+    // Only while this fresh start is neither applied nor declined, so a repeat changes nothing.
+    db
+      .prepare(`UPDATE profiles SET karma_floor = ${floor} WHERE user_id IN ${karmaGroupSql("?2")} AND ${waiting}`)
       .bind(input.id, input.userId),
     db
       .prepare(
         `UPDATE fresh_starts SET applied_at = ?3,
            karma = (SELECT karma FROM profiles WHERE user_id = ?2),
            floor = (SELECT karma_floor FROM profiles WHERE user_id = ?2)
-         WHERE id = ?1 AND user_id = ?2 AND applied_at IS NULL`,
+         WHERE id = ?1 AND user_id = ?2 AND applied_at IS NULL AND declined_at IS NULL`,
       )
       .bind(input.id, input.userId, input.now),
     // Settles the new floor at once, as any recount would.
-    trailFloors(db),
+    trailFloors(db, karmaGroupSql("?1"), input.userId),
   ]);
   const row = await db
-    .prepare(`SELECT applied_at FROM fresh_starts WHERE id = ?1 AND user_id = ?2`)
+    .prepare(`SELECT applied_at, declined_at FROM fresh_starts WHERE id = ?1 AND user_id = ?2`)
     .bind(input.id, input.userId)
-    .first<{ applied_at: number | null }>();
-  return row?.applied_at != null;
+    .first<{ applied_at: number | null; declined_at: number | null }>();
+  return row?.applied_at != null ? "applied" : row?.declined_at != null ? "declined" : "none";
 }

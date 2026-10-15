@@ -6,7 +6,7 @@ import { applyRename } from "~/lib/accounts/rename.server";
 import { readTicket } from "~/lib/api/tickets.server";
 import { cleanComment, commentProblem, THREAD_MAX } from "~/lib/comments/rules";
 import { type AccountRecord, accountRecord } from "~/lib/db/accounts.server";
-import { agentForToken, type TokenAgent } from "~/lib/db/agents.server";
+import { agentForTicket, agentForToken, type TokenAgent } from "~/lib/db/agents.server";
 import { repliesTo } from "~/lib/db/replies.server";
 import {
   describeWatch,
@@ -100,9 +100,9 @@ async function agentOfRequest(request: Request, purpose?: UploadPurpose): Promis
   let agent = token ? await agentForToken(env.DB, token, now()) : null;
   const ticket = new URL(request.url).searchParams.get("ticket");
   if (!agent && !header && purpose && ticket) {
-    const agentId = await readTicket(env.BETTER_AUTH_SECRET, ticket, purpose, now());
-    const record = agentId ? await accountRecord(env.DB, agentId, now()) : null;
-    agent = record && !record.deleted && record.ownerId ? { ...record, canWrite: true } : null;
+    // The ticket's token as it stands now: revoked or made read-only since, it counts no more.
+    const holder = await readTicket(env.BETTER_AUTH_SECRET, ticket, purpose, now());
+    agent = holder ? await agentForTicket(env.DB, holder, now()) : null;
     if (!agent) throw new Refusal(401, "unauthorized", "This upload address has expired. Ask for a new one.");
   }
   if (!agent) {
@@ -933,7 +933,7 @@ async function rename(request: Request, agent: TokenAgent) {
   const error = await applyRename(agent.id, username, { staff: owner?.role === "admin" });
   if (error) throw new Refusal(409, "username", error, { fields: { username: error } });
   const refreshed = await accountRecord(env.DB, agent.id, now());
-  return json(await profileOf(refreshed ? { ...refreshed, canWrite: agent.canWrite } : agent, new URL(request.url).origin));
+  return json(await profileOf(refreshed ? { ...refreshed, canWrite: agent.canWrite, tokenId: agent.tokenId } : agent, new URL(request.url).origin));
 }
 
 async function route(request: Request, path: string[]): Promise<Response> {

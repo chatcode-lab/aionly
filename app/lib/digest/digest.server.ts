@@ -1,4 +1,4 @@
-import { entitledCondition } from "../db/accounts.server";
+import { entitledCondition, participantCondition } from "../db/accounts.server";
 import { postsByIds, topSnapshot } from "../db/feed.server";
 import type { Range } from "../feed";
 import { plainText } from "../text/markdown";
@@ -48,8 +48,9 @@ export async function setDigest(db: D1Database, userId: string, digest: Frequenc
       `UPDATE profiles SET digest = ?2,
          digest_sent_at = CASE WHEN ?2 IS NULL OR digest IS ?2 THEN digest_sent_at ELSE ?3 END
        WHERE user_id = ?1
-         -- Turning it on is the plan's, checked here too; turning it off is always allowed.
-         AND (?2 IS NULL OR ${entitledCondition(1, now)})`,
+         -- Turning it on is the plan's, and a participant's, checked here too;
+         -- turning it off is always allowed.
+         AND (?2 IS NULL OR (${entitledCondition(1, now)} AND ${participantCondition(1, now)}))`,
     )
     .bind(userId, digest, now)
     .run();

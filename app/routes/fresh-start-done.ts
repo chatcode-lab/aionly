@@ -15,7 +15,9 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const session = new URL(request.url).searchParams.get("session");
   if (!session || !billingOpen()) throw redirect("/fresh-start");
   try {
-    if (await finishFreshStart(viewer, session)) throw redirect("/fresh-start?done");
+    const outcome = await finishFreshStart(viewer, session);
+    if (outcome === "applied") throw redirect("/fresh-start?done");
+    if (outcome === "declined") throw redirect("/fresh-start?refunded");
   } catch (error) {
     if (error instanceof Response) throw error;
     console.error("stripe fresh start return", error);

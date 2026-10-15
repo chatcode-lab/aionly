@@ -86,25 +86,21 @@ function resolveReportsOn(db: D1Database, type: "post" | "comment" | "user", id:
 function recountVotesOf(db: D1Database, voterId: string): D1PreparedStatement[] {
   const voted = (type: "post" | "comment") =>
     `SELECT target_id FROM votes WHERE voter_id = ?1 AND target_type = '${type}'`;
+  // Every account sharing karma with an author whose items were voted on.
+  const holders = `(
+    SELECT member.user_id FROM profiles AS member
+    JOIN profiles AS author
+      ON COALESCE(author.owner_id, author.user_id) IN (member.user_id, member.owner_id)
+    WHERE author.user_id IN (
+      SELECT author_id FROM posts WHERE id IN (${voted("post")})
+      UNION SELECT author_id FROM comments WHERE id IN (${voted("comment")})))`;
   return [
     db.prepare(`UPDATE posts SET score = ${scoreSql("post", "posts.id")} WHERE id IN (${voted("post")})`).bind(voterId),
     db
       .prepare(`UPDATE comments SET score = ${scoreSql("comment", "comments.id")} WHERE id IN (${voted("comment")})`)
       .bind(voterId),
-    // Every account sharing karma with an author whose items were voted on.
-    db
-      .prepare(
-        `UPDATE profiles SET karma = ${karmaSql("profiles.user_id")}
-         WHERE user_id IN (
-           SELECT member.user_id FROM profiles AS member
-           JOIN profiles AS author
-             ON COALESCE(author.owner_id, author.user_id) IN (member.user_id, member.owner_id)
-           WHERE author.user_id IN (
-             SELECT author_id FROM posts WHERE id IN (${voted("post")})
-             UNION SELECT author_id FROM comments WHERE id IN (${voted("comment")})))`,
-      )
-      .bind(voterId),
-    trailFloors(db),
+    db.prepare(`UPDATE profiles SET karma = ${karmaSql("profiles.user_id")} WHERE user_id IN ${holders}`).bind(voterId),
+    trailFloors(db, holders, voterId),
   ];
 }
 
@@ -401,7 +397,7 @@ export async function grantFreshStart(
     .first<{ member: string }>();
   if (!row) return false;
   const actionId = newId();
-  const applied = await applyFreshStart(db, { id: actionId, userId: row.member, source: "admin", now: input.now });
+  const applied = (await applyFreshStart(db, { id: actionId, userId: row.member, source: "admin", now: input.now })) === "applied";
   if (applied) {
     await logAction(db, { id: actionId, batchId: newId(), actorId: input.actorId, action: "fresh_start", targetType: "user", targetId: row.member, reason: input.reason, now: input.now }).run();
   }
@@ -426,12 +422,14 @@ export async function purgePostMedia(
     .first<{ thumb_key: string | null; media_key: string | null }>();
   if (!row) return null;
   const keys = [row.thumb_key, row.media_key].filter((key): key is string => key !== null);
+  // The files go first: should that fail, the post still names them, and
+  // asking again finishes the job. Only then are they forgotten and logged.
+  if (keys.length > 0) await bucket.delete(keys);
   await db.batch([
     db.prepare(`UPDATE posts SET thumb_key = NULL, media_key = NULL WHERE id = ?1`).bind(input.postId),
     db.prepare(`DELETE FROM images WHERE key IN (SELECT value FROM json_each(?1))`).bind(JSON.stringify(keys)),
     logAction(db, { id: newId(), batchId: newId(), actorId: input.actorId, action: "purge_media", targetType: "post", targetId: input.postId, reason: null, now: input.now }),
   ]);
-  if (keys.length > 0) await bucket.delete(keys);
   return keys;
 }
 
@@ -443,12 +441,13 @@ export async function resetAvatar(
 ): Promise<boolean> {
   const row = await db.prepare(`SELECT avatar_key FROM profiles WHERE user_id = ?1`).bind(input.userId).first<{ avatar_key: string | null }>();
   if (!row?.avatar_key) return false;
+  // The file goes first, so a failure leaves it named and a retry can finish.
+  await bucket.delete(row.avatar_key);
   await db.batch([
-    db.prepare(`UPDATE profiles SET avatar_key = NULL WHERE user_id = ?1`).bind(input.userId),
+    db.prepare(`UPDATE profiles SET avatar_key = NULL WHERE user_id = ?1 AND avatar_key = ?2`).bind(input.userId, row.avatar_key),
     db.prepare(`DELETE FROM images WHERE key = ?1`).bind(row.avatar_key),
     logAction(db, { id: newId(), batchId: newId(), actorId: input.actorId, action: "reset_avatar", targetType: "user", targetId: input.userId, reason: null, now: input.now }),
   ]);
-  await bucket.delete(row.avatar_key);
   return true;
 }
 

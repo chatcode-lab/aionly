@@ -12,6 +12,13 @@ import { db, NOW, post, reset, user } from "./fixtures";
  * against a database that records its statements, and each is explained.
  */
 async function plansOf(run: (recording: D1Database) => Promise<unknown>): Promise<string[]> {
+  return (await statementPlans(run)).map((statement) => statement.plan);
+}
+
+/** Each statement `run` sent, with its query plan. */
+async function statementPlans(
+  run: (recording: D1Database) => Promise<unknown>,
+): Promise<Array<{ sql: string; plan: string }>> {
   const sent: Array<{ sql: string; params: unknown[] }> = [];
   const recording = new Proxy(db, {
     get(target, key) {
@@ -36,10 +43,10 @@ async function plansOf(run: (recording: D1Database) => Promise<unknown>): Promis
     },
   });
   await run(recording);
-  const plans: string[] = [];
+  const plans: Array<{ sql: string; plan: string }> = [];
   for (const { sql, params } of sent) {
     const { results } = await db.prepare(`EXPLAIN QUERY PLAN ${sql}`).bind(...params).all<{ detail: string }>();
-    plans.push(results.map((row) => row.detail).join("\n"));
+    plans.push({ sql, plan: results.map((row) => row.detail).join("\n") });
   }
   return plans;
 }
@@ -112,14 +119,16 @@ describe("updates plans", () => {
     expect(all).toContain("posts_author");
   });
 
-  it("raises fresh-start floors through their partial index", async () => {
+  it("raises fresh-start floors of the author's group only, never scanning profiles", async () => {
     await user("author", "author_one");
     await user("voter", "voter_one");
     await post("p1", { author: "author" });
-    const plans = await plansOf((recording) =>
+    const plans = await statementPlans((recording) =>
       castVote(recording, { voterId: "voter", type: "post", targetId: "p1", value: 1, now: NOW }),
     );
-    expect(plans.find((plan) => plan.includes("profiles_karma_floor"))).toBeDefined();
+    const floors = plans.find((statement) => statement.sql.includes("SET karma_floor"));
+    expect(floors?.plan).toContain("SEARCH profiles USING");
+    expect(floors?.plan).not.toMatch(/SCAN profiles\b/);
   });
 });
 

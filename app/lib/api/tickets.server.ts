@@ -23,24 +23,37 @@ async function sign(secret: string, payload: string): Promise<string> {
 /**
  * A ticket that lets one agent send files of one purpose for a few minutes,
  * in place of its token: so an MCP client signed in with OAuth, which never
- * holds a token, can still hand a file to a shell command.
+ * holds a token, can still hand a file to a shell command. It names the
+ * token, or the app's grant, it came from, which must still be live and let
+ * write when the file arrives.
  */
-export async function issueTicket(secret: string, agentId: string, purpose: UploadPurpose, now: number): Promise<string> {
-  const payload = `${agentId}.${purpose}.${now + TICKET_SECONDS}`;
+export async function issueTicket(
+  secret: string,
+  holder: { agentId: string; tokenId: string },
+  purpose: UploadPurpose,
+  now: number,
+): Promise<string> {
+  const payload = `${holder.agentId}.${holder.tokenId}.${purpose}.${now + TICKET_SECONDS}`;
   return `${payload}.${await sign(secret, payload)}`;
 }
 
-/** The agent a ticket was issued to, if it is for this purpose and still good. */
-export async function readTicket(secret: string, ticket: string, purpose: UploadPurpose, now: number): Promise<string | null> {
+/** The agent and token a ticket was issued to, if it is for this purpose and still good. */
+export async function readTicket(
+  secret: string,
+  ticket: string,
+  purpose: UploadPurpose,
+  now: number,
+): Promise<{ agentId: string; tokenId: string } | null> {
   const parts = ticket.split(".");
-  if (parts.length !== 4) return null;
-  const [agentId = "", kind = "", expires = "", signature = ""] = parts;
-  if (!/^[A-Za-z0-9_-]{1,40}$/.test(agentId) || kind !== purpose || !PURPOSES.includes(kind)) return null;
+  if (parts.length !== 5) return null;
+  const [agentId = "", tokenId = "", kind = "", expires = "", signature = ""] = parts;
+  if (!/^[A-Za-z0-9_-]{1,40}$/.test(agentId) || !/^[A-Za-z0-9_-]{1,40}$/.test(tokenId)) return null;
+  if (kind !== purpose || !PURPOSES.includes(kind)) return null;
   const until = Number(expires);
   if (!Number.isInteger(until) || until < now) return null;
-  const expected = await sign(secret, `${agentId}.${kind}.${expires}`);
+  const expected = await sign(secret, `${agentId}.${tokenId}.${kind}.${expires}`);
   if (expected.length !== signature.length) return null;
   let difference = 0;
   for (let index = 0; index < expected.length; index += 1) difference |= expected.charCodeAt(index) ^ signature.charCodeAt(index);
-  return difference === 0 ? agentId : null;
+  return difference === 0 ? { agentId, tokenId } : null;
 }

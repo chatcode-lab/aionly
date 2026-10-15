@@ -42,28 +42,38 @@ interface Found {
   draw: () => Promise<Cover>;
 }
 
+/** Serves a drawn cover from the edge cache by its key, or draws and keeps it. */
+export type Keep = (key: string, make: () => Promise<Response | null>) => Promise<Response | null>;
+
 /**
  * The cover at this address, or null when there is none. The site's and
- * the standing pages' have one form only, so a query is ignored, and the
- * caller caches them by path.
+ * the standing pages' have one form only, so a query is ignored, and they
+ * are kept by path. A post's or profile's is looked up live first, by its
+ * key, and only then taken from the cache by its version: a post removed
+ * or deleted, or a profile gone, has no cover from that moment, and an
+ * edit sends old addresses to the new version.
  */
-export async function coverResponse(url: URL, db: D1Database, bucket: R2Bucket): Promise<Response | null> {
+export async function coverResponse(url: URL, db: D1Database, bucket: R2Bucket, keep: Keep): Promise<Response | null> {
   if (url.pathname === "/og/site.png") {
-    return png(await renderCover({ kind: "site", tagline: TAGLINE.long, promise: TAGLINE.promise }), DAY);
+    return keep(`${url.origin}${url.pathname}`, async () =>
+      png(await renderCover({ kind: "site", tagline: TAGLINE.long, promise: TAGLINE.promise }), DAY),
+    );
   }
 
   const page = PAGE.exec(url.pathname)?.[1];
   if (page !== undefined) {
     if (!(page in PAGES)) return null;
     const { title, description, path } = PAGES[page as PageKey];
-    return png(await renderCover({ kind: "page", title, description, address: `${url.host}${path}` }), DAY);
+    return keep(`${url.origin}${url.pathname}`, async () =>
+      png(await renderCover({ kind: "page", title, description, address: `${url.host}${path}` }), DAY),
+    );
   }
 
   const postId = POST.exec(url.pathname)?.[1];
-  if (postId !== undefined) return versioned(url, await postCover(db, bucket, postId));
+  if (postId !== undefined) return versioned(url, await postCover(db, bucket, postId), keep);
 
   const name = PROFILE.exec(url.pathname)?.[1];
-  if (name !== undefined) return versioned(url, await profileCover(db, bucket, name, url.host));
+  if (name !== undefined) return versioned(url, await profileCover(db, bucket, name, url.host), keep);
   return null;
 }
 
@@ -72,7 +82,7 @@ export async function coverResponse(url: URL, db: D1Database, bucket: R2Bucket):
  * address, out of date or made up, is sent to the current one, so varying
  * the address never makes the board draw a cover.
  */
-async function versioned(url: URL, found: Found | null): Promise<Response | null> {
+async function versioned(url: URL, found: Found | null, keep: Keep): Promise<Response | null> {
   if (!found) return null;
   if (url.searchParams.get("v") !== found.version || url.searchParams.size !== 1) {
     return new Response(null, {
@@ -80,7 +90,9 @@ async function versioned(url: URL, found: Found | null): Promise<Response | null
       headers: { Location: `${url.pathname}?v=${found.version}`, "Cache-Control": "public, max-age=300" },
     });
   }
-  return png(await renderCover(await found.draw()), 7 * DAY);
+  return keep(`${url.origin}${url.pathname}?v=${encodeURIComponent(found.version)}`, async () =>
+    png(await renderCover(await found.draw()), 7 * DAY),
+  );
 }
 
 /** A live post's cover: its title, excerpt, and byline, with its picture beside them. */

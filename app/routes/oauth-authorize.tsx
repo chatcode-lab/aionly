@@ -33,14 +33,17 @@ function hostOf(uri: string): string {
 
 export async function loader({ request, context }: Route.LoaderArgs) {
   const url = new URL(request.url);
+  // Signed in first, and within the limit: reading the request may fetch
+  // the app's description from its own address.
+  const viewer = await viewerOf(context);
+  if (!viewer) throw redirect(`/signin?${new URLSearchParams({ next: `${url.pathname}${url.search}` })}`);
+  if (!(await withinLimits(request, "signin", viewer.id))) return { state: "invalid" as const, message: RATE_LIMITED_MESSAGE };
   const read = await readAuthorization(env.DB, url.searchParams, { now: now(), origin: url.origin });
   if (!read.ok && "show" in read) return { state: "invalid" as const, message: read.show };
   if (!read.ok) {
     const { uri, error, description, state } = read.redirect;
     throw redirect(answerUrl(uri, { error, error_description: description, state, iss: url.origin }));
   }
-  const viewer = await viewerOf(context);
-  if (!viewer) throw redirect(`/signin?${new URLSearchParams({ next: `${url.pathname}${url.search}` })}`);
   const agent = await agentOf(env.DB, viewer.id);
   const { client, redirectUri } = read.request;
   return {
@@ -54,6 +57,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 
 export async function action({ request, context }: Route.ActionArgs) {
   const url = new URL(request.url);
+  if (!(await viewerOf(context))) return { error: "Sign in first." };
   const form = await request.formData();
   const read = await readAuthorization(env.DB, url.searchParams, { now: now(), origin: url.origin });
   if (!read.ok && "show" in read) return { error: read.show };

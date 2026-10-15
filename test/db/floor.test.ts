@@ -57,7 +57,7 @@ describe("fresh starts", () => {
     await user("m", "low_lark", { karma: -120 });
     await agentOf("m", "a", "low_lark_agent", -120);
 
-    expect(await applyFreshStart(db, { id: "cs_1", userId: "m", source: "stripe", now: NOW })).toBe(true);
+    expect(await applyFreshStart(db, { id: "cs_1", userId: "m", source: "stripe", now: NOW })).toBe("applied");
     expect(await floorOf("m")).toBe(-170);
     expect(await floorOf("a")).toBe(-170);
     expect((await accountRecord(db, "m", NOW))?.ban).toBeNull();
@@ -65,7 +65,7 @@ describe("fresh starts", () => {
 
     // Reported again, as the webhook does after the return page: nothing changes.
     await db.prepare(`UPDATE profiles SET karma = -150`).run();
-    expect(await applyFreshStart(db, { id: "cs_1", userId: "m", source: "stripe", now: NOW + 60 })).toBe(true);
+    expect(await applyFreshStart(db, { id: "cs_1", userId: "m", source: "stripe", now: NOW + 60 })).toBe("applied");
     expect(await floorOf("m")).toBe(-170);
     const record = await db.prepare(`SELECT karma, floor, applied_at FROM fresh_starts WHERE id = 'cs_1'`).first();
     expect(record).toEqual({ karma: -120, floor: -170, applied_at: NOW });
@@ -77,6 +77,25 @@ describe("fresh starts", () => {
     await applyFreshStart(db, { id: "cs_1", userId: "m", source: "stripe", now: NOW });
     expect(await freshStartStatus(db, "m", NOW + DAY)).toEqual({ lastAt: NOW, nextAt: NOW + 30 * DAY });
     expect(await freshStartStatus(db, "m", NOW + 30 * DAY)).toEqual({ lastAt: NOW, nextAt: null });
+  });
+
+  it("decline a second paid one within 30 days, however it was paid, and never an admin's", async () => {
+    await user("admin", "the_admin", { role: "admin" });
+    await user("m", "low_lark", { karma: -120 });
+    expect(await applyFreshStart(db, { id: "cs_1", userId: "m", source: "stripe", now: NOW })).toBe("applied");
+    await db.prepare(`UPDATE profiles SET karma = -200`).run();
+    // A second checkout paid a second later: declined, and the floor stays.
+    expect(await applyFreshStart(db, { id: "cs_2", userId: "m", source: "stripe", now: NOW + 1 })).toBe("declined");
+    expect(await applyFreshStart(db, { id: "cs_2", userId: "m", source: "stripe", now: NOW + 60 })).toBe("declined");
+    expect(await floorOf("m")).toBe(-170);
+    expect(await db.prepare(`SELECT applied_at, declined_at FROM fresh_starts WHERE id = 'cs_2'`).first()).toEqual({
+      applied_at: null,
+      declined_at: NOW + 1,
+    });
+    expect(await grantFreshStart(db, { userId: "m", actorId: "admin", reason: "Appeal", now: NOW + 2 })).toBe(true);
+    expect(await floorOf("m")).toBe(-250);
+    // After 30 days a paid one applies again.
+    expect(await applyFreshStart(db, { id: "cs_3", userId: "m", source: "stripe", now: NOW + 30 * DAY + 1 })).toBe("applied");
   });
 
   it("can be granted by an admin, for the agent's owner, and are logged", async () => {
@@ -101,7 +120,7 @@ describe("the floor after a recount", () => {
     await db.batch([
       db.prepare(`UPDATE profiles SET karma_floor = -155 WHERE user_id IN ('m', 'n')`),
       db.prepare(`UPDATE profiles SET karma_floor = -340 WHERE user_id = 'o'`),
-      trailFloors(db),
+      trailFloors(db, "('m', 'n', 'o')"),
     ]);
     expect(await floorOf("m")).toBe(-110);
     expect(await floorOf("n")).toBeNull();
@@ -109,12 +128,15 @@ describe("the floor after a recount", () => {
     expect(await floorOf("o")).toBe(-340);
   });
 
-  it("is raised in the same batch as a vote", async () => {
+  it("is raised in the same batch as a vote, for the author's group only", async () => {
     await user("m", "low_lark");
     await user("v", "kind_vole");
+    await user("far", "far_finch", { karma: 0 });
     await post("p1", { author: "m" });
-    await db.prepare(`UPDATE profiles SET karma_floor = -155 WHERE user_id = 'm'`).run();
+    await db.prepare(`UPDATE profiles SET karma_floor = -155 WHERE user_id IN ('m', 'far')`).run();
     await castVote(db, { voterId: "v", type: "post", targetId: "p1", value: 1, now: NOW });
     expect(await floorOf("m")).toBeNull();
+    // Someone else's floor waits for their own recount.
+    expect(await floorOf("far")).toBe(-155);
   });
 });

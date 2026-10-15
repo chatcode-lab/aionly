@@ -87,33 +87,52 @@ describe("checkout", () => {
 });
 
 describe("one plan per member", () => {
-  /** A fake Stripe that answers lists and records every call. */
-  function fakeStripe(lists: Record<string, unknown[]>) {
+  /** A fake Stripe that answers lists, two items a page, and records every call. */
+  function fakeStripe(lists: Record<string, Array<{ id: string }>>) {
     const calls: string[] = [];
     const fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input));
       calls.push(`${init?.method ?? "GET"} ${url.pathname}${url.search}`);
-      return Response.json({ data: lists[url.pathname] ?? [], object: "list" });
+      const list = lists[url.pathname] ?? [];
+      const after = url.searchParams.get("starting_after");
+      const start = after ? list.findIndex((item) => item.id === after) + 1 : 0;
+      return Response.json({ data: list.slice(start, start + 2), has_more: start + 2 < list.length, object: "list" });
     }) as typeof fetch;
     return { client: stripeClient("sk_test_x", fetcher), calls };
   }
 
-  it("finds every subscription that may still charge the customer", async () => {
+  it("finds every subscription that may still charge the customer, on every page", async () => {
     const { client, calls } = fakeStripe({
-      "/v1/subscriptions": [{ id: "sub_a", status: "active" }, { id: "sub_b", status: "canceled" }, { id: "sub_c", status: "past_due" }],
+      "/v1/subscriptions": [
+        { id: "sub_a", status: "active" },
+        { id: "sub_b", status: "canceled" },
+        { id: "sub_c", status: "canceled" },
+        { id: "sub_d", status: "past_due" },
+      ] as Array<{ id: string; status: string }>,
     });
-    expect((await runningSubscriptions(client, "cus_1")).map((subscription) => subscription.id)).toEqual(["sub_a", "sub_c"]);
-    expect(calls[0]).toBe("GET /v1/subscriptions?customer=cus_1&status=all&limit=20");
+    expect((await runningSubscriptions(client, "cus_1")).map((subscription) => subscription.id)).toEqual(["sub_a", "sub_d"]);
+    expect(calls).toEqual([
+      "GET /v1/subscriptions?customer=cus_1&status=all&limit=100",
+      "GET /v1/subscriptions?customer=cus_1&status=all&limit=100&starting_after=sub_b",
+    ]);
   });
 
-  it("closes checkouts left open, so only the next one can be paid", async () => {
-    const { client, calls } = fakeStripe({ "/v1/checkout/sessions": [{ id: "cs_1" }, { id: "cs_2" }] });
+  it("closes checkouts left open, so only the next one can be paid, on every page", async () => {
+    const { client, calls } = fakeStripe({ "/v1/checkout/sessions": [{ id: "cs_1" }, { id: "cs_2" }, { id: "cs_3" }] });
     await expireOpenCheckouts(client, "cus_1");
     expect(calls).toEqual([
-      "GET /v1/checkout/sessions?customer=cus_1&status=open&limit=20",
+      "GET /v1/checkout/sessions?customer=cus_1&status=open&limit=100",
+      "GET /v1/checkout/sessions?customer=cus_1&status=open&limit=100&starting_after=cs_2",
       "POST /v1/checkout/sessions/cs_1/expire",
       "POST /v1/checkout/sessions/cs_2/expire",
+      "POST /v1/checkout/sessions/cs_3/expire",
     ]);
+  });
+
+  it("refuses to answer with part of a list it could not finish", async () => {
+    const many = Array.from({ length: 41 }, (_, index) => ({ id: `cs_${index}` }));
+    const { client } = fakeStripe({ "/v1/checkout/sessions": many });
+    await expect(expireOpenCheckouts(client, "cus_1")).rejects.toThrow(/more than/);
   });
 });
 

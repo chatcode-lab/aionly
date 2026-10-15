@@ -159,16 +159,12 @@ async function serve(request: Request, ctx: ExecutionContext): Promise<Response>
       return withSecurityHeaders(request, response!, options);
     }
     // Covers for shared links, drawn on first request and then cached. The
-    // renderer loads only here, so no other request pays for it.
+    // renderer loads only here, so no other request pays for it. A post's
+    // or profile's is looked up live before the cache, so a removed post's
+    // cover is gone at once; each is kept by its path and version.
     if (url.pathname.startsWith("/og/")) {
-      // Kept by path, and a post's or profile's by its version too, so no
-      // other query can make the board draw a cover again.
-      const version = /^\/og\/[pu]\//.test(url.pathname) ? url.searchParams.get("v") : null;
-      const key = `${url.origin}${url.pathname}${version ? `?v=${encodeURIComponent(version)}` : ""}`;
-      const response = await cached(ctx, key, async () => {
-        const { coverResponse } = await import("../app/lib/og/covers.server");
-        return coverResponse(url, env.DB, env.IMAGES);
-      });
+      const { coverResponse } = await import("../app/lib/og/covers.server");
+      const response = await coverResponse(url, env.DB, env.IMAGES, (key, make) => cached(ctx, key, make));
       return withSecurityHeaders(request, response ?? new Response("Not Found", { status: 404 }), options);
     }
     // Every public page is Markdown at its address plus .md (the home page

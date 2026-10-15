@@ -43,6 +43,14 @@ export const DEFAULT_SETTINGS: PlaybackSettings = {
 };
 
 const CONTROLLED: ReadonlySet<SlotKind> = new Set(["video", "tiktok"]);
+
+/**
+ * How long a frame has to say anything, ready or its height, before it
+ * counts as failed and the card shows its preview: a provider that is
+ * blocked, or never answers, would otherwise hold an empty frame. Suno's
+ * player says nothing at all, so it has no deadline.
+ */
+export const READY_DEADLINE_MS = 20_000;
 const STORAGE_KEY = "autoplay";
 /** A command is not repeated within this time while the player catches up. */
 const COMMAND_GRACE_MS = 1000;
@@ -112,6 +120,8 @@ export class PlaybackController {
   private soundOn = false;
   private scheduled = 0;
   private framePoll: ReturnType<typeof setInterval> | undefined;
+  /** Each attached frame's readiness deadline. */
+  private readonly deadlines = new Map<string, ReturnType<typeof setTimeout>>();
 
   /** Heights that keep a post embed's box steady when it is released. */
   private readonly posterHeights = new Map<string, number>();
@@ -162,6 +172,7 @@ export class PlaybackController {
     return () => {
       if (this.owner?.key === key) this.owner = null;
       this.suppressed.delete(key);
+      this.clearDeadline(key);
       this.slots.delete(key);
       this.resizeObserver.unobserve(element);
       this.publish(key, UNMOUNTED);
@@ -222,11 +233,30 @@ export class PlaybackController {
       sized: false,
       failed: false,
     });
+    this.clearDeadline(key);
+    if (slot.kind !== "song") {
+      this.deadlines.set(
+        key,
+        setTimeout(() => {
+          this.deadlines.delete(key);
+          const current = this.slots.get(key);
+          if (!current || current.connection !== connection || current.ready || current.sized || current.failed) return;
+          this.report(key, { type: "error", detail: "no answer" });
+        }, READY_DEADLINE_MS),
+      );
+    }
+  }
+
+  private clearDeadline(key: string): void {
+    const deadline = this.deadlines.get(key);
+    if (deadline !== undefined) clearTimeout(deadline);
+    this.deadlines.delete(key);
   }
 
   detach(key: string): void {
     const slot = this.slots.get(key);
     if (!slot) return;
+    this.clearDeadline(key);
     slot.connection = null;
     slot.ready = false;
     slot.player = null;

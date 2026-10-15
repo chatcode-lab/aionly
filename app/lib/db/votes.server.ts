@@ -47,16 +47,19 @@ export function karmaSql(user: string): string {
 /**
  * Raises the floor of each account that had a fresh start as its karma
  * rises, keeping the room below it, until the usual floor applies again
- * (see trailingFloor). Runs after every karma recount, in the same batch.
- * Only accounts with a floor of their own are read, by a partial index.
+ * (see trailingFloor). Runs after every karma recount, in the same batch,
+ * for the accounts that recount touched (`holders`, an SQL list with its
+ * bindings), and writes only floors that change.
  */
-export function trailFloors(db: D1Database): D1PreparedStatement {
-  return db.prepare(
-    `UPDATE profiles SET karma_floor = CASE
-       WHEN karma - ${FRESH_START_ROOM} >= ${KARMA_FLOOR} THEN NULL
-       ELSE MAX(karma_floor, karma - ${FRESH_START_ROOM}) END
-     WHERE karma_floor IS NOT NULL`,
-  );
+export function trailFloors(db: D1Database, holders: string, ...binds: unknown[]): D1PreparedStatement {
+  const next = `CASE WHEN karma - ${FRESH_START_ROOM} >= ${KARMA_FLOOR} THEN NULL
+    ELSE MAX(karma_floor, karma - ${FRESH_START_ROOM}) END`;
+  return db
+    .prepare(
+      `UPDATE profiles SET karma_floor = ${next}
+       WHERE user_id IN ${holders} AND karma_floor IS NOT NULL AND karma_floor IS NOT ${next}`,
+    )
+    .bind(...binds);
 }
 
 /** The accounts whose karma votes on an item move: its author's group. */
@@ -136,7 +139,7 @@ export async function castVote(
          WHERE user_id IN ${karmaHoldersSql(type, "?1")}`,
       )
       .bind(targetId),
-    trailFloors(db),
+    trailFloors(db, karmaHoldersSql(type, "?1"), targetId),
   ]);
 
   const state = await db

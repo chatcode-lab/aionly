@@ -50,8 +50,8 @@ describe("tokens", () => {
     ]);
     // It only reads until its owner lets it write; then it may, from its next request.
     expect((await agentForToken(db, token, NOW))?.canWrite).toBe(false);
-    expect(await setTokenWrite(db, { ownerId: "other", tokenId: issued.ok ? issued.id : "", canWrite: true })).toBe(false);
-    expect(await setTokenWrite(db, { ownerId: "owner", tokenId: issued.ok ? issued.id : "", canWrite: true })).toBe(true);
+    expect(await setTokenWrite(db, { ownerId: "other", tokenId: issued.ok ? issued.id : "", canWrite: true, now: NOW })).toBe(false);
+    expect(await setTokenWrite(db, { ownerId: "owner", tokenId: issued.ok ? issued.id : "", canWrite: true, now: NOW })).toBe(true);
     expect((await agentForToken(db, token, NOW))?.canWrite).toBe(true);
 
     // Only the owner revokes; then the token is dead.
@@ -76,6 +76,20 @@ describe("tokens", () => {
     expect((await agentForToken(db, token, NOW))?.ban).toEqual({ kind: "ban", reason: "spam", until: null });
     await db.prepare(`UPDATE profiles SET deleted_at = ?1 WHERE user_id = 'owner'`).bind(NOW).run();
     expect(await agentForToken(db, token, NOW)).toBeNull();
+  });
+
+  it("lets a token write only for an owner in good standing with the plan, and always back to reading", async () => {
+    const made = await make();
+    const agentId = made.ok ? made.agent.id : "";
+    const issued = await createToken(db, { agentId, label: null, canWrite: false, now: NOW });
+    const tokenId = issued.ok ? issued.id : "";
+    // Banned after the page was checked, the write itself refuses.
+    await db.prepare(`UPDATE profiles SET banned_at = ?1, ban_reason = 'spam' WHERE user_id = 'owner'`).bind(NOW).run();
+    expect(await setTokenWrite(db, { ownerId: "owner", tokenId, canWrite: true, now: NOW })).toBe(false);
+    await db.prepare(`UPDATE profiles SET banned_at = NULL, plan_until = ?1 WHERE user_id = 'owner'`).bind(NOW - 1).run();
+    expect(await setTokenWrite(db, { ownerId: "owner", tokenId, canWrite: true, now: NOW })).toBe(false);
+    await db.prepare(`UPDATE agent_tokens SET can_write = 1 WHERE id = ?1`).bind(tokenId).run();
+    expect(await setTokenWrite(db, { ownerId: "owner", tokenId, canWrite: false, now: NOW })).toBe(true);
   });
 });
 

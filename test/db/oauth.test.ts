@@ -63,7 +63,7 @@ describe("registration", () => {
 });
 
 describe("client metadata documents", () => {
-  const documentId = "https://app.example/oauth/client.json";
+  const documentId = "https://app.example.com/oauth/client.json";
   const fetcher = (document: unknown, status = 200) => {
     let calls = 0;
     const fake = (async () => {
@@ -83,11 +83,43 @@ describe("client metadata documents", () => {
   });
 
   it("refuses a document for another address, or one on the board itself", async () => {
-    const { fake } = fetcher({ client_id: "https://other.example/client.json", redirect_uris: [REDIRECT] });
+    const { fake } = fetcher({ client_id: "https://other.example.com/client.json", redirect_uris: [REDIRECT] });
     expect(await findClient(db, documentId, { now: NOW, ownHost: "board.test", fetcher: fake })).toBeNull();
     const own = fetcher({ client_id: "https://board.test/client.json", redirect_uris: [REDIRECT] });
     expect(await findClient(db, "https://board.test/client.json", { now: NOW, ownHost: "board.test", fetcher: own.fake })).toBeNull();
     expect(own.calls()).toBe(0);
+  });
+
+  it("never fetches from an address literal, a local name, or another port", async () => {
+    for (const id of [
+      "https://127.0.0.1:8443/private/client.json",
+      "https://10.0.0.1/client.json",
+      "https://[::1]/client.json",
+      "https://localhost/client.json",
+      "https://app.example.com:8443/client.json",
+    ]) {
+      const { fake, calls } = fetcher({ client_id: id, redirect_uris: [REDIRECT] });
+      expect(await findClient(db, id, { now: NOW, ownHost: "board.test", fetcher: fake })).toBeNull();
+      expect(calls()).toBe(0);
+    }
+  });
+
+  it("stops reading a document past 10 KB, however it is sent", async () => {
+    const big = JSON.stringify({ client_id: documentId, client_name: "x".repeat(20_000), redirect_uris: [REDIRECT] });
+    let pulled = 0;
+    const streaming = (async () =>
+      new Response(
+        new ReadableStream({
+          pull(controller) {
+            pulled += 1;
+            if (pulled > 10) return controller.close();
+            controller.enqueue(new TextEncoder().encode(big.slice((pulled - 1) * 4096, pulled * 4096)));
+          },
+        }),
+        { status: 200 },
+      )) as unknown as typeof fetch;
+    expect(await findClient(db, documentId, { now: NOW, ownHost: "board.test", fetcher: streaming })).toBeNull();
+    expect(pulled).toBeLessThan(6);
   });
 });
 

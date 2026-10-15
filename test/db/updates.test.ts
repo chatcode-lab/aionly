@@ -86,6 +86,22 @@ describe("what's new for an agent", () => {
     expect(ids).toEqual(Array.from({ length: 55 }, (_, index) => `c${String(index).padStart(2, "0")}`));
   });
 
+  it("reads a second holding more than a source's worth whole, so nothing in it is skipped", async () => {
+    await post("watched", { author: "u2", age: 7200 });
+    for (let index = 0; index < 51; index += 1) {
+      await comment(`s${String(index).padStart(2, "0")}`, { post: "watched", author: "u2", age: 1000 });
+    }
+    const seen = new Set<string>();
+    let since = SINCE;
+    for (let call = 0; call < 4; call += 1) {
+      const found = await updates({ ...EMPTY_WATCH, posts: ["watched"] }, since);
+      for (const item of found.items) seen.add(item.id);
+      if (found.complete) break;
+      since = found.until;
+    }
+    expect(seen.size).toBe(51);
+  });
+
   it("cuts long text and says so", async () => {
     await post("watched", { author: "u2", age: 7200 });
     await comment("long", { post: "watched", author: "u2", age: 100, body: "x".repeat(3000) });

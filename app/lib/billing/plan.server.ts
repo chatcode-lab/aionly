@@ -2,8 +2,16 @@ import { env } from "cloudflare:workers";
 
 import { type AccountRecord } from "../db/accounts.server";
 import { readBodyCapped } from "../security/body";
-import { applyFreshStart } from "../db/fresh-starts.server";
-import { applySubscription, planStatus, rememberCustomer, runningSubscription } from "../db/subscriptions.server";
+import { applyFreshStart, type FreshStartOutcome } from "../db/fresh-starts.server";
+import {
+  applySubscription,
+  type CheckoutKind,
+  claimCheckout,
+  planStatus,
+  releaseCheckout,
+  rememberCustomer,
+  runningSubscription,
+} from "../db/subscriptions.server";
 import { FRESH_START_PRICE, PLAN_PRICES, type PlanInterval } from "../plan";
 import {
   cancelSubscription,
@@ -15,8 +23,10 @@ import {
   expireOpenCheckouts,
   getCheckoutSession,
   getSubscription,
+  isRunning,
   paidFreshStart,
   pricesByLookupKey,
+  refundPayment,
   runningSubscriptions,
   type StripeCheckoutSession,
   type StripeSubscription,
@@ -51,6 +61,22 @@ async function customerFor(viewer: AccountRecord): Promise<string> {
 /** A member who already pays for the plan, so is not sold a second one. */
 export class AlreadySubscribed extends Error {}
 
+/** Another of the member's requests is making a checkout of this kind right now. */
+export class CheckoutBusy extends Error {}
+
+/** What a member is told when another tab is making the same checkout. */
+export const BUSY = "A checkout is already opening in another tab. Use that one, or try again in a minute.";
+
+/** Runs `make` while holding the member's checkout of this kind, so no other is made meanwhile. */
+async function holdingCheckout<T>(userId: string, kind: CheckoutKind, make: () => Promise<T>): Promise<T> {
+  if (!(await claimCheckout(env.DB, userId, kind, now()))) throw new CheckoutBusy("a checkout is being made");
+  try {
+    return await make();
+  } finally {
+    await releaseCheckout(env.DB, userId, kind);
+  }
+}
+
 /**
  * Stripe's checkout page for the plan, billed monthly or yearly, for a member
  * who asked for it to start at once. One plan per member: a subscription
@@ -68,13 +94,15 @@ export async function checkoutUrl(
   const priceId = prices.get(lookupKey);
   if (!priceId) throw new Error(`no active Stripe price has the lookup key ${lookupKey}`);
   const customerId = await customerFor(viewer);
-  const running = await runningSubscriptions(client(), customerId);
-  if (running.length > 0) {
-    for (const subscription of running) await applySubscription(env.DB, subscription, { eventAt: now(), now: now() });
-    throw new AlreadySubscribed("this member already has a subscription");
-  }
-  await expireOpenCheckouts(client(), customerId);
-  return createCheckout(client(), { customerId, priceId, userId: viewer.id, origin, startNowAt });
+  return holdingCheckout(viewer.id, "plan", async () => {
+    const running = await runningSubscriptions(client(), customerId);
+    if (running.length > 0) {
+      for (const subscription of running) await applySubscription(env.DB, subscription, { eventAt: now(), now: now() });
+      throw new AlreadySubscribed("this member already has a subscription");
+    }
+    await expireOpenCheckouts(client(), customerId);
+    return createCheckout(client(), { customerId, priceId, userId: viewer.id, origin, startNowAt });
+  });
 }
 
 /** Stripe's checkout page for a fresh start, for a member who asked for it to apply at once. */
@@ -84,8 +112,23 @@ export async function freshStartCheckoutUrl(viewer: AccountRecord, origin: strin
   if (!priceId) throw new Error(`no active Stripe price has the lookup key ${lookupKey}`);
   const customerId = await customerFor(viewer);
   // Only the newest checkout can be paid, so one fresh start is bought at a time.
-  await expireOpenCheckouts(client(), customerId);
-  return createFreshStartCheckout(client(), { customerId, priceId, userId: viewer.id, origin, startNowAt });
+  return holdingCheckout(viewer.id, "fresh_start", async () => {
+    await expireOpenCheckouts(client(), customerId);
+    return createFreshStartCheckout(client(), { customerId, priceId, userId: viewer.id, origin, startNowAt });
+  });
+}
+
+/**
+ * Applies a paid fresh start, or refunds it in full when it came within the
+ * cooldown of the last one: two payments can both go through, as from two
+ * checkouts, and only one counts.
+ */
+async function settleFreshStart(session: StripeCheckoutSession, userId: string): Promise<FreshStartOutcome> {
+  const outcome = await applyFreshStart(env.DB, { id: session.id, userId, source: "stripe", now: now() });
+  if (outcome === "declined" && session.payment_intent) {
+    await refundPayment(client(), session.payment_intent, "fresh start within 30 days of the last one");
+  }
+  return outcome;
 }
 
 /**
@@ -93,10 +136,10 @@ export async function freshStartCheckoutUrl(viewer: AccountRecord, origin: strin
  * lands back here; the webhook does the same if this page is never reached.
  * Only the account that paid can finish it.
  */
-export async function finishFreshStart(viewer: AccountRecord, sessionId: string): Promise<boolean> {
+export async function finishFreshStart(viewer: AccountRecord, sessionId: string): Promise<FreshStartOutcome> {
   const session = await getCheckoutSession(client(), sessionId);
-  if (paidFreshStart(session) !== viewer.id) return false;
-  return applyFreshStart(env.DB, { id: session.id, userId: viewer.id, source: "stripe", now: now() });
+  if (paidFreshStart(session) !== viewer.id) return "none";
+  return settleFreshStart(session, viewer.id);
 }
 
 /** Stripe's customer portal, where a supporter changes or cancels the plan. */
@@ -134,9 +177,14 @@ export async function cancelForDeletion(userId: string): Promise<void> {
     return;
   }
   const { customerId } = await planStatus(env.DB, userId);
-  if (!customerId) return;
-  await expireOpenCheckouts(client(), customerId);
-  for (const subscription of await runningSubscriptions(client(), customerId)) {
+  const targets = customerId ? await runningSubscriptions(client(), customerId) : [];
+  // The one recorded here is ended too, should Stripe's list ever miss it.
+  if (recorded && !targets.some((subscription) => subscription.id === recorded)) {
+    const current = await getSubscription(client(), recorded);
+    if (isRunning(current)) targets.push(current);
+  }
+  if (customerId) await expireOpenCheckouts(client(), customerId);
+  for (const subscription of targets) {
     const ended = await cancelSubscription(client(), subscription.id);
     await applySubscription(env.DB, ended, { eventAt: now(), now: now() });
   }
@@ -178,7 +226,7 @@ export async function handleWebhook(request: Request): Promise<Response> {
   if (event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded") {
     const session = event.data.object as StripeCheckoutSession;
     const userId = paidFreshStart(session);
-    if (userId) await applyFreshStart(env.DB, { id: session.id, userId, source: "stripe", now: now() });
+    if (userId) await settleFreshStart(session, userId);
   }
   return Response.json({ received: true });
 }

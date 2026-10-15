@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { revokePresentedToken } from "~/lib/db/agents.server";
 import { AGENT_SCOPE } from "~/lib/oauth/metadata";
 import { exchangeCode, registerClient } from "~/lib/oauth/clients.server";
+import { readBodyCapped } from "~/lib/security/body";
 import { withinLimits } from "~/lib/security/rate-limit.server";
 
 import type { Route } from "./+types/oauth";
@@ -20,10 +21,9 @@ const MAX_BODY = 8 * 1024;
 const oauthError = (error: string, description: string, status = 400) =>
   Response.json({ error, error_description: description }, { status, headers: NO_STORE });
 
-async function smallText(request: Request): Promise<string | null> {
-  if (Number(request.headers.get("Content-Length") ?? "0") > MAX_BODY) return null;
-  const text = await request.text();
-  return text.length > MAX_BODY ? null : text;
+/** The body, read no further than the limit, or null past it. */
+function smallText(request: Request): Promise<string | null> {
+  return readBodyCapped(request, MAX_BODY);
 }
 
 async function token(request: Request): Promise<Response> {
@@ -55,6 +55,7 @@ async function register(request: Request): Promise<Response> {
 }
 
 async function revoke(request: Request): Promise<Response> {
+  if (!(await withinLimits(request, "signin", null))) return oauthError("slow_down", "Too many requests. Try again in a minute.", 429);
   const text = await smallText(request);
   const presented = text === null ? null : new URLSearchParams(text).get("token");
   if (presented) await revokePresentedToken(env.DB, presented, Math.floor(Date.now() / 1000));

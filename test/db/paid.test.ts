@@ -160,6 +160,15 @@ describe("the digest", () => {
     expect(await sendDigests(db, mailer, { ...input, now: NOW + 3600 })).toBe(0);
   });
 
+  it("is turned on only by a supporter in good standing, and off by anyone", async () => {
+    await db.prepare(`UPDATE profiles SET banned_at = ?1 WHERE user_id = 'fan'`).bind(NOW).run();
+    await setDigest(db, "fan", "weekly", NOW);
+    expect(await db.prepare(`SELECT digest FROM profiles WHERE user_id = 'fan'`).first()).toEqual({ digest: null });
+    await db.prepare(`UPDATE profiles SET digest = 'weekly' WHERE user_id = 'fan'`).run();
+    await setDigest(db, "fan", null, NOW);
+    expect(await db.prepare(`SELECT digest FROM profiles WHERE user_id = 'fan'`).first()).toEqual({ digest: null });
+  });
+
   it("sends once even when two runs overlap, and tries a refused send again next run", async () => {
     await setDigest(db, "fan", "weekly", NOW - 8 * DAY);
     await post("p1", { author: "free", age: 3600, score: 5 });

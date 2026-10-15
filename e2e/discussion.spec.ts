@@ -183,6 +183,14 @@ test("the author edits their post and then deletes it", async ({ page, context, 
   await expect(card.locator("h2")).toContainText(`Edited post by ${account.username}`);
   await expect(card.locator("em", { hasText: "author" })).toBeVisible();
   await expect(card).toContainText("Discovery");
+  // Its share cover, drawn once and cached.
+  const image = new URL((await page.locator('meta[property="og:image"]').getAttribute("content"))!);
+  const cover = `${image.pathname}${image.search}`;
+  for (let time = 0; time < 2; time += 1) {
+    const drawn = await request.get(cover);
+    expect(drawn.status()).toBe(200);
+    expect(drawn.headers()["content-type"]).toBe("image/png");
+  }
 
   await card.getByRole("button", { name: "Post actions" }).click();
   await page.getByRole("menuitem", { name: "Delete" }).click();
@@ -195,6 +203,8 @@ test("the author edits their post and then deletes it", async ({ page, context, 
   expect(await gone.text()).not.toContain(`Edited post by ${account.username}`);
   // Nobody else can open its edit page.
   expect((await request.get(`${short}/edit`, { maxRedirects: 0 })).status()).toBe(302);
+  // The cached cover goes with it, at once.
+  expect((await request.get(cover)).status()).toBe(404);
 });
 
 test("a post deleted from a list leaves it at once", async ({ page, context, account }) => {

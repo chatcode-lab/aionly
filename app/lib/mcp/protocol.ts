@@ -57,6 +57,8 @@ export interface ServerOptions<Context> {
   authorize: (request: Request) => Promise<Context | null>;
   /** The 401's `WWW-Authenticate`, naming where to start OAuth. */
   challenge: string;
+  /** Whether the caller is within its request limit; past it, 429. */
+  admit?: (request: Request, context: Context) => Promise<boolean>;
 }
 
 interface Message {
@@ -70,6 +72,27 @@ const HEADERS = { "Cache-Control": "no-store" };
 
 /** The largest message read: tool arguments are text, never files. */
 const MAX_BODY = 256 * 1024;
+
+/** Messages one batch from an early client may hold. */
+const MAX_BATCH = 10;
+
+/** Each tool list as clients see it, made once. */
+const listed = new WeakMap<object, unknown[]>();
+
+function toolList<Context>(tools: ReadonlyArray<Tool<Context>>): unknown[] {
+  let list = listed.get(tools);
+  if (!list) {
+    list = tools.map((tool) => ({
+      name: tool.name,
+      title: tool.title,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+      annotations: { title: tool.title, ...tool.annotations },
+    }));
+    listed.set(tools, list);
+  }
+  return list;
+}
 
 /** The body as text, or null past the limit, which stops reading there. */
 async function readText(request: Request, maxBytes: number): Promise<string | null> {
@@ -120,14 +143,7 @@ async function answer<Context>(message: Message, options: ServerOptions<Context>
   const reply = (body: unknown, status = 200): Answer => ({ status, body });
   const { id } = message;
   const params = (message.params && typeof message.params === "object" ? message.params : {}) as Record<string, unknown>;
-  const tools = () =>
-    options.tools.map((tool) => ({
-      name: tool.name,
-      title: tool.title,
-      description: tool.description,
-      inputSchema: tool.inputSchema,
-      annotations: { title: tool.title, ...tool.annotations },
-    }));
+  const tools = () => toolList(options.tools);
   switch (message.method) {
     case "server/discover":
       return reply(
@@ -241,6 +257,9 @@ export async function handleMcp<Context>(request: Request, options: ServerOption
   if (context === null) {
     return json(rpcError(null, -32001, "Sign in to aion.ly to use its tools."), 401, { "WWW-Authenticate": options.challenge });
   }
+  if (options.admit && !(await options.admit(request, context))) {
+    return json(rpcError(null, -32000, "That was a lot at once. Wait a minute, then try again."), 429, { "Retry-After": "60" });
+  }
 
   const text = await readText(request, MAX_BODY);
   if (text === null) return json(rpcError(null, -32600, "Requests are at most 256 KB."), 413);
@@ -268,6 +287,7 @@ export async function handleMcp<Context>(request: Request, options: ServerOption
   if (messages.length === 0 || messages.some((message) => !message || typeof message !== "object" || message.jsonrpc !== "2.0")) {
     return json(rpcError(null, -32600, "Invalid Request"), 400);
   }
+  if (messages.length > MAX_BATCH) return json(rpcError(null, -32600, `A batch holds at most ${MAX_BATCH} messages.`), 400);
   const answers: unknown[] = [];
   for (const message of messages) {
     if (isRequest(message)) answers.push((await answer(message, options, context, false)).body);

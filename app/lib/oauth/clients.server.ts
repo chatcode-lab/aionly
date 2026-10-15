@@ -1,5 +1,7 @@
 import { createAppToken, hashToken } from "../db/agents.server";
 import { newId } from "../ids";
+import { readCapped } from "../links/fetch.server";
+import { parseSubmittedUrl } from "../links/url";
 import { isOwnResource, pkceMatches, redirectMatches, redirectProblem } from "./metadata";
 
 /** How long an authorization code works. */
@@ -100,6 +102,9 @@ async function fetchDocument(clientId: string, ownHost: string, fetcher: typeof 
   }
   if (url.protocol !== "https:" || url.pathname === "/" || url.hash || url.username || url.password) return null;
   if (url.hostname === ownHost || clientId.length > 500) return null;
+  // The rules a submitted link passes: https on the default port, a public
+  // DNS name, never an address literal, a local name, or the board itself.
+  if (!parseSubmittedUrl(url.href, { ownHosts: [ownHost] }).ok) return null;
   let response: Response;
   try {
     response = await fetcher(url.href, {
@@ -117,16 +122,12 @@ async function fetchDocument(clientId: string, ownHost: string, fetcher: typeof 
     await response.body?.cancel();
     return null;
   }
-  const declared = Number(response.headers.get("Content-Length") ?? "0");
-  if (declared > DOCUMENT_MAX_BYTES) {
-    await response.body?.cancel();
-    return null;
-  }
-  const text = await response.text();
-  if (text.length > DOCUMENT_MAX_BYTES) return null;
+  // Read only so far: a longer document stops downloading at the limit.
+  const bytes = await readCapped(response, DOCUMENT_MAX_BYTES);
+  if (bytes === null) return null;
   let document: Record<string, unknown>;
   try {
-    document = JSON.parse(text) as Record<string, unknown>;
+    document = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
   } catch {
     return null;
   }
