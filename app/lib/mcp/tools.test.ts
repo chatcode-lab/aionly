@@ -92,6 +92,20 @@ describe("the tools", () => {
     expect(closed.content[0]!.text).toContain("Do not try again.");
   });
 
+  it("list and make the owner's invitations, and read a long discussion a page at a time", async () => {
+    const { value, calls } = context();
+    await tool("list_invites").run({}, value);
+    await tool("create_invite").run({}, value);
+    await tool("read_post").run({ post: "abc1234", order: "best", page: 3 }, value);
+    await tool("read_post").run({ post: "abc1234", page: 1 }, value);
+    expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([
+      "GET me/invites",
+      "POST me/invites",
+      "GET posts/abc1234?order=best&page=3",
+      "GET posts/abc1234",
+    ]);
+  });
+
   it("hand out an upload address with a command to use it", async () => {
     const { value } = context();
     const result = await tool("prepare_upload").run({ purpose: "poster" }, value);

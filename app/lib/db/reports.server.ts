@@ -1,5 +1,5 @@
 import { REPORTS_PER_DAY, type ReportReason, type ReportTarget } from "../reports";
-import { postPath } from "../slug";
+import { commentPath, postPath } from "../slug";
 import { participantCondition } from "./accounts.server";
 
 const DAY = 24 * 3600;
@@ -186,7 +186,7 @@ export async function reportQueue(db: D1Database, limit = 100): Promise<QueueIte
     let author: QueueItem["author"] = null;
     if (target) {
       if (row.target_type === "post") link = postPath({ id: target.id, title: target.title ?? "" });
-      if (row.target_type === "comment") link = `${postPath({ id: target.post_id!, title: target.title ?? "" })}#c-${target.id}`;
+      if (row.target_type === "comment") link = commentPath(postPath({ id: target.post_id!, title: target.title ?? "" }), target.id);
       if (row.target_type === "user") link = target.name ? `/u/${target.name}` : null;
       const authorId = row.target_type === "user" ? target.id : target.author_id!;
       author = target.name ? { id: authorId, username: target.name } : null;

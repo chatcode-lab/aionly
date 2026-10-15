@@ -72,11 +72,23 @@ function xProvider(seen: (profile: XProfile) => void) {
     disableDefaultScope: true,
     scope: ["users.read", "tweet.read", "users.email"],
     getUserInfo: async (token: { accessToken?: string }) => {
-      const response = await fetch("https://api.x.com/2/users/me?user.fields=profile_image_url,confirmed_email", {
-        headers: { Authorization: `Bearer ${token.accessToken}` },
-        signal: AbortSignal.timeout(5000),
-      });
-      if (!response.ok) return null;
+      const read = (fields: string) =>
+        fetch(`https://api.x.com/2/users/me?user.fields=${fields}`, {
+          headers: { Authorization: `Bearer ${token.accessToken}` },
+          signal: AbortSignal.timeout(5000),
+        });
+      let response = await read("profile_image_url,confirmed_email");
+      // X refuses the whole read when the email is not granted, as for an
+      // app without email access: read the profile alone, with no email.
+      if (response.status === 400 || response.status === 403) {
+        console.error("x users/me with email", response.status, await xProblem(response));
+        response = await read("profile_image_url");
+      }
+      if (!response.ok) {
+        // 402 means the X app has no credits left; 401 or 403, that the app's settings refuse it.
+        console.error("x users/me", response.status, await xProblem(response));
+        return null;
+      }
       const profile = (await response.json()) as TwitterProfile & { data?: { confirmed_email?: string } };
       const data = profile.data;
       if (!data?.id) return null;
@@ -91,6 +103,15 @@ function xProvider(seen: (profile: XProfile) => void) {
       };
     },
   };
+}
+
+/** What X said when it refused a read, briefly, for the logs. It holds no tokens. */
+async function xProblem(response: Response): Promise<string> {
+  try {
+    return (await response.text()).slice(0, 300);
+  } catch {
+    return "";
+  }
 }
 
 /** The ID a sign-in's provider gives the person, from the profile it returned. */

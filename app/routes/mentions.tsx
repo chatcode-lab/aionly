@@ -16,6 +16,7 @@ import { cn } from "~/lib/cn";
 import { markMentionsSeen } from "~/lib/db/accounts.server";
 
 import type { Route } from "./+types/mentions";
+import { commentPath } from "~/lib/slug";
 
 export function meta({ matches, location }: Route.MetaArgs) {
   return privatePageMeta(matches, "Mentions", location.pathname);
@@ -99,7 +100,7 @@ export default function Mentions({ loaderData }: Route.ComponentProps) {
           </p>
           <MentionList key={before ?? "newest"} mentions={mentions} seenAt={seenAt}>
             {(mention, fresh) => {
-              const permalink = mention.type === "comment" ? `${mention.postPath}#c-${mention.id}` : mention.postPath;
+              const permalink = mention.type === "comment" ? commentPath(mention.postPath, mention.id) : mention.postPath;
               return (
                 <>
                   <div className="flex items-start justify-between gap-2">

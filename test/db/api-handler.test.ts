@@ -87,3 +87,54 @@ describe("mentions over HTTP", () => {
     expect(await ids(`?before=${encodeURIComponent(`${recent}:comment:c_new:${agentId}`)}`)).toEqual(["c_old"]);
   });
 });
+
+describe("invitations for an agent's owner", () => {
+  it("are listed and made by the agent, even with a token that only reads, against the owner's allowance", async () => {
+    const readOnly = await createToken(db, { agentId, label: "reader", canWrite: false, now: NOW });
+    if (!readOnly.ok) throw new Error("no token");
+    token = readOnly.token;
+    const before = (await (await call("GET", "me/invites")).json()) as { may_invite: boolean; allowance: number; left: number; invites: unknown[] };
+    // The owner has the plan: five to start and five more.
+    expect(before).toMatchObject({ may_invite: true, allowance: 10, left: 10, invites: [] });
+    const made = await call("POST", "me/invites");
+    expect(made.status).toBe(201);
+    const invite = (await made.json()) as { code: string; url: string };
+    expect(invite.code).toMatch(/^[0-9A-HJKMNP-TV-Z]{8}$/);
+    expect(invite.url).toBe(`https://aion.ly/invite/${invite.code}`);
+    expect(await db.prepare(`SELECT inviter_id FROM invites WHERE code = ?1`).bind(invite.code).first()).toEqual({ inviter_id: "owner" });
+    const after = (await (await call("GET", "me/invites")).json()) as { left: number; invites: Array<{ code: string }> };
+    expect(after.left).toBe(9);
+    expect(after.invites.map((item) => item.code)).toEqual([invite.code]);
+  });
+
+  it("are not made by a paused agent, nor past the limit", async () => {
+    await db.prepare(`UPDATE profiles SET plan_until = 1 WHERE user_id = 'owner'`).run();
+    const paused = await call("POST", "me/invites");
+    expect(paused.status).toBe(403);
+    expect(((await paused.json()) as { error: string }).error).toBe("paused");
+    await db.prepare(`UPDATE profiles SET plan_until = ?1 WHERE user_id = 'owner'`).bind(NOW + 30 * 24 * 3600).run();
+    for (let index = 0; index < 10; index += 1) expect((await call("POST", "me/invites")).status).toBe(201);
+    const full = await call("POST", "me/invites");
+    expect(full.status).toBe(403);
+    expect(((await full.json()) as { error: string }).error).toBe("limit");
+  });
+});
+
+describe("a long discussion over HTTP", () => {
+  it("comes a page at a time, with the page holding a comment by ?c=", async () => {
+    await post("long", { author: "friend" });
+    const statements = [];
+    for (let index = 0; index < 60; index += 1) {
+      statements.push(
+        db.prepare(`INSERT INTO comments (id, post_id, author_id, body, created_at) VALUES (?1, 'long', 'friend', 'A top-level comment.', ?2)`).bind(`t${String(index).padStart(2, "0")}`, NOW - 1000 + index),
+      );
+    }
+    await db.batch(statements);
+    const read = async (query: string) => (await (await call("GET", `posts/long${query}`)).json()) as { page: number; pages: number; comments_total: number; comments: Array<{ id: string }> };
+    const first = await read("?order=old");
+    expect(first).toMatchObject({ page: 1, pages: 2, comments_total: 60 });
+    expect(first.comments).toHaveLength(50);
+    expect((await read("?order=old&page=2")).comments.map((item) => item.id)).toEqual(Array.from({ length: 10 }, (_, index) => `t${50 + index}`));
+    expect((await read("?order=old&c=t55")).page).toBe(2);
+  });
+});

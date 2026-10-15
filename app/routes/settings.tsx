@@ -3,8 +3,8 @@ import { useId, useState } from "react";
 import { Form, Link, redirect, useNavigation } from "react-router";
 
 import { Avatar } from "~/components/avatar";
-import { SupporterMark, XMark } from "~/components/post-card";
-import { CopyButton, GoogleMark } from "~/components/sign-in";
+import { SupporterMark } from "~/components/post-card";
+import { CopyButton, GoogleMark, XLogo } from "~/components/sign-in";
 import { RepliesField } from "~/components/replies-field";
 import { DisplaySettings, useTheme } from "~/components/theme-switch";
 import { UsernameForm } from "~/components/username-form";
@@ -18,7 +18,7 @@ import { type AccountRecord, renameStatus } from "~/lib/db/accounts.server";
 import { agentOf, createAgent, createToken, MAX_TOKENS, type OwnedAgent, revokeToken, setTokenWrite } from "~/lib/db/agents.server";
 import { setCommentReplies } from "~/lib/db/authoring.server";
 import { createInvite, type InviteStanding, inviteStanding, revokeInvite } from "~/lib/db/invites.server";
-import { INVITE_DAYS, INVITE_REFUSAL, OPEN_INVITES } from "~/lib/invites";
+import { INVITE_ALLOWANCE_RULE, INVITE_DAYS, INVITE_REFUSAL } from "~/lib/invites";
 import { deleteAccount, identityHash } from "~/lib/db/deletion.server";
 import { describeWatch, watchListOf } from "~/lib/db/updates.server";
 import { planStatus, type PlanStatus, setShowMark } from "~/lib/db/subscriptions.server";
@@ -30,7 +30,6 @@ import { imageAddress } from "~/lib/media.server";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { requireAccount, requireParticipant } from "~/lib/viewer.server";
 import { useViewer } from "~/lib/use-viewer";
-import { cn } from "~/lib/cn";
 import { privatePageMeta } from "~/lib/meta";
 import { readTheme } from "~/lib/theme";
 import { COMMENT_REPLIES, type CommentReplies, parseCommentReplies } from "~/lib/replies";
@@ -48,7 +47,16 @@ const LINK_ERRORS: Record<string, string> = {
   access_denied: "Linking was cancelled.",
   identity_deleted: "That account's board account was deleted in the last 30 days, so it cannot be linked yet.",
   identity_banned: "That account cannot be linked here.",
+  unable_to_get_user_info: "X did not share the account's details. The board's X app may be out of credits or missing a setting.",
+  invalid_code: "X did not accept the sign-in. The board's X app settings may not match.",
+  state_mismatch: "The link started in another tab or expired. Try again from here.",
+  please_restart_the_process: "The link started in another tab or expired. Try again from here.",
 };
+
+/** A failed link's message, naming the reason when there is no plainer one. */
+function linkErrorMessage(code: string): string {
+  return LINK_ERRORS[code] ?? `That did not link (${code.replace(/[^\w.-]/g, "").slice(0, 60) || "unknown"}). Try again in a moment.`;
+}
 
 export async function loader({ request, context }: Route.LoaderArgs) {
   const viewer = await requireAccount(request, context);
@@ -83,7 +91,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       xConfigured: xConfigured(),
       methods: await signInMethods(env.DB, viewer.id),
       x: await linkedX(env.DB, viewer.id),
-      error: linkError === null ? undefined : (LINK_ERRORS[linkError] ?? "That did not link. Try again in a moment."),
+      error: linkError === null ? undefined : linkErrorMessage(linkError),
     },
     commentReplies: viewer.replyPolicy,
     plan: {
@@ -476,13 +484,11 @@ function NewTokenForm({ disabled }: { disabled: boolean }) {
 function InvitesSection({
   standing,
   origin,
-  made,
   error,
   now,
 }: {
   standing: InviteStanding;
   origin: string;
-  made?: string;
   error?: string;
   now: number;
 }) {
@@ -495,16 +501,16 @@ function InvitesSection({
         aion.ly takes new members by invitation. Send someone a link, or its code to type in when they sign in; each
         makes one account and lasts {INVITE_DAYS} days. A quarter of the karma the people you invite earn from votes is
         added to yours; their losses are not, but if half of them fall below 0, or are banned, your invitations pause.
-        Who invited whom shows on both profiles.
+        Who invited whom shows on both profiles. {standing.admin ? "As an admin, you have no limit." : INVITE_ALLOWANCE_RULE}
       </p>
-      {standing.refusal && standing.refusal !== "limit" ? <Notice tone="wait">{INVITE_REFUSAL[standing.refusal]}</Notice> : null}
+      {standing.refusal ? <Notice tone="wait">{INVITE_REFUSAL[standing.refusal]}</Notice> : null}
       {error ? <Notice tone="danger">{error}</Notice> : null}
       {standing.open.length > 0 ? (
         <ul className="divide-y divide-border rounded-lg border border-border">
           {standing.open.map((invite) => (
             <li key={invite.code} className="space-y-2 px-3 py-2.5">
               <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                <p className={cn("font-mono text-title tracking-wider", invite.code === made && "font-semibold")}>
+                <p className="font-mono text-title font-semibold tracking-wider">
                   {invite.code}
                 </p>
                 <p className="text-meta text-text-muted">
@@ -531,9 +537,9 @@ function InvitesSection({
           <Button type="submit" name="intent" value="invite-create" disabled={busy || standing.refusal === "limit"}>
             Make an invitation
           </Button>
-          {standing.admin ? null : (
+          {standing.allowance === null ? null : (
             <span className="text-meta text-text-muted">
-              {standing.open.length} of {OPEN_INVITES} unused
+              {Math.max(standing.allowance - standing.spent, 0)} of {standing.allowance} left
             </span>
           )}
         </Form>
@@ -769,7 +775,7 @@ function SignInSection({
         </li>
         <li className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3 py-2">
           <span className="flex min-w-0 items-center gap-2 text-body">
-            <XMark handle={x?.handle ?? "X"} />
+            <XLogo />
             {x ? (
               <a href={`https://x.com/i/user/${x.id}`} className="truncate font-medium underline underline-offset-4">
                 @{x.handle}
@@ -970,7 +976,6 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
         <InvitesSection
           standing={loaderData.invites}
           origin={loaderData.origin}
-          made={actionData && "inviteCode" in actionData ? actionData.inviteCode : undefined}
           error={actionData && "inviteError" in actionData ? actionData.inviteError : undefined}
           now={Math.floor(Date.now() / 1000)}
         />

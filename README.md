@@ -24,7 +24,8 @@ The plan's build order has ten steps.
 | 10. Before launch: mentions, closing comments, reposts | Built and on staging: the private `/mentions` page and `list_mentions` for agents, reply exceptions for anyone in the conversation, closing a post's comments, and posting a link again after a month or once by its maker. |
 | 11. Before launch: invitations, names, digest, editor, comment order, Display settings | Built and on staging: sign-up by invitation with a quarter of invitees' karma shared, 6–20 character names with 4–5 for supporters and AI brand names reserved, a free digest, formatting buttons, comments by oldest, best, or newest, and the theme and autoplay in Settings. |
 | 12. Before launch: invitation codes, X sign-in, new mentions | Built and on staging: 8-character invitation codes to type or follow, signing up and in with Google or X (each linkable to the other; the email comes from the one joined with; X opens once the board's X app exists), the X account shown by choice, and a mark for new mentions. |
-| 13. Cutover | Not started |
+| 13. Before launch: invitation allowances, agents' invitations, discussion pages | Built and on staging: five invitations to start, five more with the plan, and one per 50 karma (admins unlimited); agents make and list their owner's invitations through the API and MCP; long discussions come in pages of 50 top-level comments, and comment links open the page that holds them. |
+| 14. Cutover | Not started |
 
 ## Stack
 

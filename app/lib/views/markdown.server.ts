@@ -4,7 +4,7 @@ import { agentsMarkdown } from "../agents/setup";
 import { defaultRange, newPage, postsByIds, topSnapshot } from "../db/feed.server";
 import { mentionNames } from "../db/mentions.server";
 import { announcement } from "../db/pins.server";
-import { postPage } from "../db/posts.server";
+import { postPage, threadPaging } from "../db/posts.server";
 import { profileByName } from "../db/profiles.server";
 import { PAGE_SIZE, parseRange, parseSort, RANGE_LABEL } from "../feed";
 import { type PostRelation, postRelation } from "../participation";
@@ -14,6 +14,7 @@ import { type CommentOrder, parseOrder } from "../comments/rules";
 import { CLOSED_RULE, replyRule } from "../replies";
 import { TAGLINE } from "../site";
 import { mentionIds, type MentionNames, replaceMentions } from "../text/mentions";
+import { commentPath } from "../slug";
 
 /**
  * True when a request asks for Markdown ahead of HTML, as AI agents and
@@ -133,7 +134,7 @@ function commentLines(
     const notes = [comment.author?.agent ? "agent" : null, relation ? RELATION_NOTE[relation] : null].filter(Boolean);
     const head =
       comment.state === "visible" && comment.author
-        ? `${author(comment.author.username, origin)}${notes.length > 0 ? ` (${notes.join(", ")})` : ""} · ${comment.score} points · ${day(comment.createdAt)}${comment.edited ? " · edited" : ""} · [link](${origin}${path}#c-${comment.id})`
+        ? `${author(comment.author.username, origin)}${notes.length > 0 ? ` (${notes.join(", ")})` : ""} · ${comment.score} points · ${day(comment.createdAt)}${comment.edited ? " · edited" : ""} · [link](${origin}${commentPath(path, comment.id)})`
         : comment.state === "removed"
           ? "*[removed by moderator]*"
           : "*[deleted by author]*";
@@ -164,10 +165,11 @@ async function postMarkdown(
   id: string,
   origin: string,
   order?: CommentOrder,
+  paging: { page?: number; focus?: string } = {},
 ): Promise<{ status: number; body: string; canonical?: string } | null> {
-  const page = await postPage(db, id, order);
+  const page = await postPage(db, id, order, paging);
   if (!page) return null;
-  const count = bodies(page.comments).length;
+  const count = page.total;
   const live = page.state === "live";
   const path = live ? page.post.path : `/p/${id}`;
   const names = await mentionNames(db, mentionIds(live ? page.post.description : "", ...bodies(page.comments)));
@@ -191,10 +193,27 @@ async function postMarkdown(
   } else {
     lines.push(page.state === "removed" ? "# [removed by moderator]" : "# [deleted by author]", "");
   }
-  lines.push(`## Comments (${count}${count > 1 ? `, ${ORDER_WORDS[page.order]}` : ""})`, "");
+  const paged = page.pages > 1 ? `, page ${page.page} of ${page.pages}` : "";
+  lines.push(`## Comments (${count}${count > 1 ? `, ${ORDER_WORDS[page.order]}` : ""}${paged})`, "");
   if (count === 0) lines.push("No comments yet.", "");
   lines.push(...commentLines(page.comments, 0, origin, path, names, live ? page.post.author : undefined));
-  return { status: live ? 200 : 410, body: lines.join("\n"), canonical: live ? `${origin}${path}` : undefined };
+  if (page.clipped) lines.push("Some of the newest replies on this page are left out: it holds more than one page loads.", "");
+  if (page.pages > 1) {
+    // Pages of top-level comments, each with all its replies, in the same order.
+    const at = (number: number) => `${origin}${path}.md?${new URLSearchParams({ ...(order ? { order } : {}), page: String(number) })}`;
+    lines.push(
+      [
+        `Page ${page.page} of ${page.pages}.`,
+        page.page > 1 ? `Previous: ${at(page.page - 1)}` : null,
+        page.page < page.pages ? `Next: ${at(page.page + 1)}` : null,
+      ]
+        .filter(Boolean)
+        .join(" "),
+      "",
+    );
+  }
+  const canonicalPage = page.page > 1 ? `?page=${page.page}` : "";
+  return { status: live ? 200 : 410, body: lines.join("\n"), canonical: live ? `${origin}${path}${canonicalPage}` : undefined };
 }
 
 async function profileMarkdown(db: D1Database, name: string, origin: string): Promise<{ status: number; body: string; location?: string } | null> {
@@ -228,7 +247,7 @@ async function profileMarkdown(db: D1Database, name: string, origin: string): Pr
   if (profile.comments.length === 0) lines.push("No comments yet.", "");
   for (const comment of profile.comments) {
     lines.push(
-      `- On [${linkText(comment.postTitle)}](${origin}${comment.postPath}#c-${comment.id}) · ${comment.score} points · ${day(comment.createdAt)}`,
+      `- On [${linkText(comment.postTitle)}](${origin}${commentPath(comment.postPath, comment.id)}) · ${comment.score} points · ${day(comment.createdAt)}`,
       `  ${replaceMentions(comment.body, names)}`,
       "",
     );
@@ -290,7 +309,7 @@ export async function markdownView(request: Request, db: D1Database): Promise<Re
     body = agentsMarkdown(url.origin);
     headers.set("Link", `<${url.origin}/agents>; rel="canonical"`);
   } else if (post) {
-    const view = await postMarkdown(db, post[1]!, url.origin, parseOrder(url.searchParams.get("order")) ?? undefined);
+    const view = await postMarkdown(db, post[1]!, url.origin, parseOrder(url.searchParams.get("order")) ?? undefined, threadPaging(url));
     if (view) {
       ({ status, body } = view);
       if (view.canonical) headers.set("Link", `<${view.canonical}>; rel="canonical"`);

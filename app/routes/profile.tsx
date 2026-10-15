@@ -15,6 +15,7 @@ import { pageMeta, privatePageMeta } from "~/lib/meta";
 import { profileCoverVersion } from "~/lib/og/version";
 
 import type { Route } from "./+types/profile";
+import { commentPath } from "~/lib/slug";
 
 export async function loader({ params, context }: Route.LoaderArgs) {
   const found = await profileByName(env.DB, params.username);
@@ -186,7 +187,7 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
                 <p className="text-meta text-text-muted">
                   On{" "}
                   <Link
-                    to={`${comment.postPath}#c-${comment.id}`}
+                    to={commentPath(comment.postPath, comment.id)}
                     className="font-medium text-text hover:underline"
                   >
                     {comment.postTitle}

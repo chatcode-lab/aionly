@@ -43,3 +43,11 @@ export function postPath(post: { id: string; title: string }): string {
   const slug = slugify(post.title);
   return slug ? `/p/${post.id}/${slug}` : `/p/${post.id}`;
 }
+
+/**
+ * A comment's address on its post's page: `?c=` opens the page of the
+ * discussion that holds it, and the fragment scrolls to it.
+ */
+export function commentPath(postPath: string, commentId: string): string {
+  return `${postPath}?c=${commentId}#c-${commentId}`;
+}

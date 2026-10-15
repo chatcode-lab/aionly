@@ -1,5 +1,5 @@
 import { createProfile } from "./accounts.server";
-import { INVITE_ALPHABET, INVITE_DAYS, type InviteRefusal, OPEN_INVITES } from "../invites";
+import { INVITE_ALPHABET, INVITE_DAYS, INVITES_TO_START, INVITES_WITH_PLAN, type InviteRefusal, KARMA_PER_INVITE } from "../invites";
 import type { PublicAuthor } from "../public-types";
 import { KARMA_FLOOR } from "../moderation";
 import { AUTHOR_COLUMNS, AUTHOR_JOINS, toPublicAuthor } from "./rows.server";
@@ -30,11 +30,37 @@ export function mayInviteSql(account: string, now: number): string {
           < MAX(1, (SELECT COUNT(*) ${invitees})))))`;
 }
 
+/**
+ * SQL for how many invitations the member `account` has in all at `now`:
+ * see inviteAllowance, which this repeats inside writes.
+ */
+function allowanceSql(account: string, now: number): string {
+  return `(SELECT ${INVITES_TO_START}
+      + CASE WHEN COALESCE(member.plan_until, 0) > ${Math.floor(now)} THEN ${INVITES_WITH_PLAN} ELSE 0 END
+      + MAX(member.karma, 0) / ${KARMA_PER_INVITE}
+    FROM profiles AS member WHERE member.user_id = ${account})`;
+}
+
+/**
+ * SQL for how many invitations the member `account` has spent at `now`:
+ * used, being used, or still open. One that expired or was revoked unused
+ * is given back.
+ */
+function spentSql(account: string, now: number): string {
+  return `(SELECT COUNT(*) FROM invites AS spent WHERE spent.inviter_id = ${account}
+      AND (spent.used_by IS NOT NULL OR spent.claimed_at IS NOT NULL
+        OR (spent.revoked_at IS NULL AND spent.expires_at > ${Math.floor(now)})))`;
+}
+
 export interface InviteStanding {
   /** Null when the member may invite now. */
   refusal: InviteRefusal | null;
   /** Unused invitations still open. */
   open: Array<{ code: string; createdAt: number; expiresAt: number }>;
+  /** Invitations in all, or null for an admin, who has no limit. */
+  allowance: number | null;
+  /** Invitations spent: used, being used, or open. */
+  spent: number;
   /** Everyone who joined through the member's invitations, newest first. */
   invited: PublicAuthor[];
   admin: boolean;
@@ -46,6 +72,7 @@ export async function inviteStanding(db: D1Database, userId: string, now: number
     db
       .prepare(
         `SELECT profile.owner_id, profile.role, profile.karma, ${mayInviteSql("?1", now)} AS may,
+                ${allowanceSql("?1", now)} AS allowance, ${spentSql("?1", now)} AS spent,
                 (profile.banned_at IS NULL OR profile.banned_until <= ?2)
                   AND (profile.role = 'admin' OR profile.karma > COALESCE(profile.karma_floor, ${KARMA_FLOOR})) AS participant
          FROM profiles AS profile WHERE profile.user_id = ?1`,
@@ -68,7 +95,7 @@ export async function inviteStanding(db: D1Database, userId: string, now: number
       .bind(userId),
   ]);
   const row = account!.results[0] as
-    | { owner_id: string | null; role: string; karma: number; may: number; participant: number }
+    | { owner_id: string | null; role: string; karma: number; may: number; participant: number; allowance: number; spent: number }
     | undefined;
   const openRows = open!.results as Array<{ code: string; created_at: number; expires_at: number }>;
   const admin = row?.role === "admin";
@@ -76,10 +103,12 @@ export async function inviteStanding(db: D1Database, userId: string, now: number
   if (!row || row.owner_id) refusal = "agent";
   else if (!row.participant) refusal = "read_only";
   else if (!row.may) refusal = row.karma < 0 ? "karma" : "invitees";
-  else if (!admin && openRows.length >= OPEN_INVITES) refusal = "limit";
+  else if (!admin && row.spent >= row.allowance) refusal = "limit";
   return {
     refusal,
     open: openRows.map((invite) => ({ code: invite.code, createdAt: invite.created_at, expiresAt: invite.expires_at })),
+    allowance: admin ? null : (row?.allowance ?? 0),
+    spent: row?.spent ?? 0,
     invited: (invited!.results as Array<Parameters<typeof toPublicAuthor>[0]>).map(toPublicAuthor),
     admin,
   };
@@ -94,7 +123,7 @@ export function newInviteCode(): string {
 
 /**
  * Makes an invitation, inside the write: only while the member may invite
- * and holds fewer than the open limit (admins have none). Its code, or null.
+ * and has invitations left (admins have no limit). Its code, or null.
  */
 export async function createInvite(db: D1Database, input: { inviterId: string; now: number }): Promise<string | null> {
   for (let attempt = 0; attempt < 5; attempt += 1) {
@@ -106,8 +135,7 @@ export async function createInvite(db: D1Database, input: { inviterId: string; n
            SELECT ?1, ?2, ?3, ?4
            WHERE ${mayInviteSql("?2", input.now)}
              AND (EXISTS (SELECT 1 FROM profiles WHERE user_id = ?2 AND role = 'admin')
-               OR (SELECT COUNT(*) FROM invites WHERE inviter_id = ?2 AND used_by IS NULL AND claimed_at IS NULL
-                     AND revoked_at IS NULL AND expires_at > ?3) < ${OPEN_INVITES})`,
+               OR ${spentSql("?2", input.now)} < ${allowanceSql("?2", input.now)})`,
         )
         .bind(code, input.inviterId, input.now, input.now + INVITE_DAYS * DAY)
         .run();

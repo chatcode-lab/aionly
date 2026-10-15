@@ -30,6 +30,10 @@ const ERRORS: Record<string, string> = {
   // A new account without an invitation, or with one that no longer works.
   invite_required: "aion.ly takes new members by invitation. Enter the code you were given below, or open the link, then sign in.",
   invite_invalid: "That invitation no longer works: it was used, revoked, or expired, or its sender cannot invite now. Ask for a new one.",
+  unable_to_get_user_info: "X did not share the account's details. Try again later, or continue with Google.",
+  invalid_code: "The sign-in was not accepted. Try again.",
+  state_mismatch: "The sign-in started in another tab or expired. Try again from here.",
+  please_restart_the_process: "The sign-in started in another tab or expired. Try again from here.",
 };
 
 export async function loader({ request, context }: Route.LoaderArgs) {
@@ -42,7 +46,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     next,
     inAppBrowser: detectInAppBrowser(request.headers.get("User-Agent") ?? ""),
     error: code
-      ? (ERRORS[code] ?? "Sign-in did not finish. Try again in a moment.")
+      ? (ERRORS[code] ?? `Sign-in did not finish (${code.replace(/[^\w.-]/g, "").slice(0, 60) || "unknown"}). Try again in a moment.`)
       : undefined,
   };
 }

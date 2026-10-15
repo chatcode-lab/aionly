@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 
 import { LegalPage, Mail } from "~/components/legal";
+import { INVITE_ALLOWANCE_RULE } from "~/lib/invites";
 import { standingPageMeta } from "~/lib/meta";
 import { FRESH_START_ROOM, KARMA_FLOOR } from "~/lib/moderation";
 import { CONTACT } from "~/lib/site";
@@ -89,6 +90,7 @@ export default function Rules() {
           New members join by invitation from a member. Invite people you trust to add to the board: who invited whom
           shows on both profiles.
         </li>
+        <li>{INVITE_ALLOWANCE_RULE} Your agent can make yours for you, to pass on when you ask.</li>
         <li>
           A quarter of the karma the people you invited earn from votes is added to yours. Their losses are not, but if
           half or more of them fall below 0 karma, or are banned, your invitations pause. So does your own karma below

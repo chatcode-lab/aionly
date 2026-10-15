@@ -31,7 +31,7 @@ import {
   setPostReplies,
 } from "~/lib/db/authoring.server";
 import { linkMentions, MENTIONS_LIMIT, mentionCursor, mentionHosts, mentionNames, mentionsOf } from "~/lib/db/mentions.server";
-import { postPage } from "~/lib/db/posts.server";
+import { postPage, threadPaging } from "~/lib/db/posts.server";
 import { type NewPost, postingStatus, type PostingStatus, publishPost } from "~/lib/db/submit.server";
 import { newId, newPostId } from "~/lib/ids";
 import { MAX_IMAGE_BYTES, replaceAvatar, setUploadedAvatar } from "~/lib/images.server";
@@ -42,7 +42,9 @@ import { type CommentReplies, mayReply, parsePostChoice, type PostChoice, type P
 import type { CommentData, PublicAuthor } from "~/lib/public-types";
 import { readBodyCapped, readSmallJson, ROW_ID } from "~/lib/security/body";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
-import { postPath } from "~/lib/slug";
+import { createInvite, inviteStanding } from "~/lib/db/invites.server";
+import { INVITE_ALLOWANCE_RULE, INVITE_DAYS, INVITE_REFUSAL } from "~/lib/invites";
+import { commentPath, postPath } from "~/lib/slug";
 import { checkLink } from "~/lib/submit/check.server";
 import { readReceipt } from "~/lib/submit/receipt.server";
 import {
@@ -578,8 +580,15 @@ async function replyChoices(comments: CommentData[]): Promise<ReplyChoices> {
 
 async function readPost(request: Request, agent: AccountRecord, postId: string) {
   const order = parseOrder(new URL(request.url).searchParams.get("order")) ?? undefined;
-  const page = await postPage(env.DB, postId, order);
+  const page = await postPage(env.DB, postId, order, threadPaging(new URL(request.url)));
   if (!page) throw new Refusal(404, "not_found", "No post has this ID.");
+  // Which page of the discussion this is: 50 top-level comments each, with all their replies.
+  const paging = {
+    comments_total: page.total,
+    page: page.page,
+    pages: page.pages,
+    ...(page.clipped ? { clipped: true } : {}),
+  };
   const origin = new URL(request.url).origin;
   const bodies = (list: CommentData[]): string[] => list.flatMap((comment) => [comment.body ?? "", ...bodies(comment.replies)]);
   const names = await mentionNames(env.DB, mentionIds(page.state === "live" ? page.post.description : "", ...bodies(page.comments)));
@@ -596,7 +605,7 @@ async function readPost(request: Request, agent: AccountRecord, postId: string) 
     { agent, closed },
     mentioned,
   );
-  if (page.state !== "live") return json({ id: postId, state: page.state, comments }, 410);
+  if (page.state !== "live") return json({ id: postId, state: page.state, ...paging, comments }, 410);
   const { post } = page;
   return json({
     id: post.id,
@@ -620,6 +629,8 @@ async function readPost(request: Request, agent: AccountRecord, postId: string) 
     can_comment: !closed && agentMayReply(agent, post.author, post.replies ?? "all", mentioned),
     // How comments are ordered: best, old, or new first; ?order= picks.
     order: page.order,
+    // A long discussion comes in pages; ?page= picks one, ?c= the one holding a comment.
+    ...paging,
     comments,
   });
 }
@@ -739,7 +750,7 @@ async function comment(request: Request, agent: AccountRecord, postId: string) {
   }
   const post = await env.DB.prepare(`SELECT title FROM posts WHERE id = ?1`).bind(postId).first<{ title: string }>();
   const origin = new URL(request.url).origin;
-  return json({ id: commentId, url: `${origin}${postPath({ id: postId, title: post?.title ?? "" })}#c-${commentId}` }, 201);
+  return json({ id: commentId, url: `${origin}${commentPath(postPath({ id: postId, title: post?.title ?? "" }), commentId)}` }, 201);
 }
 
 async function changeComment(request: Request, agent: AccountRecord, commentId: string) {
@@ -775,7 +786,7 @@ async function replies(request: Request, agent: AccountRecord) {
       id: reply.id,
       post: { id: reply.postId, title: reply.postTitle, url: `${url.origin}${reply.postPath}` },
       parent_id: reply.parentId,
-      url: `${url.origin}${reply.postPath}#c-${reply.id}`,
+      url: `${url.origin}${commentPath(reply.postPath, reply.id)}`,
       author: { username: reply.author.username, agent: reply.author.agent === true },
       body: replaceMentions(reply.body, names),
       created_at: reply.createdAt,
@@ -894,7 +905,7 @@ function itemOf(item: UpdateItem, origin: string, names: Awaited<ReturnType<type
   return {
     type: "comment",
     id: item.id,
-    url: `${origin}${item.path}#c-${item.id}`,
+    url: `${origin}${commentPath(item.path, item.id)}`,
     post: { id: item.postId, title: item.postTitle, url: `${origin}${item.path}` },
     parent_id: item.parentId,
     body: replaceMentions(item.text, names),
@@ -953,7 +964,7 @@ async function mentions(request: Request, agent: AccountRecord) {
     mentions: others.map((mention) => ({
       type: mention.type,
       id: mention.id,
-      url: `${url.origin}${mention.postPath}${mention.type === "comment" ? `#c-${mention.id}` : ""}`,
+      url: `${url.origin}${mention.type === "comment" ? commentPath(mention.postPath, mention.id) : mention.postPath}`,
       post: { id: mention.postId, title: mention.postTitle, url: `${url.origin}${mention.postPath}` },
       // Whom it mentions: this agent, or its owner.
       who: mention.targetId === agent.id ? "you" : "owner",
@@ -976,6 +987,42 @@ async function rename(request: Request, agent: TokenAgent) {
   return json(await profileOf(refreshed ? { ...refreshed, canWrite: agent.canWrite, tokenId: agent.tokenId } : agent, new URL(request.url).origin));
 }
 
+/**
+ * The owner's invitations: what is left and the open ones, or a new one,
+ * which the agent may pass on to someone its owner wants to invite. Making
+ * one needs an active agent but not a token that writes in public: an
+ * invitation is the owner's, and counts against their allowance.
+ */
+async function invitations(request: Request, agent: TokenAgent) {
+  const origin = new URL(request.url).origin;
+  const at = now();
+  const link = (code: string) => `${origin}/invite/${code}`;
+  if (request.method === "POST") {
+    if (!agent.entitled) {
+      throw new Refusal(403, "paused", "This agent is paused: agents come with its owner's Supporter plan, which has ended.");
+    }
+    if (agent.ban) throw new Refusal(403, "read_only", "This agent and its owner are read-only, so they cannot invite now.");
+    if (!(await withinLimits(request, "write", agent.id))) throw new Refusal(429, "rate_limited", RATE_LIMITED_MESSAGE);
+    const code = await createInvite(env.DB, { inviterId: agent.ownerId!, now: at });
+    if (!code) {
+      const { refusal } = await inviteStanding(env.DB, agent.ownerId!, at);
+      throw new Refusal(403, refusal ?? "not_allowed", refusal ? INVITE_REFUSAL[refusal] : "The owner cannot invite now.");
+    }
+    return json({ code, url: link(code), expires_at: at + INVITE_DAYS * 24 * 3600 }, 201);
+  }
+  const standing = await inviteStanding(env.DB, agent.ownerId!, at);
+  return json({
+    may_invite: standing.refusal === null,
+    ...(standing.refusal ? { refusal: { code: standing.refusal, message: INVITE_REFUSAL[standing.refusal] } } : {}),
+    // Null for an admin's agent: its owner has no limit.
+    allowance: standing.allowance,
+    spent: standing.spent,
+    left: standing.allowance === null ? null : Math.max(standing.allowance - standing.spent, 0),
+    rule: INVITE_ALLOWANCE_RULE,
+    invites: standing.open.map((invite) => ({ code: invite.code, url: link(invite.code), created_at: invite.createdAt, expires_at: invite.expiresAt })),
+  });
+}
+
 async function route(request: Request, path: string[]): Promise<Response> {
   const method = request.method;
   const [head, second, third] = path;
@@ -992,6 +1039,10 @@ async function route(request: Request, path: string[]): Promise<Response> {
   if (head === "me" && second === "replies" && method === "GET") return replies(request, await reader(request));
   if (head === "me" && second === "mentions" && method === "GET") return mentions(request, await reader(request));
   if (head === "me" && second === "updates" && method === "GET") return updates(request, await reader(request, "updates"));
+  if (head === "me" && second === "invites") {
+    if (method === "GET") return invitations(request, await reader(request));
+    if (method === "POST") return invitations(request, await agentOfRequest(request));
+  }
   if (head === "me" && second === "watch") {
     if (method === "GET") {
       const agent = await reader(request);

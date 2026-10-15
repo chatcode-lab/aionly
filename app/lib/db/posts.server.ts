@@ -1,4 +1,4 @@
-import { type CommentOrder, defaultOrder, orderThread, THREAD_MAX } from "../comments/rules";
+import { type CommentOrder, defaultOrder, orderThread } from "../comments/rules";
 import type { CommentData, PostDetail } from "../public-types";
 import type { PostReplies } from "../replies";
 import {
@@ -11,22 +11,54 @@ import {
   toPublicPost,
 } from "./rows.server";
 
-/** The most comments one post page loads. */
-export const THREAD_LIMIT = THREAD_MAX;
-
-export type PostPage =
-  | { state: "live"; post: PostDetail; comments: CommentData[]; order: CommentOrder }
-  // A tombstone. The post's title, URL, description, and media are not
-  // loaded at all, so they cannot leak into the response.
-  | { state: "removed" | "deleted"; comments: CommentData[]; order: CommentOrder };
+/** Top-level comments one page of a discussion shows, each with all its replies. */
+export const ROOTS_PER_PAGE = 50;
 
 /**
- * Builds the reply tree, in the order asked for, or else the discussion's
- * own: oldest first, or best first once it is busy (see defaultOrder). A
- * reply whose parent is missing from the loaded set is shown at the top
- * level rather than dropped.
+ * The most comments one page loads, against a top-level comment with
+ * thousands of replies; past it, the page's newest replies are left out.
  */
-function buildThread(rows: CommentRow[], asked?: CommentOrder): { comments: CommentData[]; order: CommentOrder } {
+export const PAGE_COMMENTS_MAX = 1000;
+
+/** Which page of a discussion shows, and what it holds. */
+export interface ThreadPage {
+  comments: CommentData[];
+  order: CommentOrder;
+  /** This page, from 1, and how many there are. */
+  page: number;
+  pages: number;
+  /** Every comment in the discussion, on all its pages, tombstones included. */
+  total: number;
+  /** The page held more replies than it loads (see PAGE_COMMENTS_MAX). */
+  clipped: boolean;
+}
+
+export type PostPage =
+  | ({ state: "live"; post: PostDetail } & ThreadPage)
+  // A tombstone. The post's title, URL, description, and media are not
+  // loaded at all, so they cannot leak into the response.
+  | ({ state: "removed" | "deleted" } & ThreadPage);
+
+/** Top-level comments in each order: as orderThread puts them, ties by ID. */
+const ROOT_ORDER: Record<CommentOrder, string> = {
+  old: "created_at, id",
+  best: "score DESC, created_at, id",
+  new: "created_at DESC, id DESC",
+};
+
+/** SQL: the top-level comment `other` comes before `target` in this order. */
+const ROOT_BEFORE: Record<CommentOrder, string> = {
+  old: "(other.created_at < target.created_at OR (other.created_at = target.created_at AND other.id < target.id))",
+  best: `(other.score > target.score OR (other.score = target.score AND
+    (other.created_at < target.created_at OR (other.created_at = target.created_at AND other.id < target.id))))`,
+  new: "(other.created_at > target.created_at OR (other.created_at = target.created_at AND other.id > target.id))",
+};
+
+/**
+ * Builds the reply tree in the order given. A reply whose parent is
+ * missing from the loaded set is shown at the top level rather than dropped.
+ */
+function buildThread(rows: CommentRow[], order: CommentOrder): CommentData[] {
   const nodes = new Map(rows.map((row) => [row.id, toPublicComment(row)]));
   const roots: CommentData[] = [];
 
@@ -35,23 +67,72 @@ function buildThread(rows: CommentRow[], asked?: CommentOrder): { comments: Comm
     const parent = row.parent_id ? nodes.get(row.parent_id) : undefined;
     (parent ? parent.replies : roots).push(node);
   }
-
-  const order = asked ?? defaultOrder(rows.length);
-  return { comments: orderThread(roots, order), order };
+  return orderThread(roots, order);
 }
 
-async function thread(db: D1Database, postId: string, order?: CommentOrder): Promise<{ comments: CommentData[]; order: CommentOrder }> {
+/**
+ * One page of a post's discussion: `ROOTS_PER_PAGE` top-level comments in
+ * the order asked for, or else the discussion's own (oldest first, or best
+ * first once it is busy; see defaultOrder), each with all its replies. The
+ * page is the one asked for, or the one holding the comment `focus`.
+ */
+async function thread(
+  db: D1Database,
+  postId: string,
+  asked: CommentOrder | undefined,
+  paging: { page?: number; focus?: string },
+): Promise<ThreadPage> {
+  const counts = await db
+    .prepare(
+      `SELECT (SELECT COUNT(*) FROM comments WHERE post_id = ?1) AS total,
+              (SELECT COUNT(*) FROM comments WHERE post_id = ?1 AND parent_id IS NULL) AS roots`,
+    )
+    .bind(postId)
+    .first<{ total: number; roots: number }>();
+  const total = counts?.total ?? 0;
+  const order = asked ?? defaultOrder(total);
+  const pages = Math.max(1, Math.ceil((counts?.roots ?? 0) / ROOTS_PER_PAGE));
+
+  let page = paging.page ?? 1;
+  if (paging.focus) {
+    const found = await db
+      .prepare(
+        `SELECT (SELECT COUNT(*) FROM comments AS other
+                 WHERE other.post_id = ?1 AND other.parent_id IS NULL AND ${ROOT_BEFORE[order]}) AS rank
+         FROM comments AS focused JOIN comments AS target ON target.id = focused.root_id
+         WHERE focused.id = ?2 AND focused.post_id = ?1`,
+      )
+      .bind(postId, paging.focus)
+      .first<{ rank: number }>();
+    if (found) page = Math.floor(found.rank / ROOTS_PER_PAGE) + 1;
+  }
+  page = Math.min(Math.max(1, Math.floor(page)), pages);
+
   const { results } = await db
     .prepare(
       `SELECT ${COMMENT_COLUMNS}
        FROM comments AS comment ${AUTHOR_JOINS("comment")}
-       WHERE comment.post_id = ?1
+       WHERE comment.post_id = ?1 AND comment.root_id IN (
+         SELECT id FROM comments WHERE post_id = ?1 AND parent_id IS NULL
+         ORDER BY ${ROOT_ORDER[order]} LIMIT ?2 OFFSET ?3)
        ORDER BY comment.created_at, comment.id
-       LIMIT ?2`,
+       LIMIT ?4`,
     )
-    .bind(postId, THREAD_LIMIT)
+    .bind(postId, ROOTS_PER_PAGE, (page - 1) * ROOTS_PER_PAGE, PAGE_COMMENTS_MAX + 1)
     .all<CommentRow>();
-  return buildThread(results, order);
+  // A reply is always newer than what it answers, so leaving out the newest keeps every reply's parent.
+  const clipped = results.length > PAGE_COMMENTS_MAX;
+  return { comments: buildThread(clipped ? results.slice(0, PAGE_COMMENTS_MAX) : results, order), order, page, pages, total, clipped };
+}
+
+/** The page of a discussion an address asks for: `?page=`, or `?c=` for the page holding a comment. */
+export function threadPaging(url: URL): { page?: number; focus?: string } {
+  const page = Number(url.searchParams.get("page"));
+  const focus = url.searchParams.get("c");
+  return {
+    ...(Number.isInteger(page) && page > 0 ? { page } : {}),
+    ...(focus && /^[A-Za-z0-9_-]{1,32}$/.test(focus) ? { focus } : {}),
+  };
 }
 
 /** Everything a post's own page shows, or null when there is no such post. */
@@ -59,6 +140,7 @@ export async function postPage(
   db: D1Database,
   id: string,
   order?: CommentOrder,
+  paging: { page?: number; focus?: string } = {},
 ): Promise<PostPage | null> {
   const status = await db
     .prepare(`SELECT deleted_at, removed_batch_id FROM posts WHERE id = ?1`)
@@ -66,7 +148,7 @@ export async function postPage(
     .first<{ deleted_at: number | null; removed_batch_id: string | null }>();
   if (!status) return null;
 
-  const discussion = await thread(db, id, order);
+  const discussion = await thread(db, id, order, paging);
   // Moderator removal takes precedence when a post carries both flags.
   if (status.removed_batch_id !== null) return { state: "removed", ...discussion };
   if (status.deleted_at !== null) return { state: "deleted", ...discussion };

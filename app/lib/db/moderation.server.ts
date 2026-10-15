@@ -1,6 +1,6 @@
 import { newId } from "../ids";
 import { KARMA_FLOOR, LOW_KARMA } from "../moderation";
-import { postPath } from "../slug";
+import { commentPath, postPath } from "../slug";
 import { givenNameStatements, withGivenName } from "./accounts.server";
 import { applyFreshStart } from "./fresh-starts.server";
 import { recountKarma, scoreSql } from "./votes.server";
@@ -621,7 +621,7 @@ export async function moderationLog(db: D1Database, input: { before?: number; li
   return results.map((row) => {
     let link: string | null = null;
     if (row.target_type === "post" && row.post_id) link = postPath({ id: row.post_id, title: row.label ?? "" });
-    if (row.target_type === "comment" && row.post_id) link = `${postPath({ id: row.post_id, title: row.post_title ?? "" })}#c-${row.target_id}`;
+    if (row.target_type === "comment" && row.post_id) link = commentPath(postPath({ id: row.post_id, title: row.post_title ?? "" }), row.target_id);
     if (row.target_type === "user" && row.label) link = `/u/${row.label}`;
     return {
       id: row.id,

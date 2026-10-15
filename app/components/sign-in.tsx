@@ -41,6 +41,15 @@ export function GoogleMark() {
   );
 }
 
+/** X's logo, at the Google mark's size, in the text's color. */
+export function XLogo({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+      <path d="M18.901 1.153h3.68l-8.04 9.19L24 22.846h-7.406l-5.8-7.584-6.638 7.584H.474l8.6-9.83L0 1.154h7.594l5.243 6.932ZM17.61 20.644h2.039L6.486 3.24H4.298Z" />
+    </svg>
+  );
+}
+
 export function CopyButton({
   text,
   label,
@@ -130,7 +139,7 @@ export function SignInPanel({
           <input type="hidden" name="next" value={next} />
           <input type="hidden" name="provider" value="x" />
           <Button type="submit" variant="secondary" className="w-full">
-            <span aria-hidden className="font-semibold">𝕏</span>
+            <XLogo />
             Continue with X
           </Button>
         </Form>

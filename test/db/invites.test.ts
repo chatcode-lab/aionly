@@ -12,7 +12,7 @@ import {
 import { deleteAccount } from "../../app/lib/db/deletion.server";
 import { profileByName } from "../../app/lib/db/profiles.server";
 import { castVote } from "../../app/lib/db/votes.server";
-import { OPEN_INVITES } from "../../app/lib/invites";
+import { inviteAllowance, INVITES_TO_START } from "../../app/lib/invites";
 import { DAY, db, NOW, post, reset, user } from "./fixtures";
 
 beforeEach(async () => {
@@ -68,16 +68,30 @@ describe("invitations", () => {
     expect(newbie?.kind === "profile" && newbie.profile.invitedBy).toBe("kind_host");
   });
 
-  it("are limited to a few unused at once, except for admins, and never made by agents", async () => {
-    for (let index = 0; index < OPEN_INVITES; index += 1) expect(await createInvite(db, { inviterId: "host", now: NOW })).not.toBeNull();
-    expect(await createInvite(db, { inviterId: "host", now: NOW })).toBeNull();
-    expect((await inviteStanding(db, "host", NOW)).refusal).toBe("limit");
+  it("are five to start, five more with the plan, one more per 50 karma; unlimited for admins, never made by agents", async () => {
+    const make = (now = NOW) => createInvite(db, { inviterId: "host", now });
+    for (let index = 0; index < INVITES_TO_START; index += 1) expect(await make()).not.toBeNull();
+    expect(await make()).toBeNull();
+    expect(await inviteStanding(db, "host", NOW)).toMatchObject({ refusal: "limit", allowance: 5, spent: 5 });
+    // One revoked unused comes back.
     const [first] = (await inviteStanding(db, "host", NOW)).open;
     expect(await revokeInvite(db, { inviterId: "host", code: first!.code, now: NOW })).toBe(true);
     expect(await inviteByCode(db, first!.code, NOW)).toMatchObject({ state: "revoked" });
-    expect(await createInvite(db, { inviterId: "host", now: NOW })).not.toBeNull();
+    expect(await make()).not.toBeNull();
+    expect(await make()).toBeNull();
+    // So do ones that expired unused; one that was used does not.
+    const later = NOW + 15 * DAY;
+    expect((await inviteStanding(db, "host", later)).spent).toBe(0);
+    await join("host", "used_one", later);
+    expect((await inviteStanding(db, "host", later)).spent).toBe(1);
+    // The plan adds five, and every 50 karma one.
+    await db.prepare(`UPDATE profiles SET plan_until = ?1, karma = 120 WHERE user_id = 'host'`).bind(NOW + 30 * DAY).run();
+    expect(await inviteStanding(db, "host", NOW)).toMatchObject({ refusal: null, allowance: 12 });
+    expect(inviteAllowance({ plan: true, karma: 120 })).toBe(12);
+    expect(inviteAllowance({ plan: false, karma: -40 })).toBe(5);
 
-    for (let index = 0; index < OPEN_INVITES + 2; index += 1) expect(await createInvite(db, { inviterId: "admin", now: NOW })).not.toBeNull();
+    for (let index = 0; index < 15; index += 1) expect(await createInvite(db, { inviterId: "admin", now: NOW })).not.toBeNull();
+    expect((await inviteStanding(db, "admin", NOW)).allowance).toBeNull();
     expect(await createInvite(db, { inviterId: "bot", now: NOW })).toBeNull();
     expect((await inviteStanding(db, "bot", NOW)).refusal).toBe("agent");
   });

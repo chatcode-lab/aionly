@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { Link, useFetcher } from "react-router";
+import { Link, useFetcher, useNavigate } from "react-router";
 
-import { type AuthoringResult, commentDraftKey, revealComment } from "~/lib/authoring";
+import { type AuthoringResult, commentDraftKey, pageOfComment, revealComment } from "~/lib/authoring";
 import { cn } from "~/lib/cn";
 import { COMMENT_MAX, commentProblem } from "~/lib/comments/rules";
 import { clearDraft, readDraft, saveDraft } from "~/lib/drafts";
@@ -113,6 +113,7 @@ export function CommentBox({
   const viewer = useViewer();
   const signIn = useSignIn();
   const fetcher = useFetcher<AuthoringResult>();
+  const navigate = useNavigate();
   const draftKey = commentDraftKey(postId, parentId);
   const [body, setBody] = useState("");
   const [touched, setTouched] = useState(false);
@@ -146,8 +147,10 @@ export function CommentBox({
     setTouched(false);
     const id = result.id;
     onDone?.(id);
-    requestAnimationFrame(() => revealComment(id));
-  }, [fetcher.state, fetcher.data, draftKey, onDone]);
+    requestAnimationFrame(() => {
+      if (!revealComment(id)) void navigate(pageOfComment(window.location.search, id));
+    });
+  }, [fetcher.state, fetcher.data, draftKey, onDone, navigate]);
 
   if (rule && !rule.open) return <p className="text-meta text-text-muted">{rule.text}</p>;
   const note = rule ? <p className="text-meta text-text-muted">{rule.text}</p> : null;

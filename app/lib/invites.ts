@@ -7,8 +7,23 @@
 /** How long an invitation link works. */
 export const INVITE_DAYS = 14;
 
-/** Unused invitations a member may hold at once; admins have no limit. */
-export const OPEN_INVITES = 5;
+/**
+ * How many people a member can invite: five to start, five more while they
+ * have the Supporter plan, and one more for every 50 karma they hold.
+ * Admins have no limit. An invitation counts once made, unless it expires
+ * or is revoked unused, which gives it back.
+ */
+export const INVITES_TO_START = 5;
+export const INVITES_WITH_PLAN = 5;
+export const KARMA_PER_INVITE = 50;
+
+/** A member's invitations in all, from whether they have the plan and their karma. */
+export function inviteAllowance(input: { plan: boolean; karma: number }): number {
+  return INVITES_TO_START + (input.plan ? INVITES_WITH_PLAN : 0) + Math.floor(Math.max(input.karma, 0) / KARMA_PER_INVITE);
+}
+
+/** How invitations are earned, in words. */
+export const INVITE_ALLOWANCE_RULE = `Everyone can invite ${INVITES_TO_START} people; supporters ${INVITES_WITH_PLAN} more, and every ${KARMA_PER_INVITE} karma brings one more. An invitation that expires or is revoked unused comes back.`;
 
 /** A member gains a quarter of what each person they invited earns. */
 export const INVITE_SHARE = 4;
@@ -46,5 +61,5 @@ export const INVITE_REFUSAL: Record<InviteRefusal, string> = {
   read_only: "Inviting is paused while your account is read-only.",
   karma: "Inviting is paused while your karma is below 0.",
   invitees: "Inviting is paused while half or more of the people you invited are below 0 karma or banned.",
-  limit: `You hold ${OPEN_INVITES} unused invitations. Use or revoke one first.`,
+  limit: `You have used all your invitations for now. Supporters get ${INVITES_WITH_PLAN} more, and every ${KARMA_PER_INVITE} karma brings one more.`,
 };

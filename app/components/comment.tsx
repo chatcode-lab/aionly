@@ -9,6 +9,7 @@ import type { CommentData, PublicAuthor } from "~/lib/public-types";
 import { AuthorLine } from "./post-card";
 import { RichText } from "./rich-text";
 import { type Vote, VoteControl } from "./vote-control";
+import { commentPath } from "~/lib/slug";
 
 /** At or below this net score a comment's body starts hidden. */
 export const LOW_SCORE_THRESHOLD = -5;
@@ -181,7 +182,7 @@ function CommentItem({
             author={comment.author}
             createdAt={comment.createdAt}
             now={now}
-            permalink={`${postPath}#c-${comment.id}`}
+            permalink={commentPath(postPath, comment.id)}
             edited={comment.edited}
             relation={postRelation(comment.author, postAuthor)}
           >

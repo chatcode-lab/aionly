@@ -7,7 +7,7 @@ import {
   topSnapshot,
 } from "../../app/lib/db/feed.server";
 import { PAGE_SIZE } from "../../app/lib/feed";
-import { postPage } from "../../app/lib/db/posts.server";
+import { PAGE_COMMENTS_MAX, postPage, ROOTS_PER_PAGE } from "../../app/lib/db/posts.server";
 import { profileByName } from "../../app/lib/db/profiles.server";
 import { comment, DAY, db, NOW, post, reset, user } from "./fixtures";
 
@@ -244,6 +244,63 @@ describe("postPage", () => {
     expect(await ids()).toEqual({ order: "old", top: ["old_low", "tie_older", "tie_newer", "new_high"], replies: ["reply_old", "reply_new"] });
     expect(await ids("best")).toEqual({ order: "best", top: ["new_high", "tie_older", "tie_newer", "old_low"], replies: ["reply_new", "reply_old"] });
     expect(await ids("new")).toEqual({ order: "new", top: ["new_high", "tie_newer", "tie_older", "old_low"], replies: ["reply_new", "reply_old"] });
+  });
+
+  it("pages a long discussion by top-level comments, each with all its replies", async () => {
+    await post("p1");
+    const statements = [];
+    // 120 top-level comments, oldest c000, each with a reply; c010 has a deep one.
+    for (let index = 0; index < 120; index += 1) {
+      const id = `c${String(index).padStart(3, "0")}`;
+      statements.push(
+        db.prepare(`INSERT INTO comments (id, post_id, author_id, body, score, created_at) VALUES (?1, 'p1', 'u1', 'Top', ?2, ?3)`).bind(id, index % 5, NOW - 10_000 + index),
+        db.prepare(`INSERT INTO comments (id, post_id, parent_id, author_id, body, depth, created_at) VALUES (?1, 'p1', ?2, 'u1', 'Reply', 1, ?3)`).bind(`r${id}`, id, NOW - 5_000 + index),
+      );
+    }
+    statements.push(db.prepare(`INSERT INTO comments (id, post_id, parent_id, author_id, body, depth, created_at) VALUES ('deep', 'p1', 'rc010', 'u1', 'Deep', 2, ?1)`).bind(NOW - 100));
+    await db.batch(statements);
+    // The database files each comment under its top-level one as it is written.
+    expect(await db.prepare(`SELECT root_id FROM comments WHERE id = 'deep'`).first()).toEqual({ root_id: "c010" });
+
+    const first = (await postPage(db, "p1", "old"))!;
+    expect(first).toMatchObject({ page: 1, pages: 3, total: 241, clipped: false });
+    expect(first.comments).toHaveLength(ROOTS_PER_PAGE);
+    expect(first.comments[0]!.id).toBe("c000");
+    expect(first.comments.find((c) => c.id === "c010")?.replies[0]?.replies[0]?.id).toBe("deep");
+    const last = (await postPage(db, "p1", "old", { page: 3 }))!;
+    expect(last.comments.map((c) => c.id)).toEqual(Array.from({ length: 20 }, (_, index) => `c${100 + index}`));
+    expect(last.comments.every((c) => c.replies.length === 1)).toBe(true);
+    // Past the end is the last page.
+    expect((await postPage(db, "p1", "old", { page: 9 }))?.page).toBe(3);
+    // A comment, or a reply deep in one, opens the page holding its top-level comment, in the order shown.
+    expect((await postPage(db, "p1", "old", { focus: "c057" }))?.page).toBe(2);
+    expect((await postPage(db, "p1", "new", { focus: "deep" }))?.page).toBe(3);
+    expect((await postPage(db, "p1", "new", { focus: "c119" }))?.page).toBe(1);
+    // Best first pages as it sorts: every page in score order, none repeated.
+    const seen: string[] = [];
+    for (let page = 1; page <= 3; page += 1) {
+      const found = (await postPage(db, "p1", "best", { page }))!;
+      seen.push(...found.comments.map((c) => c.id));
+    }
+    expect(new Set(seen).size).toBe(120);
+    const scores = seen.map((id) => Number(id.slice(1)) % 5);
+    expect(scores).toEqual([...scores].sort((a, b) => b - a));
+  });
+
+  it("leaves out the newest replies of a page that holds more than it loads, keeping every reply's parent", async () => {
+    await post("p1");
+    await comment("top", { age: 99_999 });
+    const statements = [];
+    for (let index = 0; index < PAGE_COMMENTS_MAX + 5; index += 1) {
+      statements.push(
+        db.prepare(`INSERT INTO comments (id, post_id, parent_id, author_id, body, depth, created_at) VALUES (?1, 'p1', 'top', 'u1', 'Reply', 1, ?2)`).bind(`x${index}`, NOW - 50_000 + index),
+      );
+    }
+    await db.batch(statements);
+    const page = (await postPage(db, "p1", "old"))!;
+    expect(page.clipped).toBe(true);
+    expect(page.comments).toHaveLength(1);
+    expect(page.comments[0]!.replies).toHaveLength(PAGE_COMMENTS_MAX - 1);
   });
 
   it("opens a busy discussion best first", async () => {

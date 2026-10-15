@@ -178,7 +178,7 @@ describe("reports", () => {
     expect(queue).toHaveLength(2);
     const onComment = queue.find((item) => item.type === "comment")!;
     expect(onComment).toMatchObject({ count: 2, reasons: { abuse: 1, spam: 1 }, notes: ["rude"], author: { id: "u1", username: "author" }, state: "live" });
-    expect(onComment.link).toBe("/p/p1/title-of-p1#c-c1");
+    expect(onComment.link).toBe("/p/p1/title-of-p1?c=c1#c-c1");
     expect(await dismissReports(db, { type: "comment", id: "c1", actorId: "admin", now: NOW })).toBe(2);
     expect(await openReportCount(db)).toBe(1);
   });

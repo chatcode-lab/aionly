@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
-import { useCallback, useState } from "react";
-import { data, Link, redirect } from "react-router";
+import { useCallback, useEffect, useState } from "react";
+import { data, Link, redirect, useNavigate } from "react-router";
 
 import { CommentMenu, PostMenu } from "~/components/author-menus";
 import { CommentThread } from "~/components/comment";
@@ -8,6 +8,7 @@ import { CommentBox, CommentEditor } from "~/components/comment-box";
 import { MentionsProvider } from "~/components/mentions";
 import { useNotify } from "~/components/notify";
 import { PostCard, PostTombstone } from "~/components/post-card";
+import { Button } from "~/components/ui/button";
 import { useSignIn } from "~/components/sign-in";
 import { useModerate } from "~/components/use-moderate";
 import { useParticipation } from "~/components/use-participation";
@@ -31,7 +32,7 @@ import {
 } from "~/lib/db/authoring.server";
 import { viewerMarks } from "~/lib/db/marks.server";
 import { linkMentions, mentionHosts, mentionNames } from "~/lib/db/mentions.server";
-import { postPage } from "~/lib/db/posts.server";
+import { postPage, threadPaging } from "~/lib/db/posts.server";
 import { formatWait } from "~/lib/format";
 import { newId } from "~/lib/ids";
 import type { CommentData } from "~/lib/public-types";
@@ -61,8 +62,9 @@ function commentBodies(comments: CommentData[]): string[] {
  */
 export async function loader({ params, request, context }: Route.LoaderArgs) {
   const url = new URL(request.url);
-  // The order the reader picked, or the discussion's own.
-  const page = await postPage(env.DB, params.id, parseOrder(url.searchParams.get("order")) ?? undefined);
+  // The order the reader picked, or the discussion's own, and the page
+  // asked for, or the one holding the comment `?c=` names.
+  const page = await postPage(env.DB, params.id, parseOrder(url.searchParams.get("order")) ?? undefined, threadPaging(url));
   if (!page) throw data("Not Found", { status: 404 });
   if (page.state === "live" && "slug" in params && params.slug !== undefined) {
     if (`/p/${params.id}/${params.slug}` !== page.post.path) {
@@ -83,7 +85,8 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
     comments: commentIds(page.comments),
   });
   const now = Math.floor(Date.now() / 1000);
-  const canonical = `${url.origin}${page.state === "live" ? page.post.path : `/p/${params.id}`}`;
+  // A later page of a long discussion is its own page, with its own address.
+  const canonical = `${url.origin}${page.state === "live" ? page.post.path : `/p/${params.id}`}${page.page > 1 ? `?page=${page.page}` : ""}`;
   const id = params.id;
   // A removed or deleted post answers 410: gone, and not to be indexed.
   return page.state === "live"
@@ -94,7 +97,7 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
 const COMMENT_REFUSAL: Record<Exclude<CommentRefusal, "limit" | "replies">, string> = {
   closed: "This discussion is closed.",
   comments_closed: CLOSED_RULE,
-  full: `This discussion has reached ${THREAD_MAX} comments, the most one holds for now.`,
+  full: `This discussion has reached ${THREAD_MAX.toLocaleString("en-US")} comments, the most one holds.`,
   parent: "That comment is no longer here to reply to.",
   depth: "Replies go no deeper here. Reply further up the thread.",
   not_allowed: "Your account can't comment.",
@@ -231,7 +234,7 @@ export function meta({ loaderData, matches, location }: Route.MetaArgs) {
             name: post.author.username,
             ...(post.author.username === "[deleted]" ? {} : { url: new URL(`/u/${post.author.username}`, canonical).href }),
           },
-          commentCount: countAll(loaderData.comments),
+          commentCount: loaderData.total,
           interactionStatistic: {
             "@type": "InteractionCounter",
             interactionType: "https://schema.org/LikeAction",
@@ -260,10 +263,6 @@ function commentRule(post: PostDetail, viewer: ViewerSummary | null): { text: st
       post.author.ownerId === viewer.id ||
       post.description.includes(`<@${viewer.id}>`));
   return { text, open: exempt || mayReply(post.replies, { agent: false, karma: viewer?.karma ?? 0 }) };
-}
-
-function countAll(comments: Route.ComponentProps["loaderData"]["comments"]): number {
-  return comments.reduce((total, comment) => total + 1 + countAll(comment.replies), 0);
 }
 
 /** Restores a removed post or comment, for admins; single removals only. */
@@ -328,13 +327,65 @@ function OrderSwitch({ path, order, total }: { path: string; order: CommentOrder
   );
 }
 
+/**
+ * Links to a long discussion's other pages, keeping the order the reader
+ * chose; each lands at the comments.
+ */
+function PageLinks({ path, order, total, page, pages }: { path: string; order: CommentOrder; total: number; page: number; pages: number }) {
+  if (pages < 2) return null;
+  const at = (number: number) => {
+    const query = new URLSearchParams();
+    if (order !== defaultOrder(total)) query.set("order", order);
+    if (number > 1) query.set("page", String(number));
+    const search = query.toString();
+    return `${path}${search ? `?${search}` : ""}#comments-heading`;
+  };
+  return (
+    <nav aria-label="Comment pages" className="flex flex-wrap items-center justify-between gap-2">
+      {page > 1 ? (
+        <Button asChild variant="ghost">
+          <Link to={at(page - 1)}>Previous page</Link>
+        </Button>
+      ) : (
+        <span />
+      )}
+      <span className="text-meta text-text-muted">
+        Page {page} of {pages}
+      </span>
+      {page < pages ? (
+        <Button asChild>
+          <Link to={at(page + 1)}>Next page</Link>
+        </Button>
+      ) : (
+        <span />
+      )}
+    </nav>
+  );
+}
+
+/**
+ * A link to a comment from before discussions had pages, `#c-<id>` alone,
+ * whose comment is on another page: the address that opens that page.
+ */
+function useCommentOnAnotherPage(pages: number) {
+  const navigate = useNavigate();
+  useEffect(() => {
+    const id = /^#c-([A-Za-z0-9_-]{1,32})$/.exec(window.location.hash)?.[1];
+    if (!id || pages < 2 || document.getElementById(`c-${id}`)) return;
+    const query = new URLSearchParams(window.location.search);
+    query.delete("page");
+    query.set("c", id);
+    void navigate(`?${query}#c-${id}`, { replace: true });
+  }, [pages, navigate]);
+}
+
 export default function Post({ loaderData }: Route.ComponentProps) {
   const participation = useParticipation(loaderData.marks, loaderData.now);
   const signIn = useSignIn();
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const live = loaderData.state === "live";
-  const total = countAll(loaderData.comments);
+  const total = loaderData.total;
   const postId = loaderData.id;
   const path = loaderData.state === "live" ? loaderData.post.path : `/p/${postId}`;
   const viewerId = participation.viewer?.id;
@@ -342,6 +393,7 @@ export default function Post({ loaderData }: Route.ComponentProps) {
   const closeEditor = useCallback(() => setEditing(null), []);
   const own = (comment: CommentData) => viewerId !== undefined && comment.author?.id === viewerId;
   const admin = participation.viewer?.role === "admin" && !participation.viewer.ban;
+  useCommentOnAnotherPage(loaderData.pages);
 
   return (
     <MentionsProvider names={loaderData.mentions}>
@@ -381,6 +433,11 @@ export default function Post({ loaderData }: Route.ComponentProps) {
                 ? "No comments yet"
                 : `${total} ${total === 1 ? "comment" : "comments"}`}
             </h2>
+            {loaderData.pages > 1 ? (
+              <span className="mr-auto text-meta text-text-muted">
+                page {loaderData.page} of {loaderData.pages}
+              </span>
+            ) : null}
             {total > 1 ? <OrderSwitch path={path} order={loaderData.order} total={total} /> : null}
           </div>
           {live && loaderData.post.commentsClosed ? (
@@ -467,6 +524,12 @@ export default function Post({ loaderData }: Route.ComponentProps) {
               />
             </div>
           ) : null}
+          {loaderData.clipped ? (
+            <p className="text-meta text-text-muted">
+              Some of the newest replies on this page are left out: it holds more than one page shows.
+            </p>
+          ) : null}
+          <PageLinks path={path} order={loaderData.order} total={total} page={loaderData.page} pages={loaderData.pages} />
         </section>
       </main>
     </MentionsProvider>

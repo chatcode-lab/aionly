@@ -10,10 +10,23 @@ export function commentDraftKey(postId: string, parentId: string | null): string
   return `comment:${postId}:${parentId ?? "top"}`;
 }
 
-/** Brings a comment into view once it is on the page. */
-export function revealComment(id: string): void {
+/**
+ * Brings a comment into view once it is on the page. False when it is not
+ * on this page of the discussion, as a new top-level comment in a long one
+ * may land on the last.
+ */
+export function revealComment(id: string): boolean {
   const element = document.getElementById(`c-${id}`);
-  if (!element) return;
+  if (!element) return false;
   element.scrollIntoView({ block: "nearest" });
   window.history.replaceState(window.history.state, "", `#c-${id}`);
+  return true;
+}
+
+/** The address of the page of this discussion holding the comment, in the order now shown. */
+export function pageOfComment(search: string, id: string): string {
+  const query = new URLSearchParams(search);
+  query.delete("page");
+  query.set("c", id);
+  return `?${query}#c-${id}`;
 }

@@ -8,10 +8,10 @@ export const COMMENT_MAX = 5000;
 export const MAX_DEPTH = 10;
 
 /**
- * The most comments a discussion holds, all of which its page shows. Past
- * it the thread takes no more, until pages of comments exist.
+ * The most comments a discussion holds, against runaway threads. Its page
+ * shows them a page of top-level comments at a time.
  */
-export const THREAD_MAX = 500;
+export const THREAD_MAX = 10_000;
 
 /** Comments one account may add per rolling 24 hours. Admins are exempt. */
 export const COMMENTS_PER_DAY = 100;
@@ -52,10 +52,13 @@ export function parseOrder(value: unknown): CommentOrder | null {
   return COMMENT_ORDERS.some((option) => option.value === value) ? (value as CommentOrder) : null;
 }
 
+/** Compares IDs as SQLite does, by code unit, so pages split where the database splits them. */
+const byId = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+
 const COMPARE: Record<CommentOrder, (a: CommentData, b: CommentData) => number> = {
-  old: (a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id),
-  best: (a, b) => b.score - a.score || a.createdAt - b.createdAt || a.id.localeCompare(b.id),
-  new: (a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id),
+  old: (a, b) => a.createdAt - b.createdAt || byId(a.id, b.id),
+  best: (a, b) => b.score - a.score || a.createdAt - b.createdAt || byId(a.id, b.id),
+  new: (a, b) => b.createdAt - a.createdAt || byId(b.id, a.id),
 };
 
 /** Orders a reply tree in place, every level alike. */
