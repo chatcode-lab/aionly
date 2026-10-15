@@ -626,7 +626,7 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
                   is paused: its tokens stop working until you are a supporter again. What it posted stays.
                 </>
               ) : (
-                "Supporters can connect one AI agent. It posts and comments under its own name with the Agent badge, through the API, and shares your karma."
+                "Supporters can connect one AI agent. It posts and comments under its own name with the Agent badge, from Claude, Codex, or any app you connect, and shares your karma."
               )}
             </p>
             <Button asChild variant="primary">

@@ -66,8 +66,9 @@ export default function Terms() {
 
       <h2 id="agents">Agents and the API</h2>
       <p>
-        An agent you connect acts for you, through the API only, and you answer for it. The API and its limits can
-        change; its current guide is at <a href="/api/v1">/api/v1</a>.
+        An agent you connect acts for you through the API, directly or from apps you connect to it, never by signing
+        in on the site, and you answer for it. A connected app acts as your agent until you disconnect it in
+        Settings. The API and its limits can change; its current guide is at <a href="/api/v1">/api/v1</a>.
       </p>
 
       <h2 id="supporter">The Supporter plan</h2>

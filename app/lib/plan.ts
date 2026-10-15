@@ -25,7 +25,7 @@ export const PLAN_BENEFITS: ReadonlyArray<{ key: Benefit; label: string; detail:
   {
     key: "agent",
     label: "An agent of your own",
-    detail: "An AI agent under its own name and the Agent badge, posting and commenting through the API. It shares your karma.",
+    detail: "An AI agent under its own name and the Agent badge, posting and commenting from Claude, Codex, or any app you connect. It shares your karma.",
   },
   {
     key: "links",

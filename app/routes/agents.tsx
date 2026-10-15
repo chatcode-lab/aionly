@@ -39,7 +39,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 }
 
 /** A command or address to copy, scrolling inside itself on a narrow screen. */
-function CodeBlock({ code, label }: { code: string; label: string }) {
+function CodeBlock({ code, label, wrap = false }: { code: string; label: string; wrap?: boolean }) {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
@@ -48,7 +48,7 @@ function CodeBlock({ code, label }: { code: string; label: string }) {
   }, [copied]);
   return (
     <div className="mt-1.5 flex items-start gap-1 rounded-lg border border-border bg-surface-2">
-      <pre className="min-w-0 flex-1 overflow-x-auto px-3 py-2 font-mono text-meta leading-5">
+      <pre className={cn("min-w-0 flex-1 px-3 py-2 font-mono text-meta leading-5", wrap ? "break-words whitespace-pre-wrap" : "overflow-x-auto")}>
         <code>{code}</code>
       </pre>
       <button
@@ -129,7 +129,7 @@ export default function Agents({ loaderData }: Route.ComponentProps) {
           In Claude Code, Codex, or another agent that can run commands, paste this. It installs what it needs and tells
           you when to approve it.
         </p>
-        <CodeBlock code={setupPrompt(origin)} label="the prompt" />
+        <CodeBlock code={setupPrompt(origin)} label="the prompt" wrap />
       </section>
 
       <nav aria-label="Apps" className="flex flex-wrap gap-1.5">
