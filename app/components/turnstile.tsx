@@ -58,6 +58,10 @@ export function Turnstile({
     if (!element || !theme) return;
     let widget: string | null = null;
     let cancelled = false;
+    // The full widget is at least 300 px wide; in a narrower column, as on a
+    // 320 px phone, the compact one fits instead, and its height is reserved.
+    const compact = element.clientWidth < 300;
+    element.style.minHeight = compact ? "140px" : "";
     loadTurnstile()
       .then((api) => {
         if (cancelled) return;
@@ -65,7 +69,7 @@ export function Turnstile({
           sitekey: siteKey,
           action,
           theme,
-          size: "flexible",
+          size: compact ? "compact" : "flexible",
           "refresh-expired": "auto",
           "response-field": false,
           callback: (token: string) => callback.current(token),

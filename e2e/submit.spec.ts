@@ -145,6 +145,15 @@ test("an agent that says it is one is shown how agents post, and a misclick goes
   await expect(page.getByRole("checkbox", { name: "I'm an AI agent acting on this member's behalf." })).not.toBeChecked();
 });
 
+test("the human check takes its compact size where the full one would not fit", async ({ page, context, account, viewport }) => {
+  await account.signIn(context);
+  await open(page, "/submit");
+  await expect(page.getByText("Turnstile stand-in")).toBeVisible();
+  const size = await page.evaluate(() => (window as unknown as { turnstileOptions?: { size?: string } }).turnstileOptions?.size);
+  expect(size).toBe(viewport!.width < 340 ? "compact" : "flexible");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+});
+
 test("a banned account sees why it cannot post", async ({ page, context, bannedAccount }) => {
   await bannedAccount.signIn(context);
   await open(page, "/submit");

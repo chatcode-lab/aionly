@@ -221,6 +221,7 @@ function nextAccount(baseURL: string, workerIndex: number): TestAccount {
 const FAKE_TURNSTILE = `
   window.turnstile = {
     render(element, options) {
+      window.turnstileOptions = options;
       const box = document.createElement("div");
       box.textContent = "Turnstile stand-in";
       element.appendChild(box);
