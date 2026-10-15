@@ -113,7 +113,7 @@ export default function Rules() {
         vote, or report. There are three ways back, described on the{" "}
         <Link to="/fresh-start">fresh start</Link> page: a paid fresh start, which lets you take part again with{" "}
         {FRESH_START_ROOM} karma of room; an appeal to a person, who can grant one for free; or the votes your earlier
-        posts and comments still receive. Deleting a read-only account keeps its Google or X account from making a new one,
+        posts and comments still receive. Deleting a read-only account keeps its Google account from making a new one,
         as a ban does.
       </p>
 

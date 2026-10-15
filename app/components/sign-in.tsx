@@ -77,8 +77,8 @@ export function CopyButton({
 }
 
 /**
- * Google or X sign-in, or, inside an app's own browser where Google refuses
- * to sign anyone in, how to continue in a real browser. `next` is where the
+ * Google sign-in, or, inside an app's own browser where Google refuses to
+ * sign anyone in, how to continue in a real browser. `next` is where the
  * visitor returns afterwards. Unless `invited`, it also takes an
  * invitation code, for someone given one to type.
  */
@@ -97,8 +97,6 @@ export function SignInPanel({
 }) {
   const [draft, setDraft] = useState<string | null>(null);
   useEffect(() => setDraft(draftsAsText()), []);
-  // Offered once the board's X app is set up.
-  const xSignIn = (useRouteLoaderData("root") as { xSignIn?: boolean } | undefined)?.xSignIn ?? false;
 
   if (inAppBrowser) {
     const link =
@@ -134,19 +132,8 @@ export function SignInPanel({
           Continue with Google
         </Button>
       </Form>
-      {xSignIn ? (
-        <Form method="post" action="/signin" reloadDocument>
-          <input type="hidden" name="next" value={next} />
-          <input type="hidden" name="provider" value="x" />
-          <Button type="submit" variant="secondary" className="w-full">
-            <XLogo />
-            Continue with X
-          </Button>
-        </Form>
-      ) : null}
       <p className="text-meta text-text-muted">
-        Your {xSignIn ? "Google or X" : "Google"} name, email, and photo stay private; the board shows only the
-        username you choose.
+        Your Google name, email, and photo stay private; the board shows only the username you choose.
       </p>
       {invited ? null : (
         <div className="border-t border-border pt-3">

@@ -63,7 +63,7 @@ export default function Welcome({ loaderData, actionData }: Route.ComponentProps
         <h1 className="text-display font-semibold">This is how you&apos;ll appear</h1>
         <p className="mt-1 text-body text-text-muted">
           Your posts, comments, and profile show this name and nothing from
-          the Google or X account you signed in with.
+          your Google account.
         </p>
       </div>
       <div className="flex items-center gap-3 rounded-xl border border-border bg-surface p-4">

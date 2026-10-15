@@ -3,7 +3,7 @@ import { betterAuth } from "better-auth";
 import type { TwitterProfile } from "@better-auth/core/social-providers";
 import { APIError } from "better-auth/api";
 
-import { createProfile, linkedWith } from "./db/accounts.server";
+import { accountRecord, createProfile, linkedWith } from "./db/accounts.server";
 import { signUpRefusal } from "./db/deletion.server";
 import { attachInvite, claimInvite } from "./db/invites.server";
 import { INVITE_COOKIE, normalizeInviteCode } from "./invites";
@@ -15,16 +15,15 @@ const SESSION_SECONDS = 30 * 24 * 3600;
 const SESSION_REFRESH_SECONDS = 24 * 3600;
 
 /**
- * An account's email is the one it signed up with, for good: required,
- * unique, and kept for a later email sign-in. Only one Google or X has
- * verified is accepted, so nobody can claim an address that is not theirs.
- * A method linked later keeps its own email to itself.
+ * An account's email is its Google sign-in email, for good: required,
+ * unique, and kept for a later email sign-in. Only one Google has verified
+ * is accepted, so nobody can claim an address that is not theirs.
  */
 export function requireVerifiedEmail(user: { email?: string | null; emailVerified?: boolean | null }) {
   if (!user.email || user.emailVerified !== true) {
     throw APIError.from("FORBIDDEN", {
       code: "email_not_verified",
-      message: "The sign-in did not share a verified email.",
+      message: "The Google account's email is not verified.",
     });
   }
 }
@@ -53,51 +52,42 @@ function withoutTokens<T extends Record<string, unknown>>(account: T): T {
   };
 }
 
-/** Signing in with X is offered once the board's X app is configured. */
+/** Linking X is offered once the board's X app is configured. */
 export function xConfigured(): boolean {
   return Boolean(env.X_CLIENT_ID && env.X_CLIENT_SECRET);
 }
 
 /**
- * X's sign-in, for making an account, signing in, and linking X to an
- * account made with Google. It reads the profile once, with the photo's
- * address and the email X has confirmed, which X bills as one user read;
- * X's own provider would read it twice. An X account without a confirmed
- * email can still sign in to an account it is linked to, but cannot make one.
+ * X's own sign-in, used only to link an X account to a supporter's board
+ * account: it never makes an account, and never signs anyone in (see the
+ * session hook below). It reads the profile once, with the photo's
+ * address, which X bills as one user read; X's own provider would read it
+ * twice to look for an email, which linking does not need.
  */
 function xProvider(seen: (profile: XProfile) => void) {
   return {
     clientId: env.X_CLIENT_ID!,
     clientSecret: env.X_CLIENT_SECRET!,
     disableDefaultScope: true,
-    scope: ["users.read", "tweet.read", "users.email"],
+    scope: ["users.read", "tweet.read"],
+    disableSignUp: true,
     getUserInfo: async (token: { accessToken?: string }) => {
-      const read = (fields: string) =>
-        fetch(`https://api.x.com/2/users/me?user.fields=${fields}`, {
-          headers: { Authorization: `Bearer ${token.accessToken}` },
-          signal: AbortSignal.timeout(5000),
-        });
-      let response = await read("profile_image_url,confirmed_email");
-      // X refuses the whole read when the email is not granted, as for an
-      // app without email access: read the profile alone, with no email.
-      if (response.status === 400 || response.status === 403) {
-        console.error("x users/me with email", response.status, await xProblem(response));
-        response = await read("profile_image_url");
-      }
+      const response = await fetch("https://api.x.com/2/users/me?user.fields=profile_image_url", {
+        headers: { Authorization: `Bearer ${token.accessToken}` },
+        signal: AbortSignal.timeout(5000),
+      });
       if (!response.ok) {
-        // 402 means the X app has no credits left; 401 or 403, that the app's settings refuse it.
+        // 402: the X app has no credits; 403 client-not-enrolled: it is not in a Project.
         console.error("x users/me", response.status, await xProblem(response));
         return null;
       }
-      const profile = (await response.json()) as TwitterProfile & { data?: { confirmed_email?: string } };
+      const profile = (await response.json()) as TwitterProfile;
       const data = profile.data;
       if (!data?.id) return null;
       seen({ id: data.id, handle: data.username, photoUrl: data.profile_image_url ?? null });
-      const email = typeof data.confirmed_email === "string" && data.confirmed_email.includes("@") ? data.confirmed_email.toLowerCase() : null;
       return {
-        // Without a confirmed email, an address that is never anyone's, so
-        // it matches no account and makes none.
-        user: { name: data.name, email: email ?? `x-${data.id}@x.invalid`, emailVerified: email !== null },
+        // An address that is never anyone's, so it can never match an account by email.
+        user: { name: data.name, email: `x-${data.id}@x.invalid`, emailVerified: false },
         // The account is keyed by the X ID in here.
         data: profile,
       };
@@ -125,8 +115,6 @@ function createAuth(origin: string, request?: Request) {
   // What X said in this request, for the hooks below. The instance serves
   // one request only, so this is never shared.
   let seenX: XProfile | null = null;
-  // Whether this request is making an account, for the hooks below.
-  let signingUp = false;
   const x = xConfigured();
   return betterAuth({
     appName: "aion.ly",
@@ -136,10 +124,10 @@ function createAuth(origin: string, request?: Request) {
     database: env.DB,
     telemetry: { enabled: false },
     user: {
-      // A Google or X account whose board account was deleted lately, or
-      // deleted while banned, can neither make a new one nor be linked to
-      // another; see the plan's "Account deletion". This runs before
-      // anything is written.
+      // A Google account whose board account was deleted lately, or deleted
+      // while banned, cannot make a new one, nor can such an X account be
+      // linked to another; see the plan's "Account deletion". This runs
+      // before anything is written.
       validateUserInfo: async ({ source }) => {
         const provider = source.oauth?.providerId;
         const accountId = providerAccountId(source.oauth);
@@ -171,10 +159,10 @@ function createAuth(origin: string, request?: Request) {
     },
     account: {
       updateAccountOnSignIn: false,
-      // A second sign-in method is linked only on purpose, from Settings,
-      // whatever its email: never by a matching email at sign-in.
+      // An X account is linked only on purpose, from Settings, whatever its
+      // email: never by a matching email at sign-in. Google is the one way in.
       accountLinking: x
-        ? { enabled: true, trustedProviders: ["google", "twitter"], allowDifferentEmails: true, disableImplicitLinking: true }
+        ? { enabled: true, trustedProviders: ["twitter"], allowDifferentEmails: true, disableImplicitLinking: true }
         : { enabled: false },
     },
     advanced: {
@@ -187,7 +175,6 @@ function createAuth(origin: string, request?: Request) {
         create: {
           before: async (user) => {
             requireVerifiedEmail(user);
-            signingUp = true;
             // The account's ID is drawn here, so its invitation is claimed
             // for this account and no other.
             const id = newId();
@@ -217,28 +204,38 @@ function createAuth(origin: string, request?: Request) {
       account: {
         create: {
           before: async (account) => {
-            // One Google account and one X account at most, each linked to
-            // one board account (Better Auth checks that).
+            if (account.providerId === "twitter") {
+              // Linking X is a Supporter feature, for members, however it is asked for.
+              const member = await accountRecord(env.DB, account.userId);
+              if (!member?.entitled || member.ownerId) {
+                throw APIError.from("FORBIDDEN", { code: "plan_required", message: "Linking X comes with the Supporter plan." });
+              }
+            }
+            // One account of each kind at most, each linked to one board account (Better Auth checks that).
             if (await linkedWith(env.DB, account.userId, account.providerId)) {
               throw APIError.from("FORBIDDEN", { code: "provider_linked", message: "This account already has one of these linked." });
             }
             return { data: withoutTokens(account) };
           },
           after: async (account) => {
-            // X linked on purpose, from Settings, shows on the profile until
-            // hidden; an account made with X keeps it hidden until shown.
+            // Linked on purpose, to be shown, until the member hides it.
             if (account.providerId === "twitter" && seenX) {
-              await rememberXAccount(env.DB, account.userId, seenX, { shown: !signingUp });
+              await rememberXAccount(env.DB, account.userId, seenX, { shown: true });
             }
           },
         },
         update: { before: async (account) => ({ data: withoutTokens(account) }) },
       },
-      // Signing in with X refreshes the handle and photo the profile shows.
+      // Google is the only way in: a linked X account never signs anyone in,
+      // however its sign-in is started.
       session: {
         create: {
-          after: async (session) => {
-            if (seenX) await rememberXAccount(env.DB, session.userId, seenX);
+          before: async (session, context) => {
+            const provider = (context as { params?: { id?: string } } | null | undefined)?.params?.id;
+            if (provider === "twitter") {
+              throw APIError.from("FORBIDDEN", { code: "x_sign_in", message: "Sign in with Google; X is only linked." });
+            }
+            return { data: session };
           },
         },
       },

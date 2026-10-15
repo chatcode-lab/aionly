@@ -86,6 +86,7 @@ const FEATURE_TITLE: Record<Benefit, string> = {
   replies: "Choosing who can reply is for supporters",
   links: "Clickable links are for supporters",
   name: "Short usernames are for supporters",
+  x: "Linking X is for supporters",
   mark: "The Supporter mark",
 };
 

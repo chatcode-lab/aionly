@@ -32,9 +32,9 @@ export async function setXShown(db: D1Database, userId: string, shown: boolean):
 }
 
 /**
- * Unlinks a sign-in method, Google or X, while the account keeps another,
- * so nobody is locked out. Unlinking X forgets it on the profile too.
- * Whether it was unlinked.
+ * Unlinks an account the member linked, X, while another way in (Google)
+ * remains, so nobody is locked out; the profile forgets it too. Whether it
+ * was unlinked.
  */
 export async function unlinkMethod(db: D1Database, userId: string, provider: "google" | "twitter"): Promise<boolean> {
   const [unlinked] = await db.batch([
@@ -69,13 +69,4 @@ export async function linkedX(db: D1Database, userId: string): Promise<LinkedX |
     .bind(userId)
     .first<{ x_id: string; x_handle: string; x_photo_url: string | null; x_shown: number }>();
   return row ? { id: row.x_id, handle: row.x_handle, photoUrl: row.x_photo_url, shown: row.x_shown === 1 } : null;
-}
-
-/** The sign-in methods an account has: Google, X, or both. */
-export async function signInMethods(db: D1Database, userId: string): Promise<Array<"google" | "twitter">> {
-  const { results } = await db
-    .prepare(`SELECT DISTINCT "providerId" AS provider FROM "account" WHERE "userId" = ?1 AND "providerId" IN ('google', 'twitter')`)
-    .bind(userId)
-    .all<{ provider: "google" | "twitter" }>();
-  return results.map((row) => row.provider).sort();
 }

@@ -298,16 +298,18 @@ describe("sign-up", async () => {
     expect(await db.prepare(`SELECT invited_by FROM profiles WHERE user_id = ?1`).bind(created.id).first()).toEqual({ invited_by: "signup_host" });
   });
 
-  it("makes an account with X from the email X confirmed, and refuses X without one", async () => {
-    const x = { method: "oauth", oauth: { providerId: "twitter", profile: { data: { id: "x-new-1" } } } } as const;
-    await expect(
-      (await invited()).createUser({ name: "No email", email: "x-x-new-1@x.invalid", emailVerified: false }, x),
-    ).rejects.toMatchObject({ body: { code: "email_not_verified" } });
-    const created = await (await invited()).createUser({ name: "From X", email: "fromx@signup.invalid", emailVerified: true }, x);
-    expect(created.email).toBe("fromx@signup.invalid");
+  it("never signs anyone in with X, which is only linked", async () => {
+    const created = await (await invited()).createUser({ name: "Member", email: "member@signup.invalid", emailVerified: true }, google);
+    const context = await authFor(new Request("http://localhost/")).$context;
+    const session = (provider: string) =>
+      runWithEndpointContext({ context, params: { id: provider } } as unknown as Parameters<typeof runWithEndpointContext>[0], () =>
+        context.internalAdapter.createSession(created.id),
+      );
+    await expect(session("twitter")).rejects.toMatchObject({ body: { code: "x_sign_in" } });
+    expect((await session("google"))?.userId).toBe(created.id);
   });
 
-  it("refuses an X account whose board account was deleted lately", async () => {
+  it("refuses an X account whose board account was deleted lately, should it ever make one", async () => {
     const { deleteAccount, identityHash } = await import("../../app/lib/db/deletion.server");
     await user("gone_x", "gone_x_otter");
     await deleteAccount(db, {

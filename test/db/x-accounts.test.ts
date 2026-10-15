@@ -7,12 +7,17 @@ import {
   linkedX,
   rememberXAccount,
   setXShown,
-  signInMethods,
   unlinkMethod,
 } from "../../app/lib/db/x-accounts.server";
 import { db, NOW, post, reset, user } from "./fixtures";
 
 const X = { id: "1234567890", handle: "otter_makes", photoUrl: "https://pbs.twimg.com/profile_images/1/abc_normal.jpg" };
+
+/** The sign-in records the member has, by provider. */
+const providers = async () =>
+  (await db.prepare(`SELECT "providerId" AS provider FROM "account" WHERE "userId" = 'member' ORDER BY 1`).all<{ provider: string }>()).results.map(
+    (row) => row.provider,
+  );
 
 /** A sign-in method on the account, as Better Auth records it. */
 async function method(userId: string, provider: "google" | "twitter") {
@@ -29,7 +34,7 @@ async function method(userId: string, provider: "google" | "twitter") {
 beforeEach(async () => {
   await reset();
   await db.prepare(`DELETE FROM "user" WHERE "email" LIKE '%@x-accounts.invalid'`).run();
-  await user("member", "quiet_otter");
+  await user("member", "quiet_otter", { plan: true });
   await user("other", "paper_lark");
   await post("p1", { author: "member" });
 });
@@ -40,15 +45,19 @@ describe("linked X accounts", () => {
       const page = await postPage(db, "p1");
       return page?.state === "live" ? page.post.author.x : null;
     };
-    // Made with X: hidden until the member shows it.
+    // Hidden until the member shows it.
     await rememberXAccount(db, "member", X, { shown: false });
     expect(await linkedX(db, "member")).toEqual({ id: X.id, handle: X.handle, photoUrl: "https://pbs.twimg.com/profile_images/1/abc_400x400.jpg", shown: false });
     expect(await author()).toBeUndefined();
     await setXShown(db, "member", true);
     expect(await author()).toBe("otter_makes");
-    // Signing in again refreshes the handle and keeps the choice.
+    // Linking again refreshes the handle and keeps the choice.
     await rememberXAccount(db, "member", { ...X, handle: "otter_builds" });
     expect(await author()).toBe("otter_builds");
+    // Shown only while the plan lasts, as the Supporter mark is.
+    await db.prepare(`UPDATE profiles SET plan_until = 1 WHERE user_id = 'member'`).run();
+    expect(await author()).toBeUndefined();
+    await db.prepare(`UPDATE profiles SET plan_until = ?1 WHERE user_id = 'member'`).bind(NOW + 86400).run();
     await setXShown(db, "member", false);
     expect(await author()).toBeUndefined();
   });
@@ -65,12 +74,12 @@ describe("linked X accounts", () => {
     expect(await unlinkMethod(db, "member", "twitter")).toBe(false);
     expect(await linkedX(db, "member")).not.toBeNull();
     await method("member", "google");
-    expect(await signInMethods(db, "member")).toEqual(["google", "twitter"]);
+    expect(await providers()).toEqual(["google", "twitter"]);
     // With Google too, X can go, and the profile forgets it.
     expect(await unlinkMethod(db, "member", "twitter")).toBe(true);
     expect(await linkedX(db, "member")).toBeNull();
     expect(await unlinkMethod(db, "member", "google")).toBe(false);
-    expect(await signInMethods(db, "member")).toEqual(["google"]);
+    expect(await providers()).toEqual(["google"]);
   });
 
   it("lose the mark when the account is deleted", async () => {

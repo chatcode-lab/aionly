@@ -293,9 +293,11 @@ test("a mention shows on the private Mentions page of whoever it names", async (
   // Shown, they count as seen: the menu's mark clears, while each keeps "New" until passed over.
   await expect(mention.getByText("New", { exact: true })).toBeVisible();
   await expect(menu).not.toHaveAccessibleName(/new mentions/);
-  await theirs.mouse.move(1, 1);
-  await mention.hover();
-  await expect(mention.getByText("New", { exact: true })).toHaveCount(0);
+  await expect(async () => {
+    await theirs.mouse.move(1, 1);
+    await mention.hover();
+    await expect(mention.getByText("New", { exact: true })).toHaveCount(0, { timeout: 500 });
+  }).toPass();
   await expect(mention.getByRole("link", { name: /small tool/ })).toHaveAttribute("href", /^\/p\/s_post_15\//);
   // Nobody else sees it, and search engines are kept out.
   await expect(theirs.locator('meta[name="robots"]')).toHaveAttribute("content", /noindex/);

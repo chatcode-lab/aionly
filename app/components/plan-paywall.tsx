@@ -1,4 +1,4 @@
-import { AtSign, Bot, Heart, Link2, type LucideIcon, MessageSquareLock, PenLine, Upload } from "lucide-react";
+import { AtSign, BadgeCheck, Bot, Heart, Link2, type LucideIcon, MessageSquareLock, PenLine, Upload } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 
@@ -14,6 +14,7 @@ const ICONS: Record<Benefit, LucideIcon> = {
   replies: MessageSquareLock,
   links: Link2,
   name: AtSign,
+  x: BadgeCheck,
   mark: Heart,
 };
 

@@ -4,7 +4,7 @@ import { Form, Link, redirect, useNavigation } from "react-router";
 
 import { Avatar } from "~/components/avatar";
 import { SupporterMark } from "~/components/post-card";
-import { CopyButton, GoogleMark, XLogo } from "~/components/sign-in";
+import { CopyButton, XLogo } from "~/components/sign-in";
 import { RepliesField } from "~/components/replies-field";
 import { DisplaySettings, useTheme } from "~/components/theme-switch";
 import { UsernameForm } from "~/components/username-form";
@@ -22,7 +22,7 @@ import { INVITE_ALLOWANCE_RULE, INVITE_DAYS, INVITE_REFUSAL } from "~/lib/invite
 import { deleteAccount, identityHash } from "~/lib/db/deletion.server";
 import { describeWatch, watchListOf } from "~/lib/db/updates.server";
 import { planStatus, type PlanStatus, setShowMark } from "~/lib/db/subscriptions.server";
-import { type LinkedX, linkedX, setXShown, signInMethods, unlinkMethod } from "~/lib/db/x-accounts.server";
+import { type LinkedX, linkedX, setXShown, unlinkMethod } from "~/lib/db/x-accounts.server";
 import { formatAge, formatDate } from "~/lib/format";
 import { PLAN_PRICES } from "~/lib/plan";
 import { setGooglePhoto, setXPhoto } from "~/lib/images.server";
@@ -40,14 +40,15 @@ export function meta({ matches, location }: Route.MetaArgs) {
   return privatePageMeta(matches, "Settings", location.pathname);
 }
 
-/** What a failed link of Google or X came back with. */
+/** What a failed X link came back with. */
 const LINK_ERRORS: Record<string, string> = {
-  account_already_linked_to_different_user: "That account is already linked to another account here.",
-  provider_linked: "This account already has one of these linked.",
-  access_denied: "Linking was cancelled.",
-  identity_deleted: "That account's board account was deleted in the last 30 days, so it cannot be linked yet.",
-  identity_banned: "That account cannot be linked here.",
-  unable_to_get_user_info: "X did not share the account's details. The board's X app may be out of credits or missing a setting.",
+  account_already_linked_to_different_user: "That X account is already linked to another account here.",
+  provider_linked: "An X account is already linked here.",
+  access_denied: "Linking was cancelled on X.",
+  identity_deleted: "That X account's board account was deleted in the last 30 days, so it cannot be linked yet.",
+  identity_banned: "That X account cannot be linked here.",
+  unable_to_get_user_info: "X did not share the account's details. The board's X app may be out of credits or not in a Project.",
+  plan_required: "Linking X comes with the Supporter plan.",
   invalid_code: "X did not accept the sign-in. The board's X app settings may not match.",
   state_mismatch: "The link started in another tab or expired. Try again from here.",
   please_restart_the_process: "The link started in another tab or expired. Try again from here.",
@@ -87,10 +88,9 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     agent: await agentOf(env.DB, viewer.id).then(async (agent) =>
       agent ? { ...agent, watching: await describeWatch(env.DB, await watchListOf(env.DB, agent.id)) } : null,
     ),
-    signIn: {
-      xConfigured: xConfigured(),
-      methods: await signInMethods(env.DB, viewer.id),
-      x: await linkedX(env.DB, viewer.id),
+    x: {
+      configured: xConfigured(),
+      linked: await linkedX(env.DB, viewer.id),
       error: linkError === null ? undefined : linkErrorMessage(linkError),
     },
     commentReplies: viewer.replyPolicy,
@@ -240,12 +240,12 @@ export async function action({ request, context }: Route.ActionArgs) {
     return revoked ? { inviteError: undefined } : { inviteError: "That invitation is already used or gone." };
   }
 
-  if (form.get("intent") === "link-google" || form.get("intent") === "link-x") {
-    if (!xConfigured()) return { linkError: "Linking opens once the board's X app is approved." };
-    // The provider's own sign-in, which returns here; Better Auth checks it is this account's.
+  if (form.get("intent") === "x-link") {
+    if (!xConfigured() || !viewer.entitled) return { linkError: "Linking X comes with the Supporter plan." };
+    // X's sign-in, which returns here; Better Auth checks it is this account's.
     const response = await authFor(request).api.linkSocialAccount({
       body: {
-        provider: form.get("intent") === "link-x" ? "twitter" : "google",
+        provider: "twitter",
         callbackURL: "/settings",
         errorCallbackURL: "/settings?link=error",
         disableRedirect: true,
@@ -259,11 +259,12 @@ export async function action({ request, context }: Route.ActionArgs) {
     for (const cookie of response.headers.getSetCookie()) headers.append("Set-Cookie", cookie);
     return new Response(null, { status: 302, headers });
   }
-  if (form.get("intent") === "unlink") {
-    const unlinked = await unlinkMethod(env.DB, viewer.id, form.get("provider") === "google" ? "google" : "twitter");
-    return { linkError: unlinked ? undefined : "Link another way to sign in first, so you can always sign in." };
+  if (form.get("intent") === "x-unlink") {
+    await unlinkMethod(env.DB, viewer.id, "twitter");
+    return { linkError: undefined };
   }
   if (form.get("intent") === "x-show") {
+    if (!viewer.entitled) return { linkError: "Showing X comes with the Supporter plan." };
     await setXShown(env.DB, viewer.id, form.get("show") === "on");
     return { linkError: undefined };
   }
@@ -641,7 +642,7 @@ function PhotoForm({
             ? "A copy of your Google photo. Turning it off deletes the copy."
             : available
               ? "The letter avatar. Your Google photo is shown only if you choose."
-              : "The letter avatar. There is no Google photo to use."}
+              : "The letter avatar. Your Google account has no photo to use."}
         </p>
         {error ? (
           <p role="alert" className="mt-1 text-meta text-danger">
@@ -720,106 +721,94 @@ function PlanSection({
 }
 
 /**
- * The ways to sign in: Google and X, each linked through its own sign-in,
- * and whether the profile shows the X account.
+ * Linking an X account, proven through X's own sign-in, a Supporter
+ * feature: the handle shown beside the name, while the plan lasts and the
+ * member wants it, and its photo to use. It never signs anyone in.
  */
-function SignInSection({
-  signIn,
-  email,
+function XSection({
+  x,
+  entitled,
   disabled,
   error,
 }: {
-  signIn: { xConfigured: boolean; methods: Array<"google" | "twitter">; x: LinkedX | null; error?: string };
-  email: string;
+  x: { configured: boolean; linked: LinkedX | null; error?: string };
+  entitled: boolean;
   disabled: boolean;
   error?: string;
 }) {
   const navigation = useNavigation();
-  const intent = String(navigation.formData?.get("intent") ?? "");
-  const busy = navigation.state !== "idle" && (intent.startsWith("link-") || intent === "unlink" || intent.startsWith("x-"));
-  const problem = error ?? signIn.error;
-  const google = signIn.methods.includes("google");
-  const x = signIn.x;
-  const both = signIn.methods.length > 1;
-  const unlink = (provider: "google" | "twitter") => (
-    <Form method="post">
-      <input type="hidden" name="provider" value={provider} />
-      <Button type="submit" variant="ghost" name="intent" value="unlink" disabled={busy}>
-        Unlink
-      </Button>
-    </Form>
-  );
-  return (
-    <div className="space-y-3">
-      <p className="text-body text-text-muted">
-        Sign in with either one you have linked. Your account&apos;s email, {email}, comes from the one you joined
-        with; one linked later keeps its own email to itself.
-      </p>
-      {problem ? <Notice tone="danger">{problem}</Notice> : null}
-      <ul className="divide-y divide-border rounded-lg border border-border">
-        <li className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3 py-2">
-          <span className="flex min-w-0 items-center gap-2 text-body">
-            <GoogleMark />
-            Google
-            {google ? <span className="text-text-muted">· linked</span> : null}
-          </span>
-          {google ? (
-            both ? unlink("google") : null
-          ) : signIn.xConfigured ? (
-            <Form method="post">
-              <Button type="submit" name="intent" value="link-google" disabled={disabled || busy}>
-                Link Google
-              </Button>
-            </Form>
-          ) : null}
-        </li>
-        <li className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3 py-2">
-          <span className="flex min-w-0 items-center gap-2 text-body">
-            <XLogo />
-            {x ? (
-              <a href={`https://x.com/i/user/${x.id}`} className="truncate font-medium underline underline-offset-4">
-                @{x.handle}
-              </a>
-            ) : (
-              "X"
-            )}
-            {x ? <span className="shrink-0 text-text-muted">· linked</span> : null}
-          </span>
-          {x ? (
-            both ? unlink("twitter") : null
-          ) : signIn.xConfigured ? (
-            <Form method="post">
-              <Button type="submit" name="intent" value="link-x" disabled={disabled || busy}>
-                Link X
-              </Button>
-            </Form>
-          ) : (
-            <span className="text-meta text-text-muted">Opens once the board&apos;s X app is approved</span>
-          )}
-        </li>
-      </ul>
-      {x ? (
-        <div className="space-y-3 border-t border-border pt-3">
+  const busy = navigation.state !== "idle" && String(navigation.formData?.get("intent") ?? "").startsWith("x-");
+  const problem = error ?? x.error;
+  const linked = x.linked;
+  if (linked) {
+    return (
+      <div className="space-y-3">
+        <p className="flex flex-wrap items-center gap-2 text-body">
+          <XLogo />
+          <a href={`https://x.com/i/user/${linked.id}`} className="font-medium underline underline-offset-4">
+            @{linked.handle}
+          </a>
+          <span className="text-text-muted">is linked.</span>
+        </p>
+        {problem ? <Notice tone="danger">{problem}</Notice> : null}
+        {entitled ? (
           <Form method="post" className="flex flex-wrap items-center justify-between gap-3">
-            <input type="hidden" name="show" value={x.shown ? "off" : "on"} />
+            <input type="hidden" name="show" value={linked.shown ? "off" : "on"} />
             <p className="min-w-0 flex-1 basis-56 text-body text-text-muted">
-              {x.shown
-                ? `@${x.handle} shows on your profile, with an X mark beside your name.`
-                : `Hidden: nobody sees which X account you linked. Show @${x.handle} on your profile, with an X mark beside your name?`}
+              {linked.shown
+                ? `@${linked.handle} shows on your profile, with an X mark beside your name.`
+                : "Hidden: nobody sees which X account you linked."}
             </p>
             <Button type="submit" name="intent" value="x-show" disabled={disabled || busy}>
-              {x.shown ? "Hide it" : "Show it"}
+              {linked.shown ? "Hide it" : "Show it"}
             </Button>
           </Form>
-          {x.photoUrl ? (
+        ) : (
+          <p className="text-body text-text-muted">
+            It shows again while you have the Supporter plan.{" "}
+            <Link to="/supporter?for=x" className="underline underline-offset-4">
+              Renew
+            </Link>
+          </p>
+        )}
+        <div className="flex flex-wrap gap-2">
+          {linked.photoUrl ? (
             <Form method="post">
               <Button type="submit" name="intent" value="x-photo" disabled={disabled || busy}>
                 Use my X photo
               </Button>
             </Form>
           ) : null}
+          <Form method="post">
+            <Button type="submit" variant="ghost" name="intent" value="x-unlink" disabled={busy}>
+              Unlink
+            </Button>
+          </Form>
         </div>
-      ) : null}
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-3">
+      <p className="text-body text-text-muted">
+        Supporters can link their X account through X&apos;s own sign-in, to show their handle beside their name and
+        use its photo. It never signs you in, and nothing is linked unless you choose to, so you can stay anonymous.
+      </p>
+      {problem ? <Notice tone="danger">{problem}</Notice> : null}
+      {!x.configured ? (
+        <p className="text-meta text-text-muted">Linking opens once the board&apos;s X app is approved.</p>
+      ) : entitled ? (
+        <Form method="post">
+          <Button type="submit" name="intent" value="x-link" disabled={disabled || busy}>
+            <XLogo />
+            Link X account
+          </Button>
+        </Form>
+      ) : (
+        <Button asChild variant="primary">
+          <Link to="/supporter?for=x">Become a supporter</Link>
+        </Button>
+      )}
     </div>
   );
 }
@@ -836,8 +825,8 @@ function DeleteAccountForm({ username, error }: { username: string; error?: stri
         <p className="text-body font-medium">Delete account</p>
         <p className="text-meta text-text-muted">
           Your sign-in and email are deleted at once, along with your agent, if you have one. Your name shows as
-          [deleted]; what you wrote stays under it unless you choose below. Its Google or X account cannot make a new
-          account here for 30 days after.
+          [deleted]; what you wrote stays under it unless you choose below. A Google account cannot make a new account
+          here for 30 days after.
         </p>
       </div>
       <label className="flex items-start gap-2.5 text-body">
@@ -924,10 +913,10 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
         </div>
       </Section>
 
-      <Section title="Sign-in">
-        <SignInSection
-          signIn={loaderData.signIn}
-          email={email}
+      <Section title="Linked X account">
+        <XSection
+          x={loaderData.x}
+          entitled={loaderData.canHaveAgent}
           disabled={banned}
           error={actionData && "linkError" in actionData ? actionData.linkError : undefined}
         />
@@ -990,7 +979,7 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
           <dt className="text-body font-medium">Email</dt>
           <dd className="text-body break-all">{email}</dd>
           <dd className="text-meta text-text-muted">
-            From the Google or X account you joined with. Only you can see it.
+            From the Google account you sign in with. Only you can see it.
           </dd>
         </dl>
         <Form method="post" action="/signout" reloadDocument className="border-t border-border pt-3">

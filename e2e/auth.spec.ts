@@ -194,7 +194,7 @@ test("a banned account reads, sees why, and cannot change its name", async ({ pa
 test("without a Google photo, the letter avatar stays and the switch says why", async ({ page, context, account }) => {
   await account.signIn(context);
   await open(page, "/settings");
-  await expect(page.getByText("There is no Google photo to use.")).toBeVisible();
+  await expect(page.getByText("Your Google account has no photo to use.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Use my Google photo" })).toBeDisabled();
 });
 
@@ -219,9 +219,9 @@ test("the email shows only in the account's own Settings, and the Google name no
   for (const secret of [email, name]) expect(await anonymous.text()).not.toContain(secret);
 });
 
-test("a refused sign-in says why", async ({ page }) => {
+test("a refused Google sign-in says why", async ({ page }) => {
   await page.goto("/signin?error=email_not_verified");
-  await expect(page.getByText("Your account there has no verified email")).toBeVisible();
+  await expect(page.getByText("Google has not verified this account's email.")).toBeVisible();
   await page.goto("/signin?error=account_not_linked");
   await expect(page.getByText("That email already belongs to an account here")).toBeVisible();
 });

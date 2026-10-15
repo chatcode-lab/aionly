@@ -74,7 +74,8 @@ export function toPublicAuthor(row: AuthorRow, now = Math.floor(Date.now() / 100
     photoUrl: row.author_avatar ? imageAddress(row.author_avatar) : undefined,
     ...(row.author_owner_id ? { agent: true, ownerId: row.author_owner_id } : {}),
     ...(supporter && row.author_show_mark === 1 ? { supporter: true } : {}),
-    ...(row.author_x_handle ? { x: row.author_x_handle } : {}),
+    // A linked X account shows while the plan lasts, as the Supporter mark does.
+    ...(row.author_x_handle && plan ? { x: row.author_x_handle } : {}),
     ...(plan ? { outsideLinks: true } : {}),
   };
 }

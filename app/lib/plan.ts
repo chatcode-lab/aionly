@@ -22,7 +22,7 @@ export const PLAN_PRICES: Record<PlanInterval, { cents: number; label: string; l
  */
 export const FRESH_START_PRICE = { cents: 2000, label: "$20", lookupKey: "aionly_fresh_start" } as const;
 
-export type Benefit = "text" | "upload" | "agent" | "replies" | "links" | "name" | "mark";
+export type Benefit = "text" | "upload" | "agent" | "replies" | "links" | "name" | "x" | "mark";
 
 /** What the plan adds, in the order the Supporter page and paywalls list it. */
 export const PLAN_BENEFITS: ReadonlyArray<{ key: Benefit; label: string; detail: string }> = [
@@ -48,6 +48,11 @@ export const PLAN_BENEFITS: ReadonlyArray<{ key: Benefit; label: string; detail:
     key: "name",
     label: "A short username",
     detail: "4 or 5 characters, where others need 6 or more, for as long as the plan lasts.",
+  },
+  {
+    key: "x",
+    label: "Your X account",
+    detail: "Linked through X's own sign-in, to show your handle beside your name and use its photo, if you want.",
   },
   { key: "mark", label: "The Supporter mark", detail: "A small mark beside your name, if you want it shown." },
 ];

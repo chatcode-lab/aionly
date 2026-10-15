@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { type ReactNode, useEffect, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Link, useFetcher } from "react-router";
 
 import { MentionsProvider } from "~/components/mentions";
@@ -138,6 +138,9 @@ export default function Mentions({ loaderData }: Route.ComponentProps) {
 
 type Item = Route.ComponentProps["loaderData"]["mentions"][number];
 
+/** How long after the page is drawn the pointer starts to count. */
+const SETTLE_MS = 800;
+
 /**
  * The list, with what came since the member last looked marked new. The
  * mark stays while the page is open, though the visit already counts them
@@ -155,7 +158,14 @@ function MentionList({
 }) {
   const key = (mention: Item) => `${mention.type}:${mention.id}`;
   const [fresh, setFresh] = useState(() => new Set(mentions.filter((mention) => mention.mentionedAt > seenAt).map(key)));
+  // A pointer resting where the page draws, as after choosing Mentions in
+  // the menu, is no pass over a card: the browser reports one all the same.
+  const shownAt = useRef(0);
+  useEffect(() => {
+    shownAt.current = performance.now();
+  }, []);
   const read = (id: string) =>
+    performance.now() - shownAt.current > SETTLE_MS &&
     setFresh((current) => {
       if (!current.has(id)) return current;
       const next = new Set(current);
