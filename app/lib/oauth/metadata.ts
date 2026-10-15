@@ -7,12 +7,12 @@
 
 /**
  * Whether apps are told they may name themselves by a client metadata
- * document. Those that are told use it and never fall back, and some apps'
- * hosts refuse the board's request for the document, as chatgpt.com did a
- * local Worker's; so apps register dynamically instead. A document is
- * still accepted from an app that sends one unasked.
+ * document, as Claude, Codex, and ChatGPT prefer; they then show who they
+ * are by an address of their own. The deployed Worker fetches these
+ * documents. A local one is refused by some hosts (chatgpt.com answers it
+ * 403), so testing Codex locally takes `--oauth-client-registration dcr`.
  */
-export const ADVERTISE_CLIENT_DOCUMENTS = false;
+export const ADVERTISE_CLIENT_DOCUMENTS = true;
 
 /** The one scope: acting as the member's agent. */
 export const AGENT_SCOPE = "agent";
