@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { accountRecord, markMentionsSeen } from "../../app/lib/db/accounts.server";
 import { addComment, editComment, editPost } from "../../app/lib/db/authoring.server";
-import { mentionCursor, mentionsOf } from "../../app/lib/db/mentions.server";
+import { mentionCursor, mentionsCommitted, mentionsOf } from "../../app/lib/db/mentions.server";
 import { publishPost } from "../../app/lib/db/submit.server";
 import { EMPTY_WATCH, updatesFor } from "../../app/lib/db/updates.server";
 import { comment, db, NOW, post, reset, user } from "./fixtures";
@@ -69,9 +69,9 @@ describe("mention rows", () => {
     await comment("c1", { post: "p1", author: "u3", age: 600, body: "Ask <@bot>." });
     await comment("c2", { post: "p1", author: "u3", age: 300, body: "Gone <@u2>.", deleted: true });
     await db.batch([
-      db.prepare(`INSERT INTO mentions VALUES ('u2', 'post', 'p1', ?1)`).bind(NOW - 3600),
-      db.prepare(`INSERT INTO mentions VALUES ('bot', 'comment', 'c1', ?1)`).bind(NOW - 600),
-      db.prepare(`INSERT INTO mentions VALUES ('u2', 'comment', 'c2', ?1)`).bind(NOW - 300),
+      db.prepare(`INSERT INTO mentions (target_id, item_type, item_id, created_at) VALUES ('u2', 'post', 'p1', ?1)`).bind(NOW - 3600),
+      db.prepare(`INSERT INTO mentions (target_id, item_type, item_id, created_at) VALUES ('bot', 'comment', 'c1', ?1)`).bind(NOW - 600),
+      db.prepare(`INSERT INTO mentions (target_id, item_type, item_id, created_at) VALUES ('u2', 'comment', 'c2', ?1)`).bind(NOW - 300),
     ]);
     const found = await mentionsOf(db, { targets: ["u2", "bot"] });
     expect(found.map((mention) => [mention.type, mention.id, mention.targetId])).toEqual([
@@ -94,9 +94,9 @@ describe("mention rows", () => {
     for (let index = 0; index < 51; index += 1) {
       const id = `t${String(index).padStart(2, "0")}`;
       await comment(id, { post: "p1", author: "u3", body: `Hi <@u2> ${index}` });
-      statements.push(db.prepare(`INSERT INTO mentions VALUES ('u2', 'comment', ?1, ?2)`).bind(id, NOW - 100));
+      statements.push(db.prepare(`INSERT INTO mentions (target_id, item_type, item_id, created_at) VALUES ('u2', 'comment', ?1, ?2)`).bind(id, NOW - 100));
     }
-    await db.prepare(`INSERT INTO mentions VALUES ('u2', 'post', 'p1', ?1)`).bind(NOW - 100).run();
+    await db.prepare(`INSERT INTO mentions (target_id, item_type, item_id, created_at) VALUES ('u2', 'post', 'p1', ?1)`).bind(NOW - 100).run();
     await db.batch(statements);
     const seen = new Set<string>();
     let before: string | undefined;
@@ -143,8 +143,8 @@ describe("mentions in what's new", () => {
     await post("p1", { author: "u1", age: 7200, description: "For <@u2>." });
     await comment("c1", { post: "p1", author: "u3", age: 7200, body: "Ask <@bot>." });
     await db.batch([
-      db.prepare(`INSERT INTO mentions VALUES ('u2', 'post', 'p1', ?1)`).bind(NOW - 300),
-      db.prepare(`INSERT INTO mentions VALUES ('bot', 'comment', 'c1', ?1)`).bind(NOW - 200),
+      db.prepare(`INSERT INTO mentions (target_id, item_type, item_id, created_at) VALUES ('u2', 'post', 'p1', ?1)`).bind(NOW - 300),
+      db.prepare(`INSERT INTO mentions (target_id, item_type, item_id, created_at) VALUES ('bot', 'comment', 'c1', ?1)`).bind(NOW - 200),
     ]);
     const found = await updatesFor(db, { agentId: "bot", ownerId: "u2", watch: EMPTY_WATCH, since: NOW - 3600, now: NOW });
     expect(Object.fromEntries(found.items.map((item) => [item.id, item.why]))).toEqual({
@@ -155,25 +155,28 @@ describe("mentions in what's new", () => {
 });
 
 describe("new mentions", () => {
-  it("count items naming the member or their agent since they last looked, until the page is shown", async () => {
+  it("count what was committed after the member last looked, even within the same second", async () => {
     await post("p1", { author: "u1" });
-    await comment("c1", { post: "p1", author: "u3", body: "<@u2> and <@bot>" });
-    await comment("c2", { post: "p1", author: "u3", body: "<@bot>" });
-    await db.prepare(`UPDATE profiles SET mentions_seen_at = ?1 WHERE user_id = 'u2'`).bind(NOW - 100).run();
-    await db.batch([
-      db.prepare(`INSERT INTO mentions VALUES ('u2', 'post', 'p1', ?1)`).bind(NOW - 200),
-      // One comment naming both counts once.
-      db.prepare(`INSERT INTO mentions VALUES ('u2', 'comment', 'c1', ?1)`).bind(NOW - 50),
-      db.prepare(`INSERT INTO mentions VALUES ('bot', 'comment', 'c1', ?1)`).bind(NOW - 50),
-      db.prepare(`INSERT INTO mentions VALUES ('bot', 'comment', 'c2', ?1)`).bind(NOW - 10),
-    ]);
-    expect((await accountRecord(db, "u2", NOW))?.newMentions).toBe(2);
-    await markMentionsSeen(db, "u2", NOW - 20);
+    const write = (id: string, body: string) =>
+      addComment(db, { id, postId: "p1", parentId: null, authorId: "u3", body, now: NOW });
+    // One comment naming both the member and their agent counts once.
+    expect(await write("c1", "<@u2> and <@bot>")).toEqual({ ok: true });
     expect((await accountRecord(db, "u2", NOW))?.newMentions).toBe(1);
-    // Never back.
-    await markMentionsSeen(db, "u2", NOW - 1000);
-    expect((await accountRecord(db, "u2", NOW))?.mentionsSeenAt).toBe(NOW - 20);
-    await markMentionsSeen(db, "u2", NOW);
+    // The page is read here...
+    const read = await mentionsCommitted(db);
+    // ...and another mention lands in the very same second, after it.
+    expect(await write("c2", "Over to <@bot>")).toEqual({ ok: true });
+    await markMentionsSeen(db, "u2", read);
+    expect((await accountRecord(db, "u2", NOW))?.newMentions).toBe(1);
+    const [newest] = await mentionsOf(db, { targets: ["u2", "bot"] });
+    expect(newest).toMatchObject({ id: "c2" });
+    expect(newest!.seq).toBeGreaterThan(read);
+    // Never back, and never past what has been committed.
+    await markMentionsSeen(db, "u2", read - 1);
+    expect((await accountRecord(db, "u2", NOW))?.mentionsSeenSeq).toBe(read);
+    await markMentionsSeen(db, "u2", read + 1_000_000);
     expect((await accountRecord(db, "u2", NOW))?.newMentions).toBe(0);
+    expect(await write("c3", "And <@u2> again")).toEqual({ ok: true });
+    expect((await accountRecord(db, "u2", NOW))?.newMentions).toBe(1);
   });
 });

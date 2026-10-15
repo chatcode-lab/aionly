@@ -57,16 +57,33 @@ export async function unlinkMethod(db: D1Database, userId: string, provider: "go
 
 export interface LinkedX {
   id: string;
-  handle: string;
+  /** Null when the link landed but X's details for the profile did not. */
+  handle: string | null;
   photoUrl: string | null;
   /** Shown on the profile and beside the name. */
   shown: boolean;
 }
 
+/**
+ * The member's linked X account, by its sign-in record, which is what
+ * linking writes first and unlinking removes; the profile's copy of the
+ * handle and photo comes with it when it was written.
+ */
 export async function linkedX(db: D1Database, userId: string): Promise<LinkedX | null> {
   const row = await db
-    .prepare(`SELECT x_id, x_handle, x_photo_url, x_shown FROM profiles WHERE user_id = ?1 AND x_id IS NOT NULL`)
+    .prepare(
+      `SELECT account."accountId" AS account_id, profile.x_id, profile.x_handle, profile.x_photo_url, profile.x_shown
+       FROM "account" AS account LEFT JOIN profiles AS profile ON profile.user_id = account."userId"
+       WHERE account."userId" = ?1 AND account."providerId" = 'twitter'`,
+    )
     .bind(userId)
-    .first<{ x_id: string; x_handle: string; x_photo_url: string | null; x_shown: number }>();
-  return row ? { id: row.x_id, handle: row.x_handle, photoUrl: row.x_photo_url, shown: row.x_shown === 1 } : null;
+    .first<{ account_id: string; x_id: string | null; x_handle: string | null; x_photo_url: string | null; x_shown: number | null }>();
+  if (!row) return null;
+  const details = row.x_id === row.account_id;
+  return {
+    id: row.account_id,
+    handle: details ? row.x_handle : null,
+    photoUrl: details ? row.x_photo_url : null,
+    shown: details && row.x_shown === 1,
+  };
 }

@@ -16,9 +16,12 @@ export const ROOTS_PER_PAGE = 50;
 
 /**
  * The most comments one page loads, against a top-level comment with
- * thousands of replies; past it, the page's newest replies are left out.
+ * thousands of replies: every top-level comment on the page, and replies
+ * up to the rest, shared out in turns (see thread); past it, the latest
+ * replies of the busiest are left out.
  */
 export const PAGE_COMMENTS_MAX = 1000;
+const REPLIES_PER_PAGE = PAGE_COMMENTS_MAX - ROOTS_PER_PAGE;
 
 /** Which page of a discussion shows, and what it holds. */
 export interface ThreadPage {
@@ -108,21 +111,44 @@ async function thread(
   }
   page = Math.min(Math.max(1, Math.floor(page)), pages);
 
-  const { results } = await db
-    .prepare(
-      `SELECT ${COMMENT_COLUMNS}
-       FROM comments AS comment ${AUTHOR_JOINS("comment")}
-       WHERE comment.post_id = ?1 AND comment.root_id IN (
-         SELECT id FROM comments WHERE post_id = ?1 AND parent_id IS NULL
-         ORDER BY ${ROOT_ORDER[order]} LIMIT ?2 OFFSET ?3)
-       ORDER BY comment.created_at, comment.id
-       LIMIT ?4`,
-    )
-    .bind(postId, ROOTS_PER_PAGE, (page - 1) * ROOTS_PER_PAGE, PAGE_COMMENTS_MAX + 1)
-    .all<CommentRow>();
-  // A reply is always newer than what it answers, so leaving out the newest keeps every reply's parent.
-  const clipped = results.length > PAGE_COMMENTS_MAX;
-  return { comments: buildThread(clipped ? results.slice(0, PAGE_COMMENTS_MAX) : results, order), order, page, pages, total, clipped };
+  // The page's top-level comments, every one of them.
+  const roots = `SELECT id FROM comments WHERE post_id = ?1 AND parent_id IS NULL
+    ORDER BY ${ROOT_ORDER[order]} LIMIT ${ROOTS_PER_PAGE} OFFSET ${(page - 1) * ROOTS_PER_PAGE}`;
+  const [top, replies, focused] = await db.batch([
+    db.prepare(`SELECT ${COMMENT_COLUMNS} FROM comments AS comment ${AUTHOR_JOINS("comment")} WHERE comment.id IN (${roots})`).bind(postId),
+    // Their replies, the budget shared in turns: each top-level comment's
+    // first reply, then each one's second, and so on, oldest first in each,
+    // so a busy one cannot crowd out the rest, and a reply's parent always
+    // comes in before it.
+    db
+      .prepare(
+        `SELECT ${COMMENT_COLUMNS}
+         FROM (SELECT comments.*, ROW_NUMBER() OVER (PARTITION BY root_id ORDER BY created_at, id) AS turn
+               FROM comments WHERE post_id = ?1 AND parent_id IS NOT NULL AND root_id IN (${roots})) AS comment
+         ${AUTHOR_JOINS("comment")}
+         ORDER BY comment.turn, comment.created_at, comment.id
+         LIMIT ?2`,
+      )
+      .bind(postId, REPLIES_PER_PAGE + 1),
+    // A comment the address names, and every comment above it, whatever the budget left out.
+    db
+      .prepare(
+        `WITH RECURSIVE chain(id, parent_id) AS (
+           SELECT id, parent_id FROM comments WHERE id = ?2 AND post_id = ?1
+           UNION ALL
+           SELECT above.id, above.parent_id FROM comments AS above JOIN chain ON above.id = chain.parent_id)
+         SELECT ${COMMENT_COLUMNS} FROM comments AS comment ${AUTHOR_JOINS("comment")}
+         WHERE comment.id IN (SELECT id FROM chain)`,
+      )
+      .bind(postId, paging.focus ?? ""),
+  ]);
+  const replyRows = replies!.results as CommentRow[];
+  const clipped = replyRows.length > REPLIES_PER_PAGE;
+  const rows = new Map<string, CommentRow>();
+  for (const row of [...(top!.results as CommentRow[]), ...replyRows.slice(0, REPLIES_PER_PAGE), ...(focused!.results as CommentRow[])]) {
+    rows.set(row.id, row);
+  }
+  return { comments: buildThread([...rows.values()], order), order, page, pages, total, clipped };
 }
 
 /** The page of a discussion an address asks for: `?page=`, or `?c=` for the page holding a comment. */

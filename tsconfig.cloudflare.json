@@ -38,6 +38,7 @@
     "resolveJsonModule": true
   },
   "exclude": [
+    "test/migrations/**/*",
     "app/**/*.test.ts",
     "app/routes.ts"
   ]

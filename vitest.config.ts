@@ -16,6 +16,9 @@ export default defineConfig({
         resolve: { alias },
         test: { name: "unit", include: ["app/**/*.test.ts"] },
       },
+      // The migrations, run in order on Node's SQLite over data from before
+      // them, as an upgrade meets it.
+      { test: { name: "migrations", include: ["test/migrations/**/*.test.ts"] } },
       // The data layer, run inside the Workers runtime against a real D1
       // database with the project's migrations applied.
       {

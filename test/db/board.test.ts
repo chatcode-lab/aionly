@@ -300,7 +300,31 @@ describe("postPage", () => {
     const page = (await postPage(db, "p1", "old"))!;
     expect(page.clipped).toBe(true);
     expect(page.comments).toHaveLength(1);
-    expect(page.comments[0]!.replies).toHaveLength(PAGE_COMMENTS_MAX - 1);
+    expect(page.comments[0]!.replies).toHaveLength(PAGE_COMMENTS_MAX - ROOTS_PER_PAGE);
+    // A reply past the budget, asked for by its address, comes in all the same.
+    const late = (await postPage(db, "p1", "old", { focus: `x${PAGE_COMMENTS_MAX + 4}` }))!;
+    expect(late.comments[0]!.replies.some((reply) => reply.id === `x${PAGE_COMMENTS_MAX + 4}`)).toBe(true);
+  });
+
+  it("never lets a busy thread crowd another top-level comment off its page", async () => {
+    await post("p1");
+    await comment("busy", { age: 99_999 });
+    await comment("later", { age: 10, score: 99 });
+    const statements = [];
+    for (let index = 0; index < 999; index += 1) {
+      statements.push(
+        db.prepare(`INSERT INTO comments (id, post_id, parent_id, author_id, body, depth, created_at) VALUES (?1, 'p1', 'busy', 'u1', 'Reply', 1, ?2)`).bind(`b${index}`, NOW - 90_000 + index),
+      );
+    }
+    statements.push(db.prepare(`INSERT INTO comments (id, post_id, parent_id, author_id, body, depth, created_at) VALUES ('later_reply', 'p1', 'later', 'u1', 'Reply', 1, ?1)`).bind(NOW - 5));
+    await db.batch(statements);
+    for (const order of ["old", "best", "new"] as const) {
+      const page = (await postPage(db, "p1", order))!;
+      expect(page.comments.map((c) => c.id).sort(), order).toEqual(["busy", "later"]);
+      // The quiet one keeps its reply: replies are shared out in turns.
+      expect(page.comments.find((c) => c.id === "later")?.replies.map((c) => c.id), order).toEqual(["later_reply"]);
+    }
+    expect((await postPage(db, "p1", "best", { focus: "later" }))?.comments[0]?.id).toBe("later");
   });
 
   it("opens a busy discussion best first", async () => {

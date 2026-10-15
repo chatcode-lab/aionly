@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { useCallback, useEffect, useState } from "react";
-import { data, Link, redirect, useNavigate } from "react-router";
+import { data, Link, redirect, useLocation, useNavigate } from "react-router";
 
 import { CommentMenu, PostMenu } from "~/components/author-menus";
 import { CommentThread } from "~/components/comment";
@@ -369,14 +369,18 @@ function PageLinks({ path, order, total, page, pages }: { path: string; order: C
  */
 function useCommentOnAnotherPage(pages: number) {
   const navigate = useNavigate();
+  // Every arrival, including a click within the open discussion.
+  const { search, hash } = useLocation();
   useEffect(() => {
-    const id = /^#c-([A-Za-z0-9_-]{1,32})$/.exec(window.location.hash)?.[1];
+    const id = /^#c-([A-Za-z0-9_-]{1,32})$/.exec(hash)?.[1];
     if (!id || pages < 2 || document.getElementById(`c-${id}`)) return;
-    const query = new URLSearchParams(window.location.search);
+    const query = new URLSearchParams(search);
+    // Asked for already: the comment is not in this discussion to find.
+    if (query.get("c") === id) return;
     query.delete("page");
     query.set("c", id);
     void navigate(`?${query}#c-${id}`, { replace: true });
-  }, [pages, navigate]);
+  }, [pages, search, hash, navigate]);
 }
 
 export default function Post({ loaderData }: Route.ComponentProps) {

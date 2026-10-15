@@ -20,14 +20,14 @@ const providers = async () =>
   );
 
 /** A sign-in method on the account, as Better Auth records it. */
-async function method(userId: string, provider: "google" | "twitter") {
+async function method(userId: string, provider: "google" | "twitter", accountId = `${provider}-id-of-${userId}`) {
   await db.batch([
     db
       .prepare(`INSERT OR IGNORE INTO "user" ("id", "name", "email", "emailVerified", "createdAt", "updatedAt") VALUES (?1, ?1, ?2, 1, 0, 0)`)
       .bind(userId, `${userId}@x-accounts.invalid`),
     db
       .prepare(`INSERT INTO "account" ("id", "accountId", "providerId", "userId", "createdAt", "updatedAt") VALUES (?1, ?2, ?3, ?4, 0, 0)`)
-      .bind(`${userId}-${provider}`, `${provider}-id-of-${userId}`, provider, userId),
+      .bind(`${userId}-${provider}`, accountId, provider, userId),
   ]);
 }
 
@@ -46,6 +46,7 @@ describe("linked X accounts", () => {
       return page?.state === "live" ? page.post.author.x : null;
     };
     // Hidden until the member shows it.
+    await method("member", "twitter", X.id);
     await rememberXAccount(db, "member", X, { shown: false });
     expect(await linkedX(db, "member")).toEqual({ id: X.id, handle: X.handle, photoUrl: "https://pbs.twimg.com/profile_images/1/abc_400x400.jpg", shown: false });
     expect(await author()).toBeUndefined();
@@ -82,10 +83,31 @@ describe("linked X accounts", () => {
     expect(await providers()).toEqual(["google"]);
   });
 
+  it("count as linked by their sign-in record, even when X's details did not arrive", async () => {
+    await method("member", "twitter");
+    // The link landed; writing the handle and photo did not.
+    expect(await linkedX(db, "member")).toEqual({ id: "twitter-id-of-member", handle: null, photoUrl: null, shown: false });
+    const page = await postPage(db, "p1");
+    expect(page?.state === "live" ? page.post.author.x : "missing").toBeUndefined();
+    await method("member", "google");
+    expect(await unlinkMethod(db, "member", "twitter")).toBe(true);
+    expect(await linkedX(db, "member")).toBeNull();
+  });
+
+  it("are one of each kind per account, held by the database", async () => {
+    await method("member", "twitter");
+    await expect(
+      db
+        .prepare(`INSERT INTO "account" ("id", "accountId", "providerId", "userId", "createdAt", "updatedAt") VALUES ('second', 'another-x', 'twitter', 'member', 0, 0)`)
+        .run(),
+    ).rejects.toThrow(/UNIQUE/);
+  });
+
   it("lose the mark when the account is deleted", async () => {
     await rememberXAccount(db, "member", X);
     await deleteAccount(db, { userId: "member", content: false, banned: false, identities: [], now: NOW });
     // Free to link to a new account.
+    await method("other", "twitter", X.id);
     await rememberXAccount(db, "other", X);
     expect((await linkedX(db, "other"))?.handle).toBe("otter_makes");
   });

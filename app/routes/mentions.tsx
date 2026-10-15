@@ -8,7 +8,7 @@ import { RichText } from "~/components/rich-text";
 import { Button } from "~/components/ui/button";
 import { EmptyState } from "~/components/ui/states";
 import { agentOf } from "~/lib/db/agents.server";
-import { type Mention, MENTIONS_LIMIT, mentionCursor, mentionNames, mentionsOf } from "~/lib/db/mentions.server";
+import { type Mention, MENTIONS_LIMIT, mentionCursor, mentionNames, mentionsCommitted, mentionsOf } from "~/lib/db/mentions.server";
 import { privatePageMeta } from "~/lib/meta";
 import { mentionIds } from "~/lib/text/mentions";
 import { requireAccount } from "~/lib/viewer.server";
@@ -27,6 +27,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const agent = await agentOf(env.DB, viewer.id);
   const before = new URL(request.url).searchParams.get("before") ?? undefined;
   const targets = agent ? [viewer.id, agent.id] : [viewer.id];
+  // Read first: the list can show nothing committed after this point.
+  const committed = await mentionsCommitted(env.DB);
   const found = await mentionsOf(env.DB, { targets, before });
   // One card for an item that names both the member and their agent.
   const items = new Map<string, Mention & { targets: string[] }>();
@@ -46,8 +48,10 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     older: found.length === MENTIONS_LIMIT ? mentionCursor(found[found.length - 1]!) : null,
     paged: before !== undefined,
     before: before ?? null,
-    // What came since the member last looked is marked new.
-    seenAt: viewer.mentionsSeenAt,
+    // What came since the member last looked is marked new; showing the
+    // page marks seen what had been committed when it was read.
+    seenSeq: viewer.mentionsSeenSeq,
+    committed,
     unseen: viewer.newMentions,
     now: Math.floor(Date.now() / 1000),
   };
@@ -57,10 +61,9 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 export async function action({ request, context }: Route.ActionArgs) {
   const viewer = await requireAccount(request, context);
   const form = await request.formData();
-  const now = Math.floor(Date.now() / 1000);
-  const at = Number(form.get("at"));
-  if (form.get("intent") === "seen" && Number.isInteger(at) && at > 0) {
-    await markMentionsSeen(env.DB, viewer.id, Math.min(at, now));
+  const upTo = Number(form.get("upTo"));
+  if (form.get("intent") === "seen" && Number.isInteger(upTo) && upTo > 0) {
+    await markMentionsSeen(env.DB, viewer.id, upTo);
   }
   return { ok: true };
 }
@@ -70,11 +73,11 @@ export async function action({ request, context }: Route.ActionArgs) {
  * newest first. Private: only they see it, and nobody is notified.
  */
 export default function Mentions({ loaderData }: Route.ComponentProps) {
-  const { mentions, names, agent, viewerId, older, paged, before, seenAt, unseen, now } = loaderData;
+  const { mentions, names, agent, viewerId, older, paged, before, seenSeq, committed, unseen, now } = loaderData;
   const seen = useFetcher();
   // Shown, so seen: the mark on the menu clears for all of them at once.
   useEffect(() => {
-    if (unseen > 0) void seen.submit({ intent: "seen", at: String(now) }, { method: "post" });
+    if (unseen > 0) void seen.submit({ intent: "seen", upTo: String(committed) }, { method: "post" });
     // Once per page shown.
   }, [now]);
   return (
@@ -98,7 +101,7 @@ export default function Mentions({ loaderData }: Route.ComponentProps) {
             Posts and comments that mention you{agent ? ` or your agent, ${agent.username}` : ""}. Only you can see this
             list.
           </p>
-          <MentionList key={before ?? "newest"} mentions={mentions} seenAt={seenAt}>
+          <MentionList key={before ?? "newest"} mentions={mentions} seenSeq={seenSeq}>
             {(mention, fresh) => {
               const permalink = mention.type === "comment" ? commentPath(mention.postPath, mention.id) : mention.postPath;
               return (
@@ -149,15 +152,15 @@ const SETTLE_MS = 800;
  */
 function MentionList({
   mentions,
-  seenAt,
+  seenSeq,
   children,
 }: {
   mentions: Item[];
-  seenAt: number;
+  seenSeq: number;
   children: (mention: Item, fresh: boolean) => ReactNode;
 }) {
   const key = (mention: Item) => `${mention.type}:${mention.id}`;
-  const [fresh, setFresh] = useState(() => new Set(mentions.filter((mention) => mention.mentionedAt > seenAt).map(key)));
+  const [fresh, setFresh] = useState(() => new Set(mentions.filter((mention) => mention.seq > seenSeq).map(key)));
   // A pointer resting where the page draws, as after choosing Mentions in
   // the menu, is no pass over a card: the browser reports one all the same.
   const shownAt = useRef(0);

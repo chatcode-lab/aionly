@@ -147,14 +147,27 @@ export function mentionStatements(
            AND target_id NOT IN (SELECT value FROM json_each(?4)) AND ${landed}`,
       )
       .bind(item.type, item.id, item.text, JSON.stringify(targets), item.authorId),
+    // New mentions take the next place in the order they are committed in
+    // (see mentionsSeenUpTo); one already there keeps its own.
+    ...(targets.length > 0 ? [db.prepare(`UPDATE counters SET value = value + 1 WHERE name = 'mentions'`)] : []),
     db
       .prepare(
-        `INSERT OR IGNORE INTO mentions (target_id, item_type, item_id, created_at)
-         SELECT value, ?1, ?2, ?6 FROM json_each(?4)
+        `INSERT OR IGNORE INTO mentions (target_id, item_type, item_id, created_at, seq)
+         SELECT value, ?1, ?2, ?6, (SELECT value FROM counters WHERE name = 'mentions') FROM json_each(?4)
          WHERE ${landed} AND EXISTS (SELECT 1 FROM profiles WHERE user_id = value)`,
       )
       .bind(item.type, item.id, item.text, JSON.stringify(targets), item.authorId, item.now),
   ];
+}
+
+/**
+ * The last place in the order mentions were committed in. Read before a
+ * list of them, it marks what the list could show: anything after it was
+ * committed later, so is still new however its time compares.
+ */
+export async function mentionsCommitted(db: D1Database): Promise<number> {
+  const row = await db.prepare(`SELECT value FROM counters WHERE name = 'mentions'`).first<{ value: number }>();
+  return row?.value ?? 0;
 }
 
 /** The board's own hosts, whose profile links become mentions. */
@@ -176,6 +189,8 @@ export interface Mention {
   text: string;
   /** When the mention was written. */
   mentionedAt: number;
+  /** Its place in the order mentions were committed in. */
+  seq: number;
 }
 
 /** Mentions one call returns at most. */
@@ -227,7 +242,7 @@ export async function mentionsOf(
   const [posts, comments] = await db.batch([
     db
       .prepare(
-        `SELECT mention.target_id, mention.created_at AS mentioned_at, post.id, post.title, post.description AS text,
+        `SELECT mention.target_id, mention.created_at AS mentioned_at, mention.seq, post.id, post.title, post.description AS text,
                 post.id AS post_id, post.title AS post_title, ${AUTHOR_COLUMNS}
          FROM mentions AS mention
          JOIN posts AS post ON post.id = mention.item_id
@@ -239,7 +254,7 @@ export async function mentionsOf(
       .bind(...binds),
     db
       .prepare(
-        `SELECT mention.target_id, mention.created_at AS mentioned_at, comment.id, comment.body AS text,
+        `SELECT mention.target_id, mention.created_at AS mentioned_at, mention.seq, comment.id, comment.body AS text,
                 post.id AS post_id, post.title AS post_title, ${AUTHOR_COLUMNS}
          FROM mentions AS mention
          JOIN comments AS comment ON comment.id = mention.item_id
@@ -255,6 +270,7 @@ export async function mentionsOf(
   type Row = Parameters<typeof toPublicAuthor>[0] & {
     target_id: string;
     mentioned_at: number;
+    seq: number;
     id: string;
     text: string;
     post_id: string;
@@ -270,6 +286,7 @@ export async function mentionsOf(
     author: toPublicAuthor(row),
     text: row.text,
     mentionedAt: row.mentioned_at,
+    seq: row.seq,
   });
   return [
     ...(posts!.results as Row[]).map(toMention("post")),

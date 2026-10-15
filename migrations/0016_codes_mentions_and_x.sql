@@ -8,14 +8,28 @@ UPDATE checkout_claims SET until = claimed_at + 60;
 -- create, not for an email: only that account can take it, and a claim
 -- whose account exists is kept, never freed for someone else.
 ALTER TABLE invites ADD COLUMN claimed_by TEXT;
+
+-- A claim made by email before this, whose account was made, is kept for
+-- that account, so the next request or the hourly run attaches it. One
+-- claim per email: the earliest; the others, and claims whose account
+-- never came, are freed, as the hourly run would have freed them.
+UPDATE invites SET claimed_by = (SELECT "user"."id" FROM "user" WHERE "user"."email" = invites.claimed_email)
+WHERE claimed_email IS NOT NULL AND used_by IS NULL
+  AND NOT EXISTS (
+    SELECT 1 FROM invites AS earlier
+    WHERE earlier.claimed_email = invites.claimed_email AND earlier.used_by IS NULL
+      AND (earlier.claimed_at < invites.claimed_at OR (earlier.claimed_at = invites.claimed_at AND earlier.code < invites.code)));
+UPDATE invites SET claimed_at = NULL WHERE claimed_by IS NULL AND used_by IS NULL;
+
 CREATE INDEX invites_claimed_by ON invites (claimed_by) WHERE claimed_by IS NOT NULL;
 DROP INDEX invites_claimed;
 ALTER TABLE invites DROP COLUMN claimed_email;
 
 -- Codes are now 8 capital letters and digits, to type as well as follow.
--- Unused invitations with the old, longer codes are cancelled.
+-- Unused invitations with the old, longer codes are cancelled, unless a
+-- sign-up kept above holds one.
 UPDATE invites SET revoked_at = unixepoch()
-WHERE length(code) <> 8 AND used_by IS NULL AND revoked_at IS NULL;
+WHERE length(code) <> 8 AND used_by IS NULL AND claimed_by IS NULL AND revoked_at IS NULL;
 
 -- Up to when a member has seen their mentions, for the mark that says new
 -- ones came. Mentions from before this are not new.

@@ -746,12 +746,16 @@ function XSection({
         <p className="flex flex-wrap items-center gap-2 text-body">
           <XLogo />
           <a href={`https://x.com/i/user/${linked.id}`} className="font-medium underline underline-offset-4">
-            @{linked.handle}
+            {linked.handle ? `@${linked.handle}` : "Your X account"}
           </a>
           <span className="text-text-muted">is linked.</span>
         </p>
         {problem ? <Notice tone="danger">{problem}</Notice> : null}
-        {entitled ? (
+        {!linked.handle ? (
+          <p className="text-body text-text-muted">
+            Its details did not come through from X, so nothing shows yet. Unlink it and link it again.
+          </p>
+        ) : entitled ? (
           <Form method="post" className="flex flex-wrap items-center justify-between gap-3">
             <input type="hidden" name="show" value={linked.shown ? "off" : "on"} />
             <p className="min-w-0 flex-1 basis-56 text-body text-text-muted">

@@ -96,8 +96,8 @@ export interface AccountRecord {
   digest: "daily" | "weekly" | "monthly" | null;
   /** Who may reply to the account's comments, its choice while it has the plan. */
   replyPolicy: CommentReplies;
-  /** Up to when the member has seen their mentions. */
-  mentionsSeenAt: number;
+  /** Up to which place in the order mentions were committed in the member has seen theirs. */
+  mentionsSeenSeq: number;
   /** Items mentioning the member or their agent since then, up to NEW_MENTIONS_MAX. */
   newMentions: number;
   /** An invitation claimed for this account at sign-up has yet to attach. */
@@ -135,13 +135,13 @@ export async function accountRecord(
               profile.created_at, profile.banned_at, profile.banned_until,
               profile.ban_reason, profile.deleted_at, profile.owner_id,
               profile.limits, profile.plan_until, profile.show_mark, profile.digest, profile.reply_policy,
-              profile.karma_floor, username.name, profile.mentions_seen_at,
+              profile.karma_floor, username.name, profile.mentions_seen_seq,
               -- Mentions of the member or their agent since they last looked, up to 99.
               (SELECT COUNT(*) FROM (
                  SELECT DISTINCT item_type, item_id FROM mentions
                  WHERE target_id IN (profile.user_id,
                          (SELECT agent.user_id FROM profiles AS agent WHERE agent.owner_id = profile.user_id AND agent.deleted_at IS NULL))
-                   AND created_at > profile.mentions_seen_at
+                   AND seq > profile.mentions_seen_seq
                  LIMIT ${NEW_MENTIONS_MAX})) AS new_mentions,
               -- A sign-up whose invitation did not attach.
               EXISTS (SELECT 1 FROM invites WHERE claimed_by = profile.user_id AND used_by IS NULL) AS invite_pending,
@@ -173,7 +173,7 @@ export async function accountRecord(
       reply_policy: Exclude<CommentReplies, "all"> | null;
       karma_floor: number | null;
       name: string;
-      mentions_seen_at: number;
+      mentions_seen_seq: number;
       new_mentions: number;
       invite_pending: number;
       owner_banned_at: number | null;
@@ -221,7 +221,7 @@ export async function accountRecord(
     showMark: row.show_mark === 1,
     digest: row.digest,
     replyPolicy: row.reply_policy ?? "all",
-    mentionsSeenAt: row.mentions_seen_at,
+    mentionsSeenSeq: row.mentions_seen_seq,
     newMentions: row.new_mentions,
     invitePending: row.invite_pending === 1,
   };
@@ -237,13 +237,17 @@ export async function linkedWith(db: D1Database, userId: string, providerId: str
 }
 
 /**
- * Marks the member's mentions up to `at` as seen, so the new-mentions mark
- * clears; never moves back.
+ * Marks the member's mentions up to `upTo`, a place in the order mentions
+ * were committed in (see mentionsCommitted), as seen, so the new-mentions
+ * mark clears; never moves back, nor past what has been committed.
  */
-export async function markMentionsSeen(db: D1Database, userId: string, at: number): Promise<void> {
+export async function markMentionsSeen(db: D1Database, userId: string, upTo: number): Promise<void> {
   await db
-    .prepare(`UPDATE profiles SET mentions_seen_at = ?2 WHERE user_id = ?1 AND mentions_seen_at < ?2`)
-    .bind(userId, Math.floor(at))
+    .prepare(
+      `UPDATE profiles SET mentions_seen_seq = MIN(?2, (SELECT value FROM counters WHERE name = 'mentions'))
+       WHERE user_id = ?1 AND mentions_seen_seq < ?2`,
+    )
+    .bind(userId, Math.floor(upTo))
     .run();
 }
 

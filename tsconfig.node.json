@@ -6,7 +6,8 @@
     "playwright.config.ts",
     "react-router.config.ts",
     "app/routes.ts",
-    "e2e/**/*.ts"
+    "e2e/**/*.ts",
+    "test/migrations/**/*.ts"
   ],
   "compilerOptions": {
     "composite": true,

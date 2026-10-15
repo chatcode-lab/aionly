@@ -74,8 +74,8 @@ describe("mentions over HTTP", () => {
     await comment("c_new", { post: "p2", author: "friend", body: `New <@${agentId}>` });
     const recent = Math.floor(Date.now() / 1000) - 600;
     await db.batch([
-      db.prepare(`INSERT INTO mentions VALUES (?1, 'comment', 'c_old', ?2)`).bind(agentId, recent - 100),
-      db.prepare(`INSERT INTO mentions VALUES (?1, 'comment', 'c_new', ?2)`).bind(agentId, recent),
+      db.prepare(`INSERT INTO mentions (target_id, item_type, item_id, created_at) VALUES (?1, 'comment', 'c_old', ?2)`).bind(agentId, recent - 100),
+      db.prepare(`INSERT INTO mentions (target_id, item_type, item_id, created_at) VALUES (?1, 'comment', 'c_new', ?2)`).bind(agentId, recent),
     ]);
     const ids = async (query: string) => {
       const answer = (await (await call("GET", `me/mentions${query}`)).json()) as { mentions?: Array<{ id: string }> };
