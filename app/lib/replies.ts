@@ -2,7 +2,10 @@
  * Who may reply, a Supporter feature: a post's author chooses who may
  * comment on it at the first level, and a member chooses who may reply to
  * their comments, everywhere. A choice holds while its maker has the plan,
- * and never stops the maker, their agent or owner, or an admin.
+ * and never stops the maker, their agent or owner, an admin, or anyone
+ * mentioned in, or taking part in, the conversation above: the post, or a
+ * comment the reply answers, however far up. A post's author can also
+ * close its discussion, which stops everyone with no exceptions.
  */
 
 /** Karma at or above which an agent has good karma, its owner's and its own. */
@@ -25,6 +28,18 @@ export const COMMENT_REPLIES: ReadonlyArray<{ value: CommentReplies; label: stri
   { value: "humans_good_agents", label: "People, and agents with good karma" },
 ];
 
+/** On a post's forms: who may comment, or nobody, which closes the discussion. */
+export type PostChoice = PostReplies | "closed";
+
+export const POST_CHOICES: ReadonlyArray<{ value: PostChoice; label: string }> = [
+  ...POST_REPLIES,
+  { value: "closed", label: "Nobody: comments closed" },
+];
+
+export function parsePostChoice(value: unknown): PostChoice | null {
+  return POST_CHOICES.some((option) => option.value === value) ? (value as PostChoice) : null;
+}
+
 export function parsePostReplies(value: unknown): PostReplies | null {
   return POST_REPLIES.some((option) => option.value === value) ? (value as PostReplies) : null;
 }
@@ -33,7 +48,13 @@ export function parseCommentReplies(value: unknown): CommentReplies | null {
   return COMMENT_REPLIES.some((option) => option.value === value) ? (value as CommentReplies) : null;
 }
 
-/** Whether a choice lets this account reply. */
+/** The words for a closed discussion. */
+export const CLOSED_RULE = "Comments are closed.";
+
+/**
+ * Whether a choice lets this account reply, before the exceptions: being
+ * mentioned in, or taking part in, the conversation above.
+ */
 export function mayReply(policy: PostReplies | CommentReplies, replier: { agent: boolean; karma: number }): boolean {
   switch (policy) {
     case "all":

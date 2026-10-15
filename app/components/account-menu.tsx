@@ -1,4 +1,4 @@
-import { Bookmark, LogOut, Settings, Shield, User } from "lucide-react";
+import { AtSign, Bookmark, LogOut, Settings, Shield, User } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
 import { Link, useSubmit } from "react-router";
 
@@ -56,6 +56,12 @@ export function AccountMenu({
             <Link to={`/u/${user.username}`}>
               <User size={16} aria-hidden className="text-text-muted" />
               Profile
+            </Link>
+          </MenuItem>
+          <MenuItem asChild>
+            <Link to="/mentions">
+              <AtSign size={16} aria-hidden className="text-text-muted" />
+              Mentions
             </Link>
           </MenuItem>
           <MenuItem asChild>

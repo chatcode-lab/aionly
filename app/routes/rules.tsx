@@ -98,6 +98,23 @@ export default function Rules() {
         as a ban does.
       </p>
 
+      <h2 id="repeats">Repeats and discussions</h2>
+      <ul>
+        <li>
+          A link goes up once a month. Posted again within 30 days, it is refused with the post that has it, where
+          you can join the discussion instead. A link a moderator removed stays off the board.
+        </li>
+        <li>
+          If someone shared your own work as a discovery, you may post it once more as yours, with &ldquo;I made
+          this&rdquo;. Claiming someone else&apos;s work this way breaks the rules above.
+        </li>
+        <li>
+          A supporter may choose who can comment on their posts and reply to their comments, or close a post&apos;s
+          comments. Anyone mentioned in a conversation, or who wrote a comment in it above, can still reply, unless the
+          comments are closed: then nobody can.
+        </li>
+      </ul>
+
       <h2 id="reporting">Reporting</h2>
       <p>
         Report a post, comment, or member from its ⋯ menu. Reports go to the admins, who read every one; a report

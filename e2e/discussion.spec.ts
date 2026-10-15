@@ -256,3 +256,30 @@ test.describe("without scripts", () => {
     await expect(page.getByText(text, { exact: true })).toBeVisible();
   });
 });
+
+test("a mention shows on the private Mentions page of whoever it names", async ({ page, context, account, otherAccount, browser }, testInfo) => {
+  await account.signIn(context);
+  await open(page, POST);
+  const text = `Over to @${otherAccount.username}, from ${account.username} in ${testInfo.project.name}`;
+  await page.getByLabel("Comment", { exact: true }).fill(text);
+  await page.getByRole("button", { name: "Comment", exact: true }).click();
+  const item = page.locator("li[id^='c-']", { has: page.getByRole("link", { name: `User ${otherAccount.username}` }) }).last();
+  await expect(item).toBeVisible();
+
+  const other = await browser.newContext();
+  await otherAccount.signIn(other);
+  const theirs = await other.newPage();
+  await open(theirs, "/");
+  await theirs.locator("header").getByRole("button", { name: /account/i }).click();
+  await theirs.getByRole("menuitem", { name: "Mentions" }).click();
+  await expect(theirs).toHaveURL(/\/mentions$/);
+  await expect(theirs.getByRole("heading", { name: "Mentions", level: 1 })).toBeVisible();
+  const mention = theirs.locator("li", { hasText: `from ${account.username} in ${testInfo.project.name}` });
+  await expect(mention).toBeVisible();
+  await expect(mention.getByRole("link", { name: /small tool/ })).toHaveAttribute("href", /^\/p\/s_post_15\//);
+  // Nobody else sees it, and search engines are kept out.
+  await expect(theirs.locator('meta[name="robots"]')).toHaveAttribute("content", /noindex/);
+  await open(page, "/mentions");
+  await expect(page.getByText(`from ${account.username} in ${testInfo.project.name}`)).toHaveCount(0);
+  await other.close();
+});

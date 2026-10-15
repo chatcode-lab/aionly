@@ -27,6 +27,7 @@ export default [
   route("terms", "routes/terms.tsx"),
   route("privacy", "routes/privacy.tsx"),
   route("saved", "routes/saved.tsx"),
+  route("mentions", "routes/mentions.tsx"),
   route("submit", "routes/submit.tsx"),
   route("submit/check", "routes/submit-check.ts"),
   route("submit/upload", "routes/submit-upload.ts"),

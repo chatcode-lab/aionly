@@ -4,9 +4,9 @@ import { postPath } from "../slug";
 import { AUTHOR_COLUMNS, AUTHOR_JOINS, LIVE, toPublicAuthor } from "./rows.server";
 
 /**
- * What is new for an agent since a time: replies to it and to its owner, its
- * owner's own posts and comments, and new posts and comments on what it
- * watches (posts, people, and keywords). It lets an agent help its owner
+ * What is new for an agent since a time: replies to it and to its owner,
+ * mentions of either, its owner's own posts and comments, and new posts and
+ * comments on what it watches (posts, people, and keywords). It lets an agent help its owner
  * keep up and take part, reading only, without walking the board.
  *
  * Every source reads a bounded number of rows through an index, all in one
@@ -52,7 +52,15 @@ export function parseWatch(raw: string | null): WatchList {
   }
 }
 
-export type Reason = "reply_to_you" | "reply_to_owner" | "owner" | "watched_post" | "watched_user" | "keyword";
+export type Reason =
+  | "reply_to_you"
+  | "reply_to_owner"
+  | "mention_you"
+  | "mention_owner"
+  | "owner"
+  | "watched_post"
+  | "watched_user"
+  | "keyword";
 
 interface ItemBase {
   id: string;
@@ -227,6 +235,31 @@ export async function updatesFor(
          ORDER BY comment.created_at ASC LIMIT ${SOURCE_LIMIT}`,
       )
       .bind(JSON.stringify(watch.users), since, now),
+    // Posts and comments mentioning the agent or its owner, by when the
+    // mention was written, which an edit can make later than the item.
+    db
+      .prepare(
+        `SELECT ${POST_COLUMNS}, mention.target_id, mention.created_at AS mentioned_at
+         FROM mentions AS mention
+         JOIN posts AS post ON post.id = mention.item_id
+         ${AUTHOR_JOINS("post")}
+         WHERE mention.item_type = 'post' AND mention.target_id IN (?1, ?4) AND post.author_id <> ?1
+           AND mention.created_at > ?2 AND mention.created_at <= ?3 AND ${LIVE_POST}
+         ORDER BY mention.created_at ASC LIMIT ${SOURCE_LIMIT}`,
+      )
+      .bind(agentId, since, now, ownerId),
+    db
+      .prepare(
+        `SELECT ${COMMENT_COLUMNS}, mention.target_id, mention.created_at AS mentioned_at
+         FROM mentions AS mention
+         JOIN comments AS comment ON comment.id = mention.item_id
+         JOIN posts AS post ON post.id = comment.post_id
+         ${AUTHOR_JOINS("comment")}
+         WHERE mention.item_type = 'comment' AND mention.target_id IN (?1, ?4) AND comment.author_id <> ?1
+           AND mention.created_at > ?2 AND mention.created_at <= ?3 AND ${LIVE_COMMENT}
+         ORDER BY mention.created_at ASC LIMIT ${SOURCE_LIMIT}`,
+      )
+      .bind(agentId, since, now, ownerId),
     // Keywords, across the newest posts and comments in the window, with
     // where each scan stopped when it filled up.
     db
@@ -264,7 +297,7 @@ export async function updatesFor(
   ];
   const watching = watch.keywords.length > 0;
   // Keyword scans run only for an agent that watches keywords.
-  const results = await db.batch(watching ? statements : statements.slice(0, 7));
+  const results = await db.batch(watching ? statements : statements.slice(0, 9));
   const rows = <T>(index: number) => (results[index]?.results ?? []) as T[];
 
   const replyToAgent = rows<CommentRow>(0);
@@ -274,10 +307,13 @@ export async function updatesFor(
   const watchedPosts = rows<CommentRow>(4);
   const userPosts = rows<PostRow>(5);
   const userComments = rows<CommentRow>(6);
-  const keywordPosts = watching ? rows<PostRow>(7) : [];
-  const postsScanEnd = watching ? rows<{ created_at: number }>(8)[0]?.created_at : undefined;
-  const keywordComments = watching ? rows<CommentRow>(9) : [];
-  const commentsScanEnd = watching ? rows<{ created_at: number }>(10)[0]?.created_at : undefined;
+  type Mentioned = { target_id: string; mentioned_at: number };
+  const mentionedPosts = rows<PostRow & Mentioned>(7);
+  const mentionedComments = rows<CommentRow & Mentioned>(8);
+  const keywordPosts = watching ? rows<PostRow>(9) : [];
+  const postsScanEnd = watching ? rows<{ created_at: number }>(10)[0]?.created_at : undefined;
+  const keywordComments = watching ? rows<CommentRow>(11) : [];
+  const commentsScanEnd = watching ? rows<{ created_at: number }>(12)[0]?.created_at : undefined;
 
   // Where the window ends: before the last item of any source that filled
   // up, or of either keyword scan, so nothing after it is skipped.
@@ -287,6 +323,9 @@ export async function updatesFor(
   };
   for (const list of [replyToAgent, replyToOwner, ownerPosts, ownerComments, watchedPosts, userPosts, userComments, keywordPosts, keywordComments]) {
     if (list.length >= SOURCE_LIMIT) stopBefore(list[list.length - 1]!.created_at);
+  }
+  for (const list of [mentionedPosts, mentionedComments]) {
+    if (list.length >= SOURCE_LIMIT) stopBefore(list[list.length - 1]!.mentioned_at);
   }
   stopBefore(postsScanEnd);
   stopBefore(commentsScanEnd);
@@ -339,6 +378,10 @@ export async function updatesFor(
   for (const row of watchedPosts) add(comment(row), "watched_post");
   for (const row of userPosts) add(post(row), "watched_user");
   for (const row of userComments) add(comment(row), "watched_user");
+  // A mention counts by when it was written, within the same window.
+  const mentionWhy = (row: Mentioned): Reason => (row.target_id === agentId ? "mention_you" : "mention_owner");
+  for (const row of mentionedPosts) if (row.mentioned_at <= until) add(post(row), mentionWhy(row));
+  for (const row of mentionedComments) if (row.mentioned_at <= until) add(comment(row), mentionWhy(row));
   // The database matched each keyword as a substring; only whole words count.
   for (const row of keywordPosts) {
     for (const keyword of watch.keywords) {

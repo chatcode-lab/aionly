@@ -315,11 +315,65 @@ describe("posting", () => {
     expect(await postingStatus(db, author, NOW)).toEqual({ allowed: true });
 
     await db.prepare(`UPDATE posts SET removed_batch_id = 'b1' WHERE id = 'old'`).run();
-    expect(await findDuplicate(db, "url:example.com/new")).toEqual({ id: "old", state: "removed" });
+    expect(await findDuplicate(db, "url:example.com/new", { origin: null, now: NOW })).toEqual({ id: "old", state: "removed" });
     // Only an author-deleted, unremoved post frees its link.
     await db.prepare(`UPDATE posts SET removed_batch_id = NULL, deleted_at = ?1 WHERE id = 'old'`).bind(NOW).run();
-    expect(await findDuplicate(db, "url:example.com/new")).toBeNull();
+    expect(await findDuplicate(db, "url:example.com/new", { origin: "found", now: NOW })).toBeNull();
     expect((await publishPost(db, newPost(author, { id: "fresh" }))).ok).toBe(true);
+  });
+
+  describe("posting a link again", () => {
+    const KEY = "url:example.com/new";
+    const as = async (id: string, origin: "made" | "found", user = "u1") =>
+      publishPost(db, newPost((await accountRecord(db, user, NOW))!, { id, origin }));
+
+    it("lets its maker post a discovery once more as their own work", async () => {
+      await post("found1", { author: "u2", key: KEY, origin: "found" });
+      expect(await as("again", "found")).toMatchObject({ ok: false, reason: "duplicate", existing: { id: "found1" } });
+      expect((await as("mine", "made")).ok).toBe(true);
+      // Once it stands as someone's own work, nobody posts it again.
+      expect(await as("third", "made", "u2")).toMatchObject({ ok: false, reason: "duplicate", existing: { id: "mine" } });
+      expect(await as("fourth", "found", "u2")).toMatchObject({ ok: false, reason: "duplicate", existing: { id: "mine" } });
+    });
+
+    it("refuses one's own work posted twice", async () => {
+      await post("made1", { author: "u2", key: KEY, origin: "made" });
+      expect(await as("again", "made")).toMatchObject({ ok: false, reason: "duplicate", existing: { id: "made1" } });
+      expect(await as("found", "found")).toMatchObject({ ok: false, reason: "duplicate" });
+    });
+
+    it("frees a link a month after it was last posted", async () => {
+      await post("old", { author: "u2", key: KEY, origin: "made", age: 31 * DAY });
+      await post("newer", { author: "u2", key: KEY, origin: "found", age: 29 * DAY });
+      expect(await as("again", "found")).toMatchObject({ ok: false, reason: "duplicate", existing: { id: "newer" } });
+      await db.prepare(`UPDATE posts SET created_at = ?1 WHERE id = 'newer'`).bind(NOW - 30 * DAY).run();
+      expect((await as("again", "found")).ok).toBe(true);
+    });
+
+    it("keeps a link a moderator removed blocked for good", async () => {
+      await post("gone", { author: "u2", key: KEY, origin: "found", age: 400 * DAY, removed: true });
+      expect(await as("again", "made")).toMatchObject({ ok: false, reason: "duplicate", existing: { id: "gone", state: "removed" } });
+    });
+
+    it("shows a check without the origin only what blocks either one, so it hints at nothing", async () => {
+      await post("found1", { author: "u2", key: KEY, origin: "found" });
+      expect(await findDuplicate(db, KEY, { origin: null, now: NOW })).toBeNull();
+      expect(await findDuplicate(db, KEY, { origin: "found", now: NOW })).toEqual({ id: "found1", state: "live" });
+      expect(await findDuplicate(db, KEY, { origin: "made", now: NOW })).toBeNull();
+      await post("made1", { author: "u1", key: KEY, origin: "made", age: 60 });
+      expect(await findDuplicate(db, KEY, { origin: null, now: NOW })).toEqual({ id: "made1", state: "live" });
+    });
+
+    it("finds a link's posts by index", async () => {
+      const { results } = await db
+        .prepare(
+          `EXPLAIN QUERY PLAN SELECT id FROM posts AS held WHERE held.canonical_key = ?1 AND (held.removed_batch_id IS NOT NULL
+             OR (held.deleted_at IS NULL AND held.created_at > ?3 - 2592000 AND (held.origin = 'made' OR ?2 = 'found')))`,
+        )
+        .bind(KEY, null, NOW)
+        .all<{ detail: string }>();
+      expect(results.map((row) => row.detail).join(" ")).toContain("USING INDEX posts_link");
+    });
   });
 
   it("refuses a banned author inside the write", async () => {
@@ -340,8 +394,8 @@ describe("posting", () => {
 });
 
 describe("checkLink", () => {
-  const check = (raw: string) =>
-    checkLink({ raw, userId: "u1", ownHosts: OWN, db, bucket, secret: SECRET, now: NOW });
+  const check = (raw: string, origin: "made" | "found" | null = null) =>
+    checkLink({ raw, userId: "u1", ownHosts: OWN, db, bucket, secret: SECRET, now: NOW, origin });
 
   it("explains links that cannot be posted", async () => {
     expect(await check("http://example.com/")).toEqual({ ok: false, error: "Only https links can be posted." });
@@ -407,7 +461,7 @@ describe("checkLink", () => {
     stubFetch({
       "https://example.com/story": () => html(`<link rel="canonical" href="https://example.com/story">`),
     });
-    const result = await check("https://example.com/story?campaign=spring");
+    const result = await check("https://example.com/story?campaign=spring", "found");
     expect(result).toMatchObject({ ok: true, duplicate: { id: "first", state: "live" }, receipt: null });
   });
 
@@ -429,9 +483,19 @@ describe("checkLink", () => {
   it("reports a duplicate without fetching anything", async () => {
     await post("old", { author: "u2", key: "youtube:aqz-KE-bpKQ" });
     const spy = vi.spyOn(globalThis, "fetch");
-    const result = await check("https://www.youtube.com/watch?v=aqz-KE-bpKQ");
+    const result = await check("https://www.youtube.com/watch?v=aqz-KE-bpKQ", "found");
     expect(result).toMatchObject({ ok: true, duplicate: { id: "old", state: "live" }, receipt: null });
     expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("on the site, before the origin is chosen, shows a discovery as no repeat", async () => {
+    await post("old", { author: "u2", key: "youtube:aqz-KE-bpKQ", origin: "found" });
+    stubFetch({
+      "https://www.youtube.com/oembed": () => json({ title: "Big Buck Bunny" }),
+      "https://i.ytimg.com/": () => image(JPEG),
+    });
+    const result = await check("https://www.youtube.com/watch?v=aqz-KE-bpKQ");
+    expect(result).toMatchObject({ ok: true, duplicate: null });
   });
 });
 

@@ -6,7 +6,7 @@ import { Button } from "~/components/ui/button";
 import { TextArea, TextField } from "~/components/ui/field";
 import { Notice } from "~/components/ui/states";
 import { RepliesField } from "~/components/replies-field";
-import { editablePost, editPost, setPostReplies } from "~/lib/db/authoring.server";
+import { editablePost, editPost, setCommentsClosed, setPostReplies } from "~/lib/db/authoring.server";
 import { linkMentions, mentionHosts, unlinkMentions } from "~/lib/db/mentions.server";
 import { postPath } from "~/lib/slug";
 import { formatWait } from "~/lib/format";
@@ -26,7 +26,7 @@ import {
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { requireAccount, requireParticipant } from "~/lib/viewer.server";
 import { privatePageMeta } from "~/lib/meta";
-import { parsePostReplies, POST_REPLIES, type PostReplies } from "~/lib/replies";
+import { parsePostChoice, POST_CHOICES, type PostChoice } from "~/lib/replies";
 
 import type { Route } from "./+types/post-edit";
 
@@ -77,10 +77,19 @@ export async function action({ params, request, context }: Route.ActionArgs) {
 
   const stored = await linkMentions(env.DB, description, mentionHosts(request));
   const result = await editPost(env.DB, { id: post.id, authorId: viewer.id, title, origin, description: stored, now });
-  // Who may comment changes at any time, with the plan.
-  const replies = parsePostReplies(form.get("replies"));
-  if (result.ok && viewer.entitled && replies && replies !== post.replies) {
-    await setPostReplies(env.DB, { id: post.id, authorId: viewer.id, replies, now });
+  // Who may comment, or closing comments, changes at any time with the
+  // plan; a closed discussion can always be opened again, plan or not.
+  const choice = parsePostChoice(form.get("replies"));
+  if (result.ok && viewer.entitled && choice) {
+    if (choice === "closed") {
+      if (!post.closed) await setCommentsClosed(env.DB, { id: post.id, authorId: viewer.id, closed: true, now });
+    } else {
+      if (post.closed) await setCommentsClosed(env.DB, { id: post.id, authorId: viewer.id, closed: false, now });
+      if (choice !== post.replies) await setPostReplies(env.DB, { id: post.id, authorId: viewer.id, replies: choice, now });
+    }
+  }
+  if (result.ok && form.get("reopen") === "yes" && post.closed) {
+    await setCommentsClosed(env.DB, { id: post.id, authorId: viewer.id, closed: false, now });
   }
   if (result.ok) throw redirect(postPath({ id: post.id, title }));
   return {
@@ -100,7 +109,7 @@ export default function EditPost({ loaderData, actionData }: Route.ComponentProp
   const [title, setTitle] = useState(post.title);
   const [description, setDescription] = useState(post.description);
   const [origin, setOrigin] = useState<Origin>(post.origin);
-  const [replies, setReplies] = useState<PostReplies>(post.replies);
+  const [replies, setReplies] = useState<PostChoice>(post.closed ? "closed" : post.replies);
   const errors: FieldErrors = actionData && "errors" in actionData ? actionData.errors : {};
   const message = actionData && "message" in actionData ? actionData.message : undefined;
 
@@ -166,14 +175,22 @@ export default function EditPost({ loaderData, actionData }: Route.ComponentProp
             </p>
           ) : null}
         </fieldset>
-        <RepliesField
-          name="replies"
-          label="Who can comment"
-          options={POST_REPLIES}
-          value={replies}
-          onChange={setReplies}
-          entitled={entitled}
-        />
+        {!entitled && post.closed ? (
+          // Closed with the plan, it stays closed after; opening needs no plan.
+          <label className="flex items-start gap-2.5 text-body">
+            <input type="checkbox" name="reopen" value="yes" className="mt-1 size-4 shrink-0 accent-(--accent)" />
+            <span>Its comments are closed. Open them again to everyone.</span>
+          </label>
+        ) : (
+          <RepliesField
+            name="replies"
+            label="Who can comment"
+            options={POST_CHOICES}
+            value={replies}
+            onChange={setReplies}
+            entitled={entitled}
+          />
+        )}
 
         <div className="flex items-center justify-end gap-2">
           <Button variant="ghost" asChild>

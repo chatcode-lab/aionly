@@ -59,12 +59,48 @@ test("a link is checked, previewed, published, and then the day's allowance show
 test("an already posted link points to the post instead", async ({ page, context, account }) => {
   await account.signIn(context);
   await open(page, "/submit");
-  await page.getByLabel("Link").fill("https://youtu.be/aqz-KE-bpKQ?si=share");
+  // Someone's own work from two weeks ago.
+  await page.getByLabel("Link").fill("https://example.com/gallery?utm_source=share");
   await page.getByRole("button", { name: "Check link" }).click();
   const notice = page.getByRole("status").filter({ hasText: "Already posted." });
   await expect(notice).toBeVisible();
-  await expect(notice.getByRole("link", { name: "See the post" })).toHaveAttribute("href", "/p/s_post_01");
+  await expect(notice.getByRole("link", { name: "See the post" })).toHaveAttribute("href", "/p/s_post_14");
   await expect(page.getByRole("button", { name: "Publish" })).toBeDisabled();
+});
+
+test("a discovery posted again as one is refused with no hint, and its maker may post it", async ({ page, context, account, otherAccount }) => {
+  // Someone shares the link first, as a discovery.
+  const link = linkFor(account, "shared-work");
+  await account.signIn(context);
+  await open(page, "/submit");
+  await checkLink(page, link);
+  await fillPost(page, `E2E discovery by ${account.username}`);
+  await page.getByRole("button", { name: "Publish" }).click();
+  await expect(page).toHaveURL(/\/p\/[0-9a-z]{7}\/e2e-discovery-by-/);
+  const first = new URL(page.url()).pathname.split("/")[2];
+
+  // Someone else, in the same browser, finds it passes the check...
+  await otherAccount.signIn(context);
+  await open(page, "/submit");
+  await checkLink(page, link);
+  await fillPost(page, `E2E repost by ${otherAccount.username}`);
+  await page.getByRole("button", { name: "Publish" }).click();
+  // ...and refused on publishing it as a discovery, saying nothing of making it.
+  const notice = page.getByRole("status").filter({ hasText: "Already posted." });
+  await expect(notice).toBeVisible();
+  await expect(notice.getByRole("link", { name: "See the post" })).toHaveAttribute("href", `/p/${first}`);
+  await expect(notice).not.toContainText(/made|own work|creator/i);
+  await expect(page.getByRole("button", { name: "Publish" })).toBeDisabled();
+
+  // As its maker, saying so, they post it as their own work; the draft and its check come back.
+  await open(page, "/submit");
+  await expect(page.getByRole("button", { name: "Checked" })).toBeVisible();
+  await page.getByLabel("I made this").check();
+  await page.getByLabel(/made with AI or about AI/).check();
+  await expect(page.getByText("Turnstile stand-in")).toBeVisible();
+  await page.getByRole("button", { name: "Publish" }).click();
+  await expect(page).toHaveURL(/\/p\/[0-9a-z]{7}\/e2e-repost-by-/);
+  await expect(page.locator("article").first()).toContainText("Original");
 });
 
 test("a link that cannot be posted says why", async ({ page, context, account }) => {

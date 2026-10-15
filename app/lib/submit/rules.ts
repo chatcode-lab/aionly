@@ -30,6 +30,9 @@ export function nextTier(karma: number): { karma: number; postsPerDay: number } 
 /** The title and "made" or "found" can be changed this long after posting. */
 export const TITLE_EDIT_SECONDS = 3600;
 
+/** A link may be posted again this long after it last was. */
+export const REPOST_SECONDS = 30 * 24 * 3600;
+
 /** Characters as people count them, so an emoji is one. */
 export function length(text: string): number {
   return [...text].length;

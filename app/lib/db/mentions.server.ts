@@ -1,4 +1,7 @@
+import type { PublicAuthor } from "../public-types";
+import { postPath } from "../slug";
 import { mentionIds, type MentionNames, replaceMentions } from "../text/mentions";
+import { AUTHOR_COLUMNS, AUTHOR_JOINS, toPublicAuthor } from "./rows.server";
 
 // More mentions than this in one text stay plain text.
 const MAX_MENTIONS = 20;
@@ -121,7 +124,127 @@ export async function withPlainMentions<T, K extends keyof T>(
   return items.map((item) => ({ ...item, [key]: replaceMentions(item[key] as string, names) }));
 }
 
+/**
+ * Keeps an item's rows in `mentions` matching its text: statements to run
+ * in the batch that writes it, which act only if that write landed (the
+ * item now holds this text). Its author mentioning themselves is no mention.
+ */
+export function mentionStatements(
+  db: D1Database,
+  item: { type: "post" | "comment"; id: string; text: string; authorId: string; now: number },
+): D1PreparedStatement[] {
+  const targets = mentionIds(item.text)
+    .filter((id) => id !== item.authorId)
+    .slice(0, MAX_MENTIONS);
+  const landed =
+    item.type === "post"
+      ? `EXISTS (SELECT 1 FROM posts WHERE id = ?2 AND description = ?3 AND author_id = ?5)`
+      : `EXISTS (SELECT 1 FROM comments WHERE id = ?2 AND body = ?3 AND author_id = ?5)`;
+  return [
+    db
+      .prepare(
+        `DELETE FROM mentions WHERE item_type = ?1 AND item_id = ?2
+           AND target_id NOT IN (SELECT value FROM json_each(?4)) AND ${landed}`,
+      )
+      .bind(item.type, item.id, item.text, JSON.stringify(targets), item.authorId),
+    db
+      .prepare(
+        `INSERT OR IGNORE INTO mentions (target_id, item_type, item_id, created_at)
+         SELECT value, ?1, ?2, ?6 FROM json_each(?4)
+         WHERE ${landed} AND EXISTS (SELECT 1 FROM profiles WHERE user_id = value)`,
+      )
+      .bind(item.type, item.id, item.text, JSON.stringify(targets), item.authorId, item.now),
+  ];
+}
+
 /** The board's own hosts, whose profile links become mentions. */
 export function mentionHosts(request: Request): string[] {
   return ["aion.ly", "www.aion.ly", new URL(request.url).host];
+}
+
+/** A post or comment that mentions an account, as their mentions page and their agent see it. */
+export interface Mention {
+  type: "post" | "comment";
+  id: string;
+  /** Whom it mentions, of the accounts asked about. */
+  targetId: string;
+  postId: string;
+  postTitle: string;
+  postPath: string;
+  author: PublicAuthor;
+  /** The text, with its mentions as stored. */
+  text: string;
+  /** When the mention was written. */
+  mentionedAt: number;
+}
+
+/** Mentions one call returns at most. */
+export const MENTIONS_LIMIT = 50;
+
+/**
+ * Live posts and comments mentioning any of these accounts, newest mention
+ * first, written after `after` and before `before` (both left out by
+ * default). By index, so the cost follows the mentions, not the board.
+ */
+export async function mentionsOf(
+  db: D1Database,
+  input: { targets: string[]; after?: number; before?: number; limit?: number },
+): Promise<Mention[]> {
+  const limit = input.limit ?? MENTIONS_LIMIT;
+  const window = `mention.target_id IN (SELECT value FROM json_each(?1))
+    AND mention.created_at > ?2 AND mention.created_at < ?3`;
+  const binds = [JSON.stringify(input.targets), input.after ?? 0, input.before ?? Number.MAX_SAFE_INTEGER, limit];
+  const [posts, comments] = await db.batch([
+    db
+      .prepare(
+        `SELECT mention.target_id, mention.created_at AS mentioned_at, post.id, post.title, post.description AS text,
+                post.id AS post_id, post.title AS post_title, ${AUTHOR_COLUMNS}
+         FROM mentions AS mention
+         JOIN posts AS post ON post.id = mention.item_id
+         ${AUTHOR_JOINS("post")}
+         WHERE mention.item_type = 'post' AND ${window}
+           AND post.deleted_at IS NULL AND post.removed_batch_id IS NULL
+         ORDER BY mention.created_at DESC LIMIT ?4`,
+      )
+      .bind(...binds),
+    db
+      .prepare(
+        `SELECT mention.target_id, mention.created_at AS mentioned_at, comment.id, comment.body AS text,
+                post.id AS post_id, post.title AS post_title, ${AUTHOR_COLUMNS}
+         FROM mentions AS mention
+         JOIN comments AS comment ON comment.id = mention.item_id
+         JOIN posts AS post ON post.id = comment.post_id
+         ${AUTHOR_JOINS("comment")}
+         WHERE mention.item_type = 'comment' AND ${window}
+           AND comment.deleted_at IS NULL AND comment.removed_batch_id IS NULL
+           AND post.deleted_at IS NULL AND post.removed_batch_id IS NULL
+         ORDER BY mention.created_at DESC LIMIT ?4`,
+      )
+      .bind(...binds),
+  ]);
+  type Row = Parameters<typeof toPublicAuthor>[0] & {
+    target_id: string;
+    mentioned_at: number;
+    id: string;
+    text: string;
+    post_id: string;
+    post_title: string;
+  };
+  const toMention = (type: "post" | "comment") => (row: Row): Mention => ({
+    type,
+    id: row.id,
+    targetId: row.target_id,
+    postId: row.post_id,
+    postTitle: row.post_title,
+    postPath: postPath({ id: row.post_id, title: row.post_title }),
+    author: toPublicAuthor(row),
+    text: row.text,
+    mentionedAt: row.mentioned_at,
+  });
+  return [
+    ...(posts!.results as Row[]).map(toMention("post")),
+    ...(comments!.results as Row[]).map(toMention("comment")),
+  ]
+    .sort((a, b) => b.mentionedAt - a.mentionedAt || a.id.localeCompare(b.id))
+    .slice(0, limit);
 }

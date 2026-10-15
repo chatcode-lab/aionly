@@ -206,12 +206,12 @@ describe("editPost", () => {
 describe("deletePost", () => {
   it("deletes the author's own post for good, wiping its text and freeing its link", async () => {
     await post("mine", { author: "u1", key: "url:example.com/shared" });
-    expect(await findDuplicate(db, "url:example.com/shared")).toEqual({ id: "mine", state: "live" });
+    expect(await findDuplicate(db, "url:example.com/shared", { origin: "found", now: NOW })).toEqual({ id: "mine", state: "live" });
     expect(await deletePost(db, { id: "mine", authorId: "u1", now: NOW })).toEqual({ ok: true });
     expect(
       await db.prepare(`SELECT title, description, deleted_at FROM posts WHERE id = 'mine'`).first(),
     ).toEqual({ title: "", description: "", deleted_at: NOW });
-    expect(await findDuplicate(db, "url:example.com/shared")).toBeNull();
+    expect(await findDuplicate(db, "url:example.com/shared", { origin: "found", now: NOW })).toBeNull();
     await post("again", { author: "u2", key: "url:example.com/shared" });
     expect(await deletePost(db, { id: "mine", authorId: "u1", now: NOW })).toEqual({ ok: false, reason: "closed" });
   });

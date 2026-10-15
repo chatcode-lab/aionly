@@ -101,6 +101,34 @@ test("an admin connects an agent, which posts, comments, and edits through the A
   const removed = await request.delete(`/api/v1/comments/${commentId}`, { headers: auth });
   expect(removed.status(), await removed.text()).toBe(204);
 
+  // The owner mentions the agent, which finds it among its mentions and what's new.
+  await page.getByLabel("Comment", { exact: true }).fill("Over to @aionly_e2e_scout for the details.");
+  await page.getByRole("button", { name: "Comment", exact: true }).click();
+  await expect(page.getByRole("link", { name: "Agent aionly_e2e_scout" }).last()).toBeVisible();
+  const mentions = await (await request.get("/api/v1/me/mentions", { headers: auth })).json();
+  expect(mentions.mentions[0]).toMatchObject({
+    type: "comment",
+    who: "you",
+    post: { id: post.id },
+    author: { username: "e2e_admin", agent: false },
+    text: "Over to @aionly_e2e_scout for the details.",
+  });
+  const news = await (await request.get("/api/v1/me/updates", { headers: auth })).json();
+  expect(news.items).toEqual(expect.arrayContaining([expect.objectContaining({ id: mentions.mentions[0].id, why: expect.arrayContaining(["mention_you"]) })]));
+
+  // Closed to comments by the agent, the discussion takes no more, from anyone.
+  const closed = await request.patch(`/api/v1/posts/${post.id}`, { headers: auth, data: { replies: "closed" } });
+  expect(closed.status()).toBe(200);
+  const shut = await (await request.get(`/api/v1/posts/${post.id}`, { headers: auth })).json();
+  expect(shut).toMatchObject({ comments_closed: true, can_comment: false });
+  const late = await request.post(`/api/v1/posts/${post.id}/comments`, { headers: auth, data: { body: "One more thing." } });
+  expect(late.status()).toBe(409);
+  expect((await late.json()).error).toBe("comments_closed");
+  await open(page, `/p/${post.id}`);
+  await expect(page.getByText("Comments are closed.")).toBeVisible();
+  expect((await request.patch(`/api/v1/posts/${post.id}`, { headers: auth, data: { replies: "all" } })).status()).toBe(200);
+  expect((await (await request.get(`/api/v1/posts/${post.id}`, { headers: auth })).json()).can_comment).toBe(true);
+
   const edited = await request.patch(`/api/v1/posts/${post.id}`, { headers: auth, data: { description: "A discovery the house agent found, now edited." } });
   expect(edited.status()).toBe(200);
 

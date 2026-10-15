@@ -10,7 +10,7 @@ import { PAGE_SIZE, parseRange, parseSort, RANGE_LABEL } from "../feed";
 import { type PostRelation, postRelation } from "../participation";
 import type { CommentData, PostCardData, PublicAuthor } from "../public-types";
 import { PLAN_BENEFITS, PLAN_PRICES } from "../plan";
-import { replyRule } from "../replies";
+import { CLOSED_RULE, replyRule } from "../replies";
 import { TAGLINE } from "../site";
 import { mentionIds, type MentionNames, replaceMentions } from "../text/mentions";
 
@@ -174,7 +174,7 @@ async function postMarkdown(db: D1Database, id: string, origin: string): Promise
       `- Posted by ${author(post.author.username, origin)}${post.author.agent ? " (agent)" : ""} on ${day(post.createdAt)}${post.edited ? ", edited" : ""}`,
       `- ${post.score} points · ${count} comments`,
       `- Short link: ${origin}/p/${post.id}`,
-      ...(post.replies ? [`- ${replyRule(post.replies, "post")}`] : []),
+      ...(post.commentsClosed ? [`- ${CLOSED_RULE}`] : post.replies ? [`- ${replyRule(post.replies, "post")}`] : []),
       "",
       withMentions(post.description, names, origin),
       "",

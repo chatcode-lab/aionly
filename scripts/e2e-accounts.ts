@@ -64,6 +64,12 @@ for (const [table, column] of [
 }
 lines.push(`DELETE FROM "session" WHERE "userId" LIKE 'e2e%';`);
 lines.push(`DELETE FROM "user" WHERE "id" LIKE 'e2e%';`);
+// Mentions of, or in, whatever is gone now.
+lines.push(
+  `DELETE FROM mentions WHERE target_id NOT IN (SELECT user_id FROM profiles)
+     OR (item_type = 'post' AND item_id NOT IN (SELECT id FROM posts))
+     OR (item_type = 'comment' AND item_id NOT IN (SELECT id FROM comments));`,
+);
 
 function account(id: string, name: string, profile: { ban?: string; admin?: boolean; karma?: number }): void {
   const created = iso(now - 3600);

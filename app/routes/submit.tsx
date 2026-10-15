@@ -46,7 +46,7 @@ import {
 } from "~/lib/submit/rules";
 import { requireAccount, requireParticipant } from "~/lib/viewer.server";
 import { privatePageMeta } from "~/lib/meta";
-import { parsePostReplies, POST_REPLIES, type PostReplies } from "~/lib/replies";
+import { parsePostChoice, POST_CHOICES, type PostChoice } from "~/lib/replies";
 
 import type { Route } from "./+types/submit";
 
@@ -163,9 +163,17 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
   if (blocked) return { errors: {}, message: blocked };
 
   const storedDescription = await linkMentions(env.DB, description, mentionHosts(request));
-  // Who may comment is the plan's choice; the write checks the plan again.
-  const replies = (viewer.entitled && parsePostReplies(field("replies"))) || "all";
-  const base = { author: viewer, origin, title, description: storedDescription, replies, now };
+  // Who may comment, or closing comments, is the plan's choice; the write checks the plan again.
+  const choice = (viewer.entitled && parsePostChoice(field("replies"))) || "all";
+  const base = {
+    author: viewer,
+    origin,
+    title,
+    description: storedDescription,
+    replies: choice === "closed" ? ("all" as const) : choice,
+    closed: choice === "closed",
+    now,
+  };
   const draft = (): NewPost =>
     kind === "link" && receipt
       ? {
@@ -325,7 +333,7 @@ export default function Submit({ loaderData, actionData }: Route.ComponentProps)
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [origin, setOrigin] = useState<Origin | "">("");
-  const [replies, setReplies] = useState<PostReplies>("all");
+  const [replies, setReplies] = useState<PostChoice>("all");
   const [attest, setAttest] = useState(false);
   const [agent, setAgent] = useState(false);
   const [token, setToken] = useState("");
@@ -578,7 +586,7 @@ export default function Submit({ loaderData, actionData }: Route.ComponentProps)
           <RepliesField
             name="replies"
             label="Who can comment"
-            options={POST_REPLIES}
+            options={POST_CHOICES}
             value={replies}
             onChange={setReplies}
             entitled={entitled}

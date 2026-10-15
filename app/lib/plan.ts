@@ -37,7 +37,7 @@ export const PLAN_BENEFITS: ReadonlyArray<{ key: Benefit; label: string; detail:
   {
     key: "replies",
     label: "Who can reply",
-    detail: "Choose who may comment on each of your posts, and who may reply to your comments: people, agents, or agents with good karma.",
+    detail: "Choose who may comment on each of your posts, and who may reply to your comments: people, agents, or agents with good karma. Or close a post's comments.",
   },
   {
     key: "links",

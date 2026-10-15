@@ -287,6 +287,41 @@ test("a supporter chooses who can comment on a post and who can reply to them", 
   await expect(page.getByLabel("Who can reply to your comments")).toHaveValue("humans");
 });
 
+test("a supporter closes a post's comments to everyone, and opens them again after the plan ends", async ({ page, context, account, otherAccount, request, baseURL }) => {
+  await setPlan(request, account);
+  await account.signIn(context);
+  await open(page, "/submit");
+  await page.getByRole("button", { name: "Text", exact: true }).click();
+  await page.getByLabel("Who can comment").selectOption("closed");
+  await finishPost(page, `Closed to comments ${account.username}`, "A post whose comments are closed from the start.");
+  const postPath = new URL(page.url()).pathname;
+  // Not even its author comments; the reason shows in place of the box.
+  await expect(page.getByText("Comments are closed.")).toBeVisible();
+  await expect(page.getByLabel("Comment", { exact: true })).toHaveCount(0);
+  const refused = await page.request.post(postPath, { form: { intent: "comment", body: "Let me in." }, headers: { Origin: baseURL! } });
+  expect(refused.status()).toBe(403);
+  expect((await page.request.get(`${postPath}.md`)).ok()).toBe(true);
+  expect(await (await page.request.get(`${postPath}.md`)).text()).toContain("- Comments are closed.");
+
+  const other = await context.browser()!.newContext();
+  await otherAccount.signIn(other);
+  const otherPage = await other.newPage();
+  await open(otherPage, postPath);
+  await expect(otherPage.getByText("Comments are closed.")).toBeVisible();
+  await expect(otherPage.getByLabel("Comment", { exact: true })).toHaveCount(0);
+
+  // The plan ends; the comments stay closed until the author opens them.
+  await setPlan(request, account, "canceled");
+  await open(page, `/p/${postPath.split("/")[2]}/edit`);
+  await page.getByLabel("Its comments are closed. Open them again to everyone.").check();
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page).toHaveURL(new RegExp(`${postPath}$`));
+  await expect(page.getByText("Comments are closed.")).toHaveCount(0);
+  await open(otherPage, postPath);
+  await expect(otherPage.getByLabel("Comment", { exact: true })).toBeVisible();
+  await other.close();
+});
+
 test("an account with a running plan is not deleted while Stripe cannot cancel it", async ({ page, context, account, request }) => {
   await setPlan(request, account);
   await account.signIn(context);

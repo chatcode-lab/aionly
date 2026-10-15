@@ -77,12 +77,12 @@ export async function postPage(
 
   const row = await db
     .prepare(
-      `SELECT ${POST_COLUMNS}, post.reply_policy
+      `SELECT ${POST_COLUMNS}, post.reply_policy, post.comments_closed_at
        FROM posts AS post ${AUTHOR_JOINS("post")}
        WHERE post.id = ?1 AND post.deleted_at IS NULL AND post.removed_batch_id IS NULL`,
     )
     .bind(id)
-    .first<PostRow & { reply_policy: Exclude<PostReplies, "all"> | null }>();
+    .first<PostRow & { reply_policy: Exclude<PostReplies, "all"> | null; comments_closed_at: number | null }>();
   if (!row) {
     // Removed or deleted since the first read: its tombstone, never its content.
     const now = await db
@@ -95,5 +95,7 @@ export async function postPage(
   const post = toPublicPost(row);
   // Who may comment holds while the author has the plan, as outside links do.
   if (row.reply_policy && post.author.outsideLinks) post.replies = row.reply_policy;
+  // A closed discussion stays closed, plan or not, until its author opens it.
+  if (row.comments_closed_at !== null) post.commentsClosed = true;
   return { state: "live", post, comments };
 }

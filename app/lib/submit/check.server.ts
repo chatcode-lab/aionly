@@ -7,6 +7,7 @@ import { mediaUrl, resolveLink } from "../links/resolve";
 import type { Aspect, MediaLink, PageLink, Provider, UrlRejection } from "../links/types";
 import { cleanPageUrl, displayHost, isSamePage, parseSubmittedUrl } from "../links/url";
 import { RECEIPT_SECONDS, signReceipt } from "./receipt.server";
+import type { Origin } from "./rules";
 
 const REJECTION: Record<UrlRejection, string> = {
   empty: "Paste a link first.",
@@ -61,6 +62,11 @@ export async function checkLink(input: {
   secret: string;
   now: number;
   /**
+   * The post's origin when known up front, as through the API; on the site
+   * it is chosen after the check, so only what blocks either origin shows.
+   */
+  origin?: Origin | null;
+  /**
    * False to stop after the repeat check, fetching nothing from the page:
    * for a poster with no allowance left, who still learns of a repeat.
    */
@@ -93,7 +99,8 @@ export async function checkLink(input: {
   // given, without tracking or a fragment.
   let address = resolved.kind === "page" ? cleanPageUrl(url) : mediaUrl(resolved, url);
 
-  let duplicate = await findDuplicate(input.db, resolved.canonicalKey);
+  const repeat = { origin: input.origin ?? null, now: input.now };
+  let duplicate = await findDuplicate(input.db, resolved.canonicalKey, repeat);
   const base: CheckedLink = {
     url: address,
     host: displayHost(new URL(address)),
@@ -118,7 +125,7 @@ export async function checkLink(input: {
     if (declared.kind === "page" && declared.canonicalKey !== resolved.canonicalKey) {
       resolved = declared;
       address = cleanPageUrl(meta.canonical);
-      duplicate = await findDuplicate(input.db, resolved.canonicalKey);
+      duplicate = await findDuplicate(input.db, resolved.canonicalKey, repeat);
       if (duplicate) {
         return { ok: true, link: { ...base, url: address, host: displayHost(new URL(address)) }, duplicate, receipt: null };
       }

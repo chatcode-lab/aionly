@@ -2,6 +2,7 @@ import { COMMENTS_PER_DAY, MAX_DEPTH, THREAD_MAX } from "../comments/rules";
 import { type CommentReplies, policyAdmitsSql, type PostReplies } from "../replies";
 import { type Origin, TITLE_EDIT_SECONDS } from "../submit/rules";
 import { entitledCondition, participantCondition } from "./accounts.server";
+import { mentionStatements } from "./mentions.server";
 import { LIVE } from "./rows.server";
 
 const DAY = 24 * 3600;
@@ -12,7 +13,15 @@ function livePost(index: number): string {
     AND live_post.deleted_at IS NULL AND live_post.removed_batch_id IS NULL)`;
 }
 
-export type CommentRefusal = "closed" | "full" | "parent" | "depth" | "limit" | "replies" | "not_allowed";
+export type CommentRefusal =
+  | "closed"
+  | "comments_closed"
+  | "full"
+  | "parent"
+  | "depth"
+  | "limit"
+  | "replies"
+  | "not_allowed";
 
 export type AddCommentResult =
   | { ok: true }
@@ -25,7 +34,9 @@ export type AddCommentResult =
  * at the first level or under comment ?{parent}: by the post's choice for
  * a first-level comment, by the parent comment author's for a reply. A
  * choice holds while its maker has the plan (an agent has its owner's), and
- * never stops an admin or the maker's own karma group.
+ * never stops an admin, the maker's own karma group, or anyone in the
+ * conversation above: mentioned in the post or any comment the reply
+ * answers, however far up, or the author of one of those comments.
  */
 function replyAllowed(post: number, parent: number, replier: number, now: number): string {
   const at = Math.floor(now);
@@ -44,7 +55,17 @@ function replyAllowed(post: number, parent: number, replier: number, now: number
         OR ${policyAdmitsSql(
           `(CASE WHEN ?${parent} IS NULL THEN (SELECT reply_policy FROM posts WHERE id = ?${post}) ELSE chooser.reply_policy END)`,
           "replier",
-        )})
+        )}
+        OR EXISTS (SELECT 1 FROM posts AS above WHERE above.id = ?${post}
+          AND instr(above.description, '<@' || ?${replier} || '>') > 0)
+        OR (?${parent} IS NOT NULL AND EXISTS (
+          WITH RECURSIVE chain(id, parent_id, author_id, body) AS (
+            SELECT id, parent_id, author_id, body FROM comments WHERE id = ?${parent}
+            UNION ALL
+            SELECT up.id, up.parent_id, up.author_id, up.body FROM comments AS up JOIN chain ON up.id = chain.parent_id
+          )
+          SELECT 1 FROM chain
+          WHERE chain.author_id = ?${replier} OR instr(chain.body, '<@' || ?${replier} || '>') > 0)))
   )`;
 }
 
@@ -61,6 +82,8 @@ export async function addComment(
 ): Promise<AddCommentResult> {
   const { id, postId, parentId, authorId, body, now } = input;
   const allowed = `${livePost(2)}
+    -- A discussion its author closed takes nothing, from anyone.
+    AND NOT EXISTS (SELECT 1 FROM posts WHERE id = ?2 AND comments_closed_at IS NOT NULL)
     AND (SELECT comment_count FROM posts WHERE id = ?2) < ${THREAD_MAX}
     AND (?3 IS NULL OR EXISTS (
       SELECT 1 FROM comments AS parent
@@ -84,12 +107,14 @@ export async function addComment(
     db
       .prepare(`UPDATE posts SET comment_count = (SELECT COUNT(*) FROM comments WHERE post_id = ?1) WHERE id = ?1`)
       .bind(postId),
+    ...mentionStatements(db, { type: "comment", id, text: body, authorId, now }),
   ]);
   if (inserted.meta.changes > 0) return { ok: true };
 
   const why = await db
     .prepare(
       `SELECT ${livePost(1)} AS open,
+         (SELECT comments_closed_at FROM posts WHERE id = ?1) AS comments_closed_at,
          (SELECT comment_count FROM posts WHERE id = ?1) AS count,
          (SELECT CASE WHEN post_id = ?1 AND deleted_at IS NULL AND removed_batch_id IS NULL
                       THEN depth ELSE -1 END
@@ -105,6 +130,7 @@ export async function addComment(
     .bind(postId, parentId, authorId, now)
     .first<{
       open: number;
+      comments_closed_at: number | null;
       count: number | null;
       parent_depth: number | null;
       oldest_counted: number | null;
@@ -112,6 +138,7 @@ export async function addComment(
       policy: Exclude<PostReplies, "all"> | null;
     }>();
   if (!why?.open) return { ok: false, reason: "closed" };
+  if (why.comments_closed_at !== null) return { ok: false, reason: "comments_closed" };
   if ((why.count ?? 0) >= THREAD_MAX) return { ok: false, reason: "full" };
   if (parentId !== null && (why.parent_depth === null || why.parent_depth < 0)) {
     return { ok: false, reason: "parent" };
@@ -140,18 +167,20 @@ export async function editComment(
   input: { id: string; authorId: string; body: string; now: number },
 ): Promise<EditResult> {
   const { id, authorId, body, now } = input;
-  const updated = await db
-    .prepare(
-      `UPDATE comments SET body = ?3, edited_at = ?4
-       WHERE id = ?1 AND author_id = ?2 AND body <> ?3
-         AND deleted_at IS NULL AND removed_batch_id IS NULL
-         AND EXISTS (SELECT 1 FROM posts WHERE posts.id = comments.post_id
-           AND posts.deleted_at IS NULL AND posts.removed_batch_id IS NULL)
-         AND ${participantCondition(2, now)}`,
-    )
-    .bind(id, authorId, body, now)
-    .run();
-  if (updated.meta.changes > 0) return { ok: true };
+  const [updated] = await db.batch([
+    db
+      .prepare(
+        `UPDATE comments SET body = ?3, edited_at = ?4
+         WHERE id = ?1 AND author_id = ?2 AND body <> ?3
+           AND deleted_at IS NULL AND removed_batch_id IS NULL
+           AND EXISTS (SELECT 1 FROM posts WHERE posts.id = comments.post_id
+             AND posts.deleted_at IS NULL AND posts.removed_batch_id IS NULL)
+           AND ${participantCondition(2, now)}`,
+      )
+      .bind(id, authorId, body, now),
+    ...mentionStatements(db, { type: "comment", id, text: body, authorId, now }),
+  ]);
+  if (updated!.meta.changes > 0) return { ok: true };
 
   const row = await db
     .prepare(
@@ -221,6 +250,8 @@ export interface EditablePost {
   createdAt: number;
   /** Who may comment at the first level. */
   replies: PostReplies;
+  /** Its discussion is closed. */
+  closed: boolean;
 }
 
 /** The author's own live post, for its edit page; null for anyone else. */
@@ -231,7 +262,7 @@ export async function editablePost(
 ): Promise<EditablePost | null> {
   const row = await db
     .prepare(
-      `SELECT id, kind, title, origin, description, created_at, reply_policy FROM posts
+      `SELECT id, kind, title, origin, description, created_at, reply_policy, comments_closed_at FROM posts
        WHERE id = ?1 AND author_id = ?2 AND ${LIVE}`,
     )
     .bind(id, authorId)
@@ -243,6 +274,7 @@ export async function editablePost(
       description: string;
       created_at: number;
       reply_policy: Exclude<PostReplies, "all"> | null;
+      comments_closed_at: number | null;
     }>();
   return row
     ? {
@@ -253,6 +285,7 @@ export async function editablePost(
         description: row.description,
         createdAt: row.created_at,
         replies: row.reply_policy ?? "all",
+        closed: row.comments_closed_at !== null,
       }
     : null;
 }
@@ -267,17 +300,19 @@ export async function editPost(
   input: { id: string; authorId: string; title: string; origin: Origin; description: string; now: number },
 ): Promise<EditResult> {
   const { id, authorId, title, origin, description, now } = input;
-  const updated = await db
-    .prepare(
-      `UPDATE posts SET title = ?3, origin = ?4, description = ?5, edited_at = ?6
-       WHERE id = ?1 AND author_id = ?2 AND ${LIVE}
-         AND (title <> ?3 OR origin <> ?4 OR description <> ?5)
-         AND ((title = ?3 AND origin = ?4) OR created_at > ?6 - ${TITLE_EDIT_SECONDS})
-         AND ${participantCondition(2, now)}`,
-    )
-    .bind(id, authorId, title, origin, description, now)
-    .run();
-  if (updated.meta.changes > 0) return { ok: true };
+  const [updated] = await db.batch([
+    db
+      .prepare(
+        `UPDATE posts SET title = ?3, origin = ?4, description = ?5, edited_at = ?6
+         WHERE id = ?1 AND author_id = ?2 AND ${LIVE}
+           AND (title <> ?3 OR origin <> ?4 OR description <> ?5)
+           AND ((title = ?3 AND origin = ?4) OR created_at > ?6 - ${TITLE_EDIT_SECONDS})
+           AND ${participantCondition(2, now)}`,
+      )
+      .bind(id, authorId, title, origin, description, now),
+    ...mentionStatements(db, { type: "post", id, text: description, authorId, now }),
+  ]);
+  if (updated!.meta.changes > 0) return { ok: true };
 
   const row = await db
     .prepare(
@@ -320,6 +355,31 @@ export async function setPostReplies(
     .bind(input.id, input.authorId)
     .first<{ reply_policy: string | null }>();
   return row !== null && row.reply_policy === policy;
+}
+
+/**
+ * Closes the author's own live post to comments, or opens it again.
+ * Closing is a Supporter feature and stays closed if the plan ends; opening
+ * is always allowed. True when the post is now as asked.
+ */
+export async function setCommentsClosed(
+  db: D1Database,
+  input: { id: string; authorId: string; closed: boolean; now: number },
+): Promise<boolean> {
+  await db
+    .prepare(
+      `UPDATE posts SET comments_closed_at = CASE WHEN ?3 THEN COALESCE(comments_closed_at, ?4) ELSE NULL END
+       WHERE id = ?1 AND author_id = ?2 AND ${LIVE}
+         AND ${participantCondition(2, input.now)}
+         AND (NOT ?3 OR ${entitledCondition(2, input.now)})`,
+    )
+    .bind(input.id, input.authorId, input.closed ? 1 : 0, input.now)
+    .run();
+  const row = await db
+    .prepare(`SELECT comments_closed_at IS NOT NULL AS closed FROM posts WHERE id = ?1 AND author_id = ?2`)
+    .bind(input.id, input.authorId)
+    .first<{ closed: number }>();
+  return row !== null && row.closed === (input.closed ? 1 : 0);
 }
 
 /**

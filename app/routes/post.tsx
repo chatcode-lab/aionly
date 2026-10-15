@@ -34,7 +34,7 @@ import { viewerOf } from "~/lib/viewer.server";
 import { clip, pageMeta, privatePageMeta } from "~/lib/meta";
 import { postCoverVersion } from "~/lib/og/version";
 import type { PostDetail, ViewerSummary } from "~/lib/public-types";
-import { mayReply, replyRule } from "~/lib/replies";
+import { CLOSED_RULE, mayReply, replyRule } from "~/lib/replies";
 
 import type { Route } from "./+types/post";
 
@@ -84,6 +84,7 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
 
 const COMMENT_REFUSAL: Record<Exclude<CommentRefusal, "limit" | "replies">, string> = {
   closed: "This discussion is closed.",
+  comments_closed: CLOSED_RULE,
   full: `This discussion has reached ${THREAD_MAX} comments, the most one holds for now.`,
   parent: "That comment is no longer here to reply to.",
   depth: "Replies go no deeper here. Reply further up the thread.",
@@ -237,13 +238,17 @@ export function meta({ loaderData, matches, location }: Route.MetaArgs) {
 /**
  * Who the author lets comment on the post, in words, and whether that lets
  * this viewer in. People on the site are never agents; the author, their
- * agent or owner, and admins may always comment.
+ * agent or owner, admins, and anyone the post mentions may always comment.
  */
 function commentRule(post: PostDetail, viewer: ViewerSummary | null): { text: string; open: boolean } | undefined {
   const text = post.replies ? replyRule(post.replies, "post") : null;
   if (!post.replies || !text) return undefined;
   const exempt =
-    viewer !== null && (viewer.role === "admin" || viewer.id === post.author.id || post.author.ownerId === viewer.id);
+    viewer !== null &&
+    (viewer.role === "admin" ||
+      viewer.id === post.author.id ||
+      post.author.ownerId === viewer.id ||
+      post.description.includes(`<@${viewer.id}>`));
   return { text, open: exempt || mayReply(post.replies, { agent: false, karma: viewer?.karma ?? 0 }) };
 }
 
@@ -341,7 +346,9 @@ export default function Post({ loaderData }: Route.ComponentProps) {
               ? "No comments yet"
               : `${total} ${total === 1 ? "comment" : "comments"}`}
           </h2>
-          {live && total >= THREAD_MAX ? (
+          {live && loaderData.post.commentsClosed ? (
+            <p className="text-meta text-text-muted">{CLOSED_RULE}</p>
+          ) : live && total >= THREAD_MAX ? (
             <p className="text-meta text-text-muted">{COMMENT_REFUSAL.full}</p>
           ) : live ? (
             <CommentBox postId={postId} rule={commentRule(loaderData.post, participation.viewer)} />
@@ -364,14 +371,19 @@ export default function Post({ loaderData }: Route.ComponentProps) {
                 onVote={(comment, next) =>
                   void participation.vote("comment", comment.id, comment.score, next)
                 }
-                onReply={(comment) => {
-                  if (!participation.viewer) {
-                    signIn({ title: "Sign in to reply" });
-                    return;
-                  }
-                  setEditing(null);
-                  setReplyingTo((current) => (current === comment.id ? null : comment.id));
-                }}
+                // A closed discussion offers no Reply; votes still count.
+                onReply={
+                  loaderData.state === "live" && loaderData.post.commentsClosed
+                    ? undefined
+                    : (comment) => {
+                        if (!participation.viewer) {
+                          signIn({ title: "Sign in to reply" });
+                          return;
+                        }
+                        setEditing(null);
+                        setReplyingTo((current) => (current === comment.id ? null : comment.id));
+                      }
+                }
                 renderMenu={(comment) =>
                   // Under a removed or deleted post, only an author's own
                   // comments keep a menu, for deleting them.

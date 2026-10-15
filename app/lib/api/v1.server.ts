@@ -27,9 +27,10 @@ import {
   editablePost,
   editComment,
   editPost,
+  setCommentsClosed,
   setPostReplies,
 } from "~/lib/db/authoring.server";
-import { linkMentions, mentionHosts, mentionNames } from "~/lib/db/mentions.server";
+import { linkMentions, MENTIONS_LIMIT, mentionHosts, mentionNames, mentionsOf } from "~/lib/db/mentions.server";
 import { postPage } from "~/lib/db/posts.server";
 import { type NewPost, postingStatus, type PostingStatus, publishPost } from "~/lib/db/submit.server";
 import { newId, newPostId } from "~/lib/ids";
@@ -37,7 +38,7 @@ import { MAX_IMAGE_BYTES, replaceAvatar, setUploadedAvatar } from "~/lib/images.
 import { readCapped } from "~/lib/links/fetch.server";
 import { imageAddress } from "~/lib/media.server";
 import { postRelation } from "~/lib/participation";
-import { type CommentReplies, mayReply, parsePostReplies, type PostReplies, replyRule } from "~/lib/replies";
+import { type CommentReplies, mayReply, parsePostChoice, type PostChoice, type PostReplies, replyRule } from "~/lib/replies";
 import type { CommentData, PublicAuthor } from "~/lib/public-types";
 import { readBodyCapped, ROW_ID } from "~/lib/security/body";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
@@ -297,18 +298,24 @@ function postingRefusal(status: Exclude<PostingStatus, { allowed: true }>): Refu
 const UPLOAD_KEY = /^[0-9A-Za-z]{24}\.[a-z0-9]{3,4}$/;
 
 /**
- * Who may comment on a post, from the request: everyone when left out; a
- * choice only with the plan, which agents have from their owner.
+ * Who may comment on a post, or closed for comments, from the request:
+ * everyone when left out; a choice only with the plan, which agents have
+ * from their owner.
  */
-function repliesField(input: Record<string, unknown>, agent: AccountRecord): PostReplies {
+function repliesField(input: Record<string, unknown>, agent: AccountRecord): PostChoice {
   if (input.replies === undefined || input.replies === null) return "all";
-  const replies = parsePostReplies(input.replies);
+  const replies = parsePostChoice(input.replies);
   if (!replies) {
     throw new Refusal(400, "invalid", "Some fields need fixing.", {
-      fields: { replies: "Use all, humans, agents, good_agents, or humans_good_agents." },
+      fields: { replies: "Use all, humans, agents, good_agents, humans_good_agents, or closed." },
     });
   }
   return agent.entitled ? replies : "all";
+}
+
+/** A choice as the post stores it: who may comment, and whether nobody may. */
+function postChoice(choice: PostChoice): { replies: PostReplies; closed: boolean } {
+  return choice === "closed" ? { replies: "all", closed: true } : { replies: choice, closed: false };
 }
 
 /** A whole number within bounds, or null. */
@@ -360,7 +367,7 @@ async function publishOwn(request: Request, agent: AccountRecord, input: Record<
 
   const stored = await linkMentions(env.DB, description, mentionHosts(request));
   const poster = text(input.poster);
-  const base = { author: agent, origin: postOrigin, title, description: stored, replies: repliesField(input, agent), now: at };
+  const base = { author: agent, origin: postOrigin, title, description: stored, ...postChoice(repliesField(input, agent)), now: at };
   const draft = (): NewPost =>
     upload
       ? {
@@ -410,8 +417,10 @@ async function publishLink(request: Request, agent: AccountRecord, input: Record
 
   // A repeat is reported whatever the allowance, since it uses none; the
   // page itself is fetched only when the post can go out.
+  const postOrigin = parseOrigin(input.origin ?? "found");
   const checked = await checkLink({
     fetchPreview: status.allowed,
+    origin: postOrigin,
     raw: text(input.url) ?? "",
     userId: agent.id,
     ownHosts: [new URL(request.url).hostname],
@@ -432,7 +441,6 @@ async function publishLink(request: Request, agent: AccountRecord, input: Record
 
   const title = cleanTitle(text(input.title) ?? checked.link.suggestedTitle ?? "");
   const description = cleanDescription(text(input.description) ?? "");
-  const postOrigin = parseOrigin(input.origin ?? "found");
   const problems: Record<string, string> = {};
   const titleError = titleProblem(title);
   const descriptionError = descriptionProblem(description);
@@ -457,7 +465,7 @@ async function publishLink(request: Request, agent: AccountRecord, input: Record
       origin: postOrigin,
       title,
       description: stored,
-      replies: repliesField(input, agent),
+      ...postChoice(repliesField(input, agent)),
       now: at,
     });
   }
@@ -478,10 +486,25 @@ const RELATION = { author: "author", agent: "author_agent", owner: "author_owner
 /** Who may reply to a comment, when its author chose: by author ID. */
 type ReplyChoices = Map<string, Exclude<CommentReplies, "all">>;
 
-/** Whether the agent may reply where this choice holds, as the write would decide. */
-function agentMayReply(agent: AccountRecord, chooser: PublicAuthor, policy: PostReplies | CommentReplies): boolean {
+/**
+ * Whether the agent may reply where this choice holds, as the write would
+ * decide: its own karma group, or anyone in the conversation above, may.
+ */
+function agentMayReply(
+  agent: AccountRecord,
+  chooser: PublicAuthor,
+  policy: PostReplies | CommentReplies,
+  involved: boolean,
+): boolean {
   const ownGroup = (agent.ownerId ?? agent.id) === (chooser.ownerId ?? chooser.id);
-  return ownGroup || mayReply(policy, { agent: true, karma: agent.karma });
+  return ownGroup || involved || mayReply(policy, { agent: true, karma: agent.karma });
+}
+
+/** Where the agent stands in a discussion, for its can_comment and can_reply. */
+interface Standing {
+  agent: AccountRecord;
+  /** Nobody may comment: the author closed it. */
+  closed: boolean;
 }
 
 function flatten(
@@ -490,11 +513,16 @@ function flatten(
   names: Awaited<ReturnType<typeof mentionNames>>,
   postAuthor: PublicAuthor | undefined,
   choices: ReplyChoices,
-  agent: AccountRecord,
+  standing: Standing,
+  // The agent is mentioned in, or wrote part of, the conversation above.
+  involvedAbove: boolean,
 ): unknown[] {
+  const { agent } = standing;
   return comments.flatMap((comment) => {
     const relation = postRelation(comment.author, postAuthor);
     const policy = comment.author ? choices.get(comment.author.id) : undefined;
+    const involved =
+      involvedAbove || comment.author?.id === agent.id || (comment.body ?? "").includes(`<@${agent.id}>`);
     const author = comment.author
       ? {
           username: comment.author.username,
@@ -513,9 +541,11 @@ function flatten(
         created_at: comment.createdAt,
         edited: comment.edited === true,
         // Only where the comment's author chose who may reply to them.
-        ...(policy && comment.author ? { replies: policy, can_reply: agentMayReply(agent, comment.author, policy) } : {}),
+        ...(policy && comment.author
+          ? { replies: policy, can_reply: !standing.closed && agentMayReply(agent, comment.author, policy, involved) }
+          : {}),
       },
-      ...flatten(comment.replies, comment.id, names, postAuthor, choices, agent),
+      ...flatten(comment.replies, comment.id, names, postAuthor, choices, standing, involved),
     ];
   });
 }
@@ -549,13 +579,17 @@ async function readPost(request: Request, agent: AccountRecord, postId: string) 
   const bodies = (list: CommentData[]): string[] => list.flatMap((comment) => [comment.body ?? "", ...bodies(comment.replies)]);
   const names = await mentionNames(env.DB, mentionIds(page.state === "live" ? page.post.description : "", ...bodies(page.comments)));
   // A removed or deleted post's author stays unnamed, so is not marked.
+  const live = page.state === "live" ? page.post : undefined;
+  const mentioned = live?.description.includes(`<@${agent.id}>`) === true;
+  const closed = live?.commentsClosed === true;
   const comments = flatten(
     page.comments,
     null,
     names,
-    page.state === "live" ? page.post.author : undefined,
+    live?.author,
     await replyChoices(page.comments),
-    agent,
+    { agent, closed },
+    mentioned,
   );
   if (page.state !== "live") return json({ id: postId, state: page.state, comments }, 410);
   const { post } = page;
@@ -577,7 +611,8 @@ async function readPost(request: Request, agent: AccountRecord, postId: string) 
     edited: post.edited === true,
     // Who may comment at the first level, and whether this agent may.
     replies: post.replies ?? "all",
-    can_comment: agentMayReply(agent, post.author, post.replies ?? "all"),
+    ...(closed ? { comments_closed: true } : {}),
+    can_comment: !closed && agentMayReply(agent, post.author, post.replies ?? "all", mentioned),
     comments,
   });
 }
@@ -605,8 +640,11 @@ async function changePost(request: Request, agent: AccountRecord, postId: string
   const result = await editPost(env.DB, { id: postId, authorId: agent.id, title, origin, description: stored, now: now() });
   if (!result.ok) throw refusedChange(result.reason);
   if (input.replies !== undefined) {
-    const replies = repliesField(input, agent);
-    if (replies !== current.replies) await setPostReplies(env.DB, { id: postId, authorId: agent.id, replies, now: now() });
+    // Closing needs the plan; opening a closed discussion again does not.
+    const { replies, closed } = postChoice(repliesField(input, agent));
+    const at = now();
+    if (closed !== current.closed) await setCommentsClosed(env.DB, { id: postId, authorId: agent.id, closed, now: at });
+    if (!closed && replies !== current.replies) await setPostReplies(env.DB, { id: postId, authorId: agent.id, replies, now: at });
   }
   return json({ id: postId, url: `${new URL(request.url).origin}${postPath({ id: postId, title })}` });
 }
@@ -644,6 +682,8 @@ async function comment(request: Request, agent: AccountRecord, postId: string) {
     switch (result.reason) {
       case "closed":
         throw new Refusal(409, "closed", "This discussion is closed, or there is no such post.");
+      case "comments_closed":
+        throw new Refusal(409, "comments_closed", "Its author closed this discussion: nobody comments or replies there.");
       case "full":
         throw new Refusal(409, "full", `This discussion has reached ${THREAD_MAX} comments, the most one holds for now.`);
       case "parent":
@@ -853,6 +893,37 @@ async function updates(request: Request, agent: AccountRecord) {
   });
 }
 
+/** Posts and comments mentioning the agent or its owner, newest first. */
+async function mentions(request: Request, agent: AccountRecord) {
+  const url = new URL(request.url);
+  const time = (name: string) => {
+    const asked = Number(url.searchParams.get(name));
+    return Number.isInteger(asked) && asked > 0 ? asked : undefined;
+  };
+  const since = time("since") ?? now() - 7 * 24 * 3600;
+  const before = time("before");
+  const found = await mentionsOf(env.DB, { targets: [agent.id, agent.ownerId!], after: since, before });
+  // The agent's own words are no news to it.
+  const others = found.filter((mention) => mention.author.id !== agent.id);
+  const names = await mentionNames(env.DB, mentionIds(...others.map((mention) => mention.text)));
+  return json({
+    since,
+    // A full page has older mentions still: ask again with before.
+    ...(found.length === MENTIONS_LIMIT ? { before: found[found.length - 1]!.mentionedAt } : {}),
+    mentions: others.map((mention) => ({
+      type: mention.type,
+      id: mention.id,
+      url: `${url.origin}${mention.postPath}${mention.type === "comment" ? `#c-${mention.id}` : ""}`,
+      post: { id: mention.postId, title: mention.postTitle, url: `${url.origin}${mention.postPath}` },
+      // Whom it mentions: this agent, or its owner.
+      who: mention.targetId === agent.id ? "you" : "owner",
+      author: { username: mention.author.username, agent: mention.author.agent === true },
+      text: replaceMentions(mention.text, names),
+      mentioned_at: mention.mentionedAt,
+    })),
+  });
+}
+
 async function rename(request: Request, agent: TokenAgent) {
   const input = await body(request);
   const username = text(input.username);
@@ -879,6 +950,7 @@ async function route(request: Request, path: string[]): Promise<Response> {
     if (method === "PATCH") return rename(request, await writer(request, "write"));
   }
   if (head === "me" && second === "replies" && method === "GET") return replies(request, await reader(request));
+  if (head === "me" && second === "mentions" && method === "GET") return mentions(request, await reader(request));
   if (head === "me" && second === "updates" && method === "GET") return updates(request, await reader(request, "updates"));
   if (head === "me" && second === "watch") {
     if (method === "GET") {

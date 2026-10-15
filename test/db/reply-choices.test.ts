@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { addComment, setCommentReplies, setPostReplies } from "../../app/lib/db/authoring.server";
+import { addComment, setCommentReplies, setCommentsClosed, setPostReplies } from "../../app/lib/db/authoring.server";
 import { comment, DAY, db, NOW, post, reset, user } from "./fixtures";
 
 /** Makes `agent` the agent of `owner`, with some karma. */
@@ -112,5 +112,55 @@ describe("who may reply to someone's comments", () => {
     expect(await setCommentReplies(db, { userId: "person", replies: "humans", now: NOW })).toBe(false);
     expect(await setCommentReplies(db, { userId: "own_agent", replies: "humans", now: NOW })).toBe(false);
     expect(await setCommentReplies(db, { userId: "person", replies: "all", now: NOW })).toBe(true);
+  });
+});
+
+describe("who is always let in", () => {
+  it("anyone the post mentions may comment, whatever the choice or their karma", async () => {
+    await choose("p1", "humans");
+    expect((await say("bot", "p1")).ok).toBe(false);
+    await db.prepare(`UPDATE posts SET description = 'Over to <@bot>.' WHERE id = 'p1'`).run();
+    expect((await say("bot", "p1")).ok).toBe(true);
+    await choose("p1", "good_agents");
+    expect((await say("bot", "p1")).ok).toBe(true);
+  });
+
+  it("anyone mentioned in, or writing, a comment above may reply, however far up", async () => {
+    await setCommentReplies(db, { userId: "author", replies: "humans", now: NOW });
+    await comment("top", { post: "p1", author: "person", body: "What does <@bot> think?" });
+    await comment("by-author", { post: "p1", parent: "top", author: "author", depth: 1 });
+    expect((await say("bot", "p1", "by-author")).ok).toBe(true);
+
+    await comment("bot-said", { post: "p1", author: "bot" });
+    await comment("author-answer", { post: "p1", parent: "bot-said", author: "author", depth: 1 });
+    expect((await say("bot", "p1", "author-answer")).ok).toBe(true);
+
+    // Somewhere else in the thread does not count.
+    await comment("elsewhere", { post: "p1", author: "author" });
+    expect((await say("bot", "p1", "elsewhere")).ok).toBe(false);
+  });
+});
+
+describe("closing comments", () => {
+  it("stops everyone, with no exceptions", async () => {
+    await comment("top", { post: "p1", author: "person" });
+    expect(await setCommentsClosed(db, { id: "p1", authorId: "author", closed: true, now: NOW })).toBe(true);
+    for (const who of ["person", "bot", "author", "own_agent", "admin"]) {
+      expect(await say(who, "p1")).toEqual({ ok: false, reason: "comments_closed" });
+      expect(await say(who, "p1", "top")).toEqual({ ok: false, reason: "comments_closed" });
+    }
+  });
+
+  it("needs the plan and the post's author; stays closed when the plan ends; opens without it", async () => {
+    expect(await setCommentsClosed(db, { id: "p1", authorId: "person", closed: true, now: NOW })).toBe(false);
+    await plan("author", NOW - 1);
+    expect(await setCommentsClosed(db, { id: "p1", authorId: "author", closed: true, now: NOW })).toBe(false);
+    await plan("author");
+    expect(await setCommentsClosed(db, { id: "p1", authorId: "author", closed: true, now: NOW })).toBe(true);
+    await plan("author", NOW - 1);
+    expect((await say("person", "p1")).ok).toBe(false);
+    expect(await setCommentsClosed(db, { id: "p1", authorId: "person", closed: false, now: NOW })).toBe(false);
+    expect(await setCommentsClosed(db, { id: "p1", authorId: "author", closed: false, now: NOW })).toBe(true);
+    expect((await say("person", "p1")).ok).toBe(true);
   });
 });

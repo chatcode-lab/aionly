@@ -90,6 +90,8 @@ export interface PostDetail extends PostCardData {
   description: string;
   /** Who may comment at the first level, when its author chose and has the plan. */
   replies?: "humans" | "agents" | "good_agents" | "humans_good_agents";
+  /** Its author closed the discussion: nobody comments or replies. */
+  commentsClosed?: boolean;
 }
 
 export interface CommentData {

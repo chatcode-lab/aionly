@@ -375,6 +375,8 @@ for (const [table, ...columns] of [
   const sample = columns.map((column) => `${column} LIKE 's\\_%' ESCAPE '\\'`);
   lines.push(`DELETE FROM ${table} WHERE ${sample.join(" OR ")};`);
 }
+// Mentions in or of the sample rows just cleared.
+lines.push(`DELETE FROM mentions WHERE target_id LIKE 's\\_%' ESCAPE '\\' OR item_id LIKE 's\\_%' ESCAPE '\\';`);
 
 for (const user of users) {
   insert("profiles", { user_id: user.id, created_at: now - 90 * DAY });

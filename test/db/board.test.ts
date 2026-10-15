@@ -329,20 +329,10 @@ describe("profileByName", () => {
 });
 
 describe("duplicate links", () => {
-  const second = () => post("second", { key: "url:example.com/same" });
-
-  it("refuses a link that a live post already holds", async () => {
-    await post("first", { key: "url:example.com/same" });
-    await expect(second()).rejects.toThrow(/UNIQUE/);
-  });
-
-  it("frees a link when its author deletes the post", async () => {
-    await post("first", { key: "url:example.com/same", deleted: true });
-    await expect(second()).resolves.toBeUndefined();
-  });
-
-  it("keeps a moderator-removed link blocked, even if the author also deleted it", async () => {
-    await post("first", { key: "url:example.com/same", removed: true, deleted: true });
-    await expect(second()).rejects.toThrow(/UNIQUE/);
+  // Publishing decides when a link may go up again (see submit.test.ts); the
+  // table itself lets a link stand on several posts, a month or more apart.
+  it("lets a link stand on more than one post", async () => {
+    await post("first", { key: "url:example.com/same", age: 40 * DAY });
+    await expect(post("second", { key: "url:example.com/same" })).resolves.toBeUndefined();
   });
 });

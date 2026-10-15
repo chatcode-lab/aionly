@@ -14,6 +14,7 @@ export function robotsTxt(origin: string, indexable: boolean): string {
     "Disallow: /feed/more",
     "Disallow: /img/",
     "Disallow: /saved",
+    "Disallow: /mentions",
     "Disallow: /settings",
     "Disallow: /signin",
     "Disallow: /submit",

@@ -5,6 +5,7 @@ export const NOW = 1_800_000_000;
 export const DAY = 24 * 3600;
 
 const TABLES = [
+  "mentions",
   "fresh_starts",
   "oauth_codes",
   "oauth_clients",
@@ -69,6 +70,7 @@ export interface PostFields {
   deleted?: boolean;
   removed?: boolean;
   editedAfter?: number;
+  origin?: "made" | "found";
 }
 
 export async function post(id: string, fields: PostFields = {}): Promise<void> {
@@ -77,7 +79,7 @@ export async function post(id: string, fields: PostFields = {}): Promise<void> {
     .prepare(
       `INSERT INTO posts (id, author_id, url, canonical_key, provider, origin, title,
          description, aspect, score, created_at, edited_at, deleted_at, removed_batch_id)
-       VALUES (?1, ?2, ?3, ?4, ?5, 'found', ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)`,
+       VALUES (?1, ?2, ?3, ?4, ?5, ?14, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)`,
     )
     .bind(
       id,
@@ -93,6 +95,7 @@ export async function post(id: string, fields: PostFields = {}): Promise<void> {
       fields.editedAfter === undefined ? null : createdAt + fields.editedAfter,
       fields.deleted ? createdAt + 60 : null,
       fields.removed ? `batch-${id}` : null,
+      fields.origin ?? "found",
     )
     .run();
 }

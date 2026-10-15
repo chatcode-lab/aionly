@@ -1,7 +1,8 @@
 import type { PostReplies } from "../replies";
-import { nextTier, postsPerDayFor } from "../submit/rules";
+import { nextTier, type Origin, postsPerDayFor, REPOST_SECONDS } from "../submit/rules";
 import type { AccountRecord } from "./accounts.server";
 import { entitledCondition, participantCondition } from "./accounts.server";
+import { mentionStatements } from "./mentions.server";
 
 const DAY = 24 * 3600;
 
@@ -63,17 +64,35 @@ export async function postingStatus(
 export type Existing = { id: string; state: "live" | "removed" };
 
 /**
- * The post that already holds a link, if any: one that is live or was
- * removed by a moderator. A removed link stays blocked.
+ * The SQL condition that the posts row `post` keeps link ?{key} from going
+ * up again as origin ?{origin} at ?{now}. A link a moderator removed stays
+ * blocked for good. Otherwise a live post holds its link for a month, and
+ * while the link stands there only as a discovery, its maker may post it
+ * once more as their own work. With no origin yet, only what blocks either
+ * one counts: checking a link gives no hint that "made" would pass.
  */
-export async function findDuplicate(db: D1Database, canonicalKey: string): Promise<Existing | null> {
+function holdsLink(post: string, key: number, origin: number, now: number): string {
+  return `${post}.canonical_key = ?${key} AND (
+    ${post}.removed_batch_id IS NOT NULL
+    OR (${post}.deleted_at IS NULL AND ${post}.created_at > ?${now} - ${REPOST_SECONDS}
+      AND (${post}.origin = 'made' OR ?${origin} = 'found')))`;
+}
+
+/**
+ * The post that keeps a link from being posted again, if any: a removed
+ * one first, then the newest. See holdsLink for the rule.
+ */
+export async function findDuplicate(
+  db: D1Database,
+  canonicalKey: string,
+  at: { origin: Origin | null; now: number },
+): Promise<Existing | null> {
   const row = await db
     .prepare(
-      `SELECT id, removed_batch_id FROM posts
-       WHERE canonical_key = ?1 AND (deleted_at IS NULL OR removed_batch_id IS NOT NULL)
-       LIMIT 1`,
+      `SELECT id, removed_batch_id FROM posts AS held WHERE ${holdsLink("held", 1, 2, 3)}
+       ORDER BY removed_batch_id IS NULL, created_at DESC LIMIT 1`,
     )
-    .bind(canonicalKey)
+    .bind(canonicalKey, at.origin, at.now)
     .first<{ id: string; removed_batch_id: string | null }>();
   if (!row) return null;
   return { id: row.id, state: row.removed_batch_id === null ? "live" : "removed" };
@@ -87,6 +106,8 @@ interface PostBase {
   description: string;
   /** Who may comment at the first level, a Supporter feature; everyone when left out. */
   replies?: PostReplies;
+  /** Published with its discussion closed, a Supporter feature. */
+  closed?: boolean;
   now: number;
 }
 
@@ -129,8 +150,8 @@ export type PublishResult =
  * Publishes a post and attaches its pending images, in one batch: a link's
  * snapshot, or an upload's file and poster. The posting rules are part of
  * the insert, so two quick submissions cannot both pass the allowance; text
- * posts and uploads also need the plan, checked the same way. The duplicate
- * rule for links is the unique index.
+ * posts and uploads also need the plan, checked the same way, and so is
+ * the rule on posting a link again (holdsLink).
  */
 export async function publishPost(db: D1Database, post: NewPost): Promise<PublishResult> {
   const limit = dailyLimit(post.author);
@@ -148,6 +169,7 @@ export async function publishPost(db: D1Database, post: NewPost): Promise<Publis
     )
   )
   AND (?3 = 'link' OR ${entitledCondition(2, post.now)})
+  AND (?5 IS NULL OR NOT EXISTS (SELECT 1 FROM posts AS held WHERE ${holdsLink("held", 5, 7, 12)}))
   AND (?3 <> 'upload' OR ${pending(15, "media")} IS NOT NULL)`;
 
   try {
@@ -156,11 +178,12 @@ export async function publishPost(db: D1Database, post: NewPost): Promise<Publis
         .prepare(
           `INSERT INTO posts (id, author_id, kind, url, canonical_key, provider, origin,
              title, description, page_title, thumb_key, aspect, created_at,
-             media_key, media_type, media_width, media_height, media_duration, reply_policy)
+             media_key, media_type, media_width, media_height, media_duration, reply_policy, comments_closed_at)
            SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ${pending(11, "post")}, ?14, ?12,
              ${pending(15, "media")}, ?16, ?17, ?18, ?19,
              -- Choosing who may comment is the plan's; without it, everyone may.
-             CASE WHEN ${entitledCondition(2, post.now)} THEN ?20 ELSE NULL END
+             CASE WHEN ${entitledCondition(2, post.now)} THEN ?20 ELSE NULL END,
+             CASE WHEN ?21 AND ${entitledCondition(2, post.now)} THEN ?12 ELSE NULL END
            WHERE ${allowed}`,
         )
         .bind(
@@ -184,6 +207,7 @@ export async function publishPost(db: D1Database, post: NewPost): Promise<Publis
           upload?.height ?? null,
           upload?.duration ?? null,
           post.replies && post.replies !== "all" ? post.replies : null,
+          post.closed ? 1 : 0,
         ),
       db
         .prepare(
@@ -192,14 +216,13 @@ export async function publishPost(db: D1Database, post: NewPost): Promise<Publis
              AND EXISTS (SELECT 1 FROM posts WHERE id = ?3 AND (thumb_key = images.key OR media_key = images.key))`,
         )
         .bind(thumbKey, mediaKey, post.id),
+      ...mentionStatements(db, { type: "post", id: post.id, text: post.description, authorId: post.author.id, now: post.now }),
     ]);
-    if (inserted.meta.changes === 0) return { ok: false, reason: "not_allowed" };
-    return { ok: true, id: post.id };
+    if (inserted.meta.changes > 0) return { ok: true, id: post.id };
+    const existing = link ? await findDuplicate(db, link.canonicalKey, { origin: post.origin, now: post.now }) : null;
+    return existing ? { ok: false, reason: "duplicate", existing } : { ok: false, reason: "not_allowed" };
   } catch (error) {
-    if (!String(error).includes("UNIQUE")) throw error;
-    if (String(error).includes("posts.id")) return { ok: false, reason: "id_taken" };
-    const existing = link ? await findDuplicate(db, link.canonicalKey) : null;
-    if (!existing) throw error;
-    return { ok: false, reason: "duplicate", existing };
+    if (String(error).includes("UNIQUE") && String(error).includes("posts.id")) return { ok: false, reason: "id_taken" };
+    throw error;
   }
 }
