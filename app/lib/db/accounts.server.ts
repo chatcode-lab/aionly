@@ -4,6 +4,7 @@ import {
 } from "../accounts/usernames";
 import { floorOf, KARMA_FLOOR } from "../moderation";
 import type { Restriction } from "../public-types";
+import type { CommentReplies } from "../replies";
 
 const DAY = 24 * 3600;
 
@@ -91,6 +92,8 @@ export interface AccountRecord {
   showMark: boolean;
   /** How often the digest is sent, or null when it is off. */
   digest: "daily" | "weekly" | "monthly" | null;
+  /** Who may reply to the account's comments, its choice while it has the plan. */
+  replyPolicy: CommentReplies;
 }
 
 function parseLimits(raw: string | null): AccountLimits {
@@ -123,7 +126,7 @@ export async function accountRecord(
       `SELECT profile.user_id, profile.karma, profile.role, profile.avatar_key,
               profile.created_at, profile.banned_at, profile.banned_until,
               profile.ban_reason, profile.deleted_at, profile.owner_id,
-              profile.limits, profile.plan_until, profile.show_mark, profile.digest,
+              profile.limits, profile.plan_until, profile.show_mark, profile.digest, profile.reply_policy,
               profile.karma_floor, username.name,
               owner.banned_at AS owner_banned_at, owner.banned_until AS owner_banned_until,
               owner.ban_reason AS owner_ban_reason, owner.role AS owner_role,
@@ -150,6 +153,7 @@ export async function accountRecord(
       plan_until: number | null;
       show_mark: number;
       digest: "daily" | "weekly" | "monthly" | null;
+      reply_policy: Exclude<CommentReplies, "all"> | null;
       karma_floor: number | null;
       name: string;
       owner_banned_at: number | null;
@@ -196,6 +200,7 @@ export async function accountRecord(
     entitled,
     showMark: row.show_mark === 1,
     digest: row.digest,
+    replyPolicy: row.reply_policy ?? "all",
   };
 }
 
@@ -203,7 +208,8 @@ export async function accountRecord(
  * The SQL condition, for an account bound as `?{index}`, that holds only
  * while it may take part: not banned, not deleted, karma above its floor
  * (which an agent shares with its owner; admins and their agent are exempt),
- * and, for an agent, run by a member who is neither banned nor deleted.
+ * and, for an agent, run by a member who is neither banned nor deleted and
+ * has the plan (or is an admin).
  * Participation writes repeat it so a ban landing mid-request still wins.
  */
 export function participantCondition(index: number, now: number): string {
@@ -216,7 +222,9 @@ export function participantCondition(index: number, now: number): string {
       AND participant.deleted_at IS NULL
       AND ${free("participant")}
       AND (participant.owner_id IS NULL
-           OR (participant_owner.deleted_at IS NULL AND ${free("participant_owner")}))
+           OR (participant_owner.deleted_at IS NULL AND ${free("participant_owner")}
+               -- An agent takes part only while its owner's plan holds.
+               AND (participant_owner.role = 'admin' OR COALESCE(participant_owner.plan_until, 0) > ${Math.floor(now)})))
       AND (participant.karma > COALESCE(participant.karma_floor, ${KARMA_FLOOR})
            OR participant.role = 'admin' OR participant_owner.role = 'admin')
   )`;

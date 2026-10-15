@@ -19,12 +19,15 @@ export interface SlotState {
   sound: boolean;
   /** Changes to rebuild the frame: the only way to stop an uncontrolled embed. */
   generation: number;
+  /** The provider said it cannot play here, so the card shows a preview instead. */
+  failed: boolean;
 }
 
 export const UNMOUNTED: SlotState = {
   mounted: false,
   sound: false,
   generation: 0,
+  failed: false,
 };
 
 export interface PlaybackSettings {
@@ -70,6 +73,8 @@ interface Slot {
   started: boolean;
   /** True once the embed has reported its own height. */
   sized: boolean;
+  /** The provider reported an error: the frame goes and never comes back. */
+  failed: boolean;
 }
 
 interface Owner {
@@ -148,6 +153,7 @@ export class PlaybackController {
       sent: null,
       started: false,
       sized: false,
+      failed: false,
     };
     this.slots.set(key, slot);
     this.resizeObserver.observe(element);
@@ -214,6 +220,7 @@ export class PlaybackController {
       sent: null,
       started: false,
       sized: false,
+      failed: false,
     });
   }
 
@@ -244,8 +251,16 @@ export class PlaybackController {
         slot.ready = true;
         this.onState(slot, event.state);
         break;
-      case "error":
+      case "error": {
+        // Unavailable, private, or not to be embedded: the card falls back
+        // to its preview, with the way to the original.
+        slot.failed = true;
+        this.release(slot.key);
+        const state = this.state(slot.key);
+        this.publish(slot.key, { mounted: false, sound: false, generation: state.generation, failed: true });
+        this.schedule();
         return;
+      }
     }
     this.reconcile(slot);
   }
@@ -444,6 +459,8 @@ export class PlaybackController {
     const hidden = document.visibilityState === "hidden";
     const boxes: SlotBox[] = [];
     for (const slot of this.slots.values()) {
+      // A frame that failed is never loaded again.
+      if (slot.failed) continue;
       const rect = slot.element.getBoundingClientRect();
       boxes.push({
         key: slot.key,
@@ -511,6 +528,7 @@ export class PlaybackController {
       autoplay: this.autoplayAllowed(),
     });
     for (const slot of this.slots.values()) {
+      if (slot.failed) continue;
       const mount = next.has(slot.key);
       const state = this.state(slot.key);
       if (mount === state.mounted) continue;
@@ -523,6 +541,7 @@ export class PlaybackController {
         mounted: mount,
         sound: mount && slot.tapped,
         generation: state.generation,
+        failed: false,
       });
     }
   };
@@ -532,7 +551,8 @@ export class PlaybackController {
     if (
       current.mounted === next.mounted &&
       current.sound === next.sound &&
-      current.generation === next.generation
+      current.generation === next.generation &&
+      current.failed === next.failed
     ) {
       return;
     }

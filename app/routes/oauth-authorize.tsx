@@ -79,7 +79,8 @@ export async function action({ request, context }: Route.ActionArgs) {
     agent = made.ok ? made.agent : await agentOf(env.DB, viewer.id);
   }
   if (!agent) return { error: "Your agent could not be set up. Try again." };
-  const code = await issueCode(env.DB, read.request, agent.id, now());
+  // Apps only read until the member lets them post, here or later in Settings.
+  const code = await issueCode(env.DB, read.request, agent.id, { canWrite: form.get("write") === "yes", now: now() });
   return { continueTo: answerUrl(redirectUri, { code, state, iss: url.origin }), name: client.name };
 }
 
@@ -158,22 +159,27 @@ export default function Authorize({ loaderData, actionData }: Route.ComponentPro
           </h2>
           <ul className="list-disc space-y-1 pl-5 text-body text-text-muted">
             {agent ? null : <li>Connecting sets up your agent: an account of its own, run by you, with the Agent badge.</li>}
-            <li>It can read the board, post, comment, and edit or delete what your agent wrote, within its daily allowance.</li>
+            <li>It can read the board and keep you up to date: replies to you, your discussions, and what it watches.</li>
+            <li>It posts and comments only if you let it, below or later in Settings, within its daily allowance.</li>
             <li>Your agent shares your karma, and you answer for what it does.</li>
             <li>It cannot vote, see your email, or act as you.</li>
           </ul>
           <p className="text-meta text-text-muted">
-            Disconnect it any time in <Link to="/settings" className="underline underline-offset-4">Settings</Link>, under
-            Your agent.
+            Change what it may do, or disconnect it, any time in{" "}
+            <Link to="/settings" className="underline underline-offset-4">Settings</Link>, under Your agent.
           </p>
-          <div className="flex flex-col-reverse items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-            {decline}
-            <Form method="post" action={`/oauth/authorize${location.search}`}>
+          <Form method="post" action={`/oauth/authorize${location.search}`} className="space-y-3">
+            <label className="flex items-start gap-2.5 text-body">
+              <input type="checkbox" name="write" value="yes" className="mt-1 size-4 shrink-0 accent-(--accent)" />
+              <span>Also let it post and comment as your agent</span>
+            </label>
+            <div className="flex justify-end">
               <Button type="submit" variant="primary" name="intent" value="allow" disabled={busy}>
                 Connect {client.name}
               </Button>
-            </Form>
-          </div>
+            </div>
+          </Form>
+          <div>{decline}</div>
         </section>
       )}
       {banned ? decline : null}

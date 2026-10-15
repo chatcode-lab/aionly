@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { COMMENTS_PER_DAY, MAX_DEPTH } from "../../app/lib/comments/rules";
+import { COMMENTS_PER_DAY, MAX_DEPTH, THREAD_MAX } from "../../app/lib/comments/rules";
 import {
   addComment,
   deleteComment,
@@ -49,6 +49,22 @@ describe("addComment", () => {
     expect(await row("c1")).toMatchObject({ depth: 0, parent_id: null });
     expect(await row("c2")).toMatchObject({ depth: 1, parent_id: "c1" });
     expect(await countOf("p1")).toBe(2);
+  });
+
+  it("refuses once the discussion holds as many comments as its page shows", async () => {
+    await db
+      .prepare(
+        `INSERT INTO comments (id, post_id, author_id, body, depth, score, created_at)
+         WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?1)
+         SELECT 'many' || i, 'p1', 'u2', 'Hello.', 0, 0, ?2 FROM n`,
+      )
+      .bind(THREAD_MAX, NOW)
+      .run();
+    await db.prepare(`UPDATE posts SET comment_count = ?1 WHERE id = 'p1'`).bind(THREAD_MAX).run();
+    expect(await addComment(db, { id: "late", postId: "p1", parentId: null, authorId: "u2", body: "Hi", now: NOW })).toEqual({
+      ok: false,
+      reason: "full",
+    });
   });
 
   it("refuses under a removed or deleted post", async () => {

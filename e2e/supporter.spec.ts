@@ -162,6 +162,7 @@ test("a supporter connects an agent, which pauses when the plan ends", async ({ 
   await open(page, "/settings");
   const section = page.getByRole("region", { name: "Your agent" });
   await section.getByRole("button", { name: "Connect an agent" }).click();
+  await section.getByRole("checkbox", { name: /Let it post and comment/ }).check();
   await section.getByRole("button", { name: "New token" }).click();
   const token = (await section.locator("code").textContent())!.trim();
   const auth = { Authorization: `Bearer ${token}` };
@@ -189,6 +190,7 @@ test("a supporter's agent uploads a video through the API and posts it", async (
   await open(page, "/settings");
   const section = page.getByRole("region", { name: "Your agent" });
   await section.getByRole("button", { name: "Connect an agent" }).click();
+  await section.getByRole("checkbox", { name: /Let it post and comment/ }).check();
   await section.getByRole("button", { name: "New token" }).click();
   const auth = { Authorization: `Bearer ${(await section.locator("code").textContent())!.trim()}` };
 
@@ -236,4 +238,62 @@ test("deleting the account signs out, and what it wrote can go with it", async (
   await open(page, "/p/s_post_02");
   await expect(page.getByText(text)).toHaveCount(0);
   expect((await page.request.get(`/u/${account.username}`)).status()).toBe(404);
+});
+
+test("a supporter chooses who can comment on a post and who can reply to them", async ({ page, context, account, otherAccount, request, baseURL }) => {
+  // Without the plan, the choice leads to the plan.
+  await account.signIn(context);
+  await open(page, "/submit");
+  await expect(page.getByText("Who can comment: everyone.")).toBeVisible();
+  await expect(page.getByRole("link", { name: "Choosing comes with the Supporter plan" })).toHaveAttribute("href", "/supporter?for=replies");
+
+  await setPlan(request, account);
+  await open(page, "/submit");
+  await page.getByRole("button", { name: "Text", exact: true }).click();
+  await page.getByLabel("Who can comment").selectOption("agents");
+  await finishPost(page, `Only agents may comment ${account.username}`, "A post that only agents may comment on, to try the choice.");
+  const postPath = new URL(page.url()).pathname;
+  // Its author may still comment, and sees the rule.
+  await expect(page.getByText("Only agents can comment on this post.")).toBeVisible();
+  await expect(page.getByLabel("Comment", { exact: true })).toBeVisible();
+
+  // Another member sees the rule in place of the box, and the server agrees.
+  const other = await context.browser()!.newContext();
+  await otherAccount.signIn(other);
+  const otherPage = await other.newPage();
+  await open(otherPage, postPath);
+  await expect(otherPage.getByText("Only agents can comment on this post.")).toBeVisible();
+  await expect(otherPage.getByLabel("Comment", { exact: true })).toHaveCount(0);
+  const refused = await otherPage.request.post(postPath, { form: { intent: "comment", body: "Let me in." }, headers: { Origin: baseURL! } });
+  expect(refused.status()).toBe(403);
+
+  // The author opens it to everyone again from the edit page.
+  await open(page, `/p/${postPath.split("/")[2]}/edit`);
+  await page.getByLabel("Who can comment").selectOption("all");
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page).toHaveURL(new RegExp(`${postPath}$`));
+  await expect(page.getByText("Only agents can comment on this post.")).toHaveCount(0);
+  await open(otherPage, postPath);
+  await expect(otherPage.getByLabel("Comment", { exact: true })).toBeVisible();
+  await other.close();
+
+  // Who may reply to their comments, everywhere, is set once in Settings.
+  await open(page, "/settings");
+  const replies = page.getByRole("region", { name: "Replies to your comments" });
+  await replies.getByLabel("Who can reply to your comments").selectOption("humans");
+  await replies.getByRole("button", { name: "Save" }).click();
+  await expect(replies.getByText("Saved.")).toBeVisible();
+  await open(page, "/settings");
+  await expect(page.getByLabel("Who can reply to your comments")).toHaveValue("humans");
+});
+
+test("an account with a running plan is not deleted while Stripe cannot cancel it", async ({ page, context, account, request }) => {
+  await setPlan(request, account);
+  await account.signIn(context);
+  await open(page, "/settings");
+  await page.getByLabel(/Type .* to confirm/).fill(account.username);
+  await page.getByRole("button", { name: "Delete account" }).click();
+  // Locally there is no Stripe key, so the plan cannot be cancelled, and nothing goes.
+  await expect(page.getByText("Your plan could not be cancelled just now, so nothing was deleted.")).toBeVisible();
+  expect((await page.request.get(`/u/${account.username}`)).status()).toBe(200);
 });

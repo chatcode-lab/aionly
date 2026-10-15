@@ -35,6 +35,7 @@ test("a supporter's agent posts, reads replies, and uploads through MCP with its
   await open(page, "/settings");
   const section = page.getByRole("region", { name: "Your agent" });
   await section.getByRole("button", { name: "Connect an agent" }).click();
+  await section.getByRole("checkbox", { name: /Let it post and comment/ }).check();
   await section.getByRole("button", { name: "New token" }).click();
   const token = (await section.locator("code").textContent())!.trim();
   const mcp = client(request, token);
@@ -103,6 +104,13 @@ test("an agent keeps up with its owner and what it watches, reading only", async
   expect((listed.result.tools as Array<{ name: string }>).map((tool) => tool.name)).toEqual(expect.arrayContaining(["whats_new", "watch"]));
   const since = Math.floor(Date.now() / 1000) - 5;
 
+  // A new token only reads: posting is refused with how to allow it, and no upload address is handed out.
+  const refused = await mcp.call("create_post", { kind: "text", title: "Should not post", description: "A read-only connection tries to post." });
+  expect(refused.isError).toBe(true);
+  expect(JSON.stringify(refused.content)).toContain("read_only_token");
+  expect((await mcp.call("prepare_upload", { purpose: "media" })).isError).toBe(true);
+  await expect(section.getByText("Reads only")).toBeVisible();
+
   // Only what is on the board can be watched, and the refusal says what is not.
   const unknown = await mcp.call("watch", { users: ["nobody_here_404"] });
   expect(unknown.isError).toBe(true);
@@ -116,6 +124,7 @@ test("an agent keeps up with its owner and what it watches, reading only", async
   expect(me.structuredContent).toMatchObject({
     owner: { username: account.username, posting: { allowed: true }, read_only: null },
     read_only: null,
+    access: "read_only",
     karma_floor: -100,
     watching: { keywords: ["lighthouse keeper"] },
   });
@@ -153,6 +162,14 @@ test("an agent keeps up with its owner and what it watches, reading only", async
   await expect(section.getByText("It also watches keywords “lighthouse keeper”; 1 post.")).toBeVisible();
   const removed = await mcp.call("watch", { action: "remove", keywords: ["LIGHTHOUSE keeper"], posts: ["s_post_01"] });
   expect(removed.structuredContent).toMatchObject({ keywords: [], posts: [] });
+
+  // The owner lets this token write; from its next call it may, and can be made read-only again.
+  await section.getByRole("button", { name: "Allow posting" }).click();
+  await expect(section.getByText("Can post and comment")).toBeVisible();
+  expect((await mcp.call("whoami")).structuredContent).toMatchObject({ access: "read_write" });
+  await section.getByRole("button", { name: "Make read-only" }).click();
+  await expect(section.getByText("Reads only")).toBeVisible();
+  expect((await mcp.call("whoami")).structuredContent).toMatchObject({ access: "read_only" });
 });
 
 test("the MCP server speaks the modern protocol and asks unsigned clients to sign in", async ({ request, baseURL }) => {
@@ -203,6 +220,7 @@ test("an app connects through OAuth, acts as the agent, and is disconnected in S
   await expect(page.getByText("It returns you to 127.0.0.1:9")).toBeVisible();
   // Connecting sets up the agent, which this member does not have yet.
   await expect(page.getByText("Connecting sets up your agent")).toBeVisible();
+  await expect(page.getByRole("checkbox", { name: "Also let it post and comment as your agent" })).not.toBeChecked();
   await page.getByRole("button", { name: "Connect E2E App" }).click();
   await expect.poll(() => landed).toContain("code=");
   const answer = new URL(landed);
@@ -223,7 +241,8 @@ test("an app connects through OAuth, acts as the agent, and is disconnected in S
   const { access_token: accessToken, token_type: tokenType } = await exchanged.json();
   expect(tokenType).toBe("Bearer");
   const me = await client(request, accessToken).call("whoami");
-  expect(me.structuredContent).toMatchObject({ owner: { username: account.username } });
+  // The box to let it post was left alone, so it only reads.
+  expect(me.structuredContent).toMatchObject({ owner: { username: account.username }, access: "read_only" });
   // The code works once.
   const again = await request.post("/oauth/token", {
     form: { grant_type: "authorization_code", code: answer.searchParams.get("code")!, client_id: clientId, code_verifier: verifier },
@@ -234,6 +253,7 @@ test("an app connects through OAuth, acts as the agent, and is disconnected in S
   const section = page.getByRole("region", { name: "Your agent" });
   await expect(section.getByText("E2E App")).toBeVisible();
   await expect(section.getByText(/Connected app · connected/)).toBeVisible();
+  await expect(section.getByText("Reads only")).toBeVisible();
   await section.getByRole("button", { name: "Disconnect" }).click();
   await expect(section.getByText("No apps or tokens yet.")).toBeVisible();
   const after = await request.post("/mcp", { headers: { Authorization: `Bearer ${accessToken}` }, data: { jsonrpc: "2.0", id: 1, method: "ping" } });

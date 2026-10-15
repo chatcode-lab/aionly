@@ -5,6 +5,7 @@ import { Form, Link, redirect, useNavigation } from "react-router";
 import { Avatar } from "~/components/avatar";
 import { SupporterMark, XMark } from "~/components/post-card";
 import { CopyButton } from "~/components/sign-in";
+import { RepliesField } from "~/components/replies-field";
 import { UsernameForm } from "~/components/username-form";
 import { Button } from "~/components/ui/button";
 import { Notice } from "~/components/ui/states";
@@ -13,7 +14,8 @@ import { RENAME_INTERVAL_DAYS } from "~/lib/accounts/usernames";
 import { authFor, xConfigured } from "~/lib/auth.server";
 import { cancelForDeletion } from "~/lib/billing/plan.server";
 import { type AccountRecord, renameStatus } from "~/lib/db/accounts.server";
-import { agentOf, createAgent, createToken, MAX_TOKENS, type OwnedAgent, revokeToken } from "~/lib/db/agents.server";
+import { agentOf, createAgent, createToken, MAX_TOKENS, type OwnedAgent, revokeToken, setTokenWrite } from "~/lib/db/agents.server";
+import { setCommentReplies } from "~/lib/db/authoring.server";
 import { deleteAccount, identityHash } from "~/lib/db/deletion.server";
 import { describeWatch, watchListOf } from "~/lib/db/updates.server";
 import { planStatus, type PlanStatus, setShowMark } from "~/lib/db/subscriptions.server";
@@ -26,6 +28,7 @@ import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.se
 import { requireAccount, requireParticipant } from "~/lib/viewer.server";
 import { useViewer } from "~/lib/use-viewer";
 import { privatePageMeta } from "~/lib/meta";
+import { COMMENT_REPLIES, type CommentReplies, parseCommentReplies } from "~/lib/replies";
 
 import type { Route } from "./+types/settings";
 
@@ -71,6 +74,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       linked: await linkedX(env.DB, viewer.id),
       error: xError === null ? undefined : (X_ERRORS[xError] ?? "X did not link. Try again in a moment."),
     },
+    commentReplies: viewer.replyPolicy,
     plan: {
       supporter: viewer.supporter,
       admin: viewer.role === "admin",
@@ -88,26 +92,49 @@ const ago = (at: number, now: number) => {
   return age === "now" ? "just now" : `${age} ago`;
 };
 
-/** Connecting the agent, and making and revoking its tokens. */
-async function agentAction(viewer: AccountRecord, form: FormData) {
+/** What a change to the agent answers: a problem, or a new token to show once. */
+type AgentResult = { agentError: string | undefined; newToken?: string };
+
+/**
+ * Taking access away from the agent's tokens and apps: revoking one, or
+ * making it read only. Allowed whatever the account's plan or standing, so
+ * an owner can always rein their agent in.
+ */
+async function restrictAction(viewer: AccountRecord, form: FormData): Promise<AgentResult> {
+  const now = Math.floor(Date.now() / 1000);
+  const tokenId = String(form.get("token") ?? "");
+  if (form.get("intent") === "token-read") {
+    const changed = await setTokenWrite(env.DB, { ownerId: viewer.id, tokenId, canWrite: false });
+    return { agentError: changed ? undefined : "That token is already gone." };
+  }
+  const revoked = await revokeToken(env.DB, { ownerId: viewer.id, tokenId, now });
+  return { agentError: revoked ? undefined : "That token is already gone." };
+}
+
+/** Connecting the agent, making its tokens, and letting one write. */
+async function agentAction(viewer: AccountRecord, form: FormData): Promise<AgentResult> {
   if (!viewer.entitled) return { agentError: "Agents come with the Supporter plan." };
   const now = Math.floor(Date.now() / 1000);
   const intent = form.get("intent");
   if (intent === "agent-create") {
     const result = await createAgent(env.DB, { ownerId: viewer.id, ownerName: viewer.username, now, staff: viewer.role === "admin" });
-    return result.ok ? { agentError: undefined } : { agentError: "You already have an agent." };
+    if (result.ok) return { agentError: undefined };
+    return { agentError: result.reason === "exists" ? "You already have an agent." : "Agents come with the Supporter plan." };
   }
   const agent = await agentOf(env.DB, viewer.id);
   if (!agent) return { agentError: "Connect an agent first." };
   if (intent === "token-create") {
     const label = String(form.get("label") ?? "").trim().slice(0, TOKEN_LABEL_MAX) || null;
-    const result = await createToken(env.DB, { agentId: agent.id, label, now });
-    return result.ok
-      ? { agentError: undefined, newToken: result.token }
-      : { agentError: `An agent holds at most ${MAX_TOKENS} tokens. Revoke one first.` };
+    // A token only reads unless the owner ticks the box.
+    const result = await createToken(env.DB, { agentId: agent.id, label, canWrite: form.get("write") === "yes", now });
+    if (result.ok) return { agentError: undefined, newToken: result.token };
+    return {
+      agentError:
+        result.reason === "too_many" ? `An agent holds at most ${MAX_TOKENS} tokens. Revoke one first.` : "Your agent can't take a new token now.",
+    };
   }
-  const revoked = await revokeToken(env.DB, { ownerId: viewer.id, tokenId: String(form.get("token") ?? ""), now });
-  return { agentError: revoked ? undefined : "That token is already gone." };
+  const changed = await setTokenWrite(env.DB, { ownerId: viewer.id, tokenId: String(form.get("token") ?? ""), canWrite: true });
+  return { agentError: changed ? undefined : "That token is already gone." };
 }
 
 /**
@@ -153,6 +180,11 @@ export async function action({ request, context }: Route.ActionArgs) {
     if (!(await withinLimits(request, "write", account.id))) return { deleteError: RATE_LIMITED_MESSAGE };
     return deleteAccountAction(request, account, form);
   }
+  if (form.get("intent") === "token-revoke" || form.get("intent") === "token-read") {
+    const account = await requireAccount(request, context);
+    if (!(await withinLimits(request, "write", account.id))) return { agentError: RATE_LIMITED_MESSAGE };
+    return restrictAction(account, form);
+  }
   const viewer = await requireParticipant(request, context);
   if (!(await withinLimits(request, "write", viewer.id))) {
     return form.get("intent") === "photo"
@@ -160,7 +192,7 @@ export async function action({ request, context }: Route.ActionArgs) {
       : { error: RATE_LIMITED_MESSAGE, saved: false };
   }
 
-  if (["agent-create", "token-create", "token-revoke"].includes(String(form.get("intent")))) {
+  if (["agent-create", "token-create", "token-write"].includes(String(form.get("intent")))) {
     return agentAction(viewer, form);
   }
 
@@ -194,6 +226,13 @@ export async function action({ request, context }: Route.ActionArgs) {
   if (form.get("intent") === "mark") {
     await setShowMark(env.DB, viewer.id, form.get("show") === "on");
     return { markSaved: true };
+  }
+
+  if (form.get("intent") === "replies") {
+    const replies = parseCommentReplies(form.get("replies"));
+    if (!replies || (replies !== "all" && !viewer.entitled)) return { repliesError: "Choosing who can reply comes with the Supporter plan." };
+    const saved = await setCommentReplies(env.DB, { userId: viewer.id, replies, now: Math.floor(Date.now() / 1000) });
+    return saved ? { repliesSaved: true } : { repliesError: "That did not save. Try again." };
   }
 
   if (form.get("intent") === "photo") {
@@ -297,17 +336,27 @@ function AgentSection({
       {agent.tokens.length > 0 ? (
         <ul className="divide-y divide-border rounded-lg border border-border">
           {agent.tokens.map((token) => (
-            <li key={token.id} className="flex items-center justify-between gap-3 px-3 py-2">
-              <div className="min-w-0">
+            <li key={token.id} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 py-2">
+              <div className="min-w-0 flex-1 basis-48">
                 <p className="truncate text-body font-medium">{token.label ?? "Token"}</p>
                 <p className="text-meta text-text-muted">
                   {token.app ? "Connected app" : "Token"} · {token.app ? "connected" : "made"} {ago(token.createdAt, now)} ·{" "}
                   {token.lastUsedAt ? `used ${ago(token.lastUsedAt, now)}` : "never used"}
                 </p>
+                <p className="text-meta">{token.canWrite ? "Can post and comment" : "Reads only"}</p>
               </div>
-              <Form method="post">
+              <Form method="post" className="flex shrink-0 flex-wrap justify-end gap-1">
                 <input type="hidden" name="token" value={token.id} />
-                <Button type="submit" variant="ghost" name="intent" value="token-revoke" disabled={disabled || Boolean(busy)}>
+                {token.canWrite ? (
+                  <Button type="submit" variant="ghost" name="intent" value="token-read" disabled={Boolean(busy)}>
+                    Make read-only
+                  </Button>
+                ) : (
+                  <Button type="submit" variant="ghost" name="intent" value="token-write" disabled={disabled || Boolean(busy)}>
+                    Allow posting
+                  </Button>
+                )}
+                <Button type="submit" variant="ghost" name="intent" value="token-revoke" disabled={Boolean(busy)}>
                   {token.app ? "Disconnect" : "Revoke"}
                 </Button>
               </Form>
@@ -330,11 +379,61 @@ function AgentSection({
             className="mt-1 h-9 w-full rounded-lg border border-border-strong bg-surface px-3 text-body pointer-coarse:h-(--touch) pointer-coarse:text-[1rem]"
           />
         </div>
+        <label className="flex basis-full items-start gap-2.5 text-meta text-text-muted">
+          <input type="checkbox" name="write" value="yes" className="mt-0.5 size-4 shrink-0 accent-(--accent)" />
+          <span>Let it post and comment. Without this, it reads and keeps you up to date only.</span>
+        </label>
         <Button type="submit" name="intent" value="token-create" disabled={disabled || Boolean(busy)}>
           New token
         </Button>
       </Form>
     </div>
+  );
+}
+
+/**
+ * Who may reply to the member's comments, wherever they are: a Supporter
+ * feature, so without the plan it says everyone may and leads to the plan.
+ */
+function RepliesSection({
+  current,
+  entitled,
+  disabled,
+  saved,
+  error,
+}: {
+  current: CommentReplies;
+  entitled: boolean;
+  disabled: boolean;
+  saved: boolean;
+  error?: string;
+}) {
+  const navigation = useNavigation();
+  const busy = navigation.state !== "idle" && navigation.formData?.get("intent") === "replies";
+  const [replies, setReplies] = useState<CommentReplies>(current);
+  return (
+    <Form method="post" className="space-y-3">
+      <input type="hidden" name="intent" value="replies" />
+      <RepliesField
+        name="replies"
+        label="Who can reply to your comments"
+        options={COMMENT_REPLIES}
+        value={replies}
+        onChange={setReplies}
+        entitled={entitled}
+      />
+      {entitled ? (
+        <p className="text-meta text-text-muted">
+          Each post&apos;s own choice decides who may comment on it directly; this decides who may answer you anywhere.
+        </p>
+      ) : null}
+      {error ? <Notice tone="danger">{error}</Notice> : saved ? <Notice>Saved.</Notice> : null}
+      {entitled ? (
+        <Button type="submit" disabled={disabled || busy || replies === current}>
+          Save
+        </Button>
+      ) : null}
+    </Form>
   );
 }
 
@@ -624,6 +723,16 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
       <Section title="Supporter plan">
         <PlanSection plan={loaderData.plan} disabled={banned} />
         {actionData && "markSaved" in actionData ? <Notice>Saved.</Notice> : null}
+      </Section>
+
+      <Section title="Replies to your comments">
+        <RepliesSection
+          current={loaderData.commentReplies}
+          entitled={loaderData.canHaveAgent}
+          disabled={banned}
+          saved={Boolean(actionData && "repliesSaved" in actionData)}
+          error={actionData && "repliesError" in actionData ? actionData.repliesError : undefined}
+        />
       </Section>
 
       <Section title="Your agent">

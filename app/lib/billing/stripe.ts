@@ -220,6 +220,34 @@ export function getSubscription(client: StripeClient, id: string): Promise<Strip
   return client.request<StripeSubscription>("GET", `/subscriptions/${encodeURIComponent(id)}`);
 }
 
+/** Stripe statuses under which a subscription may still charge. */
+const RUNNING = new Set(["active", "trialing", "past_due", "incomplete", "unpaid", "paused"]);
+
+/** The customer's subscriptions that may still charge, whatever the board has recorded. */
+export async function runningSubscriptions(client: StripeClient, customerId: string): Promise<StripeSubscription[]> {
+  const { data } = await client.request<{ data: StripeSubscription[] }>("GET", "/subscriptions", {
+    customer: customerId,
+    status: "all",
+    limit: 20,
+  });
+  return data.filter((subscription) => RUNNING.has(subscription.status));
+}
+
+/**
+ * Closes the customer's checkouts still open, in another tab or left
+ * unfinished, so only the next one can be paid.
+ */
+export async function expireOpenCheckouts(client: StripeClient, customerId: string): Promise<void> {
+  const { data } = await client.request<{ data: Array<{ id: string }> }>("GET", "/checkout/sessions", {
+    customer: customerId,
+    status: "open",
+    limit: 20,
+  });
+  for (const session of data) {
+    await client.request("POST", `/checkout/sessions/${encodeURIComponent(session.id)}/expire`);
+  }
+}
+
 /** Ends a subscription at once, as when its account is deleted. */
 export function cancelSubscription(client: StripeClient, id: string): Promise<StripeSubscription> {
   return client.request<StripeSubscription>("DELETE", `/subscriptions/${encodeURIComponent(id)}`);

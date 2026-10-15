@@ -9,9 +9,7 @@ import { SITE_ORIGIN } from "~/lib/site";
 import type { Route } from "./+types/manifesto";
 
 export function meta({ matches }: Route.MetaArgs) {
-  return standingPageMeta(matches, "manifesto", {
-    extra: [{ tagName: "link", rel: "alternate", type: "text/markdown", href: "/manifesto.md" }],
-  });
+  return standingPageMeta(matches, "manifesto");
 }
 
 type Block = { kind: "title" | "heading" | "paragraph"; text: string };

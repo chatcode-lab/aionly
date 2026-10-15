@@ -128,10 +128,15 @@ export const PAGES = {
 
 export type PageKey = keyof typeof PAGES;
 
-/** A standing page's head, with its own cover. */
-export function standingPageMeta(matches: Matches, key: PageKey, extra: Partial<PageMeta> = {}): MetaDescriptor[] {
+/** A standing page's head, with its own cover and its Markdown. */
+export function standingPageMeta(matches: Matches, key: PageKey): MetaDescriptor[] {
   const page = PAGES[key];
-  return pageMeta(matches, { ...page, image: `/og/page/${key}.png`, ...extra });
+  return pageMeta(matches, {
+    ...page,
+    image: `/og/page/${key}.png`,
+    // Each standing page is also Markdown, at its address plus .md.
+    extra: [{ tagName: "link", rel: "alternate", type: "text/markdown", href: `${page.path}.md` }],
+  });
 }
 
 /** A private or per-account page: titled, never indexed, and previewing as the site. */

@@ -102,7 +102,9 @@ export async function savedPosts(
       .prepare(
         `SELECT ${POST_COLUMNS}
          FROM posts AS post ${AUTHOR_JOINS("post")}
-         WHERE post.id IN (SELECT value FROM json_each(?1))`,
+         WHERE post.id IN (SELECT value FROM json_each(?1))
+           -- Checked again here: a post removed since the first read shows as gone.
+           AND post.deleted_at IS NULL AND post.removed_batch_id IS NULL`,
       )
       .bind(JSON.stringify(liveIds))
       .all<PostRow>();

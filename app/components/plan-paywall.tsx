@@ -1,4 +1,4 @@
-import { Bot, Heart, Link2, type LucideIcon, Newspaper, PenLine, Upload } from "lucide-react";
+import { Bot, Heart, Link2, type LucideIcon, MessageSquareLock, Newspaper, PenLine, Upload } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 
@@ -11,6 +11,7 @@ const ICONS: Record<Benefit, LucideIcon> = {
   text: PenLine,
   upload: Upload,
   agent: Bot,
+  replies: MessageSquareLock,
   links: Link2,
   mark: Heart,
   digest: Newspaper,

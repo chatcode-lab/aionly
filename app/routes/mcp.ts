@@ -23,7 +23,7 @@ const UPLOAD_PATH: Record<UploadPurpose, { method: "POST" | "PUT"; path: string 
  * to. API calls run in-process with the caller's token and address, so the
  * API's checks and burst limits apply as if the agent had called it.
  */
-function contextFor(request: Request, agentId: string): ToolContext {
+function contextFor(request: Request, agentId: string, canWrite: boolean): ToolContext {
   const origin = new URL(request.url).origin;
   const forwarded = new Headers({ Authorization: request.headers.get("Authorization") ?? "" });
   const address = request.headers.get("CF-Connecting-IP");
@@ -31,6 +31,7 @@ function contextFor(request: Request, agentId: string): ToolContext {
 
   return {
     origin,
+    canWrite,
     async api(method, path, body) {
       const headers = new Headers(forwarded);
       if (body) headers.set("Content-Type", "application/json");
@@ -88,7 +89,7 @@ function serve(request: Request): Promise<Response> {
     async authorize(incoming) {
       const token = /^Bearer\s+(\S+)$/i.exec(incoming.headers.get("Authorization") ?? "")?.[1];
       const agent = token ? await agentForToken(env.DB, token, Math.floor(Date.now() / 1000)) : null;
-      return agent ? contextFor(incoming, agent.id) : null;
+      return agent ? contextFor(incoming, agent.id, agent.canWrite) : null;
     },
   });
 }

@@ -13,7 +13,7 @@ let agentId = "";
 
 beforeEach(async () => {
   await reset();
-  await user("owner", "quiet_otter");
+  await user("owner", "quiet_otter", { plan: true });
   const made = await createAgent(db, { ownerId: "owner", ownerName: "quiet_otter", now: NOW });
   agentId = made.ok ? made.agent.id : "";
 });
@@ -36,10 +36,10 @@ const authorizeParams = (clientId: string, extra: Record<string, string> = {}) =
     ...extra,
   });
 
-async function codeFor(clientId: string): Promise<string> {
+async function codeFor(clientId: string, canWrite = false): Promise<string> {
   const read = await readAuthorization(db, authorizeParams(clientId), { now: NOW, origin: ORIGIN });
   if (!read.ok) throw new Error("authorization refused");
-  return issueCode(db, read.request, agentId, NOW);
+  return issueCode(db, read.request, agentId, { canWrite, now: NOW });
 }
 
 const tokenForm = (clientId: string, code: string, extra: Record<string, string> = {}) =>
@@ -122,11 +122,15 @@ describe("the token exchange", () => {
     const result = await exchangeCode(db, tokenForm(clientId, fresh), { now: NOW, origin: ORIGIN });
     expect(result.ok).toBe(true);
     const token = result.ok ? result.token : "";
-    expect((await agentForToken(db, token, NOW))?.id).toBe(agentId);
-    expect((await agentOf(db, "owner"))?.tokens).toEqual([expect.objectContaining({ label: "Test App", app: true })]);
+    // An app only reads unless the owner ticked the box when connecting it.
+    expect(await agentForToken(db, token, NOW)).toMatchObject({ id: agentId, canWrite: false });
+    expect((await agentOf(db, "owner"))?.tokens).toEqual([expect.objectContaining({ label: "Test App", app: true, canWrite: false })]);
 
     await revokePresentedToken(db, token, NOW);
     expect(await agentForToken(db, token, NOW)).toBeNull();
+
+    const writing = await exchangeCode(db, tokenForm(clientId, await codeFor(clientId, true)), { now: NOW, origin: ORIGIN });
+    expect(await agentForToken(db, writing.ok ? writing.token : "", NOW)).toMatchObject({ canWrite: true });
   });
 
   it("refuses another app's code, an expired one, and another redirect", async () => {

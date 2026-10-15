@@ -113,14 +113,16 @@ export async function applySubscription(
         input.eventAt,
         input.now,
       ),
-    // Follows the row just written, so a stale event changes neither.
+    // Follows the row just written, so a stale event changes neither. An
+    // ended plan's end only moves earlier, so hearing of it again never
+    // stretches it to the time of hearing.
     db
       .prepare(
-        `UPDATE profiles SET plan_until = ?2
+        `UPDATE profiles SET plan_until = CASE WHEN ?5 THEN ?2 ELSE MIN(COALESCE(plan_until, ?2), ?2) END
          WHERE user_id = ?1 AND EXISTS (
            SELECT 1 FROM subscriptions WHERE user_id = ?1 AND subscription_id = ?3 AND event_at = ?4)`,
       )
-      .bind(owner.user_id, until, subscription.id, input.eventAt),
+      .bind(owner.user_id, until, subscription.id, input.eventAt, IN_FORCE.has(subscription.status) ? 1 : 0),
   ]);
   return true;
 }

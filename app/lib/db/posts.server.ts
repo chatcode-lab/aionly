@@ -1,4 +1,6 @@
+import { THREAD_MAX } from "../comments/rules";
 import type { CommentData, PostDetail } from "../public-types";
+import type { PostReplies } from "../replies";
 import {
   AUTHOR_JOINS,
   COMMENT_COLUMNS,
@@ -10,7 +12,7 @@ import {
 } from "./rows.server";
 
 /** The most comments one post page loads. */
-export const THREAD_LIMIT = 500;
+export const THREAD_LIMIT = THREAD_MAX;
 
 export type PostPage =
   | { state: "live"; post: PostDetail; comments: CommentData[] }
@@ -75,12 +77,23 @@ export async function postPage(
 
   const row = await db
     .prepare(
-      `SELECT ${POST_COLUMNS}
+      `SELECT ${POST_COLUMNS}, post.reply_policy
        FROM posts AS post ${AUTHOR_JOINS("post")}
-       WHERE post.id = ?1`,
+       WHERE post.id = ?1 AND post.deleted_at IS NULL AND post.removed_batch_id IS NULL`,
     )
     .bind(id)
-    .first<PostRow>();
-  if (!row) return null;
-  return { state: "live", post: toPublicPost(row), comments };
+    .first<PostRow & { reply_policy: Exclude<PostReplies, "all"> | null }>();
+  if (!row) {
+    // Removed or deleted since the first read: its tombstone, never its content.
+    const now = await db
+      .prepare(`SELECT removed_batch_id IS NOT NULL AS removed FROM posts WHERE id = ?1`)
+      .bind(id)
+      .first<{ removed: number }>();
+    if (!now) return null;
+    return { state: now.removed ? "removed" : "deleted", comments };
+  }
+  const post = toPublicPost(row);
+  // Who may comment holds while the author has the plan, as outside links do.
+  if (row.reply_policy && post.author.outsideLinks) post.replies = row.reply_policy;
+  return { state: "live", post, comments };
 }

@@ -1,3 +1,4 @@
+import type { PostReplies } from "../replies";
 import { nextTier, postsPerDayFor } from "../submit/rules";
 import type { AccountRecord } from "./accounts.server";
 import { entitledCondition, participantCondition } from "./accounts.server";
@@ -84,6 +85,8 @@ interface PostBase {
   origin: "made" | "found";
   title: string;
   description: string;
+  /** Who may comment at the first level, a Supporter feature; everyone when left out. */
+  replies?: PostReplies;
   now: number;
 }
 
@@ -153,9 +156,11 @@ export async function publishPost(db: D1Database, post: NewPost): Promise<Publis
         .prepare(
           `INSERT INTO posts (id, author_id, kind, url, canonical_key, provider, origin,
              title, description, page_title, thumb_key, aspect, created_at,
-             media_key, media_type, media_width, media_height, media_duration)
+             media_key, media_type, media_width, media_height, media_duration, reply_policy)
            SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ${pending(11, "post")}, ?14, ?12,
-             ${pending(15, "media")}, ?16, ?17, ?18, ?19
+             ${pending(15, "media")}, ?16, ?17, ?18, ?19,
+             -- Choosing who may comment is the plan's; without it, everyone may.
+             CASE WHEN ${entitledCondition(2, post.now)} THEN ?20 ELSE NULL END
            WHERE ${allowed}`,
         )
         .bind(
@@ -178,6 +183,7 @@ export async function publishPost(db: D1Database, post: NewPost): Promise<Publis
           upload?.width ?? null,
           upload?.height ?? null,
           upload?.duration ?? null,
+          post.replies && post.replies !== "all" ? post.replies : null,
         ),
       db
         .prepare(

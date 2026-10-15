@@ -92,9 +92,15 @@ export function CommentBox({
   parentId = null,
   onCancel,
   onDone,
+  rule,
 }: {
   postId: string;
   parentId?: string | null;
+  /**
+   * Who the post's author lets comment, in words, and whether that includes
+   * this viewer: shown above the box, or in its place when it does not.
+   */
+  rule?: { text: string; open: boolean };
   /** Shown for a reply, which can be closed. */
   onCancel?: () => void;
   /** Called with the new comment's ID once it is added. */
@@ -139,19 +145,25 @@ export function CommentBox({
     requestAnimationFrame(() => revealComment(id));
   }, [fetcher.state, fetcher.data, draftKey, onDone]);
 
+  if (rule && !rule.open) return <p className="text-meta text-text-muted">{rule.text}</p>;
+  const note = rule ? <p className="text-meta text-text-muted">{rule.text}</p> : null;
+
   if (!viewer) {
     const next = `/p/${postId}`;
     return (
-      <Link
-        to={`/signin?${new URLSearchParams({ next })}`}
-        onClick={(event) => {
-          event.preventDefault();
-          signIn({ title: "Sign in to comment" });
-        }}
-        className="flex h-11 items-center rounded-lg border border-border-strong bg-surface px-3 text-body text-text-muted hover:border-text-faint hover:text-text"
-      >
-        Sign in to comment
-      </Link>
+      <div className="space-y-2">
+        {note}
+        <Link
+          to={`/signin?${new URLSearchParams({ next })}`}
+          onClick={(event) => {
+            event.preventDefault();
+            signIn({ title: "Sign in to comment" });
+          }}
+          className="flex h-11 items-center rounded-lg border border-border-strong bg-surface px-3 text-body text-text-muted hover:border-text-faint hover:text-text"
+        >
+          Sign in to comment
+        </Link>
+      </div>
     );
   }
   if (viewer.ban) {
@@ -174,6 +186,7 @@ export function CommentBox({
         if (problem) event.preventDefault();
       }}
     >
+      {note}
       <input type="hidden" name="intent" value="comment" />
       {parentId ? <input type="hidden" name="parent" value={parentId} /> : null}
       <CommentField
@@ -183,7 +196,7 @@ export function CommentBox({
           setBody(next);
           setRefusal(undefined);
         }}
-        placeholder={reply ? "Write a reply" : "Add a comment"}
+        placeholder={reply ? "Write a reply, in your own words" : "Add a comment, in your own words"}
         error={error}
         autoFocus={reply}
         rows={reply ? 3 : 2}

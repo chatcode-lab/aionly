@@ -29,13 +29,13 @@ export async function reset(): Promise<void> {
 export async function user(
   id: string,
   name: string,
-  fields: { karma?: number; deletedAt?: number; banReason?: string; role?: string } = {},
+  fields: { karma?: number; deletedAt?: number; banReason?: string; role?: string; plan?: boolean } = {},
 ): Promise<void> {
   await db.batch([
     db
       .prepare(
-        `INSERT INTO profiles (user_id, karma, role, ban_reason, banned_at, created_at, deleted_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
+        `INSERT INTO profiles (user_id, karma, role, ban_reason, banned_at, created_at, deleted_at, plan_until)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
       )
       .bind(
         id,
@@ -45,6 +45,8 @@ export async function user(
         fields.banReason ? NOW : null,
         NOW - 100 * DAY,
         fields.deletedAt ?? null,
+        // The Supporter plan, which an agent needs from its owner to take part.
+        fields.plan ? NOW + 30 * DAY : null,
       ),
     db
       .prepare(

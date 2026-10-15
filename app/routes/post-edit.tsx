@@ -5,7 +5,8 @@ import { data, Form, Link, redirect, useNavigation } from "react-router";
 import { Button } from "~/components/ui/button";
 import { TextArea, TextField } from "~/components/ui/field";
 import { Notice } from "~/components/ui/states";
-import { editablePost, editPost } from "~/lib/db/authoring.server";
+import { RepliesField } from "~/components/replies-field";
+import { editablePost, editPost, setPostReplies } from "~/lib/db/authoring.server";
 import { linkMentions, mentionHosts, unlinkMentions } from "~/lib/db/mentions.server";
 import { postPath } from "~/lib/slug";
 import { formatWait } from "~/lib/format";
@@ -22,8 +23,10 @@ import {
   TITLE_MAX,
   titleProblem,
 } from "~/lib/submit/rules";
+import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { requireAccount, requireParticipant } from "~/lib/viewer.server";
 import { privatePageMeta } from "~/lib/meta";
+import { parsePostReplies, POST_REPLIES, type PostReplies } from "~/lib/replies";
 
 import type { Route } from "./+types/post-edit";
 
@@ -39,13 +42,20 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
   const now = Math.floor(Date.now() / 1000);
   // Mentions are edited as "@name".
   post.description = await unlinkMentions(env.DB, post.description);
-  return { post, banned: viewer.ban !== null, titleOpenUntil: post.createdAt + TITLE_EDIT_SECONDS, now };
+  return {
+    post,
+    banned: viewer.ban !== null,
+    entitled: viewer.entitled,
+    titleOpenUntil: post.createdAt + TITLE_EDIT_SECONDS,
+    now,
+  };
 }
 
 type FieldErrors = Partial<Record<"title" | "description" | "origin", string>>;
 
 export async function action({ params, request, context }: Route.ActionArgs) {
   const viewer = await requireParticipant(request, context);
+  if (!(await withinLimits(request, "write", viewer.id))) return { errors: {}, message: RATE_LIMITED_MESSAGE };
   const form = await request.formData();
   const now = Math.floor(Date.now() / 1000);
   const post = await editablePost(env.DB, params.id, viewer.id);
@@ -67,6 +77,11 @@ export async function action({ params, request, context }: Route.ActionArgs) {
 
   const stored = await linkMentions(env.DB, description, mentionHosts(request));
   const result = await editPost(env.DB, { id: post.id, authorId: viewer.id, title, origin, description: stored, now });
+  // Who may comment changes at any time, with the plan.
+  const replies = parsePostReplies(form.get("replies"));
+  if (result.ok && viewer.entitled && replies && replies !== post.replies) {
+    await setPostReplies(env.DB, { id: post.id, authorId: viewer.id, replies, now });
+  }
   if (result.ok) throw redirect(postPath({ id: post.id, title }));
   return {
     errors,
@@ -78,13 +93,14 @@ export async function action({ params, request, context }: Route.ActionArgs) {
 }
 
 export default function EditPost({ loaderData, actionData }: Route.ComponentProps) {
-  const { post, banned, titleOpenUntil, now } = loaderData;
+  const { post, banned, entitled, titleOpenUntil, now } = loaderData;
   const navigation = useNavigation();
   const saving = navigation.state !== "idle" && navigation.formMethod === "POST";
   const titleOpen = now < titleOpenUntil;
   const [title, setTitle] = useState(post.title);
   const [description, setDescription] = useState(post.description);
   const [origin, setOrigin] = useState<Origin>(post.origin);
+  const [replies, setReplies] = useState<PostReplies>(post.replies);
   const errors: FieldErrors = actionData && "errors" in actionData ? actionData.errors : {};
   const message = actionData && "message" in actionData ? actionData.message : undefined;
 
@@ -150,6 +166,14 @@ export default function EditPost({ loaderData, actionData }: Route.ComponentProp
             </p>
           ) : null}
         </fieldset>
+        <RepliesField
+          name="replies"
+          label="Who can comment"
+          options={POST_REPLIES}
+          value={replies}
+          onChange={setReplies}
+          entitled={entitled}
+        />
 
         <div className="flex items-center justify-end gap-2">
           <Button variant="ghost" asChild>

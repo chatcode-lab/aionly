@@ -10,7 +10,8 @@ export class FetchRefused extends Error {}
 
 /**
  * Fetches a public `https` address for a link preview. Redirects are followed
- * by hand, and every hop must pass the same rules as a submitted link:
+ * by hand, and the address and every hop must pass the same rules as a
+ * submitted link:
  * `https` on the default port, a public DNS name, no credentials, and never
  * the site itself. The caller's signal bounds the whole exchange.
  */
@@ -18,7 +19,11 @@ export async function fetchPublic(
   url: URL,
   options: { accept: string; signal: AbortSignal; ownHosts: readonly string[] },
 ): Promise<{ response: Response; finalUrl: URL }> {
-  let current = url;
+  // The first address passes the same rules as every redirect, whoever
+  // supplied it: a member's link, or a photo address another service gave.
+  const first = parseSubmittedUrl(url.href, { ownHosts: options.ownHosts });
+  if (!first.ok) throw new FetchRefused(`address refused: ${first.reason}`);
+  let current = first.url;
   for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
     const response = await fetch(current, {
       redirect: "manual",

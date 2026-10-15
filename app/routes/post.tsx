@@ -13,7 +13,7 @@ import { useModerate } from "~/components/use-moderate";
 import { useParticipation } from "~/components/use-participation";
 import { canVoteOn } from "~/lib/participation";
 import type { AuthoringIntent, AuthoringResult } from "~/lib/authoring";
-import { cleanComment, commentProblem } from "~/lib/comments/rules";
+import { cleanComment, commentProblem, THREAD_MAX } from "~/lib/comments/rules";
 import {
   addComment,
   type CommentRefusal,
@@ -28,11 +28,13 @@ import { formatWait } from "~/lib/format";
 import { newId } from "~/lib/ids";
 import type { CommentData } from "~/lib/public-types";
 import { mentionIds, replaceMentions } from "~/lib/text/mentions";
-import { ROW_ID } from "~/lib/security/body";
+import { readSmallForm, ROW_ID } from "~/lib/security/body";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { viewerOf } from "~/lib/viewer.server";
 import { clip, pageMeta, privatePageMeta } from "~/lib/meta";
 import { postCoverVersion } from "~/lib/og/version";
+import type { PostDetail, ViewerSummary } from "~/lib/public-types";
+import { mayReply, replyRule } from "~/lib/replies";
 
 import type { Route } from "./+types/post";
 
@@ -80,8 +82,9 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
     : data({ ...page, id, marks, mentions, now, canonical }, { status: 410 });
 }
 
-const COMMENT_REFUSAL: Record<Exclude<CommentRefusal, "limit">, string> = {
+const COMMENT_REFUSAL: Record<Exclude<CommentRefusal, "limit" | "replies">, string> = {
   closed: "This discussion is closed.",
+  full: `This discussion has reached ${THREAD_MAX} comments, the most one holds for now.`,
   parent: "That comment is no longer here to reply to.",
   depth: "Replies go no deeper here. Reply further up the thread.",
   not_allowed: "Your account can't comment.",
@@ -100,10 +103,8 @@ const CHANGE_REFUSAL = {
  */
 export async function action({ params, request, context }: Route.ActionArgs) {
   // A comment is at most 5,000 characters; nothing bigger is read.
-  if (Number(request.headers.get("Content-Length") ?? "0") > 64 * 1024) {
-    return data<AuthoringResult>({ ok: false, intent: "comment", error: "That is too long." }, { status: 413 });
-  }
-  const form = await request.formData();
+  const form = await readSmallForm(request, 64 * 1024);
+  if (!form) return data<AuthoringResult>({ ok: false, intent: "comment", error: "That is too long." }, { status: 413 });
   const intent = String(form.get("intent") ?? "") as AuthoringIntent;
   const refuse = (error: string, status: number) =>
     data<AuthoringResult>({ ok: false, intent, error }, { status });
@@ -147,6 +148,9 @@ export async function action({ params, request, context }: Route.ActionArgs) {
           `That is 100 comments in a day. Try again in ${formatWait((result.retryAt ?? now) - now)}; your draft is saved.`,
           429,
         );
+      }
+      if (result.reason === "replies") {
+        return refuse(replyRule(result.policy, result.on) ?? COMMENT_REFUSAL.not_allowed, 403);
       }
       return refuse(COMMENT_REFUSAL[result.reason], 403);
     }
@@ -201,7 +205,7 @@ export function meta({ loaderData, matches, location }: Route.MetaArgs) {
     imageAlt: `${post.title}, posted by ${by} on aion.ly`,
     extra: [
       { property: "article:published_time", content: published },
-      { tagName: "link", rel: "alternate", type: "text/markdown", href: canonical },
+      { tagName: "link", rel: "alternate", type: "text/markdown", href: `${canonical}.md` },
       // Structured data for search engines, as a discussion forum post.
       {
         "script:ld+json": {
@@ -230,6 +234,19 @@ export function meta({ loaderData, matches, location }: Route.MetaArgs) {
   });
 }
 
+/**
+ * Who the author lets comment on the post, in words, and whether that lets
+ * this viewer in. People on the site are never agents; the author, their
+ * agent or owner, and admins may always comment.
+ */
+function commentRule(post: PostDetail, viewer: ViewerSummary | null): { text: string; open: boolean } | undefined {
+  const text = post.replies ? replyRule(post.replies, "post") : null;
+  if (!post.replies || !text) return undefined;
+  const exempt =
+    viewer !== null && (viewer.role === "admin" || viewer.id === post.author.id || post.author.ownerId === viewer.id);
+  return { text, open: exempt || mayReply(post.replies, { agent: false, karma: viewer?.karma ?? 0 }) };
+}
+
 function countAll(comments: Route.ComponentProps["loaderData"]["comments"]): number {
   return comments.reduce((total, comment) => total + 1 + countAll(comment.replies), 0);
 }
@@ -246,6 +263,28 @@ function RestoreButton({ type, id }: { type: "post" | "comment"; id: string }) {
       className="rounded-md px-1.5 py-0.5 text-meta font-medium text-accent hover:bg-accent-soft"
     >
       Restore
+    </button>
+  );
+}
+
+/**
+ * Deletes a removed post's files for good, for an admin taking content
+ * down. It asks first; the post can still be restored, without them.
+ */
+function PurgeMediaButton({ id }: { id: string }) {
+  const { run, busy } = useModerate();
+  const notify = useNotify();
+  return (
+    <button
+      type="button"
+      disabled={busy}
+      onClick={() => {
+        if (!window.confirm("Delete this post's files for good? Cached copies on the media domain last until purged there.")) return;
+        run({ action: "purge_media", postId: id }, () => notify("Its files are deleted."));
+      }}
+      className="rounded-md px-1.5 py-0.5 text-meta font-medium text-danger hover:bg-danger-soft"
+    >
+      Delete files
     </button>
   );
 }
@@ -287,7 +326,12 @@ export default function Post({ loaderData }: Route.ComponentProps) {
           />
         ) : (
           <PostTombstone state={loaderData.state}>
-            {admin && loaderData.state === "removed" ? <RestoreButton type="post" id={postId} /> : null}
+            {admin && loaderData.state === "removed" ? (
+              <>
+                <RestoreButton type="post" id={postId} />
+                <PurgeMediaButton id={postId} />
+              </>
+            ) : null}
           </PostTombstone>
         )}
 
@@ -297,7 +341,11 @@ export default function Post({ loaderData }: Route.ComponentProps) {
               ? "No comments yet"
               : `${total} ${total === 1 ? "comment" : "comments"}`}
           </h2>
-          {live ? <CommentBox postId={postId} /> : null}
+          {live && total >= THREAD_MAX ? (
+            <p className="text-meta text-text-muted">{COMMENT_REFUSAL.full}</p>
+          ) : live ? (
+            <CommentBox postId={postId} rule={commentRule(loaderData.post, participation.viewer)} />
+          ) : null}
           {total > 0 ? (
             <div className="rounded-xl border border-border bg-surface p-3 sm:p-4">
               <CommentThread

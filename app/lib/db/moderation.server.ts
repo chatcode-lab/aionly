@@ -27,7 +27,8 @@ export type ModerationAction =
   | "restore"
   | "set_limits"
   | "reset_avatar"
-  | "fresh_start";
+  | "fresh_start"
+  | "purge_media";
 
 export type ModerationResult =
   | { ok: true; batchId: string; actionId: string }
@@ -204,16 +205,17 @@ export async function banUser(
   const batchId = newId();
   const actionId = newId();
   const base = { batchId, actorId: input.actorId, targetType: "user" as const, targetId: input.userId, reason: input.reason, now: input.now };
-  // Every step after the ban itself runs only if the ban landed.
-  const banned = `EXISTS (SELECT 1 FROM profiles WHERE user_id = ?9 AND banned_at = ?8 AND role <> 'admin')`;
+  // Every step after the ban itself runs only if the ban landed, which its
+  // batch on the profile says.
+  const banned = `EXISTS (SELECT 1 FROM profiles WHERE user_id = ?9 AND ban_batch_id = ?2 AND role <> 'admin')`;
 
   const statements: D1PreparedStatement[] = [
     db
       .prepare(
-        `UPDATE profiles SET banned_at = ?2, banned_until = ?3, ban_reason = ?4
+        `UPDATE profiles SET banned_at = ?2, banned_until = ?3, ban_reason = ?4, ban_batch_id = ?5
          WHERE user_id = ?1 AND role <> 'admin' AND deleted_at IS NULL`,
       )
-      .bind(input.userId, input.now, until, input.reason),
+      .bind(input.userId, input.now, until, input.reason, batchId),
     logAction(db, { ...base, id: actionId, action: "ban" }, banned, input.userId),
   ];
   if (input.removeComments) {
@@ -222,9 +224,9 @@ export async function banUser(
         .prepare(
           `UPDATE comments SET removed_batch_id = ?2
            WHERE author_id = ?1 AND removed_batch_id IS NULL AND deleted_at IS NULL
-             AND EXISTS (SELECT 1 FROM profiles WHERE user_id = ?1 AND banned_at = ?3)`,
+             AND EXISTS (SELECT 1 FROM profiles WHERE user_id = ?1 AND ban_batch_id = ?2)`,
         )
-        .bind(input.userId, batchId, input.now),
+        .bind(input.userId, batchId),
       logAction(db, { ...base, id: newId(), action: "remove_comments" }, banned, input.userId),
     );
   }
@@ -234,9 +236,9 @@ export async function banUser(
         .prepare(
           `UPDATE votes SET invalidated_batch_id = ?2
            WHERE voter_id = ?1 AND invalidated_batch_id IS NULL
-             AND EXISTS (SELECT 1 FROM profiles WHERE user_id = ?1 AND banned_at = ?3)`,
+             AND EXISTS (SELECT 1 FROM profiles WHERE user_id = ?1 AND ban_batch_id = ?2)`,
         )
-        .bind(input.userId, batchId, input.now),
+        .bind(input.userId, batchId),
       ...recountVotesOf(db, input.userId),
       logAction(db, { ...base, id: newId(), action: "discard_votes" }, banned, input.userId),
     );
@@ -262,7 +264,7 @@ export async function unbanUser(
   const [updated] = await db.batch([
     db
       .prepare(
-        `UPDATE profiles SET banned_at = NULL, banned_until = NULL, ban_reason = NULL
+        `UPDATE profiles SET banned_at = NULL, banned_until = NULL, ban_reason = NULL, ban_batch_id = NULL
          WHERE user_id = ?1 AND banned_at IS NOT NULL`,
       )
       .bind(input.userId),
@@ -317,10 +319,11 @@ export async function revertAction(
       undo = [
         db
           .prepare(
-            `UPDATE profiles SET banned_at = NULL, banned_until = NULL, ban_reason = NULL
-             WHERE user_id = ?1 AND banned_at = ?2`,
+            // Only the ban this action made: a later one has its own batch.
+            `UPDATE profiles SET banned_at = NULL, banned_until = NULL, ban_reason = NULL, ban_batch_id = NULL
+             WHERE user_id = ?1 AND ban_batch_id = ?2`,
           )
-          .bind(action.target_id, action.created_at),
+          .bind(action.target_id, action.batch_id),
       ];
       break;
     default:
@@ -403,6 +406,33 @@ export async function grantFreshStart(
     await logAction(db, { id: actionId, batchId: newId(), actorId: input.actorId, action: "fresh_start", targetType: "user", targetId: row.member, reason: input.reason, now: input.now }).run();
   }
   return applied;
+}
+
+/**
+ * Deletes a removed post's files for good: its upload, its poster or
+ * snapshot, for a takedown. Removal alone keeps them, so the post can be
+ * restored; after this it can be restored without them. Copies already in
+ * the media domain's cache last until they expire or are purged there.
+ * Returns the deleted keys, or null when the post is not removed.
+ */
+export async function purgePostMedia(
+  db: D1Database,
+  bucket: R2Bucket,
+  input: { postId: string; actorId: string; now: number },
+): Promise<string[] | null> {
+  const row = await db
+    .prepare(`SELECT thumb_key, media_key FROM posts WHERE id = ?1 AND removed_batch_id IS NOT NULL`)
+    .bind(input.postId)
+    .first<{ thumb_key: string | null; media_key: string | null }>();
+  if (!row) return null;
+  const keys = [row.thumb_key, row.media_key].filter((key): key is string => key !== null);
+  await db.batch([
+    db.prepare(`UPDATE posts SET thumb_key = NULL, media_key = NULL WHERE id = ?1`).bind(input.postId),
+    db.prepare(`DELETE FROM images WHERE key IN (SELECT value FROM json_each(?1))`).bind(JSON.stringify(keys)),
+    logAction(db, { id: newId(), batchId: newId(), actorId: input.actorId, action: "purge_media", targetType: "post", targetId: input.postId, reason: null, now: input.now }),
+  ]);
+  if (keys.length > 0) await bucket.delete(keys);
+  return keys;
 }
 
 /** Puts an account back on its letter avatar and deletes the photo copy. */

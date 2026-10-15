@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { frameUrl } from "../embeds/frames";
 import { type MediaLink, PROVIDERS } from "../links/types";
+import { readBodyCapped } from "./body";
 import { buildSitePolicy, createNonce } from "./csp";
 import { withSecurityHeaders } from "./headers";
 import { isSameOriginRequest, safeReturnPath } from "./request";
@@ -197,5 +198,37 @@ describe("safeReturnPath", () => {
     "javascript:alert(1)",
   ])("falls back to / for %j", (value) => {
     expect(safeReturnPath(value, SITE)).toBe("/");
+  });
+});
+
+describe("capped body reading", () => {
+  /** A request whose body streams `chunks` of 1 KB, with no declared length, counting what was read. */
+  function streamed(chunks: number) {
+    let pulled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        if (pulled >= chunks) return controller.close();
+        pulled += 1;
+        controller.enqueue(new Uint8Array(1024).fill(97));
+      },
+    });
+    const request = new Request("https://board.test/x", { method: "POST", body, duplex: "half" } as RequestInit);
+    return { request, pulled: () => pulled };
+  }
+
+  it("reads a body within the limit", async () => {
+    const { request } = streamed(2);
+    expect(await readBodyCapped(request, 4096)).toBe("a".repeat(2048));
+  });
+
+  it("stops reading as soon as an undeclared body passes the limit", async () => {
+    const { request, pulled } = streamed(2048);
+    expect(await readBodyCapped(request, 2048)).toBeNull();
+    expect(pulled()).toBeLessThanOrEqual(4);
+  });
+
+  it("refuses a declared length over the limit without reading", async () => {
+    const request = new Request("https://board.test/x", { method: "POST", body: "x".repeat(10), headers: { "Content-Length": "999999" } });
+    expect(await readBodyCapped(request, 2048)).toBeNull();
   });
 });

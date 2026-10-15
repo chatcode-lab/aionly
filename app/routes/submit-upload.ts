@@ -30,6 +30,7 @@ export async function action({ request, context }: Route.ActionArgs) {
     now: Math.floor(Date.now() / 1000),
   });
   if (!result.ok) {
+    if (result.reason === "not_allowed") return refuse(403, "Uploads come with the Supporter plan, for an account that can take part.");
     if (result.reason === "too_large") {
       return refuse(
         413,

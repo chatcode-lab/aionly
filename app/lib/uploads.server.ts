@@ -1,3 +1,4 @@
+import { entitledCondition, participantCondition } from "./db/accounts.server";
 import { newId } from "./ids";
 import { MAX_IMAGE_BYTES } from "./images.server";
 import { type MediaType, sniffMedia, stripJpegMetadata, UPLOAD_LIMITS } from "./uploads";
@@ -13,7 +14,7 @@ export type UploadRole = "media" | "poster";
 
 export type UploadResult =
   | { ok: true; key: string; media: MediaType; contentType: string }
-  | { ok: false; reason: "too_large" | "unsupported" | "empty" };
+  | { ok: false; reason: "too_large" | "unsupported" | "empty" | "not_allowed" };
 
 const CACHE_CONTROL = "public, max-age=86400";
 
@@ -118,25 +119,33 @@ export async function storeUpload(
   }
 
   const kind = poster ? "post" : "media";
-  const { results: earlier } = await db
-    .prepare(`SELECT key FROM images WHERE owner_id = ?1 AND kind = ?2 AND state = 'pending'`)
-    .bind(input.ownerId, kind)
-    .all<{ key: string }>();
+  // Uploads are the plan's, for a member who may take part; the write
+  // checks both. The rows it displaces come back from the same batch, so
+  // their files are deleted even when two uploads overlap.
+  const allowed = (index: number) => `${participantCondition(index, input.now)} AND ${entitledCondition(index, input.now)}`;
+  let displaced: string[];
   try {
-    await db.batch([
-      db.prepare(`DELETE FROM images WHERE owner_id = ?1 AND kind = ?2 AND state = 'pending'`).bind(input.ownerId, kind),
+    const [deleted, inserted] = await db.batch([
+      db
+        .prepare(`DELETE FROM images WHERE owner_id = ?1 AND kind = ?2 AND state = 'pending' AND ${allowed(1)} RETURNING key`)
+        .bind(input.ownerId, kind),
       db
         .prepare(
           `INSERT INTO images (key, owner_id, kind, state, content_type, bytes, created_at)
-           VALUES (?1, ?2, ?3, 'pending', ?4, ?5, ?6)`,
+           SELECT ?1, ?2, ?3, 'pending', ?4, ?5, ?6 WHERE ${allowed(2)}`,
         )
         .bind(key, input.ownerId, kind, sniffed.contentType, bytes, input.now),
     ]);
+    if (inserted!.meta.changes === 0) {
+      await bucket.delete(key);
+      return { ok: false, reason: "not_allowed" };
+    }
+    displaced = (deleted!.results as Array<{ key: string }>).map((row) => row.key);
   } catch (error) {
     await bucket.delete(key);
     throw error;
   }
-  if (earlier.length > 0) await bucket.delete(earlier.map((row) => row.key));
+  if (displaced.length > 0) await bucket.delete(displaced);
   return { ok: true, key, media: sniffed.media, contentType: sniffed.contentType };
 }
 

@@ -1,6 +1,7 @@
 import { participantCondition } from "./db/accounts.server";
 import { newId } from "./ids";
 import { fetchPublic, readCapped } from "./links/fetch.server";
+import { stripJpegMetadata } from "./uploads";
 
 /** The largest picture kept as a snapshot. */
 export const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
@@ -100,16 +101,14 @@ export async function snapshotImage(
   const { bytes, type } = image;
 
   const key = imageKey(type);
-  const { results: earlier } = await db
-    .prepare(`SELECT key FROM images WHERE owner_id = ?1 AND kind = 'post' AND state = 'pending'`)
-    .bind(input.ownerId)
-    .all<{ key: string }>();
-
   await bucket.put(key, bytes, storeOptions(type, "post"));
+  // The rows this replaces come back from the same batch, so their files
+  // are deleted even when two checks overlap.
+  let displaced: string[];
   try {
-    await db.batch([
+    const [deleted] = await db.batch([
       db
-        .prepare(`DELETE FROM images WHERE owner_id = ?1 AND kind = 'post' AND state = 'pending'`)
+        .prepare(`DELETE FROM images WHERE owner_id = ?1 AND kind = 'post' AND state = 'pending' RETURNING key`)
         .bind(input.ownerId),
       db
         .prepare(
@@ -118,11 +117,12 @@ export async function snapshotImage(
         )
         .bind(key, input.ownerId, type, bytes.byteLength, input.now),
     ]);
+    displaced = (deleted!.results as Array<{ key: string }>).map((row) => row.key);
   } catch (error) {
     await bucket.delete(key);
     throw error;
   }
-  if (earlier.length > 0) await bucket.delete(earlier.map((row) => row.key));
+  if (displaced.length > 0) await bucket.delete(displaced);
   return key;
 }
 
@@ -182,15 +182,11 @@ export async function replaceAvatar(
   bucket: R2Bucket,
   input: { userId: string; actorId: string; image: { bytes: Uint8Array<ArrayBuffer>; type: ImageType } | null; now: number },
 ): Promise<boolean> {
-  const current = await db
-    .prepare(`SELECT avatar_key FROM profiles WHERE user_id = ?1`)
-    .bind(input.userId)
-    .first<{ avatar_key: string | null }>();
-  const previous = current?.avatar_key ?? null;
-
   let key: string | null = null;
   if (input.image) {
-    const { bytes, type } = input.image;
+    const { type } = input.image;
+    // Pictures people upload lose their metadata, where a photo was taken among it.
+    const bytes = type === "image/jpeg" ? stripJpegMetadata(input.image.bytes) : input.image.bytes;
     key = imageKey(type);
     await bucket.put(key, bytes, storeOptions(type, "avatar"));
     try {
@@ -228,10 +224,17 @@ export async function replaceAvatar(
     if (updated.meta.changes === 0) return false;
   }
 
-  if (previous && previous !== key) {
-    await db.prepare(`DELETE FROM images WHERE key = ?1 AND kind = 'avatar'`).bind(previous).run();
-    await bucket.delete(previous);
-  }
+  // Every other picture this account had goes, found after the write, so
+  // two changes at once still leave just the one in use.
+  const { results: stale } = await db
+    .prepare(
+      `DELETE FROM images WHERE owner_id = ?1 AND kind = 'avatar'
+         AND key IS NOT (SELECT avatar_key FROM profiles WHERE user_id = ?1)
+       RETURNING key`,
+    )
+    .bind(input.userId)
+    .all<{ key: string }>();
+  if (stale.length > 0) await bucket.delete(stale.map((row) => row.key));
   return true;
 }
 

@@ -73,6 +73,7 @@ describe("bans", () => {
   it("makes the account and its agent read-only until a timed ban ends", async () => {
     await user("agent", "author_bot");
     await db.prepare(`UPDATE profiles SET owner_id = 'u1' WHERE user_id = 'agent'`).run();
+    await db.prepare(`UPDATE profiles SET plan_until = ?1 WHERE user_id = 'u1'`).bind(NOW + 30 * DAY).run();
     const result = await banUser(db, { userId: "u1", actorId: "admin", duration: "day", reason: "Spam links", removeComments: false, discardVotes: false, now: NOW });
     expect(result.ok).toBe(true);
     expect(await canTakePart("u1")).toBe(false);
@@ -114,6 +115,16 @@ describe("bans", () => {
     // Removed on its own, and deleted by its author: both untouched.
     expect(await removed("comments", "c2")).toBe(single.ok ? single.batchId : "");
     expect(await db.prepare(`SELECT deleted_at FROM comments WHERE id = 'c3'`).first()).toMatchObject({ deleted_at: expect.any(Number) });
+  });
+
+  it("undoes only the ban an action made, even with a later one in the same second", async () => {
+    const first = await banUser(db, { userId: "u1", actorId: "admin", duration: "day", reason: "First", removeComments: false, discardVotes: false, now: NOW });
+    const second = await banUser(db, { userId: "u1", actorId: "admin", duration: "permanent", reason: "Second", removeComments: false, discardVotes: false, now: NOW });
+    expect(first.ok && second.ok).toBe(true);
+    await revertAction(db, { actionId: first.ok ? first.actionId : "", actorId: "admin", now: NOW });
+    expect((await accountRecord(db, "u1", NOW))?.ban).toEqual({ kind: "ban", reason: "Second", until: null });
+    await revertAction(db, { actionId: second.ok ? second.actionId : "", actorId: "admin", now: NOW });
+    expect((await accountRecord(db, "u1", NOW))?.ban).toBeNull();
   });
 
   it("discards their votes and restores them, each counted exactly once", async () => {

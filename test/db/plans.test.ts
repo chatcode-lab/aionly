@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { defaultRange, topSnapshot } from "../../app/lib/db/feed.server";
+import { moderationLog } from "../../app/lib/db/moderation.server";
+import { fileReport } from "../../app/lib/db/reports.server";
 import { updatesFor } from "../../app/lib/db/updates.server";
 import { castVote } from "../../app/lib/db/votes.server";
 import { db, NOW, post, reset, user } from "./fixtures";
@@ -118,5 +120,26 @@ describe("updates plans", () => {
       castVote(recording, { voterId: "voter", type: "post", targetId: "p1", value: 1, now: NOW }),
     );
     expect(plans.find((plan) => plan.includes("profiles_karma_floor"))).toBeDefined();
+  });
+});
+
+describe("report and moderation plans", () => {
+  it("count a reporter's day of reports by their own index", async () => {
+    await user("reporter", "reporter_one");
+    await user("author", "author_one");
+    await post("p1", { author: "author" });
+    const plans = await plansOf((recording) =>
+      fileReport(recording, { id: "r1", reporterId: "reporter", type: "post", targetId: "p1", reason: "spam", note: null, now: NOW }),
+    );
+    const all = plans.join("\n");
+    expect(all).toContain("reports_reporter");
+    expect(all).not.toMatch(/SCAN reports\b/);
+  });
+
+  it("read the moderation log newest first without scanning it", async () => {
+    const [plan] = await plansOf((recording) => moderationLog(recording, {}));
+    expect(plan).toContain("mod_actions_new");
+    expect(plan).not.toMatch(/SCAN action\b(?! USING)/);
+    expect(plan).not.toContain("USE TEMP B-TREE FOR ORDER BY");
   });
 });

@@ -8,6 +8,7 @@ import {
   banUser,
   grantFreshStart,
   type ModerationResult,
+  purgePostMedia,
   removeComment,
   removePost,
   resetAvatar,
@@ -44,7 +45,7 @@ const id = (value: unknown) => (typeof value === "string" && ROW_ID.test(value) 
 /**
  * Every moderation step, for admins only: removing and restoring posts and
  * comments, bans, the pinned announcement, closing reports, per-account
- * limits, and fresh starts on appeal. Each is logged with who did it and why.
+ * limits, fresh starts on appeal, and deleting a removed post's files. Each is logged with who did it and why.
  */
 export async function action({ request, context }: Route.ActionArgs) {
   const admin = await requireAdmin(request, context);
@@ -122,6 +123,12 @@ export async function action({ request, context }: Route.ActionArgs) {
         value === "default" ? undefined : value === null ? null : Number.isInteger(value) && (value as number) >= 0 && (value as number) <= 1000 ? (value as number) : NaN;
       if (!userId || Number.isNaN(postsPerDay)) return invalid();
       return Response.json({ updated: await setPostingLimit(env.DB, { userId, actorId, postsPerDay, now }) });
+    }
+    case "purge_media": {
+      const postId = id(body.postId);
+      if (!postId) return invalid();
+      const deleted = await purgePostMedia(env.DB, env.IMAGES, { postId, actorId, now });
+      return deleted ? Response.json({ deleted }) : Response.json({ error: "not_removed", message: "Remove the post first." }, { status: 409 });
     }
     case "fresh_start": {
       const userId = id(body.userId);

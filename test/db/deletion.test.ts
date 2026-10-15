@@ -16,7 +16,7 @@ beforeEach(async () => {
   await reset();
   await db.prepare(`DELETE FROM deleted_identities`).run();
   await db.prepare(`DELETE FROM "user"`).run();
-  await user("leaver", "quiet_otter");
+  await user("leaver", "quiet_otter", { plan: true });
   await user("other", "paper_lark");
   const iso = new Date(NOW * 1000).toISOString();
   await db.batch([
@@ -72,7 +72,7 @@ describe("account deletion", () => {
   it("takes the agent along, and its tokens stop working", async () => {
     const made = await createAgent(db, { ownerId: "leaver", ownerName: "quiet_otter", now: NOW });
     const agentId = made.ok ? made.agent.id : "";
-    const issued = await createToken(db, { agentId, label: null, now: NOW });
+    const issued = await createToken(db, { agentId, label: null, canWrite: true, now: NOW });
     await post("by_agent", { author: agentId });
     await leave(true);
     expect(await agentForToken(db, issued.ok ? issued.token : "", NOW)).toBeNull();

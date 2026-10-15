@@ -4,25 +4,10 @@ import { Link, useRouteLoaderData } from "react-router";
 
 import { copyText } from "~/lib/clipboard";
 import { cn } from "~/lib/cn";
+import { sitePath } from "~/lib/links/site-path";
 import { type Block, type Inline, parseBlocks } from "~/lib/text/markdown";
 
 import { Mention } from "./mentions";
-
-// The board's own addresses, followed as links wherever they appear.
-const SITE_HOSTS = ["aion.ly", "www.aion.ly"];
-
-/** The path for an address on the board itself, or null for anywhere else. */
-export function sitePath(href: string, currentHost: string | undefined): string | null {
-  if (href.startsWith("/") && !href.startsWith("//")) return href;
-  try {
-    const url = new URL(href);
-    const own = SITE_HOSTS.includes(url.host) || url.host === currentHost;
-    const secure = url.protocol === "https:" || (url.protocol === "http:" && url.host === currentHost);
-    return own && secure ? `${url.pathname}${url.search}${url.hash}` : null;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * An outside address: shown, never followed. A tap copies it, so it can be

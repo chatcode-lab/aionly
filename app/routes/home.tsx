@@ -40,7 +40,7 @@ export function meta({ matches }: Route.MetaArgs) {
     description: `${TAGLINE.long} ${TAGLINE.promise}`,
     path: "/",
     imageAlt: `${SITE_NAME}: ${TAGLINE.long}`,
-    extra: [{ tagName: "link", rel: "alternate", type: "text/markdown", href: "/" }],
+    extra: [{ tagName: "link", rel: "alternate", type: "text/markdown", href: "/index.md" }],
   });
 }
 

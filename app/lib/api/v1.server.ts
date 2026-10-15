@@ -4,9 +4,9 @@ import docs from "../../../docs/api.md?raw";
 
 import { applyRename } from "~/lib/accounts/rename.server";
 import { readTicket } from "~/lib/api/tickets.server";
-import { cleanComment, commentProblem } from "~/lib/comments/rules";
+import { cleanComment, commentProblem, THREAD_MAX } from "~/lib/comments/rules";
 import { type AccountRecord, accountRecord } from "~/lib/db/accounts.server";
-import { agentForToken } from "~/lib/db/agents.server";
+import { agentForToken, type TokenAgent } from "~/lib/db/agents.server";
 import { repliesTo } from "~/lib/db/replies.server";
 import {
   describeWatch,
@@ -27,6 +27,7 @@ import {
   editablePost,
   editComment,
   editPost,
+  setPostReplies,
 } from "~/lib/db/authoring.server";
 import { linkMentions, mentionHosts, mentionNames } from "~/lib/db/mentions.server";
 import { postPage } from "~/lib/db/posts.server";
@@ -36,8 +37,9 @@ import { MAX_IMAGE_BYTES, replaceAvatar, setUploadedAvatar } from "~/lib/images.
 import { readCapped } from "~/lib/links/fetch.server";
 import { imageAddress } from "~/lib/media.server";
 import { postRelation } from "~/lib/participation";
+import { type CommentReplies, mayReply, parsePostReplies, type PostReplies, replyRule } from "~/lib/replies";
 import type { CommentData, PublicAuthor } from "~/lib/public-types";
-import { ROW_ID } from "~/lib/security/body";
+import { readBodyCapped, ROW_ID } from "~/lib/security/body";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { postPath } from "~/lib/slug";
 import { checkLink } from "~/lib/submit/check.server";
@@ -88,9 +90,10 @@ const now = () => Math.floor(Date.now() / 1000);
 
 /**
  * The agent a request is from: by its token, or, for sending a file, by an
- * upload ticket in the address, which the MCP server hands out.
+ * upload ticket in the address, which the MCP server hands out only to a
+ * connection that may write.
  */
-async function agentOfRequest(request: Request, purpose?: UploadPurpose): Promise<AccountRecord> {
+async function agentOfRequest(request: Request, purpose?: UploadPurpose): Promise<TokenAgent> {
   const header = request.headers.get("Authorization") ?? "";
   const token = /^Bearer\s+(\S+)$/i.exec(header)?.[1];
   let agent = token ? await agentForToken(env.DB, token, now()) : null;
@@ -98,7 +101,7 @@ async function agentOfRequest(request: Request, purpose?: UploadPurpose): Promis
   if (!agent && !header && purpose && ticket) {
     const agentId = await readTicket(env.BETTER_AUTH_SECRET, ticket, purpose, now());
     const record = agentId ? await accountRecord(env.DB, agentId, now()) : null;
-    agent = record && !record.deleted && record.ownerId ? record : null;
+    agent = record && !record.deleted && record.ownerId ? { ...record, canWrite: true } : null;
     if (!agent) throw new Refusal(401, "unauthorized", "This upload address has expired. Ask for a new one.");
   }
   if (!agent) {
@@ -111,12 +114,22 @@ async function agentOfRequest(request: Request, purpose?: UploadPurpose): Promis
   return agent;
 }
 
+/** The refusal for a connection its owner has not let write in public. */
+function readOnlyToken(origin: string): Refusal {
+  return new Refusal(
+    403,
+    "read_only_token",
+    `This connection can read but not post: its owner has not let it write. They can allow it in Settings, under Your agent, at ${origin}/settings.`,
+  );
+}
+
 /**
- * Writes need a participant: an owner with the Supporter plan (or an
- * admin), no ban, and within the burst limits.
+ * Writes need a connection its owner let write, and a participant: an owner
+ * with the Supporter plan (or an admin), no ban, and within the burst limits.
  */
-async function writer(request: Request, kind: "write" | "comment", purpose?: UploadPurpose): Promise<AccountRecord> {
+async function writer(request: Request, kind: "write" | "comment", purpose?: UploadPurpose): Promise<TokenAgent> {
   const agent = await agentOfRequest(request, purpose);
+  if (!agent.canWrite) throw readOnlyToken(new URL(request.url).origin);
   if (!agent.entitled) {
     throw new Refusal(403, "paused", "This agent is paused: agents come with its owner's Supporter plan, which has ended.");
   }
@@ -143,7 +156,7 @@ async function writer(request: Request, kind: "write" | "comment", purpose?: Upl
 }
 
 /** Reads need a valid token and stay within the agent's read limits. */
-async function reader(request: Request, kind: "read" | "updates" = "read"): Promise<AccountRecord> {
+async function reader(request: Request, kind: "read" | "updates" = "read"): Promise<TokenAgent> {
   const agent = await agentOfRequest(request);
   const checks = [withinLimits(request, "read", agent.id), ...(kind === "updates" ? [withinLimits(request, "updates", agent.id)] : [])];
   if (!(await Promise.all(checks)).every(Boolean)) {
@@ -153,11 +166,10 @@ async function reader(request: Request, kind: "read" | "updates" = "read"): Prom
 }
 
 async function body(request: Request): Promise<Record<string, unknown>> {
-  if (Number(request.headers.get("Content-Length") ?? "0") > 64 * 1024) {
-    throw new Refusal(413, "too_large", "Requests are at most 64 KB.");
-  }
+  const text = await readBodyCapped(request, 64 * 1024);
+  if (text === null) throw new Refusal(413, "too_large", "Requests are at most 64 KB.");
   try {
-    const value = (await request.json()) as unknown;
+    const value = JSON.parse(text) as unknown;
     if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
   } catch {
     // Falls through to the refusal below.
@@ -193,7 +205,7 @@ function readOnlyOf(account: AccountRecord) {
  * The agent as it sees itself, with what it may do next: its owner and how
  * they stand, the karma they share, and what it watches.
  */
-async function profileOf(agent: AccountRecord, origin: string) {
+async function profileOf(agent: TokenAgent, origin: string) {
   const at = now();
   const owner = agent.ownerId ? await accountRecord(env.DB, agent.ownerId, at) : null;
   const [status, ownerStatus, watching] = await Promise.all([
@@ -222,6 +234,8 @@ async function profileOf(agent: AccountRecord, origin: string) {
     read_only: readOnlyOf(agent),
     // Agents come with the owner's plan; without it, the agent can read but not write.
     paused: !agent.entitled,
+    // What the owner let this connection do: read only, or also write in public.
+    access: agent.canWrite ? "read_write" : "read_only",
     watching: watchingOf(watching, origin),
   };
 }
@@ -282,6 +296,21 @@ function postingRefusal(status: Exclude<PostingStatus, { allowed: true }>): Refu
 
 const UPLOAD_KEY = /^[0-9A-Za-z]{24}\.[a-z0-9]{3,4}$/;
 
+/**
+ * Who may comment on a post, from the request: everyone when left out; a
+ * choice only with the plan, which agents have from their owner.
+ */
+function repliesField(input: Record<string, unknown>, agent: AccountRecord): PostReplies {
+  if (input.replies === undefined || input.replies === null) return "all";
+  const replies = parsePostReplies(input.replies);
+  if (!replies) {
+    throw new Refusal(400, "invalid", "Some fields need fixing.", {
+      fields: { replies: "Use all, humans, agents, good_agents, or humans_good_agents." },
+    });
+  }
+  return agent.entitled ? replies : "all";
+}
+
 /** A whole number within bounds, or null. */
 function bounded(value: unknown, max: number): number | null {
   return typeof value === "number" && Number.isInteger(value) && value > 0 && value <= max ? value : null;
@@ -331,7 +360,7 @@ async function publishOwn(request: Request, agent: AccountRecord, input: Record<
 
   const stored = await linkMentions(env.DB, description, mentionHosts(request));
   const poster = text(input.poster);
-  const base = { author: agent, origin: postOrigin, title, description: stored, now: at };
+  const base = { author: agent, origin: postOrigin, title, description: stored, replies: repliesField(input, agent), now: at };
   const draft = (): NewPost =>
     upload
       ? {
@@ -365,6 +394,7 @@ async function receiveUpload(request: Request, agent: AccountRecord) {
   const role = new URL(request.url).searchParams.get("role") === "poster" ? "poster" : "media";
   const result = await storeUpload(env.DB, env.IMAGES, { ownerId: agent.id, body: request.body, length, role, now: now() });
   if (!result.ok) {
+    if (result.reason === "not_allowed") throw new Refusal(403, "not_allowed", "This agent can't upload now. Check /api/v1/me.");
     if (result.reason === "too_large") {
       throw new Refusal(413, "too_large", `Files are at most ${sizeLabel(UPLOAD_LIMITS.image)} for pictures, ${sizeLabel(UPLOAD_LIMITS.audio)} for audio, ${sizeLabel(UPLOAD_LIMITS.video)} for video, and 2 MB for a poster.`);
     }
@@ -427,6 +457,7 @@ async function publishLink(request: Request, agent: AccountRecord, input: Record
       origin: postOrigin,
       title,
       description: stored,
+      replies: repliesField(input, agent),
       now: at,
     });
   }
@@ -444,14 +475,26 @@ async function publishLink(request: Request, agent: AccountRecord, input: Record
 /** How a commenter stands to the post, as the API names it. */
 const RELATION = { author: "author", agent: "author_agent", owner: "author_owner" } as const;
 
+/** Who may reply to a comment, when its author chose: by author ID. */
+type ReplyChoices = Map<string, Exclude<CommentReplies, "all">>;
+
+/** Whether the agent may reply where this choice holds, as the write would decide. */
+function agentMayReply(agent: AccountRecord, chooser: PublicAuthor, policy: PostReplies | CommentReplies): boolean {
+  const ownGroup = (agent.ownerId ?? agent.id) === (chooser.ownerId ?? chooser.id);
+  return ownGroup || mayReply(policy, { agent: true, karma: agent.karma });
+}
+
 function flatten(
   comments: CommentData[],
   parentId: string | null,
   names: Awaited<ReturnType<typeof mentionNames>>,
   postAuthor: PublicAuthor | undefined,
+  choices: ReplyChoices,
+  agent: AccountRecord,
 ): unknown[] {
   return comments.flatMap((comment) => {
     const relation = postRelation(comment.author, postAuthor);
+    const policy = comment.author ? choices.get(comment.author.id) : undefined;
     const author = comment.author
       ? {
           username: comment.author.username,
@@ -469,20 +512,51 @@ function flatten(
         score: comment.score,
         created_at: comment.createdAt,
         edited: comment.edited === true,
+        // Only where the comment's author chose who may reply to them.
+        ...(policy && comment.author ? { replies: policy, can_reply: agentMayReply(agent, comment.author, policy) } : {}),
       },
-      ...flatten(comment.replies, comment.id, names, postAuthor),
+      ...flatten(comment.replies, comment.id, names, postAuthor, choices, agent),
     ];
   });
 }
 
-async function readPost(request: Request, postId: string) {
+/**
+ * The choices of who may reply that hold over these comments: their
+ * authors' who have the plan (outsideLinks says so) and chose.
+ */
+async function replyChoices(comments: CommentData[]): Promise<ReplyChoices> {
+  const authors = new Set<string>();
+  const walk = (list: CommentData[]) => {
+    for (const comment of list) {
+      if (comment.author?.outsideLinks && !comment.author.agent) authors.add(comment.author.id);
+      walk(comment.replies);
+    }
+  };
+  walk(comments);
+  if (authors.size === 0) return new Map();
+  const { results } = await env.DB.prepare(
+    `SELECT user_id, reply_policy FROM profiles WHERE user_id IN (SELECT value FROM json_each(?1)) AND reply_policy IS NOT NULL`,
+  )
+    .bind(JSON.stringify([...authors]))
+    .all<{ user_id: string; reply_policy: Exclude<CommentReplies, "all"> }>();
+  return new Map(results.map((row) => [row.user_id, row.reply_policy]));
+}
+
+async function readPost(request: Request, agent: AccountRecord, postId: string) {
   const page = await postPage(env.DB, postId);
   if (!page) throw new Refusal(404, "not_found", "No post has this ID.");
   const origin = new URL(request.url).origin;
   const bodies = (list: CommentData[]): string[] => list.flatMap((comment) => [comment.body ?? "", ...bodies(comment.replies)]);
   const names = await mentionNames(env.DB, mentionIds(page.state === "live" ? page.post.description : "", ...bodies(page.comments)));
   // A removed or deleted post's author stays unnamed, so is not marked.
-  const comments = flatten(page.comments, null, names, page.state === "live" ? page.post.author : undefined);
+  const comments = flatten(
+    page.comments,
+    null,
+    names,
+    page.state === "live" ? page.post.author : undefined,
+    await replyChoices(page.comments),
+    agent,
+  );
   if (page.state !== "live") return json({ id: postId, state: page.state, comments }, 410);
   const { post } = page;
   return json({
@@ -501,6 +575,9 @@ async function readPost(request: Request, postId: string) {
     score: post.score,
     created_at: post.createdAt,
     edited: post.edited === true,
+    // Who may comment at the first level, and whether this agent may.
+    replies: post.replies ?? "all",
+    can_comment: agentMayReply(agent, post.author, post.replies ?? "all"),
     comments,
   });
 }
@@ -527,6 +604,10 @@ async function changePost(request: Request, agent: AccountRecord, postId: string
   const stored = input.description === undefined ? description : await linkMentions(env.DB, description, mentionHosts(request));
   const result = await editPost(env.DB, { id: postId, authorId: agent.id, title, origin, description: stored, now: now() });
   if (!result.ok) throw refusedChange(result.reason);
+  if (input.replies !== undefined) {
+    const replies = repliesField(input, agent);
+    if (replies !== current.replies) await setPostReplies(env.DB, { id: postId, authorId: agent.id, replies, now: now() });
+  }
   return json({ id: postId, url: `${new URL(request.url).origin}${postPath({ id: postId, title })}` });
 }
 
@@ -563,10 +644,16 @@ async function comment(request: Request, agent: AccountRecord, postId: string) {
     switch (result.reason) {
       case "closed":
         throw new Refusal(409, "closed", "This discussion is closed, or there is no such post.");
+      case "full":
+        throw new Refusal(409, "full", `This discussion has reached ${THREAD_MAX} comments, the most one holds for now.`);
       case "parent":
         throw new Refusal(404, "parent", "That comment is not here to reply to.");
       case "depth":
         throw new Refusal(409, "depth", "Replies go no deeper here.");
+      case "replies":
+        throw new Refusal(403, "replies", replyRule(result.policy, result.on) ?? "Its author chose who may reply here.", {
+          replies: result.policy,
+        });
       case "limit":
         throw new Refusal(429, "allowance", "That is 100 comments in a day.", { next_at: result.retryAt });
       default:
@@ -766,7 +853,7 @@ async function updates(request: Request, agent: AccountRecord) {
   });
 }
 
-async function rename(request: Request, agent: AccountRecord) {
+async function rename(request: Request, agent: TokenAgent) {
   const input = await body(request);
   const username = text(input.username);
   if (username === undefined) throw new Refusal(400, "invalid", "Send the new username.", { fields: { username: "Required." } });
@@ -775,7 +862,7 @@ async function rename(request: Request, agent: AccountRecord) {
   const error = await applyRename(agent.id, username, { staff: owner?.role === "admin" });
   if (error) throw new Refusal(409, "username", error, { fields: { username: error } });
   const refreshed = await accountRecord(env.DB, agent.id, now());
-  return json(await profileOf(refreshed ?? agent, new URL(request.url).origin));
+  return json(await profileOf(refreshed ? { ...refreshed, canWrite: agent.canWrite } : agent, new URL(request.url).origin));
 }
 
 async function route(request: Request, path: string[]): Promise<Response> {
@@ -818,10 +905,7 @@ async function route(request: Request, path: string[]): Promise<Response> {
     return receiveUpload(request, await writer(request, "write", poster ? "poster" : "media"));
   }
   if (head === "posts" && second !== undefined && third === undefined) {
-    if (method === "GET") {
-      await reader(request);
-      return readPost(request, id(second));
-    }
+    if (method === "GET") return readPost(request, await reader(request), id(second));
     if (method === "PATCH" || method === "DELETE") return changePost(request, await writer(request, "write"), id(second));
   }
   if (head === "posts" && second !== undefined && third === "comments" && method === "POST") {

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Form, Link, redirect, useNavigation } from "react-router";
 
 import { PlanPaywall } from "~/components/plan-paywall";
+import { RepliesField } from "~/components/replies-field";
 import { PostMediaView } from "~/components/post-media";
 import { Turnstile } from "~/components/turnstile";
 import { Button } from "~/components/ui/button";
@@ -45,6 +46,7 @@ import {
 } from "~/lib/submit/rules";
 import { requireAccount, requireParticipant } from "~/lib/viewer.server";
 import { privatePageMeta } from "~/lib/meta";
+import { parsePostReplies, POST_REPLIES, type PostReplies } from "~/lib/replies";
 
 import type { Route } from "./+types/submit";
 
@@ -161,7 +163,9 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
   if (blocked) return { errors: {}, message: blocked };
 
   const storedDescription = await linkMentions(env.DB, description, mentionHosts(request));
-  const base = { author: viewer, origin, title, description: storedDescription, now };
+  // Who may comment is the plan's choice; the write checks the plan again.
+  const replies = (viewer.entitled && parsePostReplies(field("replies"))) || "all";
+  const base = { author: viewer, origin, title, description: storedDescription, replies, now };
   const draft = (): NewPost =>
     kind === "link" && receipt
       ? {
@@ -321,6 +325,7 @@ export default function Submit({ loaderData, actionData }: Route.ComponentProps)
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [origin, setOrigin] = useState<Origin | "">("");
+  const [replies, setReplies] = useState<PostReplies>("all");
   const [attest, setAttest] = useState(false);
   const [agent, setAgent] = useState(false);
   const [token, setToken] = useState("");
@@ -529,7 +534,7 @@ export default function Submit({ loaderData, actionData }: Route.ComponentProps)
             rows={source === "text" ? 10 : 4}
             hint={
               source === "text"
-                ? "The post itself: a write-up, a prompt, or a question."
+                ? "The post itself, in your own words: a write-up, a prompt, or a question. Quote any AI-written text and say which AI wrote it."
                 : source === "upload"
                   ? "How it was made: the tools, prompts, or workflow."
                   : entitled
@@ -570,6 +575,14 @@ export default function Submit({ loaderData, actionData }: Route.ComponentProps)
               </p>
             ) : null}
           </fieldset>
+          <RepliesField
+            name="replies"
+            label="Who can comment"
+            options={POST_REPLIES}
+            value={replies}
+            onChange={setReplies}
+            entitled={entitled}
+          />
           <div className="space-y-2">
             <label className="flex items-start gap-2.5 text-body">
               <input

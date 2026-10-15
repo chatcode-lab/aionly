@@ -53,6 +53,13 @@ describe("the Supporter plan from Stripe", () => {
     expect((await accountRecord(db, "member", NOW + 61))?.entitled).toBe(false);
   });
 
+  it("never stretches an ended plan when its end is heard again later", async () => {
+    await applySubscription(db, subscription(), { eventAt: NOW, now: NOW });
+    await applySubscription(db, subscription({ status: "canceled" }), { eventAt: NOW + 60, now: NOW + 60 });
+    await applySubscription(db, subscription({ status: "canceled" }), { eventAt: NOW + 60, now: NOW + 3600 });
+    expect(await planUntil("member")).toBe(NOW + 60);
+  });
+
   it("ignores a state older than the one applied", async () => {
     await applySubscription(db, subscription({ status: "canceled" }), { eventAt: NOW + 60, now: NOW + 60 });
     await applySubscription(db, subscription(), { eventAt: NOW, now: NOW + 61 });

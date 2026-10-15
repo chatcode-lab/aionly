@@ -58,7 +58,7 @@ export function meta({ loaderData, matches, location }: Route.MetaArgs) {
     imageAlt: `${profile.username} on aion.ly`,
     extra: [
       { property: "profile:username", content: profile.username },
-      { tagName: "link", rel: "alternate", type: "text/markdown", href: path },
+      { tagName: "link", rel: "alternate", type: "text/markdown", href: `${path}.md` },
     ],
   });
 }

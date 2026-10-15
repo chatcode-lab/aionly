@@ -1,3 +1,4 @@
+import { entitledCondition } from "../db/accounts.server";
 import { postsByIds, topSnapshot } from "../db/feed.server";
 import type { Range } from "../feed";
 import { plainText } from "../text/markdown";
@@ -46,7 +47,9 @@ export async function setDigest(db: D1Database, userId: string, digest: Frequenc
     .prepare(
       `UPDATE profiles SET digest = ?2,
          digest_sent_at = CASE WHEN ?2 IS NULL OR digest IS ?2 THEN digest_sent_at ELSE ?3 END
-       WHERE user_id = ?1`,
+       WHERE user_id = ?1
+         -- Turning it on is the plan's, checked here too; turning it off is always allowed.
+         AND (?2 IS NULL OR ${entitledCondition(1, now)})`,
     )
     .bind(userId, digest, now)
     .run();
@@ -94,8 +97,11 @@ export async function digestPosts(db: D1Database, frequency: Frequency, origin: 
 /**
  * Sends every digest that is due, a batch per frequency per run. A quiet
  * period with no posts sends nothing, and still counts as sent. Each
- * address gets its own message, with its own unsubscribe link; a refused
- * send is skipped and tried again next run.
+ * address gets its own message, with its own unsubscribe link. Recipients
+ * are claimed before anything is sent, so two runs at once never send one
+ * twice; a refused send is released and tried again next run, and a run
+ * cut short after its claim sends nothing more that period rather than risk
+ * sending twice.
  */
 export async function sendDigests(
   db: D1Database,
@@ -104,10 +110,22 @@ export async function sendDigests(
 ): Promise<number> {
   let sent = 0;
   for (const frequency of FREQUENCIES) {
-    const recipients = await dueRecipients(db, frequency, input.now);
+    const due = await dueRecipients(db, frequency, input.now);
+    if (due.length === 0) continue;
+    const { results: claimed } = await db
+      .prepare(
+        `UPDATE profiles SET digest_sent_at = ?3
+         WHERE user_id IN (SELECT value FROM json_each(?1)) AND digest = ?4
+           AND (digest_sent_at IS NULL OR digest_sent_at < ?2)
+         RETURNING user_id`,
+      )
+      .bind(JSON.stringify(due.map((recipient) => recipient.userId)), periodStart(frequency, input.now), input.now, frequency)
+      .all<{ user_id: string }>();
+    const mine = new Set(claimed.map((row) => row.user_id));
+    const recipients = due.filter((recipient) => mine.has(recipient.userId));
     if (recipients.length === 0) continue;
     const posts = await digestPosts(db, frequency, input.origin, input.now);
-    const done: string[] = [];
+    const failed: string[] = [];
     for (const recipient of recipients) {
       if (posts.length > 0) {
         const unsubscribeUrl = `${input.origin}/digest/unsubscribe?token=${encodeURIComponent(await unsubscribeToken(input.secret, recipient.userId))}`;
@@ -127,15 +145,14 @@ export async function sendDigests(
           sent += 1;
         } catch (error) {
           console.error("digest send", frequency, error);
-          continue;
+          failed.push(recipient.userId);
         }
       }
-      done.push(recipient.userId);
     }
-    if (done.length > 0) {
+    if (failed.length > 0) {
       await db
-        .prepare(`UPDATE profiles SET digest_sent_at = ?2 WHERE user_id IN (SELECT value FROM json_each(?1))`)
-        .bind(JSON.stringify(done), input.now)
+        .prepare(`UPDATE profiles SET digest_sent_at = NULL WHERE user_id IN (SELECT value FROM json_each(?1)) AND digest_sent_at = ?2`)
+        .bind(JSON.stringify(failed), input.now)
         .run();
     }
   }

@@ -88,6 +88,8 @@ export interface PostCardData {
 /** A post on its own page, with the whole description. */
 export interface PostDetail extends PostCardData {
   description: string;
+  /** Who may comment at the first level, when its author chose and has the plan. */
+  replies?: "humans" | "agents" | "good_agents" | "humans_good_agents";
 }
 
 export interface CommentData {

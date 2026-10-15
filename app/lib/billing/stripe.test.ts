@@ -1,6 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import { createCheckout, encodeForm, periodEnd, signWebhook, stripeClient, type StripeSubscription, verifyWebhook } from "./stripe";
+import {
+  createCheckout,
+  encodeForm,
+  expireOpenCheckouts,
+  paidFreshStart,
+  periodEnd,
+  runningSubscriptions,
+  signWebhook,
+  stripeClient,
+  type StripeSubscription,
+  verifyWebhook,
+} from "./stripe";
 
 const SECRET = "whsec_test_secret";
 const NOW = 1_800_000_000;
@@ -72,5 +83,46 @@ describe("checkout", () => {
     expect(sent!.get("metadata[start_now_requested_at]")).toBe("1800000000");
     expect(sent!.get("subscription_data[metadata][start_now_requested_at]")).toBe("1800000000");
     expect(sent!.get("subscription_data[metadata][user_id]")).toBe("u1");
+  });
+});
+
+describe("one plan per member", () => {
+  /** A fake Stripe that answers lists and records every call. */
+  function fakeStripe(lists: Record<string, unknown[]>) {
+    const calls: string[] = [];
+    const fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      calls.push(`${init?.method ?? "GET"} ${url.pathname}${url.search}`);
+      return Response.json({ data: lists[url.pathname] ?? [], object: "list" });
+    }) as typeof fetch;
+    return { client: stripeClient("sk_test_x", fetcher), calls };
+  }
+
+  it("finds every subscription that may still charge the customer", async () => {
+    const { client, calls } = fakeStripe({
+      "/v1/subscriptions": [{ id: "sub_a", status: "active" }, { id: "sub_b", status: "canceled" }, { id: "sub_c", status: "past_due" }],
+    });
+    expect((await runningSubscriptions(client, "cus_1")).map((subscription) => subscription.id)).toEqual(["sub_a", "sub_c"]);
+    expect(calls[0]).toBe("GET /v1/subscriptions?customer=cus_1&status=all&limit=20");
+  });
+
+  it("closes checkouts left open, so only the next one can be paid", async () => {
+    const { client, calls } = fakeStripe({ "/v1/checkout/sessions": [{ id: "cs_1" }, { id: "cs_2" }] });
+    await expireOpenCheckouts(client, "cus_1");
+    expect(calls).toEqual([
+      "GET /v1/checkout/sessions?customer=cus_1&status=open&limit=20",
+      "POST /v1/checkout/sessions/cs_1/expire",
+      "POST /v1/checkout/sessions/cs_2/expire",
+    ]);
+  });
+});
+
+describe("fresh start payments", () => {
+  it("count only a paid checkout for a fresh start, for the member who started it", () => {
+    const session = { id: "cs_1", object: "checkout.session" as const, mode: "payment", client_reference_id: "u1", payment_status: "paid", metadata: { kind: "fresh_start", user_id: "u1" } };
+    expect(paidFreshStart(session)).toBe("u1");
+    expect(paidFreshStart({ ...session, payment_status: "unpaid" })).toBeNull();
+    expect(paidFreshStart({ ...session, mode: "subscription" })).toBeNull();
+    expect(paidFreshStart({ ...session, metadata: {} })).toBeNull();
   });
 });

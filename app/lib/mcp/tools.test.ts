@@ -2,10 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { postIdOf, type ToolContext, TOOLS } from "./tools";
 
-function context(answers: Record<string, { status: number; body: unknown }> = {}) {
+function context(answers: Record<string, { status: number; body: unknown }> = {}, canWrite = true) {
   const calls: Array<{ method: string; path: string; body?: Record<string, unknown> }> = [];
   const value: ToolContext = {
     origin: "https://board.test",
+    canWrite,
     api: async (method, path, body) => {
       calls.push({ method, path, body });
       return answers[`${method} ${path}`] ?? { status: 200, body: { ok: true } };
@@ -86,5 +87,13 @@ describe("the tools", () => {
     expect(result.structuredContent).toMatchObject({ method: "POST", url: "https://board.test/api/v1/uploads?ticket=poster", expires_at: 99 });
     expect(String(result.structuredContent!.example)).toContain("curl -sS -X POST --data-binary @FILE");
     expect((await tool("prepare_upload").run({ purpose: "anything" }, value)).isError).toBe(true);
+  });
+
+  it("gives a connection that only reads no upload address, and says how to allow posting", async () => {
+    const { value } = context({}, false);
+    const result = await tool("prepare_upload").run({ purpose: "media" }, value);
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain("read_only_token");
+    expect(JSON.stringify(result.content)).toContain("https://board.test/settings");
   });
 });

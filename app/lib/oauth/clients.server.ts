@@ -218,14 +218,28 @@ export async function readAuthorization(
 }
 
 /** A one-time code for the app, kept as a hash, for the agent the owner chose. */
-export async function issueCode(db: D1Database, request: AuthorizationRequest, agentId: string, now: number): Promise<string> {
+export async function issueCode(
+  db: D1Database,
+  request: AuthorizationRequest,
+  agentId: string,
+  input: { canWrite: boolean; now: number },
+): Promise<string> {
   const code = newId(43);
   await db
     .prepare(
-      `INSERT INTO oauth_codes (code_hash, client_id, agent_id, redirect_uri, code_challenge, resource, expires_at)
-       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`,
+      `INSERT INTO oauth_codes (code_hash, client_id, agent_id, redirect_uri, code_challenge, resource, expires_at, can_write)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
     )
-    .bind(await hashToken(code), request.client.id, agentId, request.redirectUri, request.codeChallenge, request.resource, now + CODE_SECONDS)
+    .bind(
+      await hashToken(code),
+      request.client.id,
+      agentId,
+      request.redirectUri,
+      request.codeChallenge,
+      request.resource,
+      input.now + CODE_SECONDS,
+      input.canWrite ? 1 : 0,
+    )
     .run();
   return code;
 }
@@ -243,9 +257,20 @@ export async function exchangeCode(
   const code = form.get("code") ?? "";
   if (!code || code.length > 100) return refuse("invalid_grant", "The code is missing.");
   const claimed = await db
-    .prepare(`DELETE FROM oauth_codes WHERE code_hash = ?1 RETURNING client_id, agent_id, redirect_uri, code_challenge, resource, expires_at`)
+    .prepare(
+      `DELETE FROM oauth_codes WHERE code_hash = ?1
+       RETURNING client_id, agent_id, redirect_uri, code_challenge, resource, expires_at, can_write`,
+    )
     .bind(await hashToken(code))
-    .first<{ client_id: string; agent_id: string; redirect_uri: string; code_challenge: string; resource: string | null; expires_at: number }>();
+    .first<{
+      client_id: string;
+      agent_id: string;
+      redirect_uri: string;
+      code_challenge: string;
+      resource: string | null;
+      expires_at: number;
+      can_write: number;
+    }>();
   if (!claimed || claimed.expires_at < input.now) return refuse("invalid_grant", "The code is not valid, or was used already.");
   if (form.get("client_id") !== claimed.client_id) return refuse("invalid_grant", "The code was issued to another app.");
   const redirect = form.get("redirect_uri");
@@ -265,7 +290,14 @@ export async function exchangeCode(
     .bind(claimed.agent_id, claimed.client_id)
     .first<{ user_id: string; name: string }>();
   if (!agent) return refuse("invalid_grant", "The agent is no longer there.");
-  const token = await createAppToken(db, { agentId: agent.user_id, clientId: claimed.client_id, label: agent.name, now: input.now });
+  const token = await createAppToken(db, {
+    agentId: agent.user_id,
+    clientId: claimed.client_id,
+    label: agent.name,
+    canWrite: claimed.can_write === 1,
+    now: input.now,
+  });
+  if (!token) return refuse("invalid_grant", "The agent cannot be connected now: its owner's plan or standing has changed.");
   await db.prepare(`UPDATE oauth_clients SET last_used_at = ?2 WHERE id = ?1`).bind(claimed.client_id, input.now).run();
   return { ok: true, token };
 }

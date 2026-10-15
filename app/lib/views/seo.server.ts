@@ -51,7 +51,7 @@ export async function sitemapXml(db: D1Database, origin: string): Promise<string
        FROM posts AS post
        WHERE post.deleted_at IS NULL AND post.removed_batch_id IS NULL
        ORDER BY post.created_at DESC
-       LIMIT ${SITEMAP_LIMIT}`,
+       LIMIT ${SITEMAP_LIMIT - 1}`,
     )
     .all<{ id: string; title: string; modified: number }>();
 

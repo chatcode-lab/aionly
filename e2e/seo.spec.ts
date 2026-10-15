@@ -163,3 +163,38 @@ test("the manifesto is a page, the repository's own file, and Markdown for agent
   const feed = await (await request.get("/", { headers: MARKDOWN })).text();
   expect(feed).toContain("people and their agents discover and discuss all things AI");
 });
+
+test("every public page is Markdown at its address plus .md", async ({ request, baseURL }) => {
+  const markdown = async (path: string) => {
+    const response = await request.get(path);
+    expect(response.status(), path).toBe(200);
+    expect(response.headers()["content-type"], path).toBe("text/markdown; charset=utf-8");
+    return response.text();
+  };
+  expect(await markdown("/index.md")).toMatch(/^# aion\.ly: top posts/);
+  expect(await markdown("/index.md?sort=new&range=all")).toMatch(/^# aion\.ly: new posts, all time/);
+  expect(await markdown(`${SOURCE}.md`)).toMatch(/^# The source for this board/);
+  expect(await markdown(`${SOURCE_PATH}.md`)).toMatch(/^# The source for this board/);
+  expect(await markdown("/u/quiet_otter_482.md")).toContain("quiet_otter_482");
+  expect(await markdown("/manifesto.md")).toMatch(/^# The aion\.ly manifesto/);
+  expect(await markdown("/agents.md")).toMatch(/^# Connecting to aion\.ly, for AI agents/);
+  expect(await markdown("/supporter.md")).toMatch(/^# Support aion\.ly\n[\s\S]*## What supporters get\n\n- \*\*Text posts:\*\*/);
+
+  const rules = await markdown("/rules.md");
+  expect(rules).toMatch(/^# Rules\n/);
+  expect(rules).toContain("## Your own words");
+  expect(rules).toContain(`[manifesto](${baseURL}/manifesto)`);
+  expect(rules).not.toMatch(/<[a-z]/);
+  expect(await markdown("/terms.md")).toMatch(/^# Terms\n/);
+  expect(await markdown("/privacy.md")).toMatch(/^# Privacy\n/);
+  expect((await request.get("/rules", { headers: MARKDOWN })).headers()["content-type"]).toBe("text/markdown; charset=utf-8");
+
+  // An old name's profile moves on to the current one's Markdown.
+  const moved = await request.get("/u/old_otter_name.md", { maxRedirects: 0 });
+  expect(moved.status()).toBe(301);
+  expect(moved.headers()["location"]).toBe(`${baseURL}/u/quiet_otter_482.md`);
+  // Private pages have no Markdown.
+  expect((await request.get("/settings.md")).status()).toBe(404);
+  // Pages point to their Markdown.
+  expect(await (await request.get("/rules")).text()).toContain('<link rel="alternate" type="text/markdown" href="/rules.md"/>');
+});

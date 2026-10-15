@@ -37,6 +37,8 @@ const FAKE_FRAMES: Array<{ match: RegExp; script: string }> = [
       window.viewerPlay = () => change(1);
       window.viewerPause = () => change(2);
       window.viewerUnmute = () => { muted = false; deliver(); };
+      // As YouTube reports a video that cannot be embedded (150).
+      window.viewerFail = () => send({ event: "onError", info: 150 });
       addEventListener("message", (event) => {
         let data;
         try { data = JSON.parse(event.data); } catch { return; }

@@ -87,6 +87,23 @@ test("plays the focused video muted, and pauses it when focus moves on", async (
   expect(problems.errors).toEqual([]);
 });
 
+test("a video the provider cannot play here falls back to a preview of the original", async ({ page }) => {
+  await page.goto("/");
+  await focus(page, BUNNY);
+  const bunny = await player(page, BUNNY);
+  await expect.poll(() => isPlaying(bunny)).toBe(true);
+  await bunny.evaluate(() => (window as unknown as { viewerFail: () => void }).viewerFail());
+  const media = card(page, BUNNY);
+  await expect(media.locator("iframe")).toHaveCount(0);
+  await expect(media.getByText("It can't play here. Open the original to watch or listen.")).toBeVisible();
+  await expect(media.locator('a[href^="https://www.youtube.com/watch"]').first()).toBeVisible();
+  // It stays a preview, even when focused again.
+  await focus(page, SINTEL);
+  await focus(page, BUNNY);
+  await page.waitForTimeout(600);
+  await expect(media.locator("iframe")).toHaveCount(0);
+});
+
 test("loads frames ahead, at most three, and releases them far away", async ({ page }) => {
   await page.goto("/");
   expect(await page.locator("iframe").count()).toBeLessThanOrEqual(3);

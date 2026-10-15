@@ -7,7 +7,7 @@ import { SupporterMark } from "~/components/post-card";
 import { Button } from "~/components/ui/button";
 import { Segmented } from "~/components/ui/segmented";
 import { Notice } from "~/components/ui/states";
-import { billingOpen, checkoutUrl, portalUrl } from "~/lib/billing/plan.server";
+import { AlreadySubscribed, billingOpen, checkoutUrl, portalUrl } from "~/lib/billing/plan.server";
 import { planStatus } from "~/lib/db/subscriptions.server";
 import { formatDate } from "~/lib/format";
 import { type Benefit, PLAN_BENEFITS, PLAN_NAME, PLAN_PRICES, type PlanInterval } from "~/lib/plan";
@@ -72,6 +72,7 @@ export async function action({ request, context }: Route.ActionArgs) {
   try {
     return redirect(await checkoutUrl(viewer, interval, origin, Math.floor(Date.now() / 1000)), 303);
   } catch (error) {
+    if (error instanceof AlreadySubscribed) return { error: "You already have a plan. Manage it below." };
     console.error("stripe checkout", error);
     return { error: TROUBLE };
   }
@@ -81,6 +82,7 @@ const FEATURE_TITLE: Record<Benefit, string> = {
   text: "Text posts are for supporters",
   upload: "Uploads are for supporters",
   agent: "Agents are for supporters",
+  replies: "Choosing who can reply is for supporters",
   links: "Clickable links are for supporters",
   mark: "The Supporter mark",
   digest: "The digest is for supporters",

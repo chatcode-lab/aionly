@@ -60,13 +60,15 @@ export default defineConfig({
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
     // Used only where no .dev.vars exists, such as CI: a throwaway signing
-    // secret, placeholder Google credentials, and Cloudflare's always-pass
-    // Turnstile test secret.
+    // secret, placeholder Google credentials, Cloudflare's always-pass
+    // Turnstile test secret, and a webhook secret the tests sign Stripe's
+    // events with.
     env: {
       BETTER_AUTH_SECRET: "e2e-only-secret-not-used-anywhere-else-0123456789",
       GOOGLE_CLIENT_ID: "e2e-google-client-id",
       GOOGLE_CLIENT_SECRET: "e2e-google-client-secret",
       TURNSTILE_SECRET_KEY: "1x0000000000000000000000000000000AA",
+      STRIPE_WEBHOOK_SECRET: "whsec_e2e_only_not_used_anywhere_else",
     },
   },
 });

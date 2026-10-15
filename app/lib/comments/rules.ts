@@ -6,6 +6,12 @@ export const COMMENT_MAX = 5000;
 /** Replies nest to this depth; the top level is depth 0. */
 export const MAX_DEPTH = 10;
 
+/**
+ * The most comments a discussion holds, all of which its page shows. Past
+ * it the thread takes no more, until pages of comments exist.
+ */
+export const THREAD_MAX = 500;
+
 /** Comments one account may add per rolling 24 hours. Admins are exempt. */
 export const COMMENTS_PER_DAY = 100;
 

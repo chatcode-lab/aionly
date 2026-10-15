@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 
 import { type AccountRecord } from "../db/accounts.server";
+import { readBodyCapped } from "../security/body";
 import { applyFreshStart } from "../db/fresh-starts.server";
 import { applySubscription, planStatus, rememberCustomer, runningSubscription } from "../db/subscriptions.server";
 import { FRESH_START_PRICE, PLAN_PRICES, type PlanInterval } from "../plan";
@@ -11,9 +12,12 @@ import {
   createCustomer,
   createFreshStartCheckout,
   createPortal,
+  expireOpenCheckouts,
   getCheckoutSession,
+  getSubscription,
   paidFreshStart,
   pricesByLookupKey,
+  runningSubscriptions,
   type StripeCheckoutSession,
   type StripeSubscription,
   stripeClient,
@@ -44,9 +48,14 @@ async function customerFor(viewer: AccountRecord): Promise<string> {
   return (await planStatus(env.DB, viewer.id)).customerId ?? customerId;
 }
 
+/** A member who already pays for the plan, so is not sold a second one. */
+export class AlreadySubscribed extends Error {}
+
 /**
  * Stripe's checkout page for the plan, billed monthly or yearly, for a member
- * who asked for it to start at once.
+ * who asked for it to start at once. One plan per member: a subscription
+ * Stripe already has is applied instead, and any checkout left open is
+ * closed first, so two tabs cannot buy two plans.
  */
 export async function checkoutUrl(
   viewer: AccountRecord,
@@ -58,7 +67,14 @@ export async function checkoutUrl(
   const prices = await pricesByLookupKey(client(), [lookupKey]);
   const priceId = prices.get(lookupKey);
   if (!priceId) throw new Error(`no active Stripe price has the lookup key ${lookupKey}`);
-  return createCheckout(client(), { customerId: await customerFor(viewer), priceId, userId: viewer.id, origin, startNowAt });
+  const customerId = await customerFor(viewer);
+  const running = await runningSubscriptions(client(), customerId);
+  if (running.length > 0) {
+    for (const subscription of running) await applySubscription(env.DB, subscription, { eventAt: now(), now: now() });
+    throw new AlreadySubscribed("this member already has a subscription");
+  }
+  await expireOpenCheckouts(client(), customerId);
+  return createCheckout(client(), { customerId, priceId, userId: viewer.id, origin, startNowAt });
 }
 
 /** Stripe's checkout page for a fresh start, for a member who asked for it to apply at once. */
@@ -66,7 +82,10 @@ export async function freshStartCheckoutUrl(viewer: AccountRecord, origin: strin
   const lookupKey = FRESH_START_PRICE.lookupKey;
   const priceId = (await pricesByLookupKey(client(), [lookupKey])).get(lookupKey);
   if (!priceId) throw new Error(`no active Stripe price has the lookup key ${lookupKey}`);
-  return createFreshStartCheckout(client(), { customerId: await customerFor(viewer), priceId, userId: viewer.id, origin, startNowAt });
+  const customerId = await customerFor(viewer);
+  // Only the newest checkout can be paid, so one fresh start is bought at a time.
+  await expireOpenCheckouts(client(), customerId);
+  return createFreshStartCheckout(client(), { customerId, priceId, userId: viewer.id, origin, startNowAt });
 }
 
 /**
@@ -102,12 +121,25 @@ export async function finishCheckout(viewer: AccountRecord, sessionId: string): 
   return applySubscription(env.DB, subscription, { eventAt: now(), now: now() });
 }
 
-/** Ends a deleted account's subscription at once, so it is never charged again. */
+/**
+ * Before an account is deleted: ends every subscription its customer has at
+ * once, recorded or not, and closes any checkout left open, so it is never
+ * charged again. Throws, so nothing is deleted, when a subscription is
+ * running and Stripe cannot be reached to end it.
+ */
 export async function cancelForDeletion(userId: string): Promise<void> {
-  const subscriptionId = await runningSubscription(env.DB, userId);
-  if (!subscriptionId || !env.STRIPE_SECRET_KEY) return;
-  const ended = await cancelSubscription(client(), subscriptionId);
-  await applySubscription(env.DB, ended, { eventAt: now(), now: now() });
+  const recorded = await runningSubscription(env.DB, userId);
+  if (!env.STRIPE_SECRET_KEY) {
+    if (recorded) throw new Error("a running subscription cannot be cancelled without STRIPE_SECRET_KEY");
+    return;
+  }
+  const { customerId } = await planStatus(env.DB, userId);
+  if (!customerId) return;
+  await expireOpenCheckouts(client(), customerId);
+  for (const subscription of await runningSubscriptions(client(), customerId)) {
+    const ended = await cancelSubscription(client(), subscription.id);
+    await applySubscription(env.DB, ended, { eventAt: now(), now: now() });
+  }
 }
 
 const SUBSCRIPTION_EVENTS = new Set([
@@ -126,14 +158,21 @@ const SUBSCRIPTION_EVENTS = new Set([
  * retrying events the board has no use for.
  */
 export async function handleWebhook(request: Request): Promise<Response> {
-  const payload = await request.text();
+  // Read only so far before the signature is checked; Stripe's events are a few kilobytes.
+  const payload = await readBodyCapped(request, 256 * 1024);
+  if (payload === null) return Response.json({ error: "too_large" }, { status: 413 });
   const secret = env.STRIPE_WEBHOOK_SECRET ?? "";
   if (!(await verifyWebhook(payload, request.headers.get("Stripe-Signature"), secret, now()))) {
     return Response.json({ error: "bad_signature" }, { status: 400 });
   }
   const event = JSON.parse(payload) as { type: string; created: number; data: { object: unknown } };
   if (SUBSCRIPTION_EVENTS.has(event.type)) {
-    const subscription = event.data.object as StripeSubscription;
+    // Stripe's current word on the subscription, not the event's snapshot:
+    // events can come late, out of order, or several in one second, and
+    // the subscription as it is now settles them all alike. Without a key,
+    // as in tests, the snapshot is all there is.
+    const snapshot = event.data.object as StripeSubscription;
+    const subscription = env.STRIPE_SECRET_KEY ? await getSubscription(client(), snapshot.id) : snapshot;
     await applySubscription(env.DB, subscription, { eventAt: event.created, now: now() });
   }
   if (event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded") {

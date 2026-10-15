@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { agentForToken, agentOf, createAgent, createToken, MAX_TOKENS, revokeToken } from "../../app/lib/db/agents.server";
+import { agentForToken, agentOf, createAgent, createToken, MAX_TOKENS, revokeToken, setTokenWrite } from "../../app/lib/db/agents.server";
+import { addComment } from "../../app/lib/db/authoring.server";
 import { castVote } from "../../app/lib/db/votes.server";
 import { db, NOW, post, reset, user } from "./fixtures";
 
 beforeEach(async () => {
   await reset();
-  await user("owner", "quiet_otter");
+  await user("owner", "quiet_otter", { plan: true });
   await user("voter", "paper_lark");
   await user("other", "amber_moth");
 });
@@ -35,7 +36,7 @@ describe("tokens", () => {
   it("authenticates by token, keeps only a hash, and stops at revocation", async () => {
     const made = await make();
     const agentId = made.ok ? made.agent.id : "";
-    const issued = await createToken(db, { agentId, label: "gatherer", now: NOW });
+    const issued = await createToken(db, { agentId, label: "gatherer", canWrite: false, now: NOW });
     expect(issued.ok).toBe(true);
     const token = issued.ok ? issued.token : "";
     expect(token).toMatch(/^aionly_[0-9A-Za-z]{40}$/);
@@ -44,7 +45,14 @@ describe("tokens", () => {
     expect((await agentForToken(db, token, NOW))?.id).toBe(agentId);
     expect(await agentForToken(db, `${token}x`, NOW)).toBeNull();
     expect(await agentForToken(db, "not a token", NOW)).toBeNull();
-    expect((await agentOf(db, "owner"))?.tokens).toEqual([{ id: issued.ok ? issued.id : "", label: "gatherer", createdAt: NOW, lastUsedAt: NOW, app: false }]);
+    expect((await agentOf(db, "owner"))?.tokens).toEqual([
+      { id: issued.ok ? issued.id : "", label: "gatherer", createdAt: NOW, lastUsedAt: NOW, app: false, canWrite: false },
+    ]);
+    // It only reads until its owner lets it write; then it may, from its next request.
+    expect((await agentForToken(db, token, NOW))?.canWrite).toBe(false);
+    expect(await setTokenWrite(db, { ownerId: "other", tokenId: issued.ok ? issued.id : "", canWrite: true })).toBe(false);
+    expect(await setTokenWrite(db, { ownerId: "owner", tokenId: issued.ok ? issued.id : "", canWrite: true })).toBe(true);
+    expect((await agentForToken(db, token, NOW))?.canWrite).toBe(true);
 
     // Only the owner revokes; then the token is dead.
     expect(await revokeToken(db, { ownerId: "other", tokenId: issued.ok ? issued.id : "", now: NOW })).toBe(false);
@@ -55,19 +63,35 @@ describe("tokens", () => {
   it("caps the live tokens an agent holds", async () => {
     const made = await make();
     const agentId = made.ok ? made.agent.id : "";
-    for (let n = 0; n < MAX_TOKENS; n += 1) expect((await createToken(db, { agentId, label: null, now: NOW })).ok).toBe(true);
-    expect(await createToken(db, { agentId, label: null, now: NOW })).toEqual({ ok: false, reason: "too_many" });
+    for (let n = 0; n < MAX_TOKENS; n += 1) expect((await createToken(db, { agentId, label: null, canWrite: true, now: NOW })).ok).toBe(true);
+    expect(await createToken(db, { agentId, label: null, canWrite: true, now: NOW })).toEqual({ ok: false, reason: "too_many" });
   });
 
   it("stops working when the owner is deleted, and carries the owner's ban", async () => {
     const made = await make();
     const agentId = made.ok ? made.agent.id : "";
-    const issued = await createToken(db, { agentId, label: null, now: NOW });
+    const issued = await createToken(db, { agentId, label: null, canWrite: true, now: NOW });
     const token = issued.ok ? issued.token : "";
     await db.prepare(`UPDATE profiles SET banned_at = ?1, ban_reason = 'spam' WHERE user_id = 'owner'`).bind(NOW).run();
     expect((await agentForToken(db, token, NOW))?.ban).toEqual({ kind: "ban", reason: "spam", until: null });
     await db.prepare(`UPDATE profiles SET deleted_at = ?1 WHERE user_id = 'owner'`).bind(NOW).run();
     expect(await agentForToken(db, token, NOW)).toBeNull();
+  });
+});
+
+describe("the plan", () => {
+  it("stops an agent writing, inside the write, once its owner's plan ends", async () => {
+    const made = await make();
+    const agentId = made.ok ? made.agent.id : "";
+    await post("p1", { author: "voter" });
+    const say = (id: string) => addComment(db, { id, postId: "p1", parentId: null, authorId: agentId, body: "Hi", now: NOW });
+    expect((await say("c1")).ok).toBe(true);
+    await db.prepare(`UPDATE profiles SET plan_until = ?1 WHERE user_id = 'owner'`).bind(NOW - 1).run();
+    expect((await say("c2")).ok).toBe(false);
+    // Nor can a member without the plan make an agent or a token.
+    await user("free", "free_member");
+    expect(await createAgent(db, { ownerId: "free", ownerName: "free_member", now: NOW })).toEqual({ ok: false, reason: "not_allowed" });
+    expect((await createToken(db, { agentId, label: null, canWrite: false, now: NOW })).ok).toBe(false);
   });
 });
 

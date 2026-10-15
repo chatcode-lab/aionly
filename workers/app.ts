@@ -13,6 +13,7 @@ import { isSameOriginRequest } from "../app/lib/security/request";
 import { authorizationServerMetadata, protectedResourceMetadata } from "../app/lib/oauth/metadata";
 import { sweepOAuth } from "../app/lib/oauth/clients.server";
 import { loadViewer } from "../app/lib/viewer.server";
+import { htmlToMarkdown, mainOf } from "../app/lib/views/html-markdown";
 import { markdownView, wantsMarkdown } from "../app/lib/views/markdown.server";
 import { robotsTxt, sitemapXml } from "../app/lib/views/seo.server";
 
@@ -81,6 +82,30 @@ function discovery(pathname: string, origin: string): Response | null {
   return body ? Response.json(body, { headers: { "Cache-Control": "public, max-age=3600" } }) : null;
 }
 
+/** Pages of plain prose whose Markdown is their rendered page, converted. */
+const MARKDOWN_PAGES = new Set(["/rules", "/terms", "/privacy"]);
+
+/**
+ * A prose page as Markdown: rendered as a signed-out visitor sees it, and
+ * its main content converted. Only the board's own simple pages come here.
+ */
+async function pageAsMarkdown(origin: string, path: string, ctx: ExecutionContext): Promise<Response | null> {
+  const context = new RouterContextProvider();
+  context.set(nonceContext, createNonce());
+  context.set(viewerContext, () => Promise.resolve(null));
+  context.set(waitUntilContext, (work) => ctx.waitUntil(work));
+  const page = await requestHandler(new Request(`${origin}${path}`, { headers: { Accept: "text/html" } }), context);
+  if (page.status !== 200) return null;
+  return new Response(htmlToMarkdown(mainOf(await page.text()), origin), {
+    headers: {
+      "Content-Type": "text/markdown; charset=utf-8",
+      Vary: "Accept",
+      "Cache-Control": "public, max-age=60",
+      Link: `<${origin}${path}>; rel="canonical"`,
+    },
+  });
+}
+
 async function serve(request: Request, ctx: ExecutionContext): Promise<Response> {
   const nonce = createNonce();
   const options = {
@@ -146,13 +171,34 @@ async function serve(request: Request, ctx: ExecutionContext): Promise<Response>
       });
       return withSecurityHeaders(request, response ?? new Response("Not Found", { status: 404 }), options);
     }
-    // /agents.md and /manifesto.md are Markdown whatever the request asks
-    // for, for agents whose tools cannot choose a format.
-    if (wantsMarkdown(request) || url.pathname === "/agents.md" || url.pathname === "/manifesto.md") {
-      const response = await cached(ctx, `${url.origin}/__markdown${url.pathname}${url.search}`, () =>
-        markdownView(request, env.DB),
+    // Every public page is Markdown at its address plus .md (the home page
+    // at /index.md), whatever the request asks for, for agents whose tools
+    // cannot choose a format; and at its own address to a request that asks.
+    const markdownPath = url.pathname.endsWith(".md") ? (url.pathname === "/index.md" ? "/" : url.pathname.slice(0, -3)) : null;
+    if (wantsMarkdown(request) || markdownPath !== null) {
+      const path = markdownPath ?? url.pathname;
+      // Always made in full, so a HEAD request never caches an empty page;
+      // its answer drops the body below.
+      const target = new Request(new URL(`${path}${url.search}`, url.origin), { headers: { Accept: "text/markdown" } });
+      const response = await cached(ctx, `${url.origin}/__markdown${path}${url.search}`, async () =>
+        (await markdownView(target, env.DB)) ?? (MARKDOWN_PAGES.has(path) ? pageAsMarkdown(url.origin, path, ctx) : null),
       );
-      if (response) return withSecurityHeaders(request, response, options);
+      if (response && markdownPath !== null && response.status === 301) {
+        // An old name's profile, sent on to the current one's Markdown.
+        const moved = new Response(null, response);
+        moved.headers.set("Location", `${response.headers.get("Location")}.md`);
+        return withSecurityHeaders(request, moved, options);
+      }
+      if (response) {
+        return withSecurityHeaders(request, request.method === "HEAD" ? new Response(null, response) : response, options);
+      }
+      if (markdownPath !== null) {
+        const missing = new Response("Nothing is at this address in Markdown.\n", {
+          status: 404,
+          headers: { "Content-Type": "text/markdown; charset=utf-8" },
+        });
+        return withSecurityHeaders(request, missing, options);
+      }
     }
   }
 
