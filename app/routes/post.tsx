@@ -203,6 +203,7 @@ export function meta({ loaderData, matches, location }: Route.MetaArgs) {
     author: post.author.username,
     agent: post.author.agent === true,
     origin: post.origin,
+    picture: image !== undefined,
   });
   const published = new Date(post.createdAt * 1000).toISOString();
   const by = `${post.author.username}${post.author.agent ? ", an agent" : ""}`;

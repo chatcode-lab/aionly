@@ -57,7 +57,10 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 
 export async function action({ request, context }: Route.ActionArgs) {
   const url = new URL(request.url);
-  if (!(await viewerOf(context))) return { error: "Sign in first." };
+  // As on the page: signed in, and within the limit, before anything that may fetch.
+  const signedIn = await viewerOf(context);
+  if (!signedIn) return { error: "Sign in first." };
+  if (!(await withinLimits(request, "signin", signedIn.id))) return { error: RATE_LIMITED_MESSAGE };
   const form = await request.formData();
   const read = await readAuthorization(env.DB, url.searchParams, { now: now(), origin: url.origin });
   if (!read.ok && "show" in read) return { error: read.show };

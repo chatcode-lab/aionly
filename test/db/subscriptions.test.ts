@@ -11,6 +11,7 @@ import {
   releaseCheckout,
   rememberCustomer,
   setShowMark,
+  stillHolding,
 } from "../../app/lib/db/subscriptions.server";
 import { DAY, db, NOW, post, reset, user } from "./fixtures";
 
@@ -112,15 +113,30 @@ describe("the Supporter plan from Stripe", () => {
 
 describe("making a checkout", () => {
   it("is held for one request at a time per member and kind, and a dead claim lapses", async () => {
-    expect(await claimCheckout(db, "u1", "plan", NOW)).toBe(true);
+    const first = await claimCheckout(db, "u1", "plan", NOW);
+    expect(first).not.toBeNull();
     // Another tab, at the same moment: held off.
-    expect(await claimCheckout(db, "u1", "plan", NOW)).toBe(false);
-    expect(await claimCheckout(db, "u1", "fresh_start", NOW)).toBe(true);
-    expect(await claimCheckout(db, "u2", "plan", NOW)).toBe(true);
-    await releaseCheckout(db, "u1", "plan");
-    expect(await claimCheckout(db, "u1", "plan", NOW + 1)).toBe(true);
+    expect(await claimCheckout(db, "u1", "plan", NOW)).toBeNull();
+    expect(await claimCheckout(db, "u1", "fresh_start", NOW)).not.toBeNull();
+    expect(await claimCheckout(db, "u2", "plan", NOW)).not.toBeNull();
+    await releaseCheckout(db, first!);
+    const second = await claimCheckout(db, "u1", "plan", NOW + 1);
+    expect(second).not.toBeNull();
+    expect(await claimCheckout(db, "u1", "plan", NOW + 30)).toBeNull();
     // A claim whose request died is taken over after a minute.
-    expect(await claimCheckout(db, "u1", "plan", NOW + 30)).toBe(false);
-    expect(await claimCheckout(db, "u1", "plan", NOW + 61)).toBe(true);
+    expect(await claimCheckout(db, "u1", "plan", NOW + 61)).not.toBeNull();
+  });
+
+  it("belongs to the request that took it: a lapsed holder can neither release its successor's claim nor make a checkout", async () => {
+    const lapsed = (await claimCheckout(db, "u1", "plan", NOW))!;
+    expect(await stillHolding(db, lapsed, NOW + 5)).toBe(true);
+    const successor = (await claimCheckout(db, "u1", "plan", NOW + 60))!;
+    expect(await stillHolding(db, lapsed, NOW + 61)).toBe(false);
+    await releaseCheckout(db, lapsed);
+    // The successor still holds it, so a third request waits.
+    expect(await claimCheckout(db, "u1", "plan", NOW + 61)).toBeNull();
+    expect(await stillHolding(db, successor, NOW + 61)).toBe(true);
+    // Near the end of its time, even the holder makes nothing.
+    expect(await stillHolding(db, successor, NOW + 60 + 55)).toBe(false);
   });
 });

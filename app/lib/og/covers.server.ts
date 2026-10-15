@@ -118,6 +118,8 @@ async function postCover(db: D1Database, bucket: R2Bucket, id: string): Promise<
     }>();
   if (!row) return null;
   const author = toPublicAuthor(row);
+  // An uploaded picture shows itself; anything else, its snapshot or poster.
+  const pictureKey = row.kind === "upload" && row.media_type === "image" ? row.media_key : row.thumb_key;
   return {
     version: postCoverVersion({
       title: row.title,
@@ -125,6 +127,7 @@ async function postCover(db: D1Database, bucket: R2Bucket, id: string): Promise<
       author: author.username,
       agent: author.agent === true,
       origin: row.origin,
+      picture: pictureKey !== null,
     }),
     async draw() {
       const names = await mentionNames(db, mentionIds(row.description));
@@ -133,8 +136,7 @@ async function postCover(db: D1Database, bucket: R2Bucket, id: string): Promise<
       const where = row.url ? ` · ${displayHost(new URL(row.url))}` : "";
       const byline =
         row.kind === "text" ? `Posted by ${who}` : `${row.origin === "made" ? "Made" : "Found"} by ${who}${where}`;
-      // An uploaded picture shows itself; anything else, its snapshot or poster.
-      const picture = await pictureFrom(bucket, row.kind === "upload" && row.media_type === "image" ? row.media_key : row.thumb_key);
+      const picture = await pictureFrom(bucket, pictureKey);
       return { kind: "post", title: row.title, description, byline, ...(picture ? { picture } : {}) };
     },
   };

@@ -137,27 +137,54 @@ const CLAIM_SECONDS = 60;
 
 export type CheckoutKind = "plan" | "fresh_start";
 
+/** A request's hold on a member's checkout: its token proves it is the holder. */
+export interface CheckoutClaim {
+  userId: string;
+  kind: CheckoutKind;
+  token: string;
+  /** When it was taken: past CLAIM_SECONDS, another request may take it over. */
+  at: number;
+}
+
 /**
  * Holds the member's checkout of one kind while it is made, from looking
  * for a plan or an open checkout to making the new one, so two tabs cannot
- * both find nothing and both make one. False while another request holds
+ * both find nothing and both make one. Null while another request holds
  * it; a claim a minute old is taken over, should its request have died.
  */
-export async function claimCheckout(db: D1Database, userId: string, kind: CheckoutKind, now: number): Promise<boolean> {
+export async function claimCheckout(db: D1Database, userId: string, kind: CheckoutKind, now: number): Promise<CheckoutClaim | null> {
+  const token = crypto.randomUUID();
   const claimed = await db
     .prepare(
-      `INSERT INTO checkout_claims (user_id, kind, claimed_at) VALUES (?1, ?2, ?3)
-       ON CONFLICT (user_id, kind) DO UPDATE SET claimed_at = excluded.claimed_at
+      `INSERT INTO checkout_claims (user_id, kind, claimed_at, token) VALUES (?1, ?2, ?3, ?4)
+       ON CONFLICT (user_id, kind) DO UPDATE SET claimed_at = excluded.claimed_at, token = excluded.token
        WHERE checkout_claims.claimed_at <= excluded.claimed_at - ${CLAIM_SECONDS}`,
     )
-    .bind(userId, kind, now)
+    .bind(userId, kind, now, token)
     .run();
-  return claimed.meta.changes > 0;
+  return claimed.meta.changes > 0 ? { userId, kind, token, at: now } : null;
 }
 
-/** Lets the member's next checkout of this kind be made. */
-export async function releaseCheckout(db: D1Database, userId: string, kind: CheckoutKind): Promise<void> {
-  await db.prepare(`DELETE FROM checkout_claims WHERE user_id = ?1 AND kind = ?2`).bind(userId, kind).run();
+/**
+ * Whether the claim is still this request's, with time left to make the
+ * checkout: a request slower than the claim's lifetime has lost it, and
+ * must make nothing.
+ */
+export async function stillHolding(db: D1Database, claim: CheckoutClaim, now: number): Promise<boolean> {
+  if (now - claim.at >= CLAIM_SECONDS - 10) return false;
+  const row = await db
+    .prepare(`SELECT 1 FROM checkout_claims WHERE user_id = ?1 AND kind = ?2 AND token = ?3`)
+    .bind(claim.userId, claim.kind, claim.token)
+    .first();
+  return row !== null;
+}
+
+/** Lets the member's next checkout of this kind be made, if this claim still holds it. */
+export async function releaseCheckout(db: D1Database, claim: CheckoutClaim): Promise<void> {
+  await db
+    .prepare(`DELETE FROM checkout_claims WHERE user_id = ?1 AND kind = ?2 AND token = ?3`)
+    .bind(claim.userId, claim.kind, claim.token)
+    .run();
 }
 
 /** The subscription to cancel when an account is deleted, if one is running. */

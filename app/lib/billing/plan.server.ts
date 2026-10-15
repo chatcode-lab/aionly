@@ -10,6 +10,7 @@ import {
   planStatus,
   releaseCheckout,
   rememberCustomer,
+  stillHolding,
   runningSubscription,
 } from "../db/subscriptions.server";
 import { FRESH_START_PRICE, PLAN_PRICES, type PlanInterval } from "../plan";
@@ -67,13 +68,28 @@ export class CheckoutBusy extends Error {}
 /** What a member is told when another tab is making the same checkout. */
 export const BUSY = "A checkout is already opening in another tab. Use that one, or try again in a minute.";
 
-/** Runs `make` while holding the member's checkout of this kind, so no other is made meanwhile. */
-async function holdingCheckout<T>(userId: string, kind: CheckoutKind, make: () => Promise<T>): Promise<T> {
-  if (!(await claimCheckout(env.DB, userId, kind, now()))) throw new CheckoutBusy("a checkout is being made");
+/**
+ * Runs `make` while holding the member's checkout of this kind, so no other
+ * is made meanwhile. `make` checks it still holds the claim (`holding`)
+ * just before making the checkout, and names the attempt to Stripe, so a
+ * request that outlived its claim, or is retried, makes no second one.
+ */
+async function holdingCheckout<T>(
+  userId: string,
+  kind: CheckoutKind,
+  make: (attempt: { holding: () => Promise<void>; id: string }) => Promise<T>,
+): Promise<T> {
+  const claim = await claimCheckout(env.DB, userId, kind, now());
+  if (!claim) throw new CheckoutBusy("a checkout is being made");
   try {
-    return await make();
+    return await make({
+      id: claim.token,
+      holding: async () => {
+        if (!(await stillHolding(env.DB, claim, now()))) throw new CheckoutBusy("the claim lapsed");
+      },
+    });
   } finally {
-    await releaseCheckout(env.DB, userId, kind);
+    await releaseCheckout(env.DB, claim);
   }
 }
 
@@ -94,14 +110,15 @@ export async function checkoutUrl(
   const priceId = prices.get(lookupKey);
   if (!priceId) throw new Error(`no active Stripe price has the lookup key ${lookupKey}`);
   const customerId = await customerFor(viewer);
-  return holdingCheckout(viewer.id, "plan", async () => {
+  return holdingCheckout(viewer.id, "plan", async (attempt) => {
     const running = await runningSubscriptions(client(), customerId);
     if (running.length > 0) {
       for (const subscription of running) await applySubscription(env.DB, subscription, { eventAt: now(), now: now() });
       throw new AlreadySubscribed("this member already has a subscription");
     }
     await expireOpenCheckouts(client(), customerId);
-    return createCheckout(client(), { customerId, priceId, userId: viewer.id, origin, startNowAt });
+    await attempt.holding();
+    return createCheckout(client(), { customerId, priceId, userId: viewer.id, origin, startNowAt, attempt: attempt.id });
   });
 }
 
@@ -112,9 +129,10 @@ export async function freshStartCheckoutUrl(viewer: AccountRecord, origin: strin
   if (!priceId) throw new Error(`no active Stripe price has the lookup key ${lookupKey}`);
   const customerId = await customerFor(viewer);
   // Only the newest checkout can be paid, so one fresh start is bought at a time.
-  return holdingCheckout(viewer.id, "fresh_start", async () => {
+  return holdingCheckout(viewer.id, "fresh_start", async (attempt) => {
     await expireOpenCheckouts(client(), customerId);
-    return createFreshStartCheckout(client(), { customerId, priceId, userId: viewer.id, origin, startNowAt });
+    await attempt.holding();
+    return createFreshStartCheckout(client(), { customerId, priceId, userId: viewer.id, origin, startNowAt, attempt: attempt.id });
   });
 }
 
@@ -177,13 +195,21 @@ export async function cancelForDeletion(userId: string): Promise<void> {
     return;
   }
   const { customerId } = await planStatus(env.DB, userId);
+  // No checkout of either kind may be made from here on: the claims are
+  // held, and left to lapse once the account is gone.
+  for (const kind of ["plan", "fresh_start"] as const) {
+    if (!(await claimCheckout(env.DB, userId, kind, now()))) throw new CheckoutBusy("a checkout is being made");
+  }
+  // Open checkouts close first, so one completing now becomes a
+  // subscription the list below finds; one that completed as it closed
+  // makes the close fail, and nothing is deleted.
+  if (customerId) await expireOpenCheckouts(client(), customerId);
   const targets = customerId ? await runningSubscriptions(client(), customerId) : [];
   // The one recorded here is ended too, should Stripe's list ever miss it.
   if (recorded && !targets.some((subscription) => subscription.id === recorded)) {
     const current = await getSubscription(client(), recorded);
     if (isRunning(current)) targets.push(current);
   }
-  if (customerId) await expireOpenCheckouts(client(), customerId);
   for (const subscription of targets) {
     const ended = await cancelSubscription(client(), subscription.id);
     await applySubscription(env.DB, ended, { eventAt: now(), now: now() });

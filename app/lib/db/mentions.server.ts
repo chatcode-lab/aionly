@@ -182,18 +182,43 @@ export interface Mention {
 export const MENTIONS_LIMIT = 50;
 
 /**
+ * Where a page of mentions ended, to ask for the next: the mention's time
+ * and what tells apart mentions written in the same second.
+ */
+export function mentionCursor(mention: Mention): string {
+  return `${mention.mentionedAt}:${mention.type}:${mention.id}:${mention.targetId}`;
+}
+
+/** A cursor read back; a bare number means everything before that second. */
+function parseCursor(raw: string | number | undefined): { at: number; key: string } {
+  if (raw === undefined) return { at: Number.MAX_SAFE_INTEGER, key: "" };
+  if (typeof raw === "number") return { at: raw, key: "" };
+  const [at, ...rest] = raw.split(":");
+  const time = Number(at);
+  if (!Number.isInteger(time) || time <= 0 || rest.length !== 3) return { at: Number.MAX_SAFE_INTEGER, key: "" };
+  return { at: time, key: rest.join(":") };
+}
+
+/** A mention's place among those of the same second: type, item, and whom. */
+const KEY = (type: "post" | "comment") => `('${type}:' || mention.item_id || ':' || mention.target_id)`;
+
+/**
  * Live posts and comments mentioning any of these accounts, newest mention
- * first, written after `after` and before `before` (both left out by
- * default). By index, so the cost follows the mentions, not the board.
+ * first, written after `after` and before the cursor `before` (see
+ * mentionCursor; both left out by default). Ties within a second are put
+ * in a fixed order, so paging misses none. By index, so the cost follows
+ * the mentions, not the board.
  */
 export async function mentionsOf(
   db: D1Database,
-  input: { targets: string[]; after?: number; before?: number; limit?: number },
+  input: { targets: string[]; after?: number; before?: string | number; limit?: number },
 ): Promise<Mention[]> {
   const limit = input.limit ?? MENTIONS_LIMIT;
-  const window = `mention.target_id IN (SELECT value FROM json_each(?1))
-    AND mention.created_at > ?2 AND mention.created_at < ?3`;
-  const binds = [JSON.stringify(input.targets), input.after ?? 0, input.before ?? Number.MAX_SAFE_INTEGER, limit];
+  const cursor = parseCursor(input.before);
+  const window = (type: "post" | "comment") => `mention.target_id IN (SELECT value FROM json_each(?1))
+    AND mention.created_at > ?2
+    AND (mention.created_at < ?3 OR (mention.created_at = ?3 AND ?5 <> '' AND ${KEY(type)} < ?5))`;
+  const binds = [JSON.stringify(input.targets), input.after ?? 0, cursor.at, limit, cursor.key];
   const [posts, comments] = await db.batch([
     db
       .prepare(
@@ -202,9 +227,9 @@ export async function mentionsOf(
          FROM mentions AS mention
          JOIN posts AS post ON post.id = mention.item_id
          ${AUTHOR_JOINS("post")}
-         WHERE mention.item_type = 'post' AND ${window}
+         WHERE mention.item_type = 'post' AND ${window("post")}
            AND post.deleted_at IS NULL AND post.removed_batch_id IS NULL
-         ORDER BY mention.created_at DESC LIMIT ?4`,
+         ORDER BY mention.created_at DESC, ${KEY("post")} DESC LIMIT ?4`,
       )
       .bind(...binds),
     db
@@ -215,10 +240,10 @@ export async function mentionsOf(
          JOIN comments AS comment ON comment.id = mention.item_id
          JOIN posts AS post ON post.id = comment.post_id
          ${AUTHOR_JOINS("comment")}
-         WHERE mention.item_type = 'comment' AND ${window}
+         WHERE mention.item_type = 'comment' AND ${window("comment")}
            AND comment.deleted_at IS NULL AND comment.removed_batch_id IS NULL
            AND post.deleted_at IS NULL AND post.removed_batch_id IS NULL
-         ORDER BY mention.created_at DESC LIMIT ?4`,
+         ORDER BY mention.created_at DESC, ${KEY("comment")} DESC LIMIT ?4`,
       )
       .bind(...binds),
   ]);
@@ -245,6 +270,16 @@ export async function mentionsOf(
     ...(posts!.results as Row[]).map(toMention("post")),
     ...(comments!.results as Row[]).map(toMention("comment")),
   ]
-    .sort((a, b) => b.mentionedAt - a.mentionedAt || a.id.localeCompare(b.id))
+    // The same order as the queries: newest, then the key, highest first.
+    .sort((a, b) => b.mentionedAt - a.mentionedAt || byBytes(keyOf(b), keyOf(a)))
     .slice(0, limit);
+}
+
+function keyOf(mention: Mention): string {
+  return `${mention.type}:${mention.id}:${mention.targetId}`;
+}
+
+/** Compares as SQLite does, by code unit, not by locale. */
+function byBytes(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
 }

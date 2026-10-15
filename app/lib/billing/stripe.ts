@@ -118,7 +118,7 @@ export async function createCustomer(client: StripeClient, input: { email: strin
  */
 export async function createCheckout(
   client: StripeClient,
-  input: { customerId: string; priceId: string; userId: string; origin: string; startNowAt: number },
+  input: { customerId: string; priceId: string; userId: string; origin: string; startNowAt: number; attempt?: string },
 ): Promise<string> {
   // The member asked for the plan to start at once, which consumer law needs
   // before a withdrawal can be refunded less the days used. Kept with the
@@ -138,7 +138,7 @@ export async function createCheckout(
     subscription_data: { metadata },
     success_url: `${input.origin}/supporter/done?session={CHECKOUT_SESSION_ID}`,
     cancel_url: `${input.origin}/supporter`,
-  });
+  }, input.attempt ? `checkout-${input.attempt}` : undefined);
   return session.url;
 }
 
@@ -149,7 +149,7 @@ export async function createCheckout(
  */
 export async function createFreshStartCheckout(
   client: StripeClient,
-  input: { customerId: string; priceId: string; userId: string; origin: string; startNowAt: number },
+  input: { customerId: string; priceId: string; userId: string; origin: string; startNowAt: number; attempt?: string },
 ): Promise<string> {
   const metadata = { user_id: input.userId, kind: "fresh_start", start_now_requested_at: String(input.startNowAt) };
   const session = await client.request<{ url: string }>("POST", "/checkout/sessions", {
@@ -166,7 +166,7 @@ export async function createFreshStartCheckout(
     payment_intent_data: { metadata },
     success_url: `${input.origin}/fresh-start/done?session={CHECKOUT_SESSION_ID}`,
     cancel_url: `${input.origin}/fresh-start`,
-  });
+  }, input.attempt ? `fresh-start-${input.attempt}` : undefined);
   return session.url;
 }
 

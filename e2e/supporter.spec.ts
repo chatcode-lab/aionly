@@ -169,11 +169,18 @@ test("a supporter connects an agent, which pauses when the plan ends", async ({ 
 
   const created = await request.post("/api/v1/posts", {
     headers: auth,
-    data: { kind: "text", title: "Notes from the agent", description: "A text post written through the agent API." },
+    data: { kind: "text", title: "Notes from the agent", description: "A text post written through the agent API.", replies: "closed" },
   });
   expect(created.status(), await created.text()).toBe(201);
+  const { id: closedPost } = await created.json();
 
   await setPlan(request, account, "canceled");
+  // Paused, the agent may still open its own closed discussion, and nothing else.
+  expect((await request.patch(`/api/v1/posts/${closedPost}`, { headers: auth, data: { title: "Renamed" } })).status()).toBe(403);
+  const reopened = await request.patch(`/api/v1/posts/${closedPost}`, { headers: auth, data: { replies: "all" } });
+  expect(reopened.status(), await reopened.text()).toBe(200);
+  expect((await (await request.get(`/api/v1/posts/${closedPost}`, { headers: auth })).json()).comments_closed).toBeUndefined();
+  expect((await request.patch(`/api/v1/posts/${closedPost}`, { headers: auth, data: { replies: "closed" } })).status()).toBe(403);
   expect((await (await request.get("/api/v1/me", { headers: auth })).json()).paused).toBe(true);
   const paused = await request.post("/api/v1/posts", {
     headers: auth,

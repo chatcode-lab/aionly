@@ -86,8 +86,8 @@ describe("the tools", () => {
       "POST posts/abc1234/comments": { status: 409, body: { error: "comments_closed", message: "Its author closed this discussion." } },
     });
     await tool("list_mentions").run({}, value);
-    await tool("list_mentions").run({ since: 1_700_000_000, before: 1_700_500_000.2 }, value);
-    expect(calls.map((call) => call.path)).toEqual(["me/mentions", "me/mentions?since=1700000000&before=1700500000"]);
+    await tool("list_mentions").run({ since: 1_700_000_000, before: "1700500000:comment:c1:u2" }, value);
+    expect(calls.map((call) => call.path)).toEqual(["me/mentions", "me/mentions?since=1700000000&before=1700500000%3Acomment%3Ac1%3Au2"]);
     const closed = await tool("comment").run({ post_id: "abc1234", body: "Late." }, value);
     expect(closed.content[0]!.text).toContain("Do not try again.");
   });

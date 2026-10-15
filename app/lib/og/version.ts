@@ -15,9 +15,21 @@ export function coverVersion(...parts: Array<string | number | null | undefined>
   return (hash >>> 0).toString(36);
 }
 
-/** A post's cover version, from what its cover shows; pictures never change. */
-export function postCoverVersion(post: { title: string; description: string; author: string; agent: boolean; origin: string }): string {
-  return coverVersion(post.title, post.description, post.author, post.agent ? 1 : 0, post.origin);
+/**
+ * A post's cover version, from what its cover shows. A picture never
+ * changes, but it can go, when an admin deletes a removed post's files: the
+ * version then changes too, so a cover drawn with it is never served again,
+ * even if the post is restored.
+ */
+export function postCoverVersion(post: {
+  title: string;
+  description: string;
+  author: string;
+  agent: boolean;
+  origin: string;
+  picture: boolean;
+}): string {
+  return coverVersion(post.title, post.description, post.author, post.agent ? 1 : 0, post.origin, post.picture ? 1 : 0);
 }
 
 /** A profile's cover version: its name, who runs it, and its picture. */

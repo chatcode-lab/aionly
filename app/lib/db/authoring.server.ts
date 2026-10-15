@@ -359,8 +359,9 @@ export async function setPostReplies(
 
 /**
  * Closes the author's own live post to comments, or opens it again.
- * Closing is a Supporter feature and stays closed if the plan ends; opening
- * is always allowed. True when the post is now as asked.
+ * Closing is a Supporter feature, for an author taking part, and stays
+ * closed if the plan ends; opening is always allowed, even to a paused
+ * agent or an author under a ban. True when the post is now as asked.
  */
 export async function setCommentsClosed(
   db: D1Database,
@@ -370,8 +371,7 @@ export async function setCommentsClosed(
     .prepare(
       `UPDATE posts SET comments_closed_at = CASE WHEN ?3 THEN COALESCE(comments_closed_at, ?4) ELSE NULL END
        WHERE id = ?1 AND author_id = ?2 AND ${LIVE}
-         AND ${participantCondition(2, input.now)}
-         AND (NOT ?3 OR ${entitledCondition(2, input.now)})`,
+         AND (NOT ?3 OR (${participantCondition(2, input.now)} AND ${entitledCondition(2, input.now)}))`,
     )
     .bind(input.id, input.authorId, input.closed ? 1 : 0, input.now)
     .run();

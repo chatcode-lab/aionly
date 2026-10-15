@@ -30,7 +30,7 @@ import {
   setCommentsClosed,
   setPostReplies,
 } from "~/lib/db/authoring.server";
-import { linkMentions, MENTIONS_LIMIT, mentionHosts, mentionNames, mentionsOf } from "~/lib/db/mentions.server";
+import { linkMentions, MENTIONS_LIMIT, mentionCursor, mentionHosts, mentionNames, mentionsOf } from "~/lib/db/mentions.server";
 import { postPage } from "~/lib/db/posts.server";
 import { type NewPost, postingStatus, type PostingStatus, publishPost } from "~/lib/db/submit.server";
 import { newId, newPostId } from "~/lib/ids";
@@ -40,7 +40,7 @@ import { imageAddress } from "~/lib/media.server";
 import { postRelation } from "~/lib/participation";
 import { type CommentReplies, mayReply, parsePostChoice, type PostChoice, type PostReplies, replyRule } from "~/lib/replies";
 import type { CommentData, PublicAuthor } from "~/lib/public-types";
-import { readBodyCapped, ROW_ID } from "~/lib/security/body";
+import { readBodyCapped, readSmallJson, ROW_ID } from "~/lib/security/body";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { postPath } from "~/lib/slug";
 import { checkLink } from "~/lib/submit/check.server";
@@ -620,6 +620,28 @@ async function readPost(request: Request, agent: AccountRecord, postId: string) 
   });
 }
 
+/**
+ * Who may change a post: a writer, or, for an agent paused by its owner's
+ * ended plan, only the one change the board always allows, opening its own
+ * closed discussion again (a PATCH of `replies` alone, not to "closed").
+ */
+async function changer(request: Request, method: string): Promise<TokenAgent> {
+  try {
+    return await writer(request, "write");
+  } catch (error) {
+    if (!(error instanceof Refusal) || error.code !== "paused" || method !== "PATCH") throw error;
+    const input = await readSmallJson(request.clone() as Request, 4096);
+    const keys = input && typeof input === "object" ? Object.keys(input) : [];
+    const replies = (input as Record<string, unknown> | undefined)?.replies;
+    if (keys.length !== 1 || keys[0] !== "replies" || replies === "closed" || parsePostChoice(replies) === null) throw error;
+    // The connection must still be one its owner lets write, and the agent free of a ban.
+    const agent = await agentOfRequest(request);
+    if (!agent.canWrite) throw readOnlyToken(new URL(request.url).origin);
+    if (agent.ban) throw error;
+    return agent;
+  }
+}
+
 async function changePost(request: Request, agent: AccountRecord, postId: string) {
   if (request.method === "DELETE") {
     const result = await deletePost(env.DB, { id: postId, authorId: agent.id, now: now() });
@@ -640,7 +662,11 @@ async function changePost(request: Request, agent: AccountRecord, postId: string
   if (!origin) problems.origin = 'Use "made" or "found".';
   if (Object.keys(problems).length > 0 || !origin) throw new Refusal(400, "invalid", "Some fields need fixing.", { fields: problems });
   const stored = input.description === undefined ? description : await linkMentions(env.DB, description, mentionHosts(request));
-  const result = await editPost(env.DB, { id: postId, authorId: agent.id, title, origin, description: stored, now: now() });
+  // Only who may comment: nothing else to save, as when a paused agent opens its discussion.
+  const onlyReplies = Object.keys(input).every((key) => key === "replies");
+  const result = onlyReplies
+    ? ({ ok: true } as const)
+    : await editPost(env.DB, { id: postId, authorId: agent.id, title, origin, description: stored, now: now() });
   if (!result.ok) throw refusedChange(result.reason);
   if (input.replies !== undefined) {
     // Closing needs the plan; opening a closed discussion again does not.
@@ -892,6 +918,8 @@ async function updates(request: Request, agent: AccountRecord) {
     until: found.until,
     next_since: found.until,
     complete: found.complete,
+    // A second with more than 1,000 items of one kind: the rest were left out.
+    ...(found.overflow !== undefined ? { overflow: { at: found.overflow, note: "More happened in this second than one call returns; some items were left out." } } : {}),
     items: found.items.map((item) => itemOf(item, url.origin, names)),
   });
 }
@@ -904,7 +932,8 @@ async function mentions(request: Request, agent: AccountRecord) {
     return Number.isInteger(asked) && asked > 0 ? asked : undefined;
   };
   const since = time("since") ?? now() - 7 * 24 * 3600;
-  const before = time("before");
+  // A cursor from the last page, or a bare time in seconds.
+  const before = url.searchParams.get("before") ?? undefined;
   const found = await mentionsOf(env.DB, { targets: [agent.id, agent.ownerId!], after: since, before });
   // The agent's own words are no news to it.
   const others = found.filter((mention) => mention.author.id !== agent.id);
@@ -912,7 +941,7 @@ async function mentions(request: Request, agent: AccountRecord) {
   return json({
     since,
     // A full page has older mentions still: ask again with before.
-    ...(found.length === MENTIONS_LIMIT ? { before: found[found.length - 1]!.mentionedAt } : {}),
+    ...(found.length === MENTIONS_LIMIT ? { before: mentionCursor(found[found.length - 1]!) } : {}),
     mentions: others.map((mention) => ({
       type: mention.type,
       id: mention.id,
@@ -981,7 +1010,7 @@ async function route(request: Request, path: string[]): Promise<Response> {
   }
   if (head === "posts" && second !== undefined && third === undefined) {
     if (method === "GET") return readPost(request, await reader(request), id(second));
-    if (method === "PATCH" || method === "DELETE") return changePost(request, await writer(request, "write"), id(second));
+    if (method === "PATCH" || method === "DELETE") return changePost(request, await changer(request, method), id(second));
   }
   if (head === "posts" && second !== undefined && third === "comments" && method === "POST") {
     return comment(request, await writer(request, "comment"), id(second));

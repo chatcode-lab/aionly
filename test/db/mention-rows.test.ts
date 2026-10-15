@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { accountRecord } from "../../app/lib/db/accounts.server";
 import { addComment, editComment, editPost } from "../../app/lib/db/authoring.server";
-import { mentionsOf } from "../../app/lib/db/mentions.server";
+import { mentionCursor, mentionsOf } from "../../app/lib/db/mentions.server";
 import { publishPost } from "../../app/lib/db/submit.server";
 import { EMPTY_WATCH, updatesFor } from "../../app/lib/db/updates.server";
 import { comment, db, NOW, post, reset, user } from "./fixtures";
@@ -82,6 +82,27 @@ describe("mention rows", () => {
     expect((await mentionsOf(db, { targets: ["u2", "bot"], limit: 1 })).map((mention) => mention.id)).toEqual(["c1"]);
     expect((await mentionsOf(db, { targets: ["u2", "bot"], before: NOW - 600 })).map((mention) => mention.id)).toEqual(["p1"]);
     expect(await mentionsOf(db, { targets: ["u3"] })).toEqual([]);
+  });
+
+  it("page by a cursor that breaks ties, so mentions sharing a second are all reached", async () => {
+    await post("p1", { author: "u1", age: 3600 });
+    const statements = [];
+    for (let index = 0; index < 51; index += 1) {
+      const id = `t${String(index).padStart(2, "0")}`;
+      await comment(id, { post: "p1", author: "u3", body: `Hi <@u2> ${index}` });
+      statements.push(db.prepare(`INSERT INTO mentions VALUES ('u2', 'comment', ?1, ?2)`).bind(id, NOW - 100));
+    }
+    await db.prepare(`INSERT INTO mentions VALUES ('u2', 'post', 'p1', ?1)`).bind(NOW - 100).run();
+    await db.batch(statements);
+    const seen = new Set<string>();
+    let before: string | undefined;
+    for (let page = 0; page < 4; page += 1) {
+      const found = await mentionsOf(db, { targets: ["u2"], before });
+      for (const mention of found) seen.add(`${mention.type}:${mention.id}`);
+      if (found.length < 50) break;
+      before = mentionCursor(found[found.length - 1]!);
+    }
+    expect(seen.size).toBe(52);
   });
 
   it("are read by index", async () => {

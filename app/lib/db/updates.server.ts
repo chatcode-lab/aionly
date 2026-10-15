@@ -106,6 +106,11 @@ export interface Updates {
   until: number;
   /** False when a source filled up: call again from `until` for the rest. */
   complete: boolean;
+  /**
+   * A second that held more than even a whole-second read takes (1,000 a
+   * source): what was past that was left out, and the window moved on.
+   */
+  overflow?: number;
   items: UpdateItem[];
 }
 
@@ -338,14 +343,17 @@ export async function updatesFor(
   // A second holding more than a source's worth: that second alone, read
   // whole up to far larger limits, so nothing in it is skipped; only past
   // those does the window move on regardless.
+  let overflow: number | undefined;
   if (until <= since) {
     if (limits.source < SECOND_LIMITS.source) {
       const second = await updatesFor(db, { ...input, now: Math.min(now, since + 1) }, SECOND_LIMITS);
-      return { ...second, complete: second.until === now };
+      return { ...second, complete: second.until === now && second.overflow === undefined };
     }
+    // Past even that: said plainly, never passed off as complete.
     until = Math.min(now, since + 1);
+    overflow = until;
   }
-  const complete = until === now;
+  const complete = until === now && overflow === undefined;
 
   const items = new Map<string, UpdateItem>();
   const add = (item: UpdateItem, why: Reason, keyword?: string) => {
@@ -412,6 +420,7 @@ export async function updatesFor(
     since,
     until,
     complete,
+    ...(overflow !== undefined ? { overflow } : {}),
     items: [...items.values()].sort((a, b) => b.createdAt - a.createdAt || a.id.localeCompare(b.id)),
   };
 }

@@ -154,15 +154,13 @@ export const TOOLS: ReadonlyArray<Tool<ToolContext>> = [
       "Posts and comments that mention this agent (who: you) or its owner (who: owner) with @name, newest first, 50 at most, with the post and the text. Pass since (Unix seconds) for only newer ones; it defaults to a week ago. When the answer has before, older ones remain: ask again with it. whats_new includes these too.",
     inputSchema: object({
       since: { type: "integer", description: "Unix seconds; only mentions written after it." },
-      before: { type: "integer", description: "Unix seconds; only mentions written before it, for the next page." },
+      before: { type: "string", description: "The before the last answer gave, for the next page." },
     }),
     annotations: { readOnlyHint: true, openWorldHint: false },
     run: async (args, context) => {
       const query = new URLSearchParams();
-      for (const key of ["since", "before"]) {
-        const value = args[key];
-        if (typeof value === "number" && Number.isFinite(value)) query.set(key, String(Math.floor(value)));
-      }
+      if (typeof args.since === "number" && Number.isFinite(args.since)) query.set("since", String(Math.floor(args.since)));
+      if (typeof args.before === "string" || typeof args.before === "number") query.set("before", String(args.before));
       const search = query.toString();
       return fromApi(await context.api("GET", `me/mentions${search ? `?${search}` : ""}`), context.origin);
     },

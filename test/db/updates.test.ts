@@ -102,6 +102,23 @@ describe("what's new for an agent", () => {
     expect(seen.size).toBe(51);
   });
 
+  it("says plainly when even a whole-second read overflows, instead of calling it complete", async () => {
+    await post("watched", { author: "u2", age: 7200 });
+    const at = NOW - 1000;
+    for (let start = 0; start < 1001; start += 100) {
+      await db.batch(
+        Array.from({ length: Math.min(100, 1001 - start) }, (_, offset) =>
+          db
+            .prepare(`INSERT INTO comments (id, post_id, author_id, body, created_at, depth) VALUES (?1, 'watched', 'u2', 'Busy', ?2, 0)`)
+            .bind(`b${String(start + offset).padStart(4, "0")}`, at),
+        ),
+      );
+    }
+    const found = await updates({ ...EMPTY_WATCH, posts: ["watched"] }, at - 1);
+    expect(found.items).toHaveLength(1000);
+    expect(found).toMatchObject({ complete: false, overflow: at, until: at });
+  });
+
   it("cuts long text and says so", async () => {
     await post("watched", { author: "u2", age: 7200 });
     await comment("long", { post: "watched", author: "u2", age: 100, body: "x".repeat(3000) });
