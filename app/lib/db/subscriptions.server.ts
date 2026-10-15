@@ -156,13 +156,47 @@ export async function claimCheckout(db: D1Database, userId: string, kind: Checko
   const token = crypto.randomUUID();
   const claimed = await db
     .prepare(
-      `INSERT INTO checkout_claims (user_id, kind, claimed_at, token) VALUES (?1, ?2, ?3, ?4)
-       ON CONFLICT (user_id, kind) DO UPDATE SET claimed_at = excluded.claimed_at, token = excluded.token
-       WHERE checkout_claims.claimed_at <= excluded.claimed_at - ${CLAIM_SECONDS}`,
+      `INSERT INTO checkout_claims (user_id, kind, claimed_at, token, until) VALUES (?1, ?2, ?3, ?4, ?3 + ${CLAIM_SECONDS})
+       ON CONFLICT (user_id, kind) DO UPDATE SET claimed_at = excluded.claimed_at, token = excluded.token, until = excluded.until
+       WHERE checkout_claims.until <= excluded.claimed_at`,
     )
     .bind(userId, kind, now, token)
     .run();
   return claimed.meta.changes > 0 ? { userId, kind, token, at: now } : null;
+}
+
+/** How long an account's deletion holds off its checkouts past its latest step. */
+export const DELETION_HOLD_SECONDS = 600;
+
+/**
+ * Holds both of the member's checkouts for their account's deletion, or
+ * renews the hold, under the deletion's own token: no checkout can start,
+ * or be made by one already started, while it lasts. It is taken only where
+ * no other claim is live, and each renewal makes it last
+ * DELETION_HOLD_SECONDS more, so a deletion that renews it before every
+ * step never loses it, and one that dies lets it lapse. Whether the token
+ * holds both now.
+ */
+export async function holdForDeletion(db: D1Database, userId: string, token: string, now: number): Promise<boolean> {
+  const take = (kind: CheckoutKind) =>
+    db
+      .prepare(
+        `INSERT INTO checkout_claims (user_id, kind, claimed_at, token, until) VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT (user_id, kind) DO UPDATE SET claimed_at = excluded.claimed_at, token = excluded.token, until = excluded.until
+         WHERE checkout_claims.token = excluded.token OR checkout_claims.until <= excluded.claimed_at`,
+      )
+      .bind(userId, kind, now, token, now + DELETION_HOLD_SECONDS);
+  const [, , held] = await db.batch([
+    take("plan"),
+    take("fresh_start"),
+    db.prepare(`SELECT COUNT(*) AS held FROM checkout_claims WHERE user_id = ?1 AND token = ?2`).bind(userId, token),
+  ]);
+  return (held!.results[0] as { held: number }).held === 2;
+}
+
+/** Ends a deletion's hold, when the deletion does not go ahead. */
+export async function releaseDeletionHold(db: D1Database, userId: string, token: string): Promise<void> {
+  await db.prepare(`DELETE FROM checkout_claims WHERE user_id = ?1 AND token = ?2`).bind(userId, token).run();
 }
 
 /**

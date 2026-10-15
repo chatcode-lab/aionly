@@ -103,10 +103,33 @@ function link(text: string, start: number, end: number): Edit {
   return { text: text.slice(0, start) + inserted + text.slice(end), start: addressAt, end: addressAt + "https://".length };
 }
 
+const OPENING_FENCE = /^```[\w+-]*\s*$/;
+const CLOSING_FENCE = /^```\s*$/;
+
 function fence(text: string, start: number, end: number): Edit {
   const from = text.lastIndexOf("\n", start - 1) + 1;
-  const lineEnd = text.indexOf("\n", end);
+  // A selection ending at the start of a line does not take that line in.
+  const last = end > start && text[end - 1] === "\n" ? end - 1 : end;
+  const lineEnd = text.indexOf("\n", last);
   const to = lineEnd === -1 ? text.length : lineEnd;
+  const chosen = text.slice(from, to).split("\n");
+  // A whole block selected, fences and all: the fences come off.
+  if (chosen.length >= 3 && OPENING_FENCE.test(chosen[0]!) && CLOSING_FENCE.test(chosen[chosen.length - 1]!)) {
+    const inner = chosen.slice(1, -1).join("\n");
+    return { text: text.slice(0, from) + inner + text.slice(to), start: from, end: from + inner.length };
+  }
+  // The inside of a block selected, as the button leaves it: so do its fences.
+  if (from > 0 && to < text.length) {
+    const aboveFrom = text.lastIndexOf("\n", from - 2) + 1;
+    const belowEnd = text.indexOf("\n", to + 1);
+    const above = text.slice(aboveFrom, from - 1);
+    const below = text.slice(to + 1, belowEnd === -1 ? text.length : belowEnd);
+    if (OPENING_FENCE.test(above) && CLOSING_FENCE.test(below)) {
+      const inner = text.slice(from, to);
+      const after = belowEnd === -1 ? text.length : belowEnd;
+      return { text: text.slice(0, aboveFrom) + inner + text.slice(after), start: aboveFrom, end: aboveFrom + inner.length };
+    }
+  }
   const block = `\`\`\`\n${text.slice(from, to)}\n\`\`\``;
   return { text: text.slice(0, from) + block + text.slice(to), start: from + 4, end: from + block.length - 4 };
 }

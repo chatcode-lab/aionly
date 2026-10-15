@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { accountRecord } from "../../app/lib/db/accounts.server";
+import { accountRecord, markMentionsSeen } from "../../app/lib/db/accounts.server";
 import { addComment, editComment, editPost } from "../../app/lib/db/authoring.server";
 import { mentionCursor, mentionsOf } from "../../app/lib/db/mentions.server";
 import { publishPost } from "../../app/lib/db/submit.server";
@@ -81,6 +81,10 @@ describe("mention rows", () => {
     expect(found[0]).toMatchObject({ postId: "p1", postTitle: "Title of p1", author: { username: "quiet_wren" }, text: "Ask <@bot>." });
     expect((await mentionsOf(db, { targets: ["u2", "bot"], limit: 1 })).map((mention) => mention.id)).toEqual(["c1"]);
     expect((await mentionsOf(db, { targets: ["u2", "bot"], before: NOW - 600 })).map((mention) => mention.id)).toEqual(["p1"]);
+    // The same time as an address carries it, as cursors were before compound ones.
+    expect((await mentionsOf(db, { targets: ["u2", "bot"], before: String(NOW - 600) })).map((mention) => mention.id)).toEqual(["p1"]);
+    // Anything else is no cursor at all: the newest page.
+    expect((await mentionsOf(db, { targets: ["u2", "bot"], before: "soon" })).map((mention) => mention.id)).toEqual(["c1", "p1"]);
     expect(await mentionsOf(db, { targets: ["u3"] })).toEqual([]);
   });
 
@@ -147,5 +151,29 @@ describe("mentions in what's new", () => {
       c1: ["mention_you"],
       p1: ["mention_owner"],
     });
+  });
+});
+
+describe("new mentions", () => {
+  it("count items naming the member or their agent since they last looked, until the page is shown", async () => {
+    await post("p1", { author: "u1" });
+    await comment("c1", { post: "p1", author: "u3", body: "<@u2> and <@bot>" });
+    await comment("c2", { post: "p1", author: "u3", body: "<@bot>" });
+    await db.prepare(`UPDATE profiles SET mentions_seen_at = ?1 WHERE user_id = 'u2'`).bind(NOW - 100).run();
+    await db.batch([
+      db.prepare(`INSERT INTO mentions VALUES ('u2', 'post', 'p1', ?1)`).bind(NOW - 200),
+      // One comment naming both counts once.
+      db.prepare(`INSERT INTO mentions VALUES ('u2', 'comment', 'c1', ?1)`).bind(NOW - 50),
+      db.prepare(`INSERT INTO mentions VALUES ('bot', 'comment', 'c1', ?1)`).bind(NOW - 50),
+      db.prepare(`INSERT INTO mentions VALUES ('bot', 'comment', 'c2', ?1)`).bind(NOW - 10),
+    ]);
+    expect((await accountRecord(db, "u2", NOW))?.newMentions).toBe(2);
+    await markMentionsSeen(db, "u2", NOW - 20);
+    expect((await accountRecord(db, "u2", NOW))?.newMentions).toBe(1);
+    // Never back.
+    await markMentionsSeen(db, "u2", NOW - 1000);
+    expect((await accountRecord(db, "u2", NOW))?.mentionsSeenAt).toBe(NOW - 20);
+    await markMentionsSeen(db, "u2", NOW);
+    expect((await accountRecord(db, "u2", NOW))?.newMentions).toBe(0);
   });
 });

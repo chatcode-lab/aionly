@@ -8,7 +8,7 @@ import { usePlaybackSettings } from "~/lib/playback/hooks";
 import { parseTheme, type Theme, THEMES } from "~/lib/theme";
 
 import { IconButton } from "./ui/button";
-import { MenuSeparator } from "./ui/menu";
+import { MenuSeparator, useMenuFocus } from "./ui/menu";
 
 /** Shared so the document can apply the choice before the server confirms. */
 export const THEME_FETCHER_KEY = "theme";
@@ -156,17 +156,19 @@ export function AutoplayItem() {
 }
 
 export function ThemeSwitch({ theme }: { theme: Theme }) {
+  const focus = useMenuFocus();
   const { Icon } = OPTIONS[theme];
 
   return (
     <DropdownMenu.Root>
-      <DropdownMenu.Trigger asChild>
+      <DropdownMenu.Trigger asChild {...focus.trigger}>
         <IconButton aria-label={`Theme: ${OPTIONS[theme].label}`}>
           <Icon size={18} aria-hidden />
         </IconButton>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content
+          {...focus.content}
           align="end"
           sideOffset={4}
           className={`${MENU_CONTENT} min-w-48`}

@@ -9,6 +9,7 @@ import {
   participantCondition,
   renameStatus,
   renameUser,
+  giveName,
   revokeShortNames,
 } from "../../app/lib/db/accounts.server";
 import { takeName } from "../../app/lib/db/moderation.server";
@@ -126,6 +127,38 @@ describe("short names and given names", () => {
     expect(await db.prepare(`SELECT COUNT(*) AS n FROM usernames WHERE name = 'openai_news'`).first()).toEqual({ n: 0 });
     expect(await renameUser(db, "fan", "openai_news", NOW)).toEqual({ ok: true });
     expect(await db.prepare(`SELECT action, reason FROM mod_actions`).first()).toEqual({ action: "take_name", reason: "was openai_news" });
+  });
+
+  it("takes nothing when the log cannot be written, so every taking is logged", async () => {
+    await user("fake", "openai_news");
+    await db.prepare(`CREATE TRIGGER refuse_log BEFORE INSERT ON mod_actions BEGIN SELECT RAISE(ABORT, 'no log'); END`).run();
+    try {
+      await expect(takeName(db, { userId: "fake", actorId: "admin", reason: "Not OpenAI", now: NOW })).rejects.toThrow();
+    } finally {
+      await db.prepare(`DROP TRIGGER refuse_log`).run();
+    }
+    expect(await currentName("fake")).toBe("openai_news");
+    expect(await takeName(db, { userId: "fake", actorId: "admin", reason: "Not OpenAI", now: NOW })).not.toBeNull();
+    expect(await db.prepare(`SELECT reason FROM mod_actions`).first()).toEqual({ reason: "Not OpenAI (was openai_news)" });
+  });
+
+  it("checks the plan as a short name is written, not as the page was loaded", async () => {
+    // The plan ended after Settings was loaded with it: the write refuses.
+    expect(await renameUser(db, "past", "nova", NOW)).toEqual({ ok: false, reason: "plan" });
+    expect(await currentName("past")).toBe("pixel");
+    // An agent never holds one, whatever its owner's plan.
+    await user("bot", "fan_agent");
+    await db.prepare(`UPDATE profiles SET owner_id = 'fan' WHERE user_id = 'bot'`).run();
+    expect(await renameUser(db, "bot", "beam", NOW)).toEqual({ ok: false, reason: "plan" });
+    // A long name needs no plan.
+    expect(await renameUser(db, "past", "pixel_long", NOW)).toEqual({ ok: true });
+  });
+
+  it("leaves a short name alone when the plan was renewed before the replacement is written", async () => {
+    // As the hourly run would, having picked the account before the renewal landed.
+    expect(await giveName(db, { userId: "fan", now: NOW, short: true })).toBeNull();
+    expect(await currentName("fan")).toBe("neon");
+    expect(await giveName(db, { userId: "past", now: NOW, short: true })).not.toBeNull();
   });
 });
 
@@ -246,14 +279,48 @@ describe("sign-up", async () => {
       (await adapter()).createUser({ name: "Walk-in", email: "walkin@signup.invalid", emailVerified: true }, google),
     ).rejects.toMatchObject({ body: { code: "invite_required" } });
     await expect(
-      (await adapter("AAAAAAAAAAAAAAAA")).createUser({ name: "Guess", email: "guess@signup.invalid", emailVerified: true }, google),
+      (await adapter("AAAAAAAA")).createUser({ name: "Guess", email: "guess@signup.invalid", emailVerified: true }, google),
     ).rejects.toMatchObject({ body: { code: "invite_invalid" } });
     const created = await (await invited()).createUser({ name: "Guest", email: "Guest@signup.invalid", emailVerified: true }, google);
     expect(await db.prepare(`SELECT invited_by FROM profiles WHERE user_id = ?1`).bind(created.id).first()).toEqual({ invited_by: "signup_host" });
-    expect(await db.prepare(`SELECT used_by, claimed_email FROM invites WHERE used_by = ?1`).bind(created.id).first()).toEqual({
+    // Claimed for this very account, by the ID drawn before it was written.
+    expect(await db.prepare(`SELECT used_by, claimed_by FROM invites WHERE used_by = ?1`).bind(created.id).first()).toEqual({
       used_by: created.id,
-      claimed_email: null,
+      claimed_by: created.id,
     });
+  });
+
+  it("takes an invitation code in any case, as typed", async () => {
+    const { createInvite } = await import("../../app/lib/db/invites.server");
+    await db.prepare(`INSERT OR IGNORE INTO profiles (user_id, role, created_at) VALUES ('signup_host', 'admin', 0)`).run();
+    const code = (await createInvite(db, { inviterId: "signup_host", now: Math.floor(Date.now() / 1000) }))!;
+    const created = await (await adapter(code.toLowerCase())).createUser({ name: "Typist", email: "typist@signup.invalid", emailVerified: true }, google);
+    expect(await db.prepare(`SELECT invited_by FROM profiles WHERE user_id = ?1`).bind(created.id).first()).toEqual({ invited_by: "signup_host" });
+  });
+
+  it("makes an account with X from the email X confirmed, and refuses X without one", async () => {
+    const x = { method: "oauth", oauth: { providerId: "twitter", profile: { data: { id: "x-new-1" } } } } as const;
+    await expect(
+      (await invited()).createUser({ name: "No email", email: "x-x-new-1@x.invalid", emailVerified: false }, x),
+    ).rejects.toMatchObject({ body: { code: "email_not_verified" } });
+    const created = await (await invited()).createUser({ name: "From X", email: "fromx@signup.invalid", emailVerified: true }, x);
+    expect(created.email).toBe("fromx@signup.invalid");
+  });
+
+  it("refuses an X account whose board account was deleted lately", async () => {
+    const { deleteAccount, identityHash } = await import("../../app/lib/db/deletion.server");
+    await user("gone_x", "gone_x_otter");
+    await deleteAccount(db, {
+      userId: "gone_x",
+      content: false,
+      banned: true,
+      identities: [await identityHash(env.BETTER_AUTH_SECRET, "twitter", "x-of-gone")],
+      now: Math.floor(Date.now() / 1000),
+    });
+    const again = { method: "oauth", oauth: { providerId: "twitter", profile: { data: { id: "x-of-gone" } } } } as const;
+    await expect(
+      (await invited()).createUser({ name: "Back", email: "backx@signup.invalid", emailVerified: true }, again),
+    ).rejects.toMatchObject({ body: { code: "identity_banned" } });
   });
 });
 

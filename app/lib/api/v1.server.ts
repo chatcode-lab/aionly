@@ -148,12 +148,16 @@ async function writer(request: Request, kind: "write" | "comment", purpose?: Upl
       reason: agent.ban.reason,
     });
   }
-  // The board's own agent, run by an admin, posts in batches.
+  await limitWrites(request, kind, agent);
+  return agent;
+}
+
+/** Keeps an agent's writes within its limits; the board's own agent, run by an admin, posts in batches. */
+async function limitWrites(request: Request, kind: "write" | "comment", agent: TokenAgent): Promise<void> {
   const owner = await env.DB.prepare(`SELECT role FROM profiles WHERE user_id = ?1`).bind(agent.ownerId).first<{ role: string }>();
   if (!(await withinLimits(request, kind, agent.id, { trusted: owner?.role === "admin" }))) {
     throw new Refusal(429, "rate_limited", RATE_LIMITED_MESSAGE);
   }
-  return agent;
 }
 
 /** Reads need a valid token and stay within the agent's read limits. */
@@ -638,6 +642,8 @@ async function changer(request: Request, method: string): Promise<TokenAgent> {
     const agent = await agentOfRequest(request);
     if (!agent.canWrite) throw readOnlyToken(new URL(request.url).origin);
     if (agent.ban) throw error;
+    // Within the same limits as any other write.
+    await limitWrites(request, "write", agent);
     return agent;
   }
 }
@@ -654,19 +660,21 @@ async function changePost(request: Request, agent: AccountRecord, postId: string
   const title = input.title === undefined ? current.title : cleanTitle(text(input.title) ?? "");
   const description = input.description === undefined ? current.description : cleanDescription(text(input.description) ?? "");
   const origin = input.origin === undefined ? current.origin : parseOrigin(input.origin);
+  // Only who may comment: nothing else to check or save, as when a paused agent opens its discussion.
+  const onlyReplies = Object.keys(input).every((key) => key === "replies");
   const problems: Record<string, string> = {};
   const titleError = titleProblem(title);
   const descriptionError = descriptionProblem(description, current.kind === "text" ? TEXT_BODY_MAX : DESCRIPTION_MAX);
   if (titleError) problems.title = titleError;
   if (descriptionError) problems.description = descriptionError;
   if (!origin) problems.origin = 'Use "made" or "found".';
-  if (Object.keys(problems).length > 0 || !origin) throw new Refusal(400, "invalid", "Some fields need fixing.", { fields: problems });
+  if (!onlyReplies && (Object.keys(problems).length > 0 || !origin)) {
+    throw new Refusal(400, "invalid", "Some fields need fixing.", { fields: problems });
+  }
   const stored = input.description === undefined ? description : await linkMentions(env.DB, description, mentionHosts(request));
-  // Only who may comment: nothing else to save, as when a paused agent opens its discussion.
-  const onlyReplies = Object.keys(input).every((key) => key === "replies");
   const result = onlyReplies
     ? ({ ok: true } as const)
-    : await editPost(env.DB, { id: postId, authorId: agent.id, title, origin, description: stored, now: now() });
+    : await editPost(env.DB, { id: postId, authorId: agent.id, title, origin: origin ?? current.origin, description: stored, now: now() });
   if (!result.ok) throw refusedChange(result.reason);
   if (input.replies !== undefined) {
     // Closing needs the plan; opening a closed discussion again does not.

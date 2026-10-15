@@ -6,6 +6,7 @@ import {
 import { floorOf, KARMA_FLOOR } from "../moderation";
 import type { Restriction } from "../public-types";
 import type { CommentReplies } from "../replies";
+import { NEW_MENTIONS_MAX } from "../text/mentions";
 
 const DAY = 24 * 3600;
 
@@ -95,6 +96,12 @@ export interface AccountRecord {
   digest: "daily" | "weekly" | "monthly" | null;
   /** Who may reply to the account's comments, its choice while it has the plan. */
   replyPolicy: CommentReplies;
+  /** Up to when the member has seen their mentions. */
+  mentionsSeenAt: number;
+  /** Items mentioning the member or their agent since then, up to NEW_MENTIONS_MAX. */
+  newMentions: number;
+  /** An invitation claimed for this account at sign-up has yet to attach. */
+  invitePending: boolean;
 }
 
 function parseLimits(raw: string | null): AccountLimits {
@@ -128,7 +135,16 @@ export async function accountRecord(
               profile.created_at, profile.banned_at, profile.banned_until,
               profile.ban_reason, profile.deleted_at, profile.owner_id,
               profile.limits, profile.plan_until, profile.show_mark, profile.digest, profile.reply_policy,
-              profile.karma_floor, username.name,
+              profile.karma_floor, username.name, profile.mentions_seen_at,
+              -- Mentions of the member or their agent since they last looked, up to 99.
+              (SELECT COUNT(*) FROM (
+                 SELECT DISTINCT item_type, item_id FROM mentions
+                 WHERE target_id IN (profile.user_id,
+                         (SELECT agent.user_id FROM profiles AS agent WHERE agent.owner_id = profile.user_id AND agent.deleted_at IS NULL))
+                   AND created_at > profile.mentions_seen_at
+                 LIMIT ${NEW_MENTIONS_MAX})) AS new_mentions,
+              -- A sign-up whose invitation did not attach.
+              EXISTS (SELECT 1 FROM invites WHERE claimed_by = profile.user_id AND used_by IS NULL) AS invite_pending,
               owner.banned_at AS owner_banned_at, owner.banned_until AS owner_banned_until,
               owner.ban_reason AS owner_ban_reason, owner.role AS owner_role,
               owner.plan_until AS owner_plan_until
@@ -157,6 +173,9 @@ export async function accountRecord(
       reply_policy: Exclude<CommentReplies, "all"> | null;
       karma_floor: number | null;
       name: string;
+      mentions_seen_at: number;
+      new_mentions: number;
+      invite_pending: number;
       owner_banned_at: number | null;
       owner_banned_until: number | null;
       owner_ban_reason: string | null;
@@ -202,7 +221,30 @@ export async function accountRecord(
     showMark: row.show_mark === 1,
     digest: row.digest,
     replyPolicy: row.reply_policy ?? "all",
+    mentionsSeenAt: row.mentions_seen_at,
+    newMentions: row.new_mentions,
+    invitePending: row.invite_pending === 1,
   };
+}
+
+/** Whether the account already has a sign-in of this provider linked. */
+export async function linkedWith(db: D1Database, userId: string, providerId: string): Promise<boolean> {
+  const row = await db
+    .prepare(`SELECT 1 FROM "account" WHERE "userId" = ?1 AND "providerId" = ?2`)
+    .bind(userId, providerId)
+    .first();
+  return row !== null;
+}
+
+/**
+ * Marks the member's mentions up to `at` as seen, so the new-mentions mark
+ * clears; never moves back.
+ */
+export async function markMentionsSeen(db: D1Database, userId: string, at: number): Promise<void> {
+  await db
+    .prepare(`UPDATE profiles SET mentions_seen_at = ?2 WHERE user_id = ?1 AND mentions_seen_at < ?2`)
+    .bind(userId, Math.floor(at))
+    .run();
 }
 
 /**
@@ -277,7 +319,7 @@ export async function renameStatus(
 
 export type RenameResult =
   | { ok: true }
-  | { ok: false; reason: "taken" | "too_soon" | "same" };
+  | { ok: false; reason: "taken" | "too_soon" | "same" | "plan" };
 
 /**
  * Changes an account's name. The old name stays reserved and redirects. The
@@ -301,11 +343,17 @@ export async function renameUser(
   if (holder && name.length >= USERNAME_MIN) return { ok: false, reason: "taken" };
 
   const earliest = now - RENAME_INTERVAL_DAYS * DAY;
-  // Names the board gave count toward neither the first free change nor the wait.
+  const short = name.length < USERNAME_MIN;
+  // Names the board gave count toward neither the first free change nor
+  // the wait. A short name needs the plan as the write lands.
   const allowed = `(
     (SELECT COUNT(*) FROM usernames WHERE user_id = ?1 AND given = 0) <= 1
     OR (SELECT MAX(created_at) FROM usernames WHERE user_id = ?1 AND given = 0) <= ?2
-  )`;
+  )${short ? ` AND ${shortNameAllowed("?1", String(Math.floor(now)))}` : ""}`;
+  const refused = async (): Promise<RenameResult> =>
+    short && !(await db.prepare(`SELECT ${shortNameAllowed("?1", "?2")} AS may`).bind(userId, now).first<{ may: number }>())?.may
+      ? { ok: false, reason: "plan" }
+      : { ok: false, reason: "too_soon" };
   if (holder) {
     // The account's own earlier short name: current again, dated now, as a change.
     const [retired] = await db.batch([
@@ -322,7 +370,7 @@ export async function renameUser(
         )
         .bind(userId, name, now),
     ]);
-    return retired!.meta.changes === 0 ? { ok: false, reason: "too_soon" } : { ok: true };
+    return retired!.meta.changes === 0 ? refused() : { ok: true };
   }
   try {
     const [retired] = await db.batch([
@@ -345,7 +393,7 @@ export async function renameUser(
         )
         .bind(userId, name, now),
     ]);
-    if (retired.meta.changes === 0) return { ok: false, reason: "too_soon" };
+    if (retired.meta.changes === 0) return refused();
     return { ok: true };
   } catch (error) {
     // Someone took the name between the check and the write.
@@ -378,27 +426,62 @@ export async function giveName(
   db: D1Database,
   input: { userId: string; now: number; short?: boolean; release?: boolean },
 ): Promise<string | null> {
-  const which = `user_id = ?1 AND is_current = 1${input.short ? " AND length(name) < 6" : ""}`;
+  return withGivenName(async (name) => {
+    const [replaced] = await db.batch(givenNameStatements(db, { ...input, name }));
+    return replaced!.meta.changes > 0 ? name : null;
+  });
+}
+
+/**
+ * Runs `write` with generated names until one is free: a write that finds
+ * its name taken has undone itself, as a batch does, and draws again.
+ */
+export async function withGivenName<T>(write: (name: string) => Promise<T>): Promise<T> {
   for (let attempt = 0; attempt < 8; attempt += 1) {
-    const name = generateUsername();
     try {
-      const [replaced] = await db.batch([
-        db.prepare(input.release ? `DELETE FROM usernames WHERE ${which}` : `UPDATE usernames SET is_current = 0 WHERE ${which}`).bind(input.userId),
-        // Only once the old name stepped aside, so the account never holds two.
-        db
-          .prepare(
-            `INSERT INTO usernames (name, user_id, is_current, created_at, given)
-             SELECT ?2, ?1, 1, ?3, 1 WHERE NOT EXISTS (SELECT 1 FROM usernames WHERE user_id = ?1 AND is_current = 1)`,
-          )
-          .bind(input.userId, name, input.now),
-      ]);
-      return replaced!.meta.changes > 0 ? name : null;
+      return await write(generateUsername());
     } catch (error) {
-      // The generated name was taken: the batch undid itself; draw again.
       if (!String(error).includes("UNIQUE")) throw error;
     }
   }
   throw new Error("could not find a free name");
+}
+
+/**
+ * The statements that give an account `name` in place of its current one;
+ * see giveName. The first acts only on a name still to replace: with
+ * `short`, a 4- or 5-character name whose account has no plan in force
+ * when the batch runs, so a renewal that lands first keeps it.
+ */
+export function givenNameStatements(
+  db: D1Database,
+  input: { userId: string; now: number; name: string; short?: boolean; release?: boolean },
+): D1PreparedStatement[] {
+  const which = `user_id = ?1 AND is_current = 1${
+    input.short ? ` AND length(name) < ${USERNAME_MIN} AND NOT ${shortNameAllowed("?1", "?2")}` : ""
+  }`;
+  return [
+    db
+      .prepare(input.release ? `DELETE FROM usernames WHERE ${which}` : `UPDATE usernames SET is_current = 0 WHERE ${which}`)
+      .bind(...(input.short ? [input.userId, input.now] : [input.userId])),
+    // Only once the old name stepped aside, so the account never holds two.
+    db
+      .prepare(
+        `INSERT INTO usernames (name, user_id, is_current, created_at, given)
+         SELECT ?2, ?1, 1, ?3, 1 WHERE NOT EXISTS (SELECT 1 FROM usernames WHERE user_id = ?1 AND is_current = 1)`,
+      )
+      .bind(input.userId, input.name, input.now),
+  ];
+}
+
+/**
+ * The SQL condition that the account `account` (SQL for its ID) may hold a
+ * 4- or 5-character name at `now`: a member, never an agent, who is an
+ * admin or has the plan in force.
+ */
+export function shortNameAllowed(account: string, now: string): string {
+  return `EXISTS (SELECT 1 FROM profiles WHERE user_id = ${account} AND owner_id IS NULL
+    AND (role = 'admin' OR COALESCE(plan_until, 0) > ${now}))`;
 }
 
 /**

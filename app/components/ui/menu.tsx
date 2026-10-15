@@ -1,10 +1,35 @@
 import { Ellipsis } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
-import type { ComponentProps, ReactNode } from "react";
+import { type ComponentProps, type ReactNode, useRef } from "react";
 
 import { cn } from "~/lib/cn";
 
 import { IconButton } from "./button";
+
+/**
+ * Where focus goes as a menu closes. Opened from the keyboard, it returns
+ * to the button, as it should; opened with a pointer, it is not put back,
+ * so a click leaves no focus ring behind. Spread `trigger` on the
+ * menu's Trigger and `content` on its Content.
+ */
+export function useMenuFocus() {
+  const pointer = useRef(false);
+  return {
+    trigger: {
+      onPointerDown: () => {
+        pointer.current = true;
+      },
+      onKeyDown: () => {
+        pointer.current = false;
+      },
+    },
+    content: {
+      onCloseAutoFocus: (event: Event) => {
+        if (pointer.current) event.preventDefault();
+      },
+    },
+  };
+}
 
 /** The ⋯ menu attached to posts, comments, and profiles. */
 export function Menu({
@@ -15,9 +40,10 @@ export function Menu({
   label: string;
   children: ReactNode;
 }) {
+  const focus = useMenuFocus();
   return (
     <DropdownMenu.Root>
-      <DropdownMenu.Trigger asChild>
+      <DropdownMenu.Trigger asChild {...focus.trigger}>
         <IconButton aria-label={label}>
           <Ellipsis size={18} aria-hidden />
         </IconButton>
@@ -27,6 +53,7 @@ export function Menu({
           align="end"
           sideOffset={4}
           className="z-50 min-w-44 rounded-xl border border-border bg-surface p-1 shadow-lg"
+          {...focus.content}
         >
           {children}
         </DropdownMenu.Content>

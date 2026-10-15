@@ -1,13 +1,14 @@
 import { env } from "cloudflare:workers";
-import { data, Link } from "react-router";
+import { data, Link, redirect } from "react-router";
 
-import { SignInPanel } from "~/components/sign-in";
+import { InviteCodeForm, SignInPanel } from "~/components/sign-in";
 import { Button } from "~/components/ui/button";
 import { Notice } from "~/components/ui/states";
 import { inviteByCode, type InviteState } from "~/lib/db/invites.server";
 import { detectInAppBrowser } from "~/lib/in-app-browser";
-import { INVITE_CODE, INVITE_COOKIE, INVITE_DAYS } from "~/lib/invites";
+import { INVITE_COOKIE, INVITE_DAYS, normalizeInviteCode } from "~/lib/invites";
 import { privatePageMeta } from "~/lib/meta";
+import { withinLimits } from "~/lib/security/rate-limit.server";
 import { TAGLINE } from "~/lib/site";
 import { viewerOf } from "~/lib/viewer.server";
 
@@ -18,36 +19,48 @@ export function meta({ matches, location }: Route.MetaArgs) {
 }
 
 /**
- * An invitation's link. An open one is kept in a cookie for the Google
- * sign-in that follows, which claims it as the account is made.
+ * An invitation's link, or its code typed in (`?code=`), in any case. An
+ * open one is kept in a cookie for the sign-in that follows, which claims
+ * it as the account is made. Looking codes up is rate-limited, so they
+ * cannot be guessed.
  */
 export async function loader({ params, request, context }: Route.LoaderArgs) {
-  const code = params.code ?? "";
-  const now = Math.floor(Date.now() / 1000);
-  const found = INVITE_CODE.test(code) ? await inviteByCode(env.DB, code, now) : null;
+  const url = new URL(request.url);
+  const typed = params.code ?? url.searchParams.get("code");
   const viewer = await viewerOf(context);
-  const body = {
-    state: (found?.state ?? "missing") as InviteState | "missing",
-    inviter: found?.inviter.username ?? null,
+  const base = {
+    inviter: null as string | null,
     signedIn: viewer !== null,
     inAppBrowser: detectInAppBrowser(request.headers.get("User-Agent") ?? ""),
+    typed: params.code ? null : typed,
   };
+  // Nothing to look up yet: a place to type the code.
+  if (typed === null || typed.trim() === "") return { ...base, state: "ask" as const };
+  const code = normalizeInviteCode(typed);
+  // A typed code goes to the invitation's own address.
+  if (code && code !== params.code) throw redirect(`/invite/${code}`);
+  if (!code) return data({ ...base, state: "missing" as const }, { status: 404 });
+  if (!(await withinLimits(request, "signin", null))) return data({ ...base, state: "limited" as const }, { status: 429 });
+
+  const found = await inviteByCode(env.DB, code, Math.floor(Date.now() / 1000));
+  const body = { ...base, state: (found?.state ?? "missing") as InviteState | "missing", inviter: found?.inviter.username ?? null };
   if (found?.state !== "open" || viewer) return data(body, { status: found ? 200 : 404 });
-  const secure = new URL(request.url).protocol === "https:";
+  const secure = url.protocol === "https:";
   const cookie = `${INVITE_COOKIE}=${code}; Path=/; Max-Age=${INVITE_DAYS * 24 * 3600}; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`;
   return data(body, { headers: { "Set-Cookie": cookie } });
 }
 
-const CLOSED: Record<Exclude<InviteState, "open"> | "missing", string> = {
+const CLOSED: Record<Exclude<InviteState, "open"> | "missing" | "limited", string> = {
   used: "This invitation has been used. Each one makes one account.",
-  revoked: "This invitation was cancelled by the member who made it.",
+  revoked: "This invitation was revoked by the member who made it.",
   expired: `This invitation has expired. They last ${INVITE_DAYS} days.`,
   paused: "This invitation cannot be used now: the member who made it cannot invite at the moment.",
-  missing: "There is no invitation at this address. Check the link you were given.",
+  missing: "There is no invitation with this code. Check the code or link you were given.",
+  limited: "Too many codes tried from this network just now. Wait a minute, then try again.",
 };
 
 export default function Invite({ loaderData }: Route.ComponentProps) {
-  const { state, inviter, signedIn, inAppBrowser } = loaderData;
+  const { state, inviter, signedIn, inAppBrowser, typed } = loaderData;
   return (
     <main className="mx-auto max-w-md space-y-4 px-(--gutter) py-10">
       <h1 className="text-display font-semibold">
@@ -60,8 +73,17 @@ export default function Invite({ loaderData }: Route.ComponentProps) {
         </Link>
         .
       </p>
-      {state !== "open" ? (
-        <Notice tone="danger">{CLOSED[state]}</Notice>
+      {state === "ask" ? (
+        signedIn ? (
+          <Notice>You already have an account here, so invitations are for others.</Notice>
+        ) : (
+          <InviteCodeForm label="Enter the code you were given." />
+        )
+      ) : state !== "open" ? (
+        <div className="space-y-3">
+          <Notice tone="danger">{CLOSED[state]}</Notice>
+          {signedIn ? null : <InviteCodeForm label="Try the code again, or another one." typed={typed} />}
+        </div>
       ) : signedIn ? (
         <div className="space-y-3">
           <Notice>You already have an account here, so this invitation is left for someone else.</Notice>
@@ -72,10 +94,10 @@ export default function Invite({ loaderData }: Route.ComponentProps) {
       ) : (
         <div className="space-y-3">
           <p className="text-body">
-            Sign in with Google to make your account. This invitation is good for one account, and {inviter ?? "the member"}{" "}
-            will be shown as the one who invited you.
+            Sign in to make your account. This invitation is good for one account, and {inviter ?? "the member"} will be
+            shown as the one who invited you.
           </p>
-          <SignInPanel next="/" inAppBrowser={inAppBrowser} />
+          <SignInPanel next="/" inAppBrowser={inAppBrowser} invited />
         </div>
       )}
     </main>

@@ -1,5 +1,5 @@
-import { newId } from "../ids";
-import { INVITE_DAYS, type InviteRefusal, OPEN_INVITES } from "../invites";
+import { createProfile } from "./accounts.server";
+import { INVITE_ALPHABET, INVITE_DAYS, type InviteRefusal, OPEN_INVITES } from "../invites";
 import type { PublicAuthor } from "../public-types";
 import { KARMA_FLOOR } from "../moderation";
 import { AUTHOR_COLUMNS, AUTHOR_JOINS, toPublicAuthor } from "./rows.server";
@@ -26,7 +26,7 @@ export function mayInviteSql(account: string, now: number): string {
       AND NOT ${banned("inviter")}
       AND (inviter.role = 'admin' OR (
         inviter.karma > COALESCE(inviter.karma_floor, ${KARMA_FLOOR}) AND inviter.karma >= 0
-        AND 2 * (SELECT COUNT(*) ${invitees} AND (invitee.vote_karma < 0 OR ${banned("invitee")}))
+        AND 2 * (SELECT COUNT(*) ${invitees} AND (invitee.karma < 0 OR ${banned("invitee")}))
           < MAX(1, (SELECT COUNT(*) ${invitees})))))`;
 }
 
@@ -85,24 +85,39 @@ export async function inviteStanding(db: D1Database, userId: string, now: number
   };
 }
 
+/** A new invitation code: 8 of the 32 characters, drawn without bias. */
+export function newInviteCode(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  // 256 is a multiple of 32, so every character is equally likely.
+  return [...bytes].map((byte) => INVITE_ALPHABET[byte % 32]).join("");
+}
+
 /**
  * Makes an invitation, inside the write: only while the member may invite
  * and holds fewer than the open limit (admins have none). Its code, or null.
  */
 export async function createInvite(db: D1Database, input: { inviterId: string; now: number }): Promise<string | null> {
-  const code = newId(16);
-  const made = await db
-    .prepare(
-      `INSERT INTO invites (code, inviter_id, created_at, expires_at)
-       SELECT ?1, ?2, ?3, ?4
-       WHERE ${mayInviteSql("?2", input.now)}
-         AND (EXISTS (SELECT 1 FROM profiles WHERE user_id = ?2 AND role = 'admin')
-           OR (SELECT COUNT(*) FROM invites WHERE inviter_id = ?2 AND used_by IS NULL AND claimed_at IS NULL
-                 AND revoked_at IS NULL AND expires_at > ?3) < ${OPEN_INVITES})`,
-    )
-    .bind(code, input.inviterId, input.now, input.now + INVITE_DAYS * DAY)
-    .run();
-  return made.meta.changes > 0 ? code : null;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const code = newInviteCode();
+    try {
+      const made = await db
+        .prepare(
+          `INSERT INTO invites (code, inviter_id, created_at, expires_at)
+           SELECT ?1, ?2, ?3, ?4
+           WHERE ${mayInviteSql("?2", input.now)}
+             AND (EXISTS (SELECT 1 FROM profiles WHERE user_id = ?2 AND role = 'admin')
+               OR (SELECT COUNT(*) FROM invites WHERE inviter_id = ?2 AND used_by IS NULL AND claimed_at IS NULL
+                     AND revoked_at IS NULL AND expires_at > ?3) < ${OPEN_INVITES})`,
+        )
+        .bind(code, input.inviterId, input.now, input.now + INVITE_DAYS * DAY)
+        .run();
+      return made.meta.changes > 0 ? code : null;
+    } catch (error) {
+      // The code was drawn before: draw another.
+      if (!String(error).includes("UNIQUE")) throw error;
+    }
+  }
+  throw new Error("could not draw a free invitation code");
 }
 
 /** Cancels one of the member's unused invitations. */
@@ -155,45 +170,75 @@ export async function inviteByCode(
 }
 
 /**
- * Claims an invitation for a Google sign-up, before its account exists:
- * the code must be open and its inviter still able to invite, all inside
- * the write, so one invitation makes one account.
+ * Claims an invitation for a sign-up, before its account exists, for the
+ * account ID the sign-up will create: the code must be open and its
+ * inviter still able to invite, all inside the write, so one invitation
+ * makes one account, and only that account can take it.
  */
-export async function claimInvite(db: D1Database, input: { code: string; email: string; now: number }): Promise<boolean> {
+export async function claimInvite(db: D1Database, input: { code: string; userId: string; now: number }): Promise<boolean> {
   const claimed = await db
     .prepare(
-      `UPDATE invites SET claimed_email = lower(?2), claimed_at = ?3
+      `UPDATE invites SET claimed_by = ?2, claimed_at = ?3
        WHERE code = ?1 AND used_by IS NULL AND claimed_at IS NULL AND revoked_at IS NULL AND expires_at > ?3
          AND ${mayInviteSql("invites.inviter_id", input.now)}`,
     )
-    .bind(input.code, input.email, input.now)
+    .bind(input.code, input.userId, input.now)
     .run();
   return claimed.meta.changes > 0;
 }
 
 /**
- * Gives the new account the invitation its email claimed: who invited it,
- * and the invitation marked used. The inviter's karma settles, since their
- * invitees' share may now include this one.
+ * Gives the new account the invitation claimed for it: who invited it, and
+ * the invitation marked used, once its profile holds the inviter. The
+ * inviter's karma settles, since their invitees' share may now include
+ * this one. Safe to repeat: a sign-up whose step failed is finished on the
+ * account's next request, or by the hourly sweep.
  */
-export async function attachInvite(db: D1Database, input: { userId: string; email: string }): Promise<void> {
-  const claim = `SELECT inviter_id FROM invites WHERE claimed_email = lower(?2) AND used_by IS NULL`;
+export async function attachInvite(db: D1Database, input: { userId: string }): Promise<void> {
+  const claim = `SELECT inviter_id FROM invites WHERE claimed_by = ?1 AND used_by IS NULL`;
   await db.batch([
     db
       .prepare(`UPDATE profiles SET invited_by = (${claim}) WHERE user_id = ?1 AND invited_by IS NULL AND EXISTS (${claim})`)
-      .bind(input.userId, input.email),
+      .bind(input.userId),
     db
-      .prepare(`UPDATE invites SET used_by = ?1, claimed_email = NULL WHERE claimed_email = lower(?2) AND used_by IS NULL`)
-      .bind(input.userId, input.email),
+      .prepare(
+        `UPDATE invites SET used_by = ?1
+         WHERE claimed_by = ?1 AND used_by IS NULL
+           AND EXISTS (SELECT 1 FROM profiles WHERE user_id = ?1 AND invited_by = invites.inviter_id)`,
+      )
+      .bind(input.userId),
     ...settleKarma(db, `(SELECT invited_by FROM profiles WHERE user_id = ?1)`, input.userId),
   ]);
 }
 
-/** Frees claims whose sign-up never finished, so their invitations work again. */
+/** How long a claim waits for its sign-up to finish before the sweep looks at it. */
+const CLAIM_GRACE_SECONDS = 600;
+
+/**
+ * Settles claims whose sign-up did not finish. One whose account was made
+ * is given to it, so a code that let an account in is never used again;
+ * one whose account never came is freed, so its invitation works again.
+ */
 export async function sweepInviteClaims(db: D1Database, now: number): Promise<number> {
+  const { results } = await db
+    .prepare(
+      `SELECT claimed_by FROM invites
+       WHERE used_by IS NULL AND claimed_at < ?1 AND EXISTS (SELECT 1 FROM "user" WHERE "id" = invites.claimed_by)
+       LIMIT 100`,
+    )
+    .bind(now - CLAIM_GRACE_SECONDS)
+    .all<{ claimed_by: string }>();
+  for (const { claimed_by: userId } of results) {
+    // Its profile too, should that step have failed as well.
+    await createProfile(db, userId);
+    await attachInvite(db, { userId });
+  }
   const freed = await db
-    .prepare(`UPDATE invites SET claimed_email = NULL, claimed_at = NULL WHERE used_by IS NULL AND claimed_at < ?1`)
-    .bind(now - 3600)
+    .prepare(
+      `UPDATE invites SET claimed_by = NULL, claimed_at = NULL
+       WHERE used_by IS NULL AND claimed_at < ?1 AND NOT EXISTS (SELECT 1 FROM "user" WHERE "id" = invites.claimed_by)`,
+    )
+    .bind(now - CLAIM_GRACE_SECONDS)
     .run();
-  return freed.meta.changes;
+  return results.length + freed.meta.changes;
 }

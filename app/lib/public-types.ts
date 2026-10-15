@@ -44,6 +44,8 @@ export interface ViewerSummary extends PublicAuthor {
   entitled: boolean;
   /** How often the digest is sent, or null when it is off. */
   digest: "daily" | "weekly" | "monthly" | null;
+  /** Posts and comments mentioning them or their agent since they last looked, up to 99. */
+  newMentions: number;
 }
 
 export type PostMedia =

@@ -1087,7 +1087,7 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
             </IconButton>
             <DigestMenu value="off" />
             <SubmitButton />
-            <AccountMenu user={AUTHORS.otter} />
+            <AccountMenu user={{ ...AUTHORS.otter, newMentions: 3 }} />
           </SiteHeader>
         </div>
         <p className="text-body text-text-muted">

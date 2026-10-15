@@ -66,7 +66,7 @@ export function FormatToolbar({
           // Keeps the selection in the text box while the button is pressed.
           onMouseDown={(event) => event.preventDefault()}
           onClick={() => apply(format)}
-          className="inline-flex size-8 items-center justify-center rounded-md text-text-muted hover:bg-surface-2 hover:text-text disabled:opacity-50 pointer-coarse:size-9"
+          className="inline-flex size-8 items-center justify-center rounded-md text-text-muted hover:bg-surface-2 focus-visible:-outline-offset-2 hover:text-text disabled:opacity-50 pointer-coarse:size-9"
         >
           <Icon size={16} aria-hidden />
         </button>

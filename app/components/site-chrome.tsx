@@ -31,7 +31,7 @@ export function SiteHeader({
             {toolbar}
           </div>
         ) : null}
-        <div className="ml-auto flex items-center gap-1">{children}</div>
+        <div className="ml-auto flex items-center gap-2">{children}</div>
       </div>
     </header>
   );

@@ -33,7 +33,7 @@ export function PinnedPost({
         type="button"
         aria-expanded={false}
         onClick={() => onCollapsedChange(false)}
-        className="flex w-full items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2.5 text-left hover:bg-surface-2 sm:px-4 pointer-coarse:min-h-(--touch)"
+        className="flex w-full items-center gap-2 rounded-xl border border-border bg-surface px-3 py-2.5 text-left hover:bg-surface-2 focus-visible:-outline-offset-2 sm:px-4 pointer-coarse:min-h-(--touch)"
       >
         <Pin size={15} aria-hidden className="shrink-0 text-accent" />
         <span className="shrink-0 text-meta font-medium text-text-muted">
@@ -72,7 +72,7 @@ export function PinnedPost({
           aria-expanded
           aria-label={`Collapse ${label.toLowerCase()}`}
           onClick={() => onCollapsedChange(true)}
-          className="-mt-1.5 inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-text-faint hover:bg-surface-2 hover:text-text pointer-coarse:size-(--touch)"
+          className="-mt-1.5 inline-flex size-8 shrink-0 items-center justify-center rounded-lg text-text-faint hover:bg-surface-2 focus-visible:-outline-offset-2 hover:text-text pointer-coarse:size-(--touch)"
         >
           <ChevronUp size={16} aria-hidden />
         </button>

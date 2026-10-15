@@ -2,29 +2,46 @@ import { AtSign, Bookmark, LogOut, Settings, Shield, User } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
 import { Link, useSubmit } from "react-router";
 
+import { NEW_MENTIONS_MAX } from "~/lib/text/mentions";
 import { useModeration } from "~/lib/use-moderation";
 
 import { Avatar } from "./avatar";
 import type { PublicAuthor } from "~/lib/public-types";
 import { MENU_CONTENT } from "./theme-switch";
-import { MenuItem, MenuSeparator } from "./ui/menu";
+import { MenuItem, MenuSeparator, useMenuFocus } from "./ui/menu";
+
+/** A count beside a menu item, such as new mentions or open reports. */
+function Count({ value, label }: { value: number; label: string }) {
+  return (
+    <span className="ml-auto rounded-full bg-accent px-1.5 text-meta font-semibold text-on-accent tabular-nums">
+      {value >= NEW_MENTIONS_MAX ? `${NEW_MENTIONS_MAX}+` : value}
+      <span className="sr-only"> {label}</span>
+    </span>
+  );
+}
 
 /**
  * The signed-in user's menu, opened from their avatar. The theme and
  * autoplay live in Settings, which keeps the top bar to four controls on a
  * narrow phone.
  */
-export function AccountMenu({ user }: { user: PublicAuthor }) {
+export function AccountMenu({ user }: { user: PublicAuthor & { newMentions: number } }) {
+  const focus = useMenuFocus();
   const submit = useSubmit();
   const moderation = useModeration();
   const waiting = moderation?.openReports ?? 0;
+  const mentions = user.newMentions;
+  const status = [
+    mentions > 0 ? `${mentions >= NEW_MENTIONS_MAX ? `${NEW_MENTIONS_MAX}+` : mentions} new mentions` : null,
+    waiting > 0 ? `${waiting} open reports` : null,
+  ].filter(Boolean);
   return (
     <DropdownMenu.Root>
-      <DropdownMenu.Trigger asChild>
+      <DropdownMenu.Trigger asChild {...focus.trigger}>
         <button
           type="button"
-          aria-label={`Account: ${user.username}${waiting > 0 ? `, ${waiting} open reports` : ""}`}
-          className="relative inline-flex size-9 items-center justify-center rounded-lg hover:bg-surface-2 pointer-coarse:size-(--touch)"
+          aria-label={[`Account: ${user.username}`, ...status].join(", ")}
+          className="relative inline-flex size-9 items-center justify-center rounded-lg hover:bg-surface-2 focus-visible:-outline-offset-2 pointer-coarse:size-(--touch)"
         >
           <Avatar
             userId={user.id}
@@ -32,13 +49,14 @@ export function AccountMenu({ user }: { user: PublicAuthor }) {
             photoUrl={user.photoUrl}
             size={26}
           />
-          {waiting > 0 ? (
+          {status.length > 0 ? (
             <span aria-hidden className="absolute top-1 right-1 size-2.5 rounded-full border-2 border-surface bg-accent" />
           ) : null}
         </button>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content
+          {...focus.content}
           align="end"
           sideOffset={4}
           className={`${MENU_CONTENT} min-w-52`}
@@ -56,6 +74,7 @@ export function AccountMenu({ user }: { user: PublicAuthor }) {
             <Link to="/mentions">
               <AtSign size={16} aria-hidden className="text-text-muted" />
               Mentions
+              {mentions > 0 ? <Count value={mentions} label="new" /> : null}
             </Link>
           </MenuItem>
           <MenuItem asChild>
@@ -75,11 +94,7 @@ export function AccountMenu({ user }: { user: PublicAuthor }) {
               <Link to="/admin">
                 <Shield size={16} aria-hidden className="text-text-muted" />
                 Moderation
-                {waiting > 0 ? (
-                  <span className="ml-auto rounded-full bg-accent px-1.5 text-meta font-semibold text-on-accent tabular-nums">
-                    {waiting}
-                  </span>
-                ) : null}
+                {waiting > 0 ? <Count value={waiting} label="open" /> : null}
               </Link>
             </MenuItem>
           ) : null}

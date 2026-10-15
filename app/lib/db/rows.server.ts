@@ -35,7 +35,7 @@ export const AUTHOR_COLUMNS = `
   profile.role AS author_role,
   profile.plan_until AS author_plan_until,
   profile.show_mark AS author_show_mark,
-  profile.x_handle AS author_x_handle,
+  CASE WHEN profile.x_shown = 1 THEN profile.x_handle END AS author_x_handle,
   author_owner.role AS author_owner_role,
   author_owner.plan_until AS author_owner_plan_until`;
 

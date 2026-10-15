@@ -5,6 +5,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useId,
   useState,
 } from "react";
 import { Form, useLocation, useRouteLoaderData } from "react-router";
@@ -17,7 +18,7 @@ import { DialogContent, DialogRoot } from "./ui/dialog";
 import { Notice } from "./ui/states";
 
 /** Google's four-color mark, as its sign-in buttons show it. */
-function GoogleMark() {
+export function GoogleMark() {
   return (
     <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden>
       <path
@@ -40,7 +41,17 @@ function GoogleMark() {
   );
 }
 
-export function CopyButton({ text, label, done }: { text: string; label: string; done: string }) {
+export function CopyButton({
+  text,
+  label,
+  done,
+  className = "w-full",
+}: {
+  text: string;
+  label: string;
+  done: string;
+  className?: string;
+}) {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
@@ -49,7 +60,7 @@ export function CopyButton({ text, label, done }: { text: string; label: string;
   }, [copied]);
 
   return (
-    <Button onClick={async () => setCopied(await copyText(text))} className="w-full">
+    <Button onClick={async () => setCopied(await copyText(text))} className={className}>
       {copied ? <Check size={16} aria-hidden /> : <Copy size={16} aria-hidden />}
       {copied ? done : label}
     </Button>
@@ -57,23 +68,27 @@ export function CopyButton({ text, label, done }: { text: string; label: string;
 }
 
 /**
- * Google sign-in, or, inside an app's own browser where Google refuses to
- * sign anyone in, how to continue in a real browser. `next` is where the
- * visitor returns afterwards.
+ * Google or X sign-in, or, inside an app's own browser where Google refuses
+ * to sign anyone in, how to continue in a real browser. `next` is where the
+ * visitor returns afterwards. Unless `invited`, it also takes an
+ * invitation code, for someone given one to type.
  */
 export function SignInPanel({
   next,
   inAppBrowser,
   error,
+  invited = false,
 }: {
   next: string;
   /** The app whose browser this is, or null in a regular browser. */
   inAppBrowser: string | null;
   error?: string;
+  /** Shown on an invitation's own page, which needs no code. */
+  invited?: boolean;
 }) {
   const [draft, setDraft] = useState<string | null>(null);
   useEffect(() => setDraft(draftsAsText()), []);
-  // Offered once the board's X app is set up; only linked accounts use it.
+  // Offered once the board's X app is set up.
   const xSignIn = (useRouteLoaderData("root") as { xSignIn?: boolean } | undefined)?.xSignIn ?? false;
 
   if (inAppBrowser) {
@@ -114,17 +129,52 @@ export function SignInPanel({
         <Form method="post" action="/signin" reloadDocument>
           <input type="hidden" name="next" value={next} />
           <input type="hidden" name="provider" value="x" />
-          <Button type="submit" variant="ghost" className="w-full">
+          <Button type="submit" variant="secondary" className="w-full">
             <span aria-hidden className="font-semibold">𝕏</span>
-            Sign in with a linked X account
+            Continue with X
           </Button>
         </Form>
       ) : null}
       <p className="text-meta text-text-muted">
-        New accounts are made with Google. Your Google name, email, and photo
-        stay private; the board shows only the username you choose.
+        Your {xSignIn ? "Google or X" : "Google"} name, email, and photo stay private; the board shows only the
+        username you choose.
       </p>
+      {invited ? null : (
+        <div className="border-t border-border pt-3">
+          <InviteCodeForm label="New here? aion.ly takes new members by invitation. Enter your code, or open the link you were given." />
+        </div>
+      )}
     </div>
+  );
+}
+
+/**
+ * A place to type an invitation's code, in any case: the invitation's page
+ * looks it up and keeps it for the sign-in.
+ */
+export function InviteCodeForm({ label, typed }: { label: string; typed?: string | null }) {
+  const id = useId();
+  return (
+    <Form method="get" action="/invite" className="space-y-1.5">
+      <label htmlFor={id} className="block text-meta text-text-muted">
+        {label}
+      </label>
+      <div className="flex gap-2">
+        <input
+          id={id}
+          name="code"
+          required
+          defaultValue={typed ?? ""}
+          autoComplete="off"
+          autoCapitalize="characters"
+          spellCheck={false}
+          maxLength={12}
+          placeholder="Invitation code"
+          className="h-9 min-w-0 flex-1 rounded-lg border border-border-strong bg-surface px-3 font-mono text-body tracking-wider text-text uppercase placeholder:font-sans placeholder:tracking-normal placeholder:text-text-faint placeholder:normal-case pointer-coarse:h-(--touch) pointer-coarse:text-[1rem]"
+        />
+        <Button type="submit">Use code</Button>
+      </div>
+    </Form>
   );
 }
 

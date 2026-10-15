@@ -1,7 +1,7 @@
 import { newId } from "../ids";
 import { KARMA_FLOOR, LOW_KARMA } from "../moderation";
 import { postPath } from "../slug";
-import { giveName } from "./accounts.server";
+import { givenNameStatements, withGivenName } from "./accounts.server";
 import { applyFreshStart } from "./fresh-starts.server";
 import { recountKarma, scoreSql } from "./votes.server";
 
@@ -443,25 +443,26 @@ export async function takeName(
   db: D1Database,
   input: { userId: string; actorId: string; reason: string | null; now: number },
 ): Promise<string | null> {
-  const old = await db
-    .prepare(`SELECT name FROM usernames WHERE user_id = ?1 AND is_current = 1`)
+  const current = await db
+    .prepare(`SELECT 1 FROM usernames WHERE user_id = ?1 AND is_current = 1`)
     .bind(input.userId)
-    .first<{ name: string }>();
-  if (!old) return null;
-  const given = await giveName(db, { userId: input.userId, now: input.now, release: true });
-  if (given) {
-    await logAction(db, {
-      id: newId(),
-      batchId: newId(),
-      actorId: input.actorId,
-      action: "take_name",
-      targetType: "user",
-      targetId: input.userId,
-      reason: input.reason ?? `was ${old.name}`,
-      now: input.now,
-    }).run();
-  }
-  return given;
+    .first();
+  if (!current) return null;
+  return withGivenName(async (name) => {
+    const [logged] = await db.batch([
+      // Logged first, in the same batch, naming the name as it stands now.
+      db
+        .prepare(
+          `INSERT INTO mod_actions (id, batch_id, actor_id, action, target_type, target_id, reason, created_at)
+           SELECT ?1, ?2, ?3, 'take_name', 'user', ?4,
+                  CASE WHEN ?5 IS NULL THEN 'was ' || name ELSE ?5 || ' (was ' || name || ')' END, ?6
+           FROM usernames WHERE user_id = ?4 AND is_current = 1`,
+        )
+        .bind(newId(), newId(), input.actorId, input.userId, input.reason, input.now),
+      ...givenNameStatements(db, { userId: input.userId, now: input.now, name, release: true }),
+    ]);
+    return logged!.meta.changes > 0 ? name : null;
+  });
 }
 
 /** Puts an account back on its letter avatar and deletes the photo copy. */

@@ -15,21 +15,21 @@ export function meta({ matches, location }: Route.MetaArgs) {
 }
 
 const ERRORS: Record<string, string> = {
-  // Better Auth's names for a refused or abandoned Google sign-in.
+  // Better Auth's names for a refused or abandoned sign-in.
   access_denied: "Sign-in was cancelled. Try again when you are ready.",
-  email_not_found: "Your Google account did not share an email address, which an account here needs.",
-  email_not_verified: "Google has not verified this account's email. Verify it with Google, then try again.",
-  // Another Google account already signed up with the same email.
-  account_not_linked: "That email already belongs to an account here, made with a different Google account.",
+  email_not_found: "Your account there did not share an email address, which an account here needs.",
+  email_not_verified:
+    "Your account there has no verified email, which a new account here needs. On X, add and confirm an email in its settings; or continue with Google.",
+  // Another account here already has the email this sign-in brought.
+  account_not_linked:
+    "That email already belongs to an account here. Sign in the way you made it, then link this one in Settings.",
   rate_limited: "Too many sign-ins from this network just now. Wait a minute, then try again.",
-  // A Google account whose board account was deleted: lately, or while banned.
-  identity_deleted: "The account this Google account made here was deleted in the last 30 days. A new one can be made after that.",
-  identity_banned: "This Google account cannot make a new account here.",
+  // A Google or X account whose board account was deleted: lately, or while banned.
+  identity_deleted: "The account this sign-in made here was deleted in the last 30 days. A new one can be made after that.",
+  identity_banned: "This account cannot make a new account here.",
   // A new account without an invitation, or with one that no longer works.
-  invite_required: "aion.ly takes new members by invitation. Ask a member for an invitation link, open it, then sign in.",
-  invite_invalid: "That invitation no longer works: it was used, cancelled, or expired, or its sender cannot invite now. Ask for a new one.",
-  // An X account that no account here has linked.
-  signup_disabled: "No account uses this X account. Sign in with Google, then link X in Settings.",
+  invite_required: "aion.ly takes new members by invitation. Enter the code you were given below, or open the link, then sign in.",
+  invite_invalid: "That invitation no longer works: it was used, revoked, or expired, or its sender cannot invite now. Ask for a new one.",
 };
 
 export async function loader({ request, context }: Route.LoaderArgs) {
@@ -48,8 +48,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 }
 
 /**
- * Starts Google sign-in. New accounts come back through the welcome step;
- * everyone else returns to where they were.
+ * Starts Google or X sign-in. New accounts come back through the welcome
+ * step; everyone else returns to where they were.
  */
 export async function action({ request }: Route.ActionArgs) {
   const origin = new URL(request.url).origin;
@@ -59,7 +59,7 @@ export async function action({ request }: Route.ActionArgs) {
     throw redirect(`/signin?${new URLSearchParams({ next, error: "rate_limited" })}`);
   }
 
-  // X signs in only an account that linked it; Google makes new ones.
+  // Either makes a new account, with an invitation, or signs in one that has it linked.
   const provider = form.get("provider") === "x" && xConfigured() ? "twitter" : "google";
   const response = await authFor(request).api.signInSocial({
     body: {

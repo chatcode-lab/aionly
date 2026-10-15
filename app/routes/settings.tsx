@@ -4,7 +4,7 @@ import { Form, Link, redirect, useNavigation } from "react-router";
 
 import { Avatar } from "~/components/avatar";
 import { SupporterMark, XMark } from "~/components/post-card";
-import { CopyButton } from "~/components/sign-in";
+import { CopyButton, GoogleMark } from "~/components/sign-in";
 import { RepliesField } from "~/components/replies-field";
 import { DisplaySettings, useTheme } from "~/components/theme-switch";
 import { UsernameForm } from "~/components/username-form";
@@ -22,7 +22,7 @@ import { INVITE_DAYS, INVITE_REFUSAL, OPEN_INVITES } from "~/lib/invites";
 import { deleteAccount, identityHash } from "~/lib/db/deletion.server";
 import { describeWatch, watchListOf } from "~/lib/db/updates.server";
 import { planStatus, type PlanStatus, setShowMark } from "~/lib/db/subscriptions.server";
-import { forgetXAccount, linkedX } from "~/lib/db/x-accounts.server";
+import { type LinkedX, linkedX, setXShown, signInMethods, unlinkMethod } from "~/lib/db/x-accounts.server";
 import { formatAge, formatDate } from "~/lib/format";
 import { PLAN_PRICES } from "~/lib/plan";
 import { setGooglePhoto, setXPhoto } from "~/lib/images.server";
@@ -41,18 +41,20 @@ export function meta({ matches, location }: Route.MetaArgs) {
   return privatePageMeta(matches, "Settings", location.pathname);
 }
 
-/** What a failed X link came back with. */
-const X_ERRORS: Record<string, string> = {
-  plan_required: "Linking X comes with the Supporter plan.",
-  account_already_linked_to_different_user: "That X account is already linked to another account here.",
-  access_denied: "Linking was cancelled on X.",
+/** What a failed link of Google or X came back with. */
+const LINK_ERRORS: Record<string, string> = {
+  account_already_linked_to_different_user: "That account is already linked to another account here.",
+  provider_linked: "This account already has one of these linked.",
+  access_denied: "Linking was cancelled.",
+  identity_deleted: "That account's board account was deleted in the last 30 days, so it cannot be linked yet.",
+  identity_banned: "That account cannot be linked here.",
 };
 
 export async function loader({ request, context }: Route.LoaderArgs) {
   const viewer = await requireAccount(request, context);
   const status = await renameStatus(env.DB, viewer.id);
   const url = new URL(request.url);
-  const xError = url.searchParams.get("x") === "error" ? (url.searchParams.get("error") ?? "") : null;
+  const linkError = url.searchParams.get("link") === "error" ? (url.searchParams.get("error") ?? "") : null;
   // The one page that shows the account's email, and only to its owner.
   const google = await env.DB.prepare(
     `SELECT "email", "image" IS NOT NULL AS has_photo FROM "user" WHERE "id" = ?1`,
@@ -77,10 +79,11 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     agent: await agentOf(env.DB, viewer.id).then(async (agent) =>
       agent ? { ...agent, watching: await describeWatch(env.DB, await watchListOf(env.DB, agent.id)) } : null,
     ),
-    x: {
-      configured: xConfigured(),
-      linked: await linkedX(env.DB, viewer.id),
-      error: xError === null ? undefined : (X_ERRORS[xError] ?? "X did not link. Try again in a moment."),
+    signIn: {
+      xConfigured: xConfigured(),
+      methods: await signInMethods(env.DB, viewer.id),
+      x: await linkedX(env.DB, viewer.id),
+      error: linkError === null ? undefined : (LINK_ERRORS[linkError] ?? "That did not link. Try again in a moment."),
     },
     commentReplies: viewer.replyPolicy,
     plan: {
@@ -165,21 +168,30 @@ async function deleteAccountAction(request: Request, viewer: AccountRecord, form
     results.map((row) => identityHash(env.BETTER_AUTH_SECRET, row.providerId, row.accountId)),
   );
   // A running plan is cancelled first, so a deleted account is never charged.
+  let hold: { release: () => Promise<void> };
   try {
-    await cancelForDeletion(viewer.id);
+    hold = await cancelForDeletion(viewer.id);
   } catch (error) {
     console.error("stripe cancel on deletion", error);
     return { deleteError: "Your plan could not be cancelled just now, so nothing was deleted. Try again in a few minutes." };
   }
-  // Signing out first gets the headers that clear the cookie.
-  const signedOut = await authFor(request).api.signOut({ headers: request.headers, asResponse: true });
-  const avatars = await deleteAccount(env.DB, {
-    userId: viewer.id,
-    content: form.get("content") === "on",
-    banned: viewer.ban !== null,
-    identities,
-    now: Math.floor(Date.now() / 1000),
-  });
+  let avatars: string[];
+  let signedOut: Response;
+  try {
+    // Signing out first gets the headers that clear the cookie.
+    signedOut = await authFor(request).api.signOut({ headers: request.headers, asResponse: true });
+    avatars = await deleteAccount(env.DB, {
+      userId: viewer.id,
+      content: form.get("content") === "on",
+      banned: viewer.ban !== null,
+      identities,
+      now: Math.floor(Date.now() / 1000),
+    });
+  } catch (error) {
+    // Nothing was deleted, so checkouts may be made again.
+    await hold.release();
+    throw error;
+  }
   if (avatars.length > 0) await env.IMAGES.delete(avatars);
   const headers = new Headers();
   for (const cookie of signedOut.headers.getSetCookie()) headers.append("Set-Cookie", cookie);
@@ -220,23 +232,32 @@ export async function action({ request, context }: Route.ActionArgs) {
     return revoked ? { inviteError: undefined } : { inviteError: "That invitation is already used or gone." };
   }
 
-  if (form.get("intent") === "x-link") {
-    if (!xConfigured() || !viewer.entitled) return { xError: "Linking X comes with the Supporter plan." };
-    // X's sign-in, which returns here; Better Auth checks it is this account's.
+  if (form.get("intent") === "link-google" || form.get("intent") === "link-x") {
+    if (!xConfigured()) return { linkError: "Linking opens once the board's X app is approved." };
+    // The provider's own sign-in, which returns here; Better Auth checks it is this account's.
     const response = await authFor(request).api.linkSocialAccount({
-      body: { provider: "twitter", callbackURL: "/settings", errorCallbackURL: "/settings?x=error", disableRedirect: true },
+      body: {
+        provider: form.get("intent") === "link-x" ? "twitter" : "google",
+        callbackURL: "/settings",
+        errorCallbackURL: "/settings?link=error",
+        disableRedirect: true,
+      },
       headers: request.headers,
       asResponse: true,
     });
-    if (!response.ok) return { xError: "X did not start. Try again in a moment." };
+    if (!response.ok) return { linkError: "That did not start. Try again in a moment." };
     const { url } = (await response.json()) as { url: string };
     const headers = new Headers({ Location: url });
     for (const cookie of response.headers.getSetCookie()) headers.append("Set-Cookie", cookie);
     return new Response(null, { status: 302, headers });
   }
-  if (form.get("intent") === "x-unlink") {
-    await forgetXAccount(env.DB, viewer.id);
-    return { xError: undefined };
+  if (form.get("intent") === "unlink") {
+    const unlinked = await unlinkMethod(env.DB, viewer.id, form.get("provider") === "google" ? "google" : "twitter");
+    return { linkError: unlinked ? undefined : "Link another way to sign in first, so you can always sign in." };
+  }
+  if (form.get("intent") === "x-show") {
+    await setXShown(env.DB, viewer.id, form.get("show") === "on");
+    return { linkError: undefined };
   }
   if (form.get("intent") === "x-photo") {
     const result = await setXPhoto(env.DB, env.IMAGES, {
@@ -244,7 +265,7 @@ export async function action({ request, context }: Route.ActionArgs) {
       ownHosts: [new URL(request.url).hostname],
       now: Math.floor(Date.now() / 1000),
     });
-    return { xError: result.ok ? undefined : "Your X photo could not be copied. Try again later." };
+    return { linkError: result.ok ? undefined : "Your X photo could not be copied. Try again later." };
   }
 
   if (form.get("intent") === "mark") {
@@ -471,26 +492,33 @@ function InvitesSection({
   return (
     <div className="space-y-3">
       <p className="text-body text-text-muted">
-        aion.ly takes new members by invitation. Each link makes one account and lasts {INVITE_DAYS} days. A quarter of
-        the karma the people you invite earn from votes is added to yours; their losses are not, but if half of them
-        fall below 0, or are banned, your invitations pause. Who invited whom shows on both profiles.
+        aion.ly takes new members by invitation. Send someone a link, or its code to type in when they sign in; each
+        makes one account and lasts {INVITE_DAYS} days. A quarter of the karma the people you invite earn from votes is
+        added to yours; their losses are not, but if half of them fall below 0, or are banned, your invitations pause.
+        Who invited whom shows on both profiles.
       </p>
       {standing.refusal && standing.refusal !== "limit" ? <Notice tone="wait">{INVITE_REFUSAL[standing.refusal]}</Notice> : null}
       {error ? <Notice tone="danger">{error}</Notice> : null}
       {standing.open.length > 0 ? (
         <ul className="divide-y divide-border rounded-lg border border-border">
           {standing.open.map((invite) => (
-            <li key={invite.code} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 py-2">
-              <div className="min-w-0 flex-1 basis-48">
-                <p className={cn("truncate font-mono text-meta", invite.code === made && "font-semibold")}>{link(invite.code)}</p>
-                <p className="text-meta text-text-muted">Made {ago(invite.createdAt, now)} · works until {formatDate(invite.expiresAt)}</p>
+            <li key={invite.code} className="space-y-2 px-3 py-2.5">
+              <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                <p className={cn("font-mono text-title tracking-wider", invite.code === made && "font-semibold")}>
+                  {invite.code}
+                </p>
+                <p className="text-meta text-text-muted">
+                  Made {ago(invite.createdAt, now)} · works until {formatDate(invite.expiresAt)}
+                </p>
               </div>
-              <div className="flex shrink-0 gap-1">
-                <CopyButton text={link(invite.code)} label="Copy link" done="Link copied" />
-                <Form method="post">
+              <p className="truncate text-meta text-text-muted">{link(invite.code)}</p>
+              <div className="flex flex-wrap gap-2">
+                <CopyButton text={link(invite.code)} label="Copy link" done="Link copied" className="" />
+                <CopyButton text={invite.code} label="Copy code" done="Code copied" className="" />
+                <Form method="post" className="ml-auto">
                   <input type="hidden" name="code" value={invite.code} />
                   <Button type="submit" variant="ghost" name="intent" value="invite-revoke" disabled={busy}>
-                    Cancel
+                    Revoke
                   </Button>
                 </Form>
               </div>
@@ -501,7 +529,7 @@ function InvitesSection({
       {standing.refusal === null || standing.refusal === "limit" ? (
         <Form method="post" className="flex flex-wrap items-center gap-3">
           <Button type="submit" name="intent" value="invite-create" disabled={busy || standing.refusal === "limit"}>
-            Make an invitation link
+            Make an invitation
           </Button>
           {standing.admin ? null : (
             <span className="text-meta text-text-muted">
@@ -607,7 +635,7 @@ function PhotoForm({
             ? "A copy of your Google photo. Turning it off deletes the copy."
             : available
               ? "The letter avatar. Your Google photo is shown only if you choose."
-              : "The letter avatar. Your Google account has no photo to use."}
+              : "The letter avatar. There is no Google photo to use."}
         </p>
         {error ? (
           <p role="alert" className="mt-1 text-meta text-danger">
@@ -685,69 +713,107 @@ function PlanSection({
   );
 }
 
-/** Linking an X account, proven through X's own sign-in, and what it offers. */
-function XSection({
-  x,
-  entitled,
+/**
+ * The ways to sign in: Google and X, each linked through its own sign-in,
+ * and whether the profile shows the X account.
+ */
+function SignInSection({
+  signIn,
+  email,
   disabled,
   error,
 }: {
-  x: { configured: boolean; linked: { id: string; handle: string; photoUrl: string | null } | null; error?: string };
-  entitled: boolean;
+  signIn: { xConfigured: boolean; methods: Array<"google" | "twitter">; x: LinkedX | null; error?: string };
+  email: string;
   disabled: boolean;
   error?: string;
 }) {
   const navigation = useNavigation();
-  const busy = navigation.state !== "idle" && String(navigation.formData?.get("intent") ?? "").startsWith("x-");
-  const problem = error ?? x.error;
-  if (x.linked) {
-    return (
-      <div className="space-y-3">
-        <p className="flex flex-wrap items-center gap-2 text-body">
-          <XMark handle={x.linked.handle} />
-          <a href={`https://x.com/i/user/${x.linked.id}`} className="font-medium underline underline-offset-4">
-            @{x.linked.handle}
-          </a>
-          <span className="text-text-muted">is linked. You can sign in with it too.</span>
-        </p>
-        {problem ? <Notice tone="danger">{problem}</Notice> : null}
-        <div className="flex flex-wrap gap-2">
-          {x.linked.photoUrl ? (
+  const intent = String(navigation.formData?.get("intent") ?? "");
+  const busy = navigation.state !== "idle" && (intent.startsWith("link-") || intent === "unlink" || intent.startsWith("x-"));
+  const problem = error ?? signIn.error;
+  const google = signIn.methods.includes("google");
+  const x = signIn.x;
+  const both = signIn.methods.length > 1;
+  const unlink = (provider: "google" | "twitter") => (
+    <Form method="post">
+      <input type="hidden" name="provider" value={provider} />
+      <Button type="submit" variant="ghost" name="intent" value="unlink" disabled={busy}>
+        Unlink
+      </Button>
+    </Form>
+  );
+  return (
+    <div className="space-y-3">
+      <p className="text-body text-text-muted">
+        Sign in with either one you have linked. Your account&apos;s email, {email}, comes from the one you joined
+        with; one linked later keeps its own email to itself.
+      </p>
+      {problem ? <Notice tone="danger">{problem}</Notice> : null}
+      <ul className="divide-y divide-border rounded-lg border border-border">
+        <li className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3 py-2">
+          <span className="flex min-w-0 items-center gap-2 text-body">
+            <GoogleMark />
+            Google
+            {google ? <span className="text-text-muted">· linked</span> : null}
+          </span>
+          {google ? (
+            both ? unlink("google") : null
+          ) : signIn.xConfigured ? (
+            <Form method="post">
+              <Button type="submit" name="intent" value="link-google" disabled={disabled || busy}>
+                Link Google
+              </Button>
+            </Form>
+          ) : null}
+        </li>
+        <li className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-3 py-2">
+          <span className="flex min-w-0 items-center gap-2 text-body">
+            <XMark handle={x?.handle ?? "X"} />
+            {x ? (
+              <a href={`https://x.com/i/user/${x.id}`} className="truncate font-medium underline underline-offset-4">
+                @{x.handle}
+              </a>
+            ) : (
+              "X"
+            )}
+            {x ? <span className="shrink-0 text-text-muted">· linked</span> : null}
+          </span>
+          {x ? (
+            both ? unlink("twitter") : null
+          ) : signIn.xConfigured ? (
+            <Form method="post">
+              <Button type="submit" name="intent" value="link-x" disabled={disabled || busy}>
+                Link X
+              </Button>
+            </Form>
+          ) : (
+            <span className="text-meta text-text-muted">Opens once the board&apos;s X app is approved</span>
+          )}
+        </li>
+      </ul>
+      {x ? (
+        <div className="space-y-3 border-t border-border pt-3">
+          <Form method="post" className="flex flex-wrap items-center justify-between gap-3">
+            <input type="hidden" name="show" value={x.shown ? "off" : "on"} />
+            <p className="min-w-0 flex-1 basis-56 text-body text-text-muted">
+              {x.shown
+                ? `@${x.handle} shows on your profile, with an X mark beside your name.`
+                : `Hidden: nobody sees which X account you linked. Show @${x.handle} on your profile, with an X mark beside your name?`}
+            </p>
+            <Button type="submit" name="intent" value="x-show" disabled={disabled || busy}>
+              {x.shown ? "Hide it" : "Show it"}
+            </Button>
+          </Form>
+          {x.photoUrl ? (
             <Form method="post">
               <Button type="submit" name="intent" value="x-photo" disabled={disabled || busy}>
                 Use my X photo
               </Button>
             </Form>
           ) : null}
-          <Form method="post">
-            <Button type="submit" variant="ghost" name="intent" value="x-unlink" disabled={busy}>
-              Unlink
-            </Button>
-          </Form>
         </div>
-      </div>
-    );
-  }
-  return (
-    <div className="space-y-3">
-      <p className="text-body text-text-muted">
-        Supporters can link their X account through X&apos;s own sign-in, to show an X mark beside their name, use
-        its photo, and sign in with X. Nothing is linked unless you choose to, so you can stay anonymous.
-      </p>
-      {problem ? <Notice tone="danger">{problem}</Notice> : null}
-      {!x.configured ? (
-        <p className="text-meta text-text-muted">Linking opens once the board&apos;s X app is approved.</p>
-      ) : entitled ? (
-        <Form method="post">
-          <Button type="submit" name="intent" value="x-link" disabled={disabled || busy}>
-            Link X account
-          </Button>
-        </Form>
-      ) : (
-        <Button asChild variant="primary">
-          <Link to="/supporter">Become a supporter</Link>
-        </Button>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -764,8 +830,8 @@ function DeleteAccountForm({ username, error }: { username: string; error?: stri
         <p className="text-body font-medium">Delete account</p>
         <p className="text-meta text-text-muted">
           Your sign-in and email are deleted at once, along with your agent, if you have one. Your name shows as
-          [deleted]; what you wrote stays under it unless you choose below. A Google account cannot make a new account
-          here for 30 days after.
+          [deleted]; what you wrote stays under it unless you choose below. Its Google or X account cannot make a new
+          account here for 30 days after.
         </p>
       </div>
       <label className="flex items-start gap-2.5 text-body">
@@ -852,12 +918,12 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
         </div>
       </Section>
 
-      <Section title="Linked X account">
-        <XSection
-          x={loaderData.x}
-          entitled={loaderData.canHaveAgent}
+      <Section title="Sign-in">
+        <SignInSection
+          signIn={loaderData.signIn}
+          email={email}
           disabled={banned}
-          error={actionData && "xError" in actionData ? actionData.xError : undefined}
+          error={actionData && "linkError" in actionData ? actionData.linkError : undefined}
         />
       </Section>
 
@@ -919,7 +985,7 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
           <dt className="text-body font-medium">Email</dt>
           <dd className="text-body break-all">{email}</dd>
           <dd className="text-meta text-text-muted">
-            From the Google account you sign in with. Only you can see it.
+            From the Google or X account you joined with. Only you can see it.
           </dd>
         </dl>
         <Form method="post" action="/signout" reloadDocument className="border-t border-border pt-3">

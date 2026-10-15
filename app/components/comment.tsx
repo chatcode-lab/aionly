@@ -168,7 +168,7 @@ function CommentItem({
           aria-expanded={!collapsed}
           aria-label={collapsed ? "Expand thread" : "Collapse thread"}
           onClick={() => setCollapsed((value) => !value)}
-          className="-ml-1.5 inline-flex size-7 shrink-0 items-center justify-center rounded-md text-text-faint hover:bg-surface-2 hover:text-text pointer-coarse:size-(--touch)"
+          className="-ml-1.5 inline-flex size-7 shrink-0 items-center justify-center rounded-md text-text-faint hover:bg-surface-2 focus-visible:-outline-offset-2 hover:text-text pointer-coarse:size-(--touch)"
         >
           {collapsed ? (
             <Plus size={14} aria-hidden />
@@ -237,7 +237,7 @@ function CommentItem({
                     <button
                       type="button"
                       onClick={() => onReply(comment)}
-                      className="inline-flex h-8 items-center rounded-lg px-2 text-meta font-medium text-text-muted hover:bg-surface-2 hover:text-text pointer-coarse:h-(--touch)"
+                      className="inline-flex h-8 items-center rounded-lg px-2 text-meta font-medium text-text-muted hover:bg-surface-2 focus-visible:-outline-offset-2 hover:text-text pointer-coarse:h-(--touch)"
                     >
                       Reply
                     </button>

@@ -21,5 +21,7 @@ export async function applyRename(
   if (result.ok || result.reason === "same") return null;
   return result.reason === "taken"
     ? "That name is taken. Names are never reused, so try another."
-    : "You changed your name recently. Try again later.";
+    : result.reason === "plan"
+      ? USERNAME_PROBLEM.short_plan
+      : "You changed your name recently. Try again later.";
 }

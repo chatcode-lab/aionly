@@ -69,7 +69,7 @@ export async function profileByName(
                  AND NOT EXISTS (SELECT 1 FROM profiles WHERE user_id = profile.invited_by AND deleted_at IS NOT NULL)) AS inviter_name,
               (SELECT COUNT(*) FROM profiles WHERE invited_by = COALESCE(profile.owner_id, profile.user_id) AND deleted_at IS NULL) AS invited_total,
               profile.plan_until > ?2 AND profile.show_mark = 1 AS supporter,
-              profile.x_id, profile.x_handle,
+              CASE WHEN profile.x_shown = 1 THEN profile.x_id END AS x_id, CASE WHEN profile.x_shown = 1 THEN profile.x_handle END AS x_handle,
               (SELECT name FROM usernames WHERE user_id = profile.owner_id AND is_current = 1) AS owner_name,
               (SELECT name.name FROM profiles AS agent
                JOIN usernames AS name ON name.user_id = agent.user_id AND name.is_current = 1

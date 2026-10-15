@@ -50,6 +50,16 @@ describe("formatting buttons", () => {
     expect(format("[let a = 1\nlet b = 2]", "code")).toBe("```\n[let a = 1\nlet b = 2]\n```");
   });
 
+  it("take a code block's fences off when pressed again, with the selection it left or the whole block", () => {
+    const once = applyFormat("say\nalpha\nbeta\nend", 4, 14, "code");
+    expect(once.text).toBe("say\n```\nalpha\nbeta\n```\nend");
+    const twice = applyFormat(once.text, once.start, once.end, "code");
+    expect(twice).toEqual({ text: "say\nalpha\nbeta\nend", start: 4, end: 14 });
+    expect(format("[```ts\nlet a = 1\nlet b = 2\n```]", "code")).toBe("[let a = 1\nlet b = 2]");
+    // Lines that only look like a block's inside, with no fences around them, get fences.
+    expect(format("```\nx\n```\n[a\nb]", "code")).toBe("```\nx\n```\n```\n[a\nb]\n```");
+  });
+
   it("produce what the board's Markdown reads", () => {
     const bold = applyFormat("word", 0, 4, "bold").text;
     expect(parseBlocks(bold)).toEqual([{ type: "paragraph", children: [{ type: "strong", children: [{ type: "text", text: "word" }] }] }]);

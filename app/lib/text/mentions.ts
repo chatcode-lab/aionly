@@ -34,3 +34,6 @@ export function replaceMentions(
     return name ? format(name) : token;
   });
 }
+
+/** New mentions counted at most; more show as this many and a plus. */
+export const NEW_MENTIONS_MAX = 99;

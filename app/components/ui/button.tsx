@@ -13,10 +13,12 @@ const HEIGHT = "h-9 pointer-coarse:h-(--touch)";
 
 const VARIANTS: Record<Variant, string> = {
   primary: "bg-accent-solid text-on-accent hover:opacity-90 active:opacity-80",
+  // The others draw the focus ring just inside their edge, so it never
+  // crowds a neighbor; on the filled button it would not show.
   secondary:
-    "border border-border-strong bg-surface text-text hover:bg-surface-2",
-  ghost: "text-text-muted hover:bg-surface-2 hover:text-text",
-  danger: "border border-danger text-danger hover:bg-danger-soft",
+    "border border-border-strong bg-surface text-text hover:bg-surface-2 focus-visible:-outline-offset-2",
+  ghost: "text-text-muted hover:bg-surface-2 hover:text-text focus-visible:-outline-offset-2",
+  danger: "border border-danger text-danger hover:bg-danger-soft focus-visible:-outline-offset-2",
 };
 
 export interface ButtonProps extends ComponentProps<"button"> {

@@ -24,14 +24,26 @@ beforeEach(async () => {
   for (const voter of ["v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9"]) await user(voter, `voter_${voter}`);
 });
 
-/** Joins `id` through a fresh invitation from `inviter`, as Google sign-up does. */
+/** Joins `id` through a fresh invitation from `inviter`, as sign-up does. */
 async function join(inviter: string, id: string, now = NOW) {
   const code = (await createInvite(db, { inviterId: inviter, now }))!;
-  expect(await claimInvite(db, { code, email: `${id}@example.invalid`, now })).toBe(true);
+  expect(await claimInvite(db, { code, userId: id, now })).toBe(true);
   await user(id, `joined_${id}`);
-  await attachInvite(db, { userId: id, email: `${id}@example.invalid` });
+  await attachInvite(db, { userId: id });
   return code;
 }
+
+/** The sign-in record Better Auth writes for an account, which the sweep looks for. */
+async function authUser(id: string) {
+  await db
+    .prepare(`INSERT INTO "user" ("id", "name", "email", "emailVerified", "createdAt", "updatedAt") VALUES (?1, ?1, ?2, 1, 0, 0)`)
+    .bind(id, `${id}@invites.invalid`)
+    .run();
+}
+
+beforeEach(async () => {
+  await db.prepare(`DELETE FROM "user" WHERE "email" LIKE '%@invites.invalid'`).run();
+});
 
 const karma = async (id: string) =>
   (await db.prepare(`SELECT karma, vote_karma FROM profiles WHERE user_id = ?1`).bind(id).first<{ karma: number; vote_karma: number }>())!;
@@ -46,7 +58,8 @@ async function upvotes(author: string, postId: string, count: number) {
 describe("invitations", () => {
   it("make one account each, and show who invited whom", async () => {
     const code = await join("host", "newbie");
-    expect(await claimInvite(db, { code, email: "other@example.invalid", now: NOW })).toBe(false);
+    expect(code).toMatch(/^[0-9A-HJKMNP-TV-Z]{8}$/);
+    expect(await claimInvite(db, { code, userId: "other", now: NOW })).toBe(false);
     expect(await inviteByCode(db, code, NOW)).toMatchObject({ state: "used", inviter: { username: "kind_host" } });
     expect(await db.prepare(`SELECT invited_by FROM profiles WHERE user_id = 'newbie'`).first()).toEqual({ invited_by: "host" });
     const host = await profileByName(db, "kind_host");
@@ -72,11 +85,41 @@ describe("invitations", () => {
   it("expire after two weeks, and a claim that never became an account is freed", async () => {
     const code = (await createInvite(db, { inviterId: "host", now: NOW }))!;
     expect(await inviteByCode(db, code, NOW + 15 * DAY)).toMatchObject({ state: "expired" });
-    expect(await claimInvite(db, { code, email: "late@example.invalid", now: NOW + 15 * DAY })).toBe(false);
-    expect(await claimInvite(db, { code, email: "slow@example.invalid", now: NOW })).toBe(true);
-    expect(await sweepInviteClaims(db, NOW + 1800)).toBe(0);
+    expect(await claimInvite(db, { code, userId: "late", now: NOW + 15 * DAY })).toBe(false);
+    expect(await claimInvite(db, { code, userId: "slow", now: NOW })).toBe(true);
+    expect(await sweepInviteClaims(db, NOW + 300)).toBe(0);
     expect(await sweepInviteClaims(db, NOW + 7200)).toBe(1);
     expect(await inviteByCode(db, code, NOW + 7200)).toMatchObject({ state: "open" });
+  });
+
+  it("stay with the account a sign-up made, even when its setup failed, and are finished for it", async () => {
+    const code = (await createInvite(db, { inviterId: "host", now: NOW }))!;
+    expect(await claimInvite(db, { code, userId: "halfway", now: NOW })).toBe(true);
+    // The account was made, but neither its profile nor its invitation followed.
+    await authUser("halfway");
+    expect(await sweepInviteClaims(db, NOW + 7200)).toBe(1);
+    // Not freed for someone else: given to the account, profile and all.
+    expect(await inviteByCode(db, code, NOW + 7200)).toMatchObject({ state: "used" });
+    expect(await claimInvite(db, { code, userId: "second", now: NOW + 7200 })).toBe(false);
+    expect(await db.prepare(`SELECT invited_by FROM profiles WHERE user_id = 'halfway'`).first()).toEqual({ invited_by: "host" });
+    expect(await db.prepare(`SELECT used_by FROM invites WHERE code = ?1`).bind(code).first()).toEqual({ used_by: "halfway" });
+  });
+
+  it("are taken only by the account each was claimed for, when two sign-ups overlap", async () => {
+    await user("other_host", "other_host");
+    const mine = (await createInvite(db, { inviterId: "host", now: NOW }))!;
+    const theirs = (await createInvite(db, { inviterId: "other_host", now: NOW }))!;
+    // Two tabs, the same person: both claim, and only the second's account is made.
+    expect(await claimInvite(db, { code: mine, userId: "tab_a", now: NOW })).toBe(true);
+    expect(await claimInvite(db, { code: theirs, userId: "tab_b", now: NOW })).toBe(true);
+    await authUser("tab_b");
+    await user("tab_b", "two_tabs");
+    await attachInvite(db, { userId: "tab_b" });
+    expect(await db.prepare(`SELECT invited_by FROM profiles WHERE user_id = 'tab_b'`).first()).toEqual({ invited_by: "other_host" });
+    expect(await inviteByCode(db, theirs, NOW)).toMatchObject({ state: "used" });
+    // The other tab's claim made no account, so its invitation is freed for use.
+    expect(await sweepInviteClaims(db, NOW + 7200)).toBe(1);
+    expect(await inviteByCode(db, mine, NOW + 7200)).toMatchObject({ state: "open" });
   });
 
   it("pause below 0 karma, and once half of those invited are below 0 or banned", async () => {
@@ -92,12 +135,23 @@ describe("invitations", () => {
     // One of two below 0 is half: no new invitations, and open ones stop working.
     expect((await inviteStanding(db, "host", NOW)).refusal).toBe("invitees");
     expect(await inviteByCode(db, pending, NOW)).toMatchObject({ state: "paused" });
-    expect(await claimInvite(db, { code: pending, email: "x@example.invalid", now: NOW })).toBe(false);
+    expect(await claimInvite(db, { code: pending, userId: "x", now: NOW })).toBe(false);
     // A third good invitee would tip it back, were inviting open; a recovery does.
     await db.prepare(`UPDATE profiles SET karma = 2, vote_karma = 2 WHERE user_id = 'bad'`).run();
     expect((await inviteStanding(db, "host", NOW)).refusal).toBeNull();
     await db.prepare(`UPDATE profiles SET banned_at = ?1 WHERE user_id = 'bad'`).bind(NOW).run();
     expect((await inviteStanding(db, "host", NOW)).refusal).toBe("invitees");
+  });
+
+  it("count an invitee's whole karma, with what their own invitees bring, as the rule says", async () => {
+    await join("host", "child");
+    await join("child", "grandchild");
+    await upvotes("grandchild", "p_grand", 8);
+    await post("p_child", { author: "child" });
+    await castVote(db, { voterId: "v9", type: "post", targetId: "p_child", value: -1, now: NOW });
+    // Below 0 from votes, but +1 in all: not below 0 karma.
+    expect(await karma("child")).toEqual({ karma: 1, vote_karma: -1 });
+    expect((await inviteStanding(db, "host", NOW)).refusal).toBeNull();
   });
 });
 

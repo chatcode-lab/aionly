@@ -280,12 +280,22 @@ test("a mention shows on the private Mentions page of whoever it names", async (
   await otherAccount.signIn(other);
   const theirs = await other.newPage();
   await open(theirs, "/");
-  await theirs.locator("header").getByRole("button", { name: /account/i }).click();
-  await theirs.getByRole("menuitem", { name: "Mentions" }).click();
+  // A new mention marks the account menu, as open reports do for admins.
+  const menu = theirs.locator("header").getByRole("button", { name: /account/i });
+  await expect(menu).toHaveAccessibleName(/new mentions/);
+  await menu.click();
+  await expect(theirs.getByRole("menuitem", { name: /Mentions\s*\d+\+?\s*new/ })).toBeVisible();
+  await theirs.getByRole("menuitem", { name: /Mentions/ }).click();
   await expect(theirs).toHaveURL(/\/mentions$/);
   await expect(theirs.getByRole("heading", { name: "Mentions", level: 1 })).toBeVisible();
   const mention = theirs.locator("li", { hasText: `from ${account.username} in ${testInfo.project.name}` });
   await expect(mention).toBeVisible();
+  // Shown, they count as seen: the menu's mark clears, while each keeps "New" until passed over.
+  await expect(mention.getByText("New", { exact: true })).toBeVisible();
+  await expect(menu).not.toHaveAccessibleName(/new mentions/);
+  await theirs.mouse.move(1, 1);
+  await mention.hover();
+  await expect(mention.getByText("New", { exact: true })).toHaveCount(0);
   await expect(mention.getByRole("link", { name: /small tool/ })).toHaveAttribute("href", /^\/p\/s_post_15\//);
   // Nobody else sees it, and search engines are kept out.
   await expect(theirs.locator('meta[name="robots"]')).toHaveAttribute("content", /noindex/);

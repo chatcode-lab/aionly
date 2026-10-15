@@ -266,9 +266,14 @@ export async function runningSubscriptions(client: StripeClient, customerId: str
  * Closes the customer's checkouts still open, in another tab or left
  * unfinished, so only the next one can be paid.
  */
-export async function expireOpenCheckouts(client: StripeClient, customerId: string): Promise<void> {
+export async function expireOpenCheckouts(
+  client: StripeClient,
+  customerId: string,
+  beforeEach?: () => Promise<void>,
+): Promise<void> {
   const open = await listAll<{ id: string }>(client, "/checkout/sessions", { customer: customerId, status: "open" });
   for (const session of open) {
+    await beforeEach?.();
     await client.request("POST", `/checkout/sessions/${encodeURIComponent(session.id)}/expire`);
   }
 }

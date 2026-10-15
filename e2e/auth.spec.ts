@@ -194,7 +194,7 @@ test("a banned account reads, sees why, and cannot change its name", async ({ pa
 test("without a Google photo, the letter avatar stays and the switch says why", async ({ page, context, account }) => {
   await account.signIn(context);
   await open(page, "/settings");
-  await expect(page.getByText("Your Google account has no photo to use.")).toBeVisible();
+  await expect(page.getByText("There is no Google photo to use.")).toBeVisible();
   await expect(page.getByRole("button", { name: "Use my Google photo" })).toBeDisabled();
 });
 
@@ -219,39 +219,53 @@ test("the email shows only in the account's own Settings, and the Google name no
   for (const secret of [email, name]) expect(await anonymous.text()).not.toContain(secret);
 });
 
-test("a refused Google sign-in says why", async ({ page }) => {
+test("a refused sign-in says why", async ({ page }) => {
   await page.goto("/signin?error=email_not_verified");
-  await expect(page.getByText("Google has not verified this account's email.")).toBeVisible();
+  await expect(page.getByText("Your account there has no verified email")).toBeVisible();
   await page.goto("/signin?error=account_not_linked");
   await expect(page.getByText("That email already belongs to an account here")).toBeVisible();
 });
 
-test("a member makes an invitation link, which greets the invited by name and can be cancelled", async ({ page, context, account, browser }) => {
+test("a member makes an invitation, whose link or typed code greets the invited by name, and can revoke it", async ({ page, context, account, browser }) => {
   await account.signIn(context);
   await open(page, "/settings");
   const section = page.getByRole("region", { name: "Invitations" });
-  await section.getByRole("button", { name: "Make an invitation link" }).click();
-  const link = section.locator("p.font-mono").first();
-  await expect(link).toContainText("/invite/");
-  const href = (await link.textContent())!.trim();
+  await section.getByRole("button", { name: "Make an invitation" }).click();
+  const shown = section.locator("p.font-mono").first();
+  await expect(shown).toHaveText(/^[0-9A-HJKMNP-TV-Z]{8}$/);
+  const code = (await shown.textContent())!.trim();
+  await expect(section.getByText(`/invite/${code}`)).toBeVisible();
+  // Every control of the row sits inside its card.
+  const row = section.locator("li").filter({ hasText: code });
+  const box = (await row.boundingBox())!;
+  for (const name of ["Copy link", "Copy code", "Revoke"]) {
+    const button = (await row.getByRole("button", { name }).boundingBox())!;
+    expect(button.x + button.width, name).toBeLessThanOrEqual(box.x + box.width);
+  }
 
-  // Someone opens it, not signed in: it names who invited them, and is kept for sign-in.
+  // Someone given the code types it, in lower case, where they sign in.
   const visitor = await browser.newContext();
   const guest = await visitor.newPage();
-  await guest.goto(href);
+  await open(guest, "/signin");
+  await guest.getByLabel(/New here\?/).fill(code.toLowerCase());
+  await guest.getByRole("button", { name: "Use code" }).click();
+  await expect(guest).toHaveURL(new RegExp(`/invite/${code}$`));
   await expect(guest.getByRole("heading", { name: `${account.username} invited you to aion.ly` })).toBeVisible();
   await expect(guest.getByRole("button", { name: /Continue with Google/ })).toBeVisible();
-  expect((await visitor.cookies()).some((cookie) => cookie.name === "aionly_invite" && href.endsWith(cookie.value))).toBe(true);
+  expect((await visitor.cookies()).some((cookie) => cookie.name === "aionly_invite" && cookie.value === code)).toBe(true);
 
-  // Cancelled, it no longer works.
-  await section.getByRole("button", { name: "Cancel" }).click();
+  // Revoked, it no longer works, by link or by code.
+  await row.getByRole("button", { name: "Revoke" }).click();
   await expect(section.locator("p.font-mono")).toHaveCount(0);
-  await guest.goto(href);
-  await expect(guest.getByText("This invitation was cancelled")).toBeVisible();
+  await guest.goto(`/invite/${code}`);
+  await expect(guest.getByText("This invitation was revoked")).toBeVisible();
+  await guest.goto(`/invite?code=${code.toLowerCase()}`);
+  await expect(guest.getByText("This invitation was revoked")).toBeVisible();
   await visitor.close();
 });
 
 test("a sign-in without an invitation says how to join", async ({ page }) => {
   await open(page, "/signin?error=invite_required");
-  await expect(page.getByText("aion.ly takes new members by invitation")).toBeVisible();
+  await expect(page.getByText("Enter the code you were given below, or open the link")).toBeVisible();
+  await expect(page.getByLabel(/New here\?/)).toBeVisible();
 });

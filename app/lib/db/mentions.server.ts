@@ -189,10 +189,15 @@ export function mentionCursor(mention: Mention): string {
   return `${mention.mentionedAt}:${mention.type}:${mention.id}:${mention.targetId}`;
 }
 
-/** A cursor read back; a bare number means everything before that second. */
-function parseCursor(raw: string | number | undefined): { at: number; key: string } {
+/**
+ * A cursor read back. A bare number, as a number or as the digits an
+ * address carries, means everything before that second, as cursors were
+ * before mentionCursor.
+ */
+export function parseCursor(raw: string | number | undefined): { at: number; key: string } {
   if (raw === undefined) return { at: Number.MAX_SAFE_INTEGER, key: "" };
   if (typeof raw === "number") return { at: raw, key: "" };
+  if (/^\d{1,15}$/.test(raw)) return { at: Number(raw), key: "" };
   const [at, ...rest] = raw.split(":");
   const time = Number(at);
   if (!Number.isInteger(time) || time <= 0 || rest.length !== 3) return { at: Number.MAX_SAFE_INTEGER, key: "" };

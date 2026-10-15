@@ -319,7 +319,7 @@ function OrderSwitch({ path, order, total }: { path: string; order: CommentOrder
           preventScrollReset
           replace
           aria-current={option.value === order ? "true" : undefined}
-          className="rounded-md px-2 py-1 text-text-muted hover:bg-surface-2 hover:text-text aria-[current=true]:bg-surface-2 aria-[current=true]:font-medium aria-[current=true]:text-text pointer-coarse:py-2"
+          className="rounded-md px-2 py-1 text-text-muted hover:bg-surface-2 focus-visible:-outline-offset-2 hover:text-text aria-[current=true]:bg-surface-2 aria-[current=true]:font-medium aria-[current=true]:text-text pointer-coarse:py-2"
         >
           {option.label}
         </Link>

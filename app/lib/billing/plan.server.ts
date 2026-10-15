@@ -7,8 +7,10 @@ import {
   applySubscription,
   type CheckoutKind,
   claimCheckout,
+  holdForDeletion,
   planStatus,
   releaseCheckout,
+  releaseDeletionHold,
   rememberCustomer,
   stillHolding,
   runningSubscription,
@@ -186,33 +188,50 @@ export async function finishCheckout(viewer: AccountRecord, sessionId: string): 
  * Before an account is deleted: ends every subscription its customer has at
  * once, recorded or not, and closes any checkout left open, so it is never
  * charged again. Throws, so nothing is deleted, when a subscription is
- * running and Stripe cannot be reached to end it.
+ * running and Stripe cannot be reached to end it, or while a checkout is
+ * being made.
+ *
+ * From the start, the deletion holds off every checkout of the member's,
+ * renewing the hold before each step, however long Stripe takes. The hold
+ * it returns was renewed last thing, and lasts through the deletion's own
+ * write; `release` it if the deletion does not go ahead.
  */
-export async function cancelForDeletion(userId: string): Promise<void> {
-  const recorded = await runningSubscription(env.DB, userId);
-  if (!env.STRIPE_SECRET_KEY) {
-    if (recorded) throw new Error("a running subscription cannot be cancelled without STRIPE_SECRET_KEY");
-    return;
-  }
-  const { customerId } = await planStatus(env.DB, userId);
-  // No checkout of either kind may be made from here on: the claims are
-  // held, and left to lapse once the account is gone.
-  for (const kind of ["plan", "fresh_start"] as const) {
-    if (!(await claimCheckout(env.DB, userId, kind, now()))) throw new CheckoutBusy("a checkout is being made");
-  }
-  // Open checkouts close first, so one completing now becomes a
-  // subscription the list below finds; one that completed as it closed
-  // makes the close fail, and nothing is deleted.
-  if (customerId) await expireOpenCheckouts(client(), customerId);
-  const targets = customerId ? await runningSubscriptions(client(), customerId) : [];
-  // The one recorded here is ended too, should Stripe's list ever miss it.
-  if (recorded && !targets.some((subscription) => subscription.id === recorded)) {
-    const current = await getSubscription(client(), recorded);
-    if (isRunning(current)) targets.push(current);
-  }
-  for (const subscription of targets) {
-    const ended = await cancelSubscription(client(), subscription.id);
-    await applySubscription(env.DB, ended, { eventAt: now(), now: now() });
+export async function cancelForDeletion(userId: string): Promise<{ release: () => Promise<void> }> {
+  const token = crypto.randomUUID();
+  const release = () => releaseDeletionHold(env.DB, userId, token);
+  const renew = async () => {
+    if (!(await holdForDeletion(env.DB, userId, token, now()))) throw new CheckoutBusy("a checkout is being made");
+  };
+  try {
+    await renew();
+    const recorded = await runningSubscription(env.DB, userId);
+    if (!env.STRIPE_SECRET_KEY) {
+      if (recorded) throw new Error("a running subscription cannot be cancelled without STRIPE_SECRET_KEY");
+      return { release };
+    }
+    const { customerId } = await planStatus(env.DB, userId);
+    // Open checkouts close first, so one completing now becomes a
+    // subscription the list below finds; one that completed as it closed
+    // makes the close fail, and nothing is deleted.
+    if (customerId) await expireOpenCheckouts(client(), customerId, renew);
+    await renew();
+    const targets = customerId ? await runningSubscriptions(client(), customerId) : [];
+    // The one recorded here is ended too, should Stripe's list ever miss it.
+    if (recorded && !targets.some((subscription) => subscription.id === recorded)) {
+      await renew();
+      const current = await getSubscription(client(), recorded);
+      if (isRunning(current)) targets.push(current);
+    }
+    for (const subscription of targets) {
+      await renew();
+      const ended = await cancelSubscription(client(), subscription.id);
+      await applySubscription(env.DB, ended, { eventAt: now(), now: now() });
+    }
+    await renew();
+    return { release };
+  } catch (error) {
+    await release();
+    throw error;
   }
 }
 

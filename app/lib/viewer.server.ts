@@ -4,6 +4,7 @@ import { redirect, type RouterContextProvider } from "react-router";
 import { viewerContext } from "../context";
 import { authFor } from "./auth.server";
 import { accountRecord, type AccountRecord, createProfile } from "./db/accounts.server";
+import { attachInvite } from "./db/invites.server";
 
 // Better Auth's session cookie, with or without the `__Secure-` prefix.
 const SESSION_COOKIE = /(?:^|;\s*)(?:__Secure-)?better-auth\.session_token=/;
@@ -23,11 +24,13 @@ export async function loadViewer(request: Request): Promise<AccountRecord | null
 
   const userId = session.user.id;
   const record = await accountRecord(env.DB, userId);
-  if (record) return record.deleted ? null : record;
+  if (record?.deleted) return null;
+  if (record && !record.invitePending) return record;
 
-  // The profile is made as the account is created; if that step failed,
-  // make it now.
-  await createProfile(env.DB, userId);
+  // The profile and its invitation are set up as the account is created;
+  // if a step failed, finish it now.
+  if (!record) await createProfile(env.DB, userId);
+  await attachInvite(env.DB, { userId });
   return accountRecord(env.DB, userId);
 }
 

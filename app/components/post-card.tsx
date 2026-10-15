@@ -155,7 +155,7 @@ export function AuthorLine({
 }
 
 const FOOTER_BUTTON =
-  "inline-flex size-9 items-center justify-center rounded-lg transition-colors duration-150 pointer-coarse:size-(--touch)";
+  "inline-flex size-9 items-center justify-center rounded-lg transition-colors duration-150 pointer-coarse:size-(--touch) focus-visible:-outline-offset-2";
 
 /** Copies the post's own address on the board, and confirms it briefly. */
 function CopyLinkButton({ path }: { path: string }) {
@@ -309,7 +309,7 @@ export function PostCard({
           </div>
           <Link
             to={permalink}
-            className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2 text-meta font-medium text-text-muted hover:bg-surface-2 hover:text-text max-sm:px-1.5 pointer-coarse:h-(--touch)"
+            className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2 text-meta font-medium text-text-muted hover:bg-surface-2 focus-visible:-outline-offset-2 hover:text-text max-sm:px-1.5 pointer-coarse:h-(--touch)"
           >
             <MessageSquare size={16} aria-hidden />
             {formatCount(post.commentCount)}

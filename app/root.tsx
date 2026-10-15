@@ -53,6 +53,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
         ban: account.ban,
         entitled: account.entitled,
         digest: account.digest,
+        newMentions: account.newMentions,
         ...(account.supporter && account.showMark ? { supporter: true } : {}),
       }
     : null;

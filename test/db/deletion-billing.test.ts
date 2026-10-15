@@ -61,5 +61,44 @@ describe("cancelling billing before an account is deleted", () => {
     await db.prepare(`DELETE FROM checkout_claims`).run();
     await claimCheckout(db, "member", "plan", Math.floor(Date.now() / 1000));
     await expect(cancelForDeletion("member")).rejects.toThrow();
+    // Refused, it took nothing: the checkout's claim is still the only one.
+    expect(await db.prepare(`SELECT COUNT(*) AS n FROM checkout_claims`).first()).toEqual({ n: 1 });
+  });
+
+  it("keeps holding checkouts off however long Stripe takes, and lets go if the deletion stops", async () => {
+    // Many old checkouts, each taking two seconds to close: over a minute in all.
+    let clock = NOW;
+    vi.spyOn(Date, "now").mockImplementation(() => clock * 1000);
+    const admitted: boolean[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = new URL(String(input instanceof Request ? input.url : input));
+      if (url.pathname === "/v1/checkout/sessions") {
+        const data = Array.from({ length: 31 }, (_, index) => ({ id: `cs_${index}` }));
+        return Response.json({ object: "list", data, has_more: false });
+      }
+      if (url.pathname.endsWith("/expire") && init?.method === "POST") {
+        clock += 2;
+        // Another tab tries to start a checkout, as each one closes.
+        admitted.push((await claimCheckout(db, "member", "plan", clock)) !== null);
+        return Response.json({ id: "cs", status: "expired" });
+      }
+      if (url.pathname === "/v1/subscriptions") return Response.json({ object: "list", data: [], has_more: false });
+      return Response.json({ error: { message: `unexpected ${url.pathname}` } }, { status: 404 });
+    });
+    const hold = await cancelForDeletion("member");
+    expect(clock - NOW).toBeGreaterThan(60);
+    expect(admitted).toHaveLength(31);
+    expect(admitted.every((taken) => !taken)).toBe(true);
+    // Still held for the deletion's own write, well past a checkout's minute.
+    expect(await claimCheckout(db, "member", "fresh_start", clock + 120)).toBeNull();
+    // The deletion did not go ahead: checkouts may be made again.
+    await hold.release();
+    expect(await claimCheckout(db, "member", "plan", clock)).not.toBeNull();
+  });
+
+  it("lets go of its hold when Stripe fails, so nothing is left blocked", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => Response.json({ error: { message: "down" } }, { status: 500 }));
+    await expect(cancelForDeletion("member")).rejects.toThrow();
+    expect(await db.prepare(`SELECT COUNT(*) AS n FROM checkout_claims`).first()).toEqual({ n: 0 });
   });
 });
