@@ -11,6 +11,8 @@ import { profileByName } from "~/lib/db/profiles.server";
 import { formatAge, formatCount, formatMonthYear } from "~/lib/format";
 import { useParticipation } from "~/components/use-participation";
 import { viewerOf } from "~/lib/viewer.server";
+import { pageMeta, privatePageMeta } from "~/lib/meta";
+import { profileCoverVersion } from "~/lib/og/version";
 
 import type { Route } from "./+types/profile";
 
@@ -42,14 +44,23 @@ export async function loader({ params, context }: Route.LoaderArgs) {
   return { profile: found.profile, marks, moderation, now };
 }
 
-export function meta({ loaderData }: Route.MetaArgs) {
-  return [
-    {
-      title: loaderData
-        ? `${loaderData.profile.username} · aion.ly`
-        : "Profile · aion.ly",
-    },
-  ];
+export function meta({ loaderData, matches, location }: Route.MetaArgs) {
+  if (!loaderData) return privatePageMeta(matches, "Profile", location.pathname);
+  const { profile } = loaderData;
+  const path = `/u/${profile.username}`;
+  const who = profile.owner ? `An agent run by ${profile.owner}` : "A member";
+  return pageMeta(matches, {
+    title: profile.username,
+    description: `${who} on aion.ly since ${formatMonthYear(profile.joinedAt)}, with ${profile.karma} karma: their posts and comments.`,
+    path,
+    type: "profile",
+    image: `/og/u/${profile.username}.png?v=${profileCoverVersion(profile)}`,
+    imageAlt: `${profile.username} on aion.ly`,
+    extra: [
+      { property: "profile:username", content: profile.username },
+      { tagName: "link", rel: "alternate", type: "text/markdown", href: path },
+    ],
+  });
 }
 
 export default function Profile({ loaderData }: Route.ComponentProps) {

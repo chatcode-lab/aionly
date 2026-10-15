@@ -98,3 +98,68 @@ test("images come from the media domain; the old address redirects there", async
   expect(old.headers()["location"]).toBe(`https://media-staging.aion.ly/${key}`);
   expect((await request.get("/img/not-a-key", { maxRedirects: 0 })).status()).toBe(404);
 });
+
+/** The size a PNG says it is, from its header. */
+function pngSize(bytes: Buffer): { width: number; height: number } {
+  expect(bytes.subarray(0, 8).toString("hex")).toBe("89504e470d0a1a0a");
+  return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+}
+
+/** A meta tag's content, by property or name. */
+const metaOf = (html: string, key: string) =>
+  new RegExp(`<meta (?:property|name)="${key.replace(/[:.]/g, "\\$&")}" content="([^"]*)"/>`).exec(html)?.[1];
+
+test("every kind of page previews with its own title, description, and a drawn cover", async ({ request, baseURL }) => {
+  const pages: Array<[string, RegExp, string]> = [
+    ["/", /^aion\.ly: people and their agents on all things AI$/, "/og/site.png"],
+    [SOURCE, /^The source for this board, built in Chatcode Lab sessions$/, "/og/p/s_post_07.png?v="],
+    ["/u/quiet_otter_482", /^quiet_otter_482$/, "/og/u/quiet_otter_482.png?v="],
+    ["/manifesto", /^Manifesto$/, "/og/page/manifesto.png"],
+    ["/agents", /^Connect your agent$/, "/og/page/agents.png"],
+    ["/rules", /^Rules$/, "/og/page/rules.png"],
+    ["/settings", /^Sign in$/, "/og/site.png"],
+  ];
+  for (const [path, title, cover] of pages) {
+    const html = await (await request.get(path)).text();
+    expect(metaOf(html, "og:title"), path).toMatch(title);
+    expect(metaOf(html, "og:description")?.length, path).toBeGreaterThan(20);
+    expect(metaOf(html, "twitter:card"), path).toBe("summary_large_image");
+    const image = metaOf(html, "og:image")!;
+    expect(image.startsWith(`${baseURL}${cover}`), `${path}: ${image}`).toBe(true);
+    expect(metaOf(html, "twitter:image"), path).toBe(image);
+    expect(metaOf(html, "og:image:alt"), path).toBeTruthy();
+
+    const picture = await request.get(image.replaceAll("&amp;", "&"));
+    expect(picture.status(), image).toBe(200);
+    expect(picture.headers()["content-type"]).toBe("image/png");
+    expect(pngSize(await picture.body()), image).toEqual({ width: 1200, height: 630 });
+  }
+});
+
+test("covers exist only for what pages show, and only at their current version", async ({ request }) => {
+  const stale = await request.get("/og/p/s_post_07.png?v=made-up", { maxRedirects: 0 });
+  expect(stale.status()).toBe(302);
+  expect(stale.headers()["location"]).toMatch(/^\/og\/p\/s_post_07\.png\?v=[0-9a-z]+$/);
+  expect((await request.get("/og/u/quiet_otter_482.png", { maxRedirects: 0 })).status()).toBe(302);
+  expect((await request.get("/og/page/nowhere.png")).status()).toBe(404);
+  // A removed post's cover is gone with it.
+  expect((await request.get("/og/p/s_post_17.png")).status()).toBe(404);
+  expect((await request.get("/og/u/nobody_at_all.png")).status()).toBe(404);
+  const html = await (await request.get("/p/s_post_17")).text();
+  expect(metaOf(html, "robots")).toBe("noindex");
+  expect(metaOf(html, "og:image")).toMatch(/\/og\/site\.png$/);
+});
+
+test("the manifesto is a page, the repository's own file, and Markdown for agents", async ({ page, request }) => {
+  await page.goto("/manifesto");
+  await expect(page.getByRole("heading", { level: 1, name: "The aion.ly manifesto" })).toBeVisible();
+  for (const name of ["People decide", "People answer for their agents", "Open and transparent"]) {
+    await expect(page.getByRole("heading", { level: 2, name })).toBeVisible();
+  }
+  await expect(page.getByRole("link", { name: "Rules" }).first()).toHaveAttribute("href", "/rules");
+  const markdown = await request.get("/manifesto.md");
+  expect(markdown.headers()["content-type"]).toBe("text/markdown; charset=utf-8");
+  expect(await markdown.text()).toMatch(/^# The aion\.ly manifesto\n/);
+  const feed = await (await request.get("/", { headers: MARKDOWN })).text();
+  expect(feed).toContain("people and their agents discover and discuss all things AI");
+});

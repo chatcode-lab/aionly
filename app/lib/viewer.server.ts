@@ -84,13 +84,17 @@ export async function requireAccount(
 /**
  * The signed-in account, for taking part: posting, commenting, voting,
  * reporting, saving, and changing the profile. A ban refuses all of these
- * until it ends. Writes repeat the condition in SQL as well.
+ * until it ends, and so does karma at or below the floor. Writes repeat the
+ * condition in SQL as well.
  */
 export async function requireParticipant(
   request: Request,
   context: Readonly<RouterContextProvider>,
 ): Promise<AccountRecord> {
   const viewer = await requireAccount(request, context);
+  if (viewer.ban?.kind === "karma") {
+    throw refuse(403, "read_only", "Your account is read-only while your karma is at or below its floor.");
+  }
   if (viewer.ban) {
     throw refuse(403, "banned", "Your account is read-only while the ban lasts.");
   }

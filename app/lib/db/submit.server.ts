@@ -6,7 +6,8 @@ const DAY = 24 * 3600;
 
 export type PostingStatus =
   | { allowed: true }
-  | { allowed: false; reason: "banned" | "karma" }
+  /** Banned, read-only by karma at or below the floor, or karma below 0. */
+  | { allowed: false; reason: "banned" | "read_only" | "karma" }
   | {
       allowed: false;
       reason: "wait";
@@ -35,7 +36,7 @@ export async function postingStatus(
   account: AccountRecord,
   now: number,
 ): Promise<PostingStatus> {
-  if (account.ban) return { allowed: false, reason: "banned" };
+  if (account.ban) return { allowed: false, reason: account.ban.kind === "karma" ? "read_only" : "banned" };
   if (account.role === "admin") return { allowed: true };
   if (account.karma < 0) return { allowed: false, reason: "karma" };
   const limit = dailyLimit(account);

@@ -44,6 +44,7 @@ import {
   titleProblem,
 } from "~/lib/submit/rules";
 import { requireAccount, requireParticipant } from "~/lib/viewer.server";
+import { privatePageMeta } from "~/lib/meta";
 
 import type { Route } from "./+types/submit";
 
@@ -51,8 +52,8 @@ const DRAFT = "submit";
 // The last check, kept for this tab so a reload shows the preview again.
 const CHECK_STORAGE = "submit-check";
 
-export function meta(_: Route.MetaArgs) {
-  return [{ title: "Submit · aion.ly" }, { name: "robots", content: "noindex" }];
+export function meta({ matches, location }: Route.MetaArgs) {
+  return privatePageMeta(matches, "Submit", location.pathname);
 }
 
 export async function loader({ request, context }: Route.LoaderArgs) {
@@ -94,6 +95,8 @@ function statusMessage(status: PostingStatus, now: number): string | null {
   switch (status.reason) {
     case "banned":
       return "Your account is read-only while the ban lasts.";
+    case "read_only":
+      return "Your account is read-only while your karma is at or below its floor.";
     case "karma":
       return "Posting is paused while your karma is below 0. Comments and votes still count.";
     case "wait": {
@@ -408,14 +411,14 @@ export default function Submit({ loaderData, actionData }: Route.ComponentProps)
       <div>
         <h1 className="text-display font-semibold">Submit</h1>
         <p className="mt-1 text-body text-text-muted">
-          Something made with AI, or AI news worth reading.
+          Something made with AI, or news, research, and tools worth discussing.
         </p>
       </div>
 
       {blocked && !loaderData.status.allowed ? (
         <Notice
           tone={
-            loaderData.status.reason === "banned"
+            loaderData.status.reason === "banned" || loaderData.status.reason === "read_only"
               ? "danger"
               : loaderData.status.reason === "wait"
                 ? "wait"

@@ -6,6 +6,7 @@ import { agentForToken } from "~/lib/db/agents.server";
 import { handleMcp } from "~/lib/mcp/protocol";
 import { instructions, TOOLS, type ToolContext, type UploadPurpose } from "~/lib/mcp/tools";
 import { protectedResourceMetadataUrl } from "~/lib/oauth/metadata";
+import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { markdownView } from "~/lib/views/markdown.server";
 
 import type { Route } from "./+types/mcp";
@@ -49,6 +50,8 @@ function contextFor(request: Request, agentId: string): ToolContext {
       return { status: response.status, body: parsed };
     },
     async markdown(path) {
+      // Pages count against the agent's reads, as the API's own reads do.
+      if (!(await withinLimits(request, "read", agentId))) return { status: 429, text: RATE_LIMITED_MESSAGE };
       let url = new URL(path, origin);
       for (let hop = 0; hop < 2; hop += 1) {
         const response = await markdownView(new Request(url, { headers: { Accept: "text/markdown" } }), env.DB);

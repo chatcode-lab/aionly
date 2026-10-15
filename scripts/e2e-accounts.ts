@@ -8,7 +8,14 @@
  * anyway without the staging secret that signs their cookies.
  */
 
-import { ACCOUNTS_PER_WORKER, ADMIN_ACCOUNT, BANNED_ACCOUNT, MAX_WORKERS } from "../e2e/accounts";
+import {
+  ACCOUNTS_PER_WORKER,
+  ADMIN_ACCOUNT,
+  APPEAL_ACCOUNT,
+  BANNED_ACCOUNT,
+  LOW_KARMA_ACCOUNT,
+  MAX_WORKERS,
+} from "../e2e/accounts";
 
 const now = Math.floor(Date.now() / 1000);
 const iso = (seconds: number) => new Date(seconds * 1000).toISOString();
@@ -46,6 +53,7 @@ lines.push(
   `DELETE FROM images WHERE owner_id LIKE 'e2e%';`,
 );
 for (const [table, column] of [
+  ["fresh_starts", "user_id"],
   ["subscriptions", "user_id"],
   ["bookmarks", "user_id"],
   ["votes", "voter_id"],
@@ -57,18 +65,23 @@ for (const [table, column] of [
 lines.push(`DELETE FROM "session" WHERE "userId" LIKE 'e2e%';`);
 lines.push(`DELETE FROM "user" WHERE "id" LIKE 'e2e%';`);
 
-function account(id: string, name: string, profile: { ban?: string; admin?: boolean }): void {
+function account(id: string, name: string, profile: { ban?: string; admin?: boolean; karma?: number }): void {
   const created = iso(now - 3600);
   lines.push(
     `INSERT INTO "user" ("id", "name", "email", "emailVerified", "createdAt", "updatedAt") VALUES ('${id}', 'Test ${id}', '${id}@example.invalid', 1, '${created}', '${created}');`,
     `INSERT INTO "session" ("id", "token", "userId", "expiresAt", "createdAt", "updatedAt") VALUES ('${id}s', 'e2e-session-${id}', '${id}', '${iso(now + 7 * 24 * 3600)}', '${created}', '${created}');`,
-    `INSERT INTO profiles (user_id, role, created_at, banned_at, ban_reason) VALUES ('${id}', '${profile.admin ? "admin" : "user"}', ${now - 3600}, ${profile.ban ? now - 60 : "NULL"}, ${profile.ban ? `'${profile.ban}'` : "NULL"});`,
+    `INSERT INTO profiles (user_id, role, karma, created_at, banned_at, ban_reason) VALUES ('${id}', '${profile.admin ? "admin" : "user"}', ${profile.karma ?? 0}, ${now - 3600}, ${profile.ban ? now - 60 : "NULL"}, ${profile.ban ? `'${profile.ban}'` : "NULL"});`,
     `INSERT INTO usernames (name, user_id, is_current, created_at) VALUES ('${name}', '${id}', 1, ${now - 3600});`,
   );
 }
 
 for (let n = 0; n < MAX_WORKERS * ACCOUNTS_PER_WORKER; n += 1) {
   account(`e2e${n}`, `e2e_user_${n}`, {});
+}
+// One account a worker below the karma floor, for each way back that tests take.
+for (let n = 0; n < MAX_WORKERS; n += 1) {
+  account(`${LOW_KARMA_ACCOUNT}${n}`, `e2e_low_${n}`, { karma: -120 });
+  account(`${APPEAL_ACCOUNT}${n}`, `e2e_appeal_${n}`, { karma: -130 });
 }
 account(BANNED_ACCOUNT, "e2e_banned", { ban: "Testing the read-only notice" });
 account(ADMIN_ACCOUNT, "e2e_admin", { admin: true });

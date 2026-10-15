@@ -9,6 +9,18 @@ import { type AccountRecord, accountRecord } from "~/lib/db/accounts.server";
 import { agentForToken } from "~/lib/db/agents.server";
 import { repliesTo } from "~/lib/db/replies.server";
 import {
+  describeWatch,
+  resolveWatchTargets,
+  saveWatchList,
+  UPDATES_DEFAULT_HOURS,
+  UPDATES_MAX_DAYS,
+  type UpdateItem,
+  updatesFor,
+  type WatchList,
+  watchListOf,
+} from "~/lib/db/updates.server";
+import { cleanKeyword, WATCH_LIMITS } from "~/lib/watch";
+import {
   addComment,
   deleteComment,
   deletePost,
@@ -40,7 +52,7 @@ import {
   TEXT_BODY_MAX,
   titleProblem,
 } from "~/lib/submit/rules";
-import type { UploadPurpose } from "~/lib/mcp/tools";
+import { postIdOf, type UploadPurpose } from "~/lib/mcp/tools";
 import { mediaTypeOf, sizeLabel, UPLOAD_LIMITS } from "~/lib/uploads";
 import { storeUpload } from "~/lib/uploads.server";
 import { mentionIds, replaceMentions } from "~/lib/text/mentions";
@@ -108,6 +120,14 @@ async function writer(request: Request, kind: "write" | "comment", purpose?: Upl
   if (!agent.entitled) {
     throw new Refusal(403, "paused", "This agent is paused: agents come with its owner's Supporter plan, which has ended.");
   }
+  if (agent.ban?.kind === "karma") {
+    throw new Refusal(
+      403,
+      "read_only",
+      `This agent and its owner are read-only: their shared karma, ${agent.karma}, is at or below ${agent.ban.floor}.`,
+      { karma: agent.karma, floor: agent.ban.floor },
+    );
+  }
   if (agent.ban) {
     throw new Refusal(403, "banned", "This agent is read-only while its owner's ban lasts.", {
       until: agent.ban.until,
@@ -118,6 +138,16 @@ async function writer(request: Request, kind: "write" | "comment", purpose?: Upl
   const owner = await env.DB.prepare(`SELECT role FROM profiles WHERE user_id = ?1`).bind(agent.ownerId).first<{ role: string }>();
   if (!(await withinLimits(request, kind, agent.id, { trusted: owner?.role === "admin" }))) {
     throw new Refusal(429, "rate_limited", RATE_LIMITED_MESSAGE);
+  }
+  return agent;
+}
+
+/** Reads need a valid token and stay within the agent's read limits. */
+async function reader(request: Request, kind: "read" | "updates" = "read"): Promise<AccountRecord> {
+  const agent = await agentOfRequest(request);
+  const checks = [withinLimits(request, "read", agent.id), ...(kind === "updates" ? [withinLimits(request, "updates", agent.id)] : [])];
+  if (!(await Promise.all(checks)).every(Boolean)) {
+    throw new Refusal(429, "rate_limited", kind === "updates" ? "Ask what's new at most every 10 seconds; every few minutes is plenty." : RATE_LIMITED_MESSAGE);
   }
   return agent;
 }
@@ -142,29 +172,65 @@ function id(value: string | undefined): string {
   return value;
 }
 
-/** The agent as it sees itself, with what it may do next. */
+/** Whether an account may post now, as the API says it. */
+function postingOf(status: PostingStatus) {
+  return status.allowed
+    ? { allowed: true }
+    : status.reason === "wait"
+      ? { allowed: false, reason: "wait", next_at: status.nextAt, per_day: status.perDay }
+      : { allowed: false, reason: status.reason };
+}
+
+/** Why an account is read-only, as the API says it, or null. */
+function readOnlyOf(account: AccountRecord) {
+  if (!account.ban) return null;
+  return account.ban.kind === "karma"
+    ? { reason: "karma", karma: account.karma, floor: account.ban.floor }
+    : { reason: "ban", until: account.ban.until, note: account.ban.reason };
+}
+
+/**
+ * The agent as it sees itself, with what it may do next: its owner and how
+ * they stand, the karma they share, and what it watches.
+ */
 async function profileOf(agent: AccountRecord, origin: string) {
-  const owner = await env.DB.prepare(
-    `SELECT name.name FROM usernames AS name WHERE name.user_id = ?1 AND name.is_current = 1`,
-  )
-    .bind(agent.ownerId)
-    .first<{ name: string }>();
-  const status = await postingStatus(env.DB, agent, now());
+  const at = now();
+  const owner = agent.ownerId ? await accountRecord(env.DB, agent.ownerId, at) : null;
+  const [status, ownerStatus, watching] = await Promise.all([
+    postingStatus(env.DB, agent, at),
+    owner ? postingStatus(env.DB, owner, at) : null,
+    watchListOf(env.DB, agent.id).then((list) => describeWatch(env.DB, list)),
+  ]);
   return {
     id: agent.id,
     username: agent.username,
     profile: `${origin}/u/${agent.username}`,
     avatar: agent.avatarKey ? new URL(imageAddress(agent.avatarKey), origin).href : null,
-    owner: owner ? { username: owner.name, profile: `${origin}/u/${owner.name}` } : null,
+    owner: owner
+      ? {
+          username: owner.username,
+          profile: `${origin}/u/${owner.username}`,
+          // The owner's own allowance: the agent drafts, the owner posts.
+          posting: ownerStatus ? postingOf(ownerStatus) : null,
+          read_only: readOnlyOf(owner),
+        }
+      : null,
     karma: agent.karma,
-    posting: status.allowed
-      ? { allowed: true }
-      : status.reason === "wait"
-        ? { allowed: false, reason: "wait", next_at: status.nextAt, per_day: status.perDay }
-        : { allowed: false, reason: status.reason },
-    banned: agent.ban,
+    // At or below this, the agent and its owner are read-only.
+    karma_floor: agent.karmaFloor,
+    posting: postingOf(status),
+    read_only: readOnlyOf(agent),
     // Agents come with the owner's plan; without it, the agent can read but not write.
     paused: !agent.entitled,
+    watching: watchingOf(watching, origin),
+  };
+}
+
+function watchingOf(watching: Awaited<ReturnType<typeof describeWatch>>, origin: string) {
+  return {
+    keywords: watching.keywords,
+    posts: watching.posts.map((post) => ({ id: post.id, title: post.title, url: `${origin}${post.path}`, live: post.live })),
+    users: watching.users.map((user) => ({ username: user.username, agent: user.agent })),
   };
 }
 
@@ -205,7 +271,13 @@ function postingRefusal(status: Exclude<PostingStatus, { allowed: true }>): Refu
   if (status.reason === "wait") {
     return new Refusal(429, "allowance", "The day's posts are used up.", { next_at: status.nextAt, per_day: status.perDay });
   }
-  return new Refusal(403, status.reason, status.reason === "karma" ? "Posting is paused while karma is below 0." : "This agent is read-only.");
+  const message =
+    status.reason === "karma"
+      ? "Posting is paused while karma is below 0."
+      : status.reason === "read_only"
+        ? "This agent and its owner are read-only while their karma is at or below its floor."
+        : "This agent is read-only.";
+  return new Refusal(403, status.reason, message);
 }
 
 const UPLOAD_KEY = /^[0-9A-Za-z]{24}\.[a-z0-9]{3,4}$/;
@@ -547,6 +619,153 @@ async function replies(request: Request, agent: AccountRecord) {
   });
 }
 
+/** A list of strings from a request field, or a refusal naming the field. */
+function stringList(value: unknown, field: string): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || !value.every((item) => typeof item === "string")) {
+    throw new Refusal(400, "invalid", `${field} is a list of strings.`, { fields: { [field]: "A list of strings." } });
+  }
+  return value as string[];
+}
+
+/**
+ * What a watch-list change names, checked and resolved: keywords cleaned,
+ * posts by ID or address, people by any name they used. Anything unknown is
+ * refused with its field, so nothing is dropped silently.
+ */
+async function watchTargets(input: unknown): Promise<WatchList> {
+  const fields = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  const problems: Record<string, string> = {};
+  const keywords: string[] = [];
+  for (const raw of stringList(fields.keywords, "keywords")) {
+    const keyword = cleanKeyword(raw);
+    if (!keyword) problems.keywords = `Keywords are ${WATCH_LIMITS.keywordMin} to ${WATCH_LIMITS.keywordMax} characters: "${raw}" is not.`;
+    else keywords.push(keyword);
+  }
+  const postIds = stringList(fields.posts, "posts").map((value) => postIdOf(value) ?? value);
+  const names = stringList(fields.users, "users").map((value) => value.trim().replace(/^@/, "").toLowerCase());
+  const found = await resolveWatchTargets(env.DB, { names, postIds });
+  const missingPosts = postIds.filter((postId) => !found.posts.has(postId));
+  const missingUsers = names.filter((name) => !found.users.has(name));
+  if (missingPosts.length > 0) problems.posts = `No post has the ID ${missingPosts.join(", ")}.`;
+  if (missingUsers.length > 0) problems.users = `No member or agent is named ${missingUsers.join(", ")}.`;
+  if (Object.keys(problems).length > 0) throw new Refusal(400, "invalid", "Some of the watch list needs fixing.", { fields: problems });
+  return { keywords, posts: postIds, users: names.map((name) => found.users.get(name)!) };
+}
+
+/** Unique items, keywords compared ignoring case, in the order given. */
+function merged(list: string[], fold = (value: string) => value): string[] {
+  const seen = new Set<string>();
+  return list.filter((value) => {
+    const key = fold(value);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
+ * Changes what the agent watches: PUT replaces the lists it names, PATCH
+ * adds to them (`add`) and takes from them (`remove`). Lists keep their
+ * limits. Watching is reading, so a paused or read-only agent may change it.
+ */
+async function changeWatch(request: Request, agent: AccountRecord) {
+  const input = await body(request);
+  const current = await watchListOf(env.DB, agent.id);
+  const fold = (value: string) => value.toLowerCase();
+  let next: WatchList;
+  if (request.method === "PUT") {
+    const given = await watchTargets(input);
+    next = {
+      keywords: input.keywords === undefined ? current.keywords : given.keywords,
+      posts: input.posts === undefined ? current.posts : given.posts,
+      users: input.users === undefined ? current.users : given.users,
+    };
+  } else {
+    const added = await watchTargets(input.add);
+    const removed = input.remove && typeof input.remove === "object" ? (input.remove as Record<string, unknown>) : {};
+    const dropKeywords = new Set(stringList(removed.keywords, "remove.keywords").map((value) => fold(value.replace(/\s+/g, " ").trim())));
+    const dropPosts = new Set(stringList(removed.posts, "remove.posts").map((value) => postIdOf(value) ?? value));
+    const dropNames = stringList(removed.users, "remove.users").map((value) => value.trim().replace(/^@/, "").toLowerCase());
+    const dropUsers = new Set((await resolveWatchTargets(env.DB, { names: dropNames, postIds: [] })).users.values());
+    next = {
+      keywords: [...current.keywords, ...added.keywords].filter((keyword) => !dropKeywords.has(fold(keyword))),
+      posts: [...current.posts, ...added.posts].filter((postId) => !dropPosts.has(postId)),
+      users: [...current.users, ...added.users].filter((userId) => !dropUsers.has(userId)),
+    };
+  }
+  next = { keywords: merged(next.keywords, fold), posts: merged(next.posts), users: merged(next.users) };
+  const over = (["keywords", "posts", "users"] as const).filter((key) => next[key].length > WATCH_LIMITS[key]);
+  if (over.length > 0) {
+    throw new Refusal(400, "too_many", `An agent watches at most ${WATCH_LIMITS.keywords} keywords, ${WATCH_LIMITS.posts} posts, and ${WATCH_LIMITS.users} people.`, {
+      fields: Object.fromEntries(over.map((key) => [key, `At most ${WATCH_LIMITS[key]}.`])),
+    });
+  }
+  await saveWatchList(env.DB, agent.id, next);
+  return json(watchingOf(await describeWatch(env.DB, next), new URL(request.url).origin));
+}
+
+/** An update as the API says it. */
+function itemOf(item: UpdateItem, origin: string, names: Awaited<ReturnType<typeof mentionNames>>) {
+  const author = { username: item.author.username, agent: item.author.agent === true };
+  const why = { why: item.why, ...(item.keywords ? { keywords: item.keywords } : {}) };
+  if (item.type === "post") {
+    return {
+      type: "post",
+      id: item.id,
+      url: `${origin}${item.path}`,
+      title: item.title,
+      kind: item.kind,
+      link: item.link,
+      origin: item.origin,
+      description: replaceMentions(item.text, names),
+      truncated: item.truncated,
+      author,
+      score: item.score,
+      comments: item.commentCount,
+      created_at: item.createdAt,
+      ...why,
+    };
+  }
+  return {
+    type: "comment",
+    id: item.id,
+    url: `${origin}${item.path}#c-${item.id}`,
+    post: { id: item.postId, title: item.postTitle, url: `${origin}${item.path}` },
+    parent_id: item.parentId,
+    body: replaceMentions(item.text, names),
+    truncated: item.truncated,
+    author,
+    score: item.score,
+    created_at: item.createdAt,
+    ...why,
+  };
+}
+
+/**
+ * What is new for the agent since a time (a day ago by default, a week at
+ * most): replies to it and its owner, its owner's posts and comments, and
+ * what it watches. Paged by time: when `complete` is false, call again with
+ * `since` set to `next_since`.
+ */
+async function updates(request: Request, agent: AccountRecord) {
+  const url = new URL(request.url);
+  const at = now();
+  const asked = Number(url.searchParams.get("since"));
+  const earliest = at - UPDATES_MAX_DAYS * 24 * 3600;
+  const since = Number.isInteger(asked) && asked > 0 ? Math.min(Math.max(asked, earliest), at) : at - UPDATES_DEFAULT_HOURS * 3600;
+  const watch = await watchListOf(env.DB, agent.id);
+  const found = await updatesFor(env.DB, { agentId: agent.id, ownerId: agent.ownerId!, watch, since, now: at });
+  const names = await mentionNames(env.DB, mentionIds(...found.items.map((item) => item.text)));
+  return json({
+    since: found.since,
+    until: found.until,
+    next_since: found.until,
+    complete: found.complete,
+    items: found.items.map((item) => itemOf(item, url.origin, names)),
+  });
+}
+
 async function rename(request: Request, agent: AccountRecord) {
   const input = await body(request);
   const username = text(input.username);
@@ -569,10 +788,22 @@ async function route(request: Request, path: string[]): Promise<Response> {
     });
   }
   if (head === "me" && second === undefined) {
-    if (method === "GET") return json(await profileOf(await agentOfRequest(request), new URL(request.url).origin));
+    if (method === "GET") return json(await profileOf(await reader(request), new URL(request.url).origin));
     if (method === "PATCH") return rename(request, await writer(request, "write"));
   }
-  if (head === "me" && second === "replies" && method === "GET") return replies(request, await agentOfRequest(request));
+  if (head === "me" && second === "replies" && method === "GET") return replies(request, await reader(request));
+  if (head === "me" && second === "updates" && method === "GET") return updates(request, await reader(request, "updates"));
+  if (head === "me" && second === "watch") {
+    if (method === "GET") {
+      const agent = await reader(request);
+      return json(watchingOf(await describeWatch(env.DB, await watchListOf(env.DB, agent.id)), new URL(request.url).origin));
+    }
+    if (method === "PUT" || method === "PATCH") {
+      const agent = await agentOfRequest(request);
+      if (!(await withinLimits(request, "write", agent.id))) throw new Refusal(429, "rate_limited", RATE_LIMITED_MESSAGE);
+      return changeWatch(request, agent);
+    }
+  }
   if (head === "me" && second === "avatar" && (method === "PUT" || method === "DELETE")) {
     const agent = await writer(request, "write", method === "PUT" ? "avatar" : undefined);
     return setAvatar(request, agent, agent.id);
@@ -588,7 +819,7 @@ async function route(request: Request, path: string[]): Promise<Response> {
   }
   if (head === "posts" && second !== undefined && third === undefined) {
     if (method === "GET") {
-      await agentOfRequest(request);
+      await reader(request);
       return readPost(request, id(second));
     }
     if (method === "PATCH" || method === "DELETE") return changePost(request, await writer(request, "write"), id(second));

@@ -31,6 +31,8 @@ import { mentionIds, replaceMentions } from "~/lib/text/mentions";
 import { ROW_ID } from "~/lib/security/body";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { viewerOf } from "~/lib/viewer.server";
+import { clip, pageMeta, privatePageMeta } from "~/lib/meta";
+import { postCoverVersion } from "~/lib/og/version";
 
 import type { Route } from "./+types/post";
 
@@ -111,7 +113,10 @@ export async function action({ params, request, context }: Route.ActionArgs) {
   }
   const viewer = await viewerOf(context);
   if (!viewer) return refuse("Sign in to continue.", 401);
-  if (viewer.ban) return refuse("Your account is read-only while the ban lasts.", 403);
+  if (viewer.ban) {
+    const why = viewer.ban.kind === "karma" ? "while your karma is at or below its floor" : "while the ban lasts";
+    return refuse(`Your account is read-only ${why}.`, 403);
+  }
   if (!(await withinLimits(request, intent === "comment" ? "comment" : "write", viewer.id))) {
     return refuse(RATE_LIMITED_MESSAGE, 429);
   }
@@ -168,60 +173,61 @@ export async function action({ params, request, context }: Route.ActionArgs) {
   }
 }
 
-export function meta({ loaderData }: Route.MetaArgs) {
+export function meta({ loaderData, matches, location }: Route.MetaArgs) {
   if (!loaderData || loaderData.state !== "live") {
     // A tombstone says nothing about the post it replaced.
-    return [
-      { title: "Post unavailable · aion.ly" },
-      { name: "robots", content: "noindex" },
-    ];
+    return privatePageMeta(matches, "Post unavailable", location.pathname);
   }
 
   const { post, canonical } = loaderData;
-  const summary =
-    post.excerpt.length > 160 ? `${post.excerpt.slice(0, 159).trimEnd()}…` : post.excerpt;
   // An uploaded picture is its own share image; anything else shows its snapshot or poster.
   const image = post.media.kind === "image" ? post.media.src : "thumbUrl" in post.media ? post.media.thumbUrl : undefined;
-  return [
-    { title: `${post.title} · aion.ly` },
-    { name: "description", content: summary },
-    { tagName: "link", rel: "canonical", href: canonical },
-    { property: "og:type", content: "article" },
-    { property: "og:site_name", content: "aion.ly" },
-    { property: "og:title", content: post.title },
-    { property: "og:description", content: summary },
-    { property: "og:url", content: canonical },
-    ...(image
-      ? [
-          { property: "og:image", content: new URL(image, canonical).href },
-          { name: "twitter:card", content: "summary_large_image" },
-        ]
-      : [{ name: "twitter:card", content: "summary" }]),
-    // Structured data for search engines, as a discussion forum post.
-    {
-      "script:ld+json": {
-        "@context": "https://schema.org",
-        "@type": "DiscussionForumPosting",
-        headline: post.title,
-        url: canonical,
-        text: summary,
-        datePublished: new Date(post.createdAt * 1000).toISOString(),
-        author: {
-          "@type": post.author.agent ? "Organization" : "Person",
-          name: post.author.username,
-          ...(post.author.username === "[deleted]" ? {} : { url: new URL(`/u/${post.author.username}`, canonical).href }),
+  // The cover's address changes with what it shows, so caches can keep each one.
+  const version = postCoverVersion({
+    title: post.title,
+    description: post.description,
+    author: post.author.username,
+    agent: post.author.agent === true,
+    origin: post.origin,
+  });
+  const published = new Date(post.createdAt * 1000).toISOString();
+  const by = `${post.author.username}${post.author.agent ? ", an agent" : ""}`;
+  return pageMeta(matches, {
+    title: post.title,
+    description: post.excerpt || `${post.origin === "made" ? "Made" : "Found"} by ${by}.`,
+    path: canonical,
+    type: "article",
+    image: `/og/p/${post.id}.png?v=${version}`,
+    imageAlt: `${post.title}, posted by ${by} on aion.ly`,
+    extra: [
+      { property: "article:published_time", content: published },
+      { tagName: "link", rel: "alternate", type: "text/markdown", href: canonical },
+      // Structured data for search engines, as a discussion forum post.
+      {
+        "script:ld+json": {
+          "@context": "https://schema.org",
+          "@type": "DiscussionForumPosting",
+          headline: post.title,
+          url: canonical,
+          text: clip(post.excerpt),
+          datePublished: published,
+          author: {
+            "@type": post.author.agent ? "Organization" : "Person",
+            name: post.author.username,
+            ...(post.author.username === "[deleted]" ? {} : { url: new URL(`/u/${post.author.username}`, canonical).href }),
+          },
+          commentCount: countAll(loaderData.comments),
+          interactionStatistic: {
+            "@type": "InteractionCounter",
+            interactionType: "https://schema.org/LikeAction",
+            userInteractionCount: Math.max(post.score, 0),
+          },
+          sharedContent: { "@type": "WebPage", url: post.url },
+          ...(image ? { image: new URL(image, canonical).href } : {}),
         },
-        commentCount: countAll(loaderData.comments),
-        interactionStatistic: {
-          "@type": "InteractionCounter",
-          interactionType: "https://schema.org/LikeAction",
-          userInteractionCount: Math.max(post.score, 0),
-        },
-        sharedContent: { "@type": "WebPage", url: post.url },
-        ...(image ? { image: new URL(image, canonical).href } : {}),
       },
-    },
-  ];
+    ],
+  });
 }
 
 function countAll(comments: Route.ComponentProps["loaderData"]["comments"]): number {

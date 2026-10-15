@@ -133,9 +133,22 @@ async function serve(request: Request, ctx: ExecutionContext): Promise<Response>
       );
       return withSecurityHeaders(request, response!, options);
     }
-    // /agents.md is Markdown whatever the request asks for, for agents
-    // whose tools cannot choose a format.
-    if (wantsMarkdown(request) || url.pathname === "/agents.md") {
+    // Covers for shared links, drawn on first request and then cached. The
+    // renderer loads only here, so no other request pays for it.
+    if (url.pathname.startsWith("/og/")) {
+      // Kept by path, and a post's or profile's by its version too, so no
+      // other query can make the board draw a cover again.
+      const version = /^\/og\/[pu]\//.test(url.pathname) ? url.searchParams.get("v") : null;
+      const key = `${url.origin}${url.pathname}${version ? `?v=${encodeURIComponent(version)}` : ""}`;
+      const response = await cached(ctx, key, async () => {
+        const { coverResponse } = await import("../app/lib/og/covers.server");
+        return coverResponse(url, env.DB, env.IMAGES);
+      });
+      return withSecurityHeaders(request, response ?? new Response("Not Found", { status: 404 }), options);
+    }
+    // /agents.md and /manifesto.md are Markdown whatever the request asks
+    // for, for agents whose tools cannot choose a format.
+    if (wantsMarkdown(request) || url.pathname === "/agents.md" || url.pathname === "/manifesto.md") {
       const response = await cached(ctx, `${url.origin}/__markdown${url.pathname}${url.search}`, () =>
         markdownView(request, env.DB),
       );

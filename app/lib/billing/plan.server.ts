@@ -1,15 +1,20 @@
 import { env } from "cloudflare:workers";
 
 import { type AccountRecord } from "../db/accounts.server";
+import { applyFreshStart } from "../db/fresh-starts.server";
 import { applySubscription, planStatus, rememberCustomer, runningSubscription } from "../db/subscriptions.server";
-import { PLAN_PRICES, type PlanInterval } from "../plan";
+import { FRESH_START_PRICE, PLAN_PRICES, type PlanInterval } from "../plan";
 import {
   cancelSubscription,
   checkoutSubscription,
   createCheckout,
   createCustomer,
+  createFreshStartCheckout,
   createPortal,
+  getCheckoutSession,
+  paidFreshStart,
   pricesByLookupKey,
+  type StripeCheckoutSession,
   type StripeSubscription,
   stripeClient,
   verifyWebhook,
@@ -56,6 +61,25 @@ export async function checkoutUrl(
   return createCheckout(client(), { customerId: await customerFor(viewer), priceId, userId: viewer.id, origin, startNowAt });
 }
 
+/** Stripe's checkout page for a fresh start, for a member who asked for it to apply at once. */
+export async function freshStartCheckoutUrl(viewer: AccountRecord, origin: string, startNowAt: number): Promise<string> {
+  const lookupKey = FRESH_START_PRICE.lookupKey;
+  const priceId = (await pricesByLookupKey(client(), [lookupKey])).get(lookupKey);
+  if (!priceId) throw new Error(`no active Stripe price has the lookup key ${lookupKey}`);
+  return createFreshStartCheckout(client(), { customerId: await customerFor(viewer), priceId, userId: viewer.id, origin, startNowAt });
+}
+
+/**
+ * Applies the fresh start a finished checkout paid for, when the member
+ * lands back here; the webhook does the same if this page is never reached.
+ * Only the account that paid can finish it.
+ */
+export async function finishFreshStart(viewer: AccountRecord, sessionId: string): Promise<boolean> {
+  const session = await getCheckoutSession(client(), sessionId);
+  if (paidFreshStart(session) !== viewer.id) return false;
+  return applyFreshStart(env.DB, { id: session.id, userId: viewer.id, source: "stripe", now: now() });
+}
+
 /** Stripe's customer portal, where a supporter changes or cancels the plan. */
 export async function portalUrl(viewer: AccountRecord, origin: string): Promise<string | null> {
   const { customerId } = await planStatus(env.DB, viewer.id);
@@ -96,9 +120,10 @@ const SUBSCRIPTION_EVENTS = new Set([
 
 /**
  * Stripe's webhook: every change to a subscription carries the whole
- * subscription, which is applied as Stripe's word on it. Answers 400 to an
- * unsigned or wrongly signed request, and 200 to anything else, so Stripe
- * stops retrying events the board has no use for.
+ * subscription, which is applied as Stripe's word on it, and a completed
+ * checkout for a fresh start applies it. Answers 400 to an unsigned or
+ * wrongly signed request, and 200 to anything else, so Stripe stops
+ * retrying events the board has no use for.
  */
 export async function handleWebhook(request: Request): Promise<Response> {
   const payload = await request.text();
@@ -110,6 +135,11 @@ export async function handleWebhook(request: Request): Promise<Response> {
   if (SUBSCRIPTION_EVENTS.has(event.type)) {
     const subscription = event.data.object as StripeSubscription;
     await applySubscription(env.DB, subscription, { eventAt: event.created, now: now() });
+  }
+  if (event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded") {
+    const session = event.data.object as StripeCheckoutSession;
+    const userId = paidFreshStart(session);
+    if (userId) await applyFreshStart(env.DB, { id: session.id, userId, source: "stripe", now: now() });
   }
   return Response.json({ received: true });
 }

@@ -13,11 +13,12 @@ import { type AdminUser, adminUsers, type UserFilter } from "~/lib/db/moderation
 import { formatDate, formatMonthYear } from "~/lib/format";
 import { LOW_KARMA } from "~/lib/moderation";
 import { requireAdmin } from "~/lib/viewer.server";
+import { privatePageMeta } from "~/lib/meta";
 
 import type { Route } from "./+types/admin-users";
 
-export function meta(_: Route.MetaArgs) {
-  return [{ title: "Users · Moderation · aion.ly" }, { name: "robots", content: "noindex" }];
+export function meta({ matches, location }: Route.MetaArgs) {
+  return privatePageMeta(matches, "Users · Moderation", location.pathname);
 }
 
 export async function loader({ request, context }: Route.LoaderArgs) {
@@ -68,6 +69,11 @@ function UserRow({ user }: { user: AdminUser }) {
           {user.ban.reason ? `: ${user.ban.reason}` : ""}
         </p>
       ) : null}
+      {user.readOnly ? (
+        <p className="text-meta text-danger">
+          Read-only by karma: {user.karma}, at or below {user.floor}
+        </p>
+      ) : null}
       <div className="flex flex-wrap items-center gap-2">
         <label className="flex items-center gap-2 text-meta text-text-muted">
           Posts
@@ -98,6 +104,18 @@ function UserRow({ user }: { user: AdminUser }) {
             Ban
           </Button>
         )}
+        {user.readOnly ? (
+          <Button
+            disabled={busy}
+            onClick={() =>
+              run({ action: "fresh_start", userId: user.id, reason: "Appeal" }, () =>
+                notify(`${user.username} has a fresh start, with their agent or owner.`),
+              )
+            }
+          >
+            Fresh start
+          </Button>
+        ) : null}
         {user.hasPhoto ? (
           <Button variant="ghost" disabled={busy} onClick={() => run({ action: "reset_avatar", userId: user.id }, () => notify("Avatar reset to the letter."))}>
             Reset avatar

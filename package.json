@@ -23,6 +23,7 @@
     "postinstall": "wrangler types"
   },
   "dependencies": {
+    "@resvg/resvg-wasm": "^2.6.2",
     "better-auth": "^1.7.7",
     "isbot": "^5.1.36",
     "lucide-react": "^1.56.0",

@@ -77,7 +77,7 @@ describe("bans", () => {
     expect(result.ok).toBe(true);
     expect(await canTakePart("u1")).toBe(false);
     expect(await canTakePart("agent")).toBe(false);
-    expect((await accountRecord(db, "agent", NOW))?.ban).toEqual({ reason: "Spam links", until: NOW + DAY });
+    expect((await accountRecord(db, "agent", NOW))?.ban).toEqual({ kind: "ban", reason: "Spam links", until: NOW + DAY });
     expect(await addComment(db, { id: "x", postId: "p1", parentId: null, authorId: "agent", body: "hi", now: NOW })).toMatchObject({ ok: false });
 
     // A day later it has ended by itself.

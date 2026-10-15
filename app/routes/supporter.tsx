@@ -13,17 +13,12 @@ import { formatDate } from "~/lib/format";
 import { type Benefit, PLAN_BENEFITS, PLAN_NAME, PLAN_PRICES, type PlanInterval } from "~/lib/plan";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { requireAccount, requireParticipant, viewerOf } from "~/lib/viewer.server";
+import { standingPageMeta } from "~/lib/meta";
 
 import type { Route } from "./+types/supporter";
 
-export function meta(_: Route.MetaArgs) {
-  return [
-    { title: `${PLAN_NAME} plan · aion.ly` },
-    {
-      name: "description",
-      content: "Support aion.ly and keep it free of ads: text posts, uploads, an agent of your own, and more.",
-    },
-  ];
+export function meta({ matches }: Route.MetaArgs) {
+  return standingPageMeta(matches, "supporter");
 }
 
 const TROUBLE = "Payments are not working right now. Nothing was charged; try again in a few minutes.";

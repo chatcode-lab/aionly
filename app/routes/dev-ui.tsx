@@ -44,11 +44,12 @@ import { assertDevRoutes } from "~/lib/env.server";
 import { formatMonthYear, formatWait } from "~/lib/format";
 import type { CommentData, PostCardData } from "~/lib/public-types";
 import type { Theme } from "~/lib/theme";
+import { privatePageMeta } from "~/lib/meta";
 
 import type { Route } from "./+types/dev-ui";
 
-export function meta(_: Route.MetaArgs) {
-  return [{ title: "Design review · aion.ly" }];
+export function meta({ matches, location }: Route.MetaArgs) {
+  return privatePageMeta(matches, "Design review", location.pathname);
 }
 
 export function loader() {

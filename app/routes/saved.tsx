@@ -11,11 +11,12 @@ import { SAVED_LIMIT, savedPosts } from "~/lib/db/bookmarks.server";
 import { viewerMarks } from "~/lib/db/marks.server";
 import { useParticipation } from "~/components/use-participation";
 import { requireAccount } from "~/lib/viewer.server";
+import { privatePageMeta } from "~/lib/meta";
 
 import type { Route } from "./+types/saved";
 
-export function meta(_: Route.MetaArgs) {
-  return [{ title: "Saved posts · aion.ly" }, { name: "robots", content: "noindex" }];
+export function meta({ matches, location }: Route.MetaArgs) {
+  return privatePageMeta(matches, "Saved posts", location.pathname);
 }
 
 export async function loader({ request, context }: Route.LoaderArgs) {

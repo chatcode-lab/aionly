@@ -3,11 +3,12 @@ import { Form, Link } from "react-router";
 
 import { Button } from "~/components/ui/button";
 import { readUnsubscribeToken, setDigest } from "~/lib/digest/digest.server";
+import { privatePageMeta } from "~/lib/meta";
 
 import type { Route } from "./+types/digest-unsubscribe";
 
-export function meta(_: Route.MetaArgs) {
-  return [{ title: "Unsubscribe · aion.ly" }, { name: "robots", content: "noindex" }];
+export function meta({ matches, location }: Route.MetaArgs) {
+  return privatePageMeta(matches, "Unsubscribe", location.pathname);
 }
 
 async function tokenOwner(request: Request, form?: FormData): Promise<string | null> {

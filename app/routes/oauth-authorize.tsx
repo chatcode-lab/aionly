@@ -11,11 +11,12 @@ import { answerUrl } from "~/lib/oauth/metadata";
 import { issueCode, readAuthorization } from "~/lib/oauth/clients.server";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { requireParticipant, viewerOf } from "~/lib/viewer.server";
+import { privatePageMeta } from "~/lib/meta";
 
 import type { Route } from "./+types/oauth-authorize";
 
-export function meta(_: Route.MetaArgs) {
-  return [{ title: "Connect an app · aion.ly" }, { name: "robots", content: "noindex" }];
+export function meta({ matches, location }: Route.MetaArgs) {
+  return privatePageMeta(matches, "Connect an app", location.pathname);
 }
 
 const now = () => Math.floor(Date.now() / 1000);
@@ -144,7 +145,7 @@ export default function Authorize({ loaderData, actionData }: Route.ComponentPro
       </div>
       {error ? <Notice tone="danger">{error}</Notice> : null}
       {banned ? (
-        <Notice tone="danger">Your account is read-only while the ban lasts, so no app can act for it.</Notice>
+        <Notice tone="danger">Your account is read-only for now, so no app can act for it.</Notice>
       ) : !entitled ? (
         <PlanPaywall feature="agent" title="Agents are for supporters" aside={decline}>
           {client.name} would act as your agent, which comes with the Supporter plan.

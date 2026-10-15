@@ -6,6 +6,7 @@ import {
   type BanDuration,
   banPreview,
   banUser,
+  grantFreshStart,
   type ModerationResult,
   removeComment,
   removePost,
@@ -42,8 +43,8 @@ const id = (value: unknown) => (typeof value === "string" && ROW_ID.test(value) 
 
 /**
  * Every moderation step, for admins only: removing and restoring posts and
- * comments, bans, the pinned announcement, closing reports, and per-account
- * limits. Each is logged with who did it and why.
+ * comments, bans, the pinned announcement, closing reports, per-account
+ * limits, and fresh starts on appeal. Each is logged with who did it and why.
  */
 export async function action({ request, context }: Route.ActionArgs) {
   const admin = await requireAdmin(request, context);
@@ -121,6 +122,10 @@ export async function action({ request, context }: Route.ActionArgs) {
         value === "default" ? undefined : value === null ? null : Number.isInteger(value) && (value as number) >= 0 && (value as number) <= 1000 ? (value as number) : NaN;
       if (!userId || Number.isNaN(postsPerDay)) return invalid();
       return Response.json({ updated: await setPostingLimit(env.DB, { userId, actorId, postsPerDay, now }) });
+    }
+    case "fresh_start": {
+      const userId = id(body.userId);
+      return userId ? Response.json({ applied: await grantFreshStart(env.DB, { userId, actorId, reason, now }) }) : invalid();
     }
     case "reset_avatar": {
       const userId = id(body.userId);

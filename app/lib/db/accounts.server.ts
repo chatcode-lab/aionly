@@ -2,6 +2,8 @@ import {
   generateUsername,
   RENAME_INTERVAL_DAYS,
 } from "../accounts/usernames";
+import { floorOf, KARMA_FLOOR } from "../moderation";
+import type { Restriction } from "../public-types";
 
 const DAY = 24 * 3600;
 
@@ -65,8 +67,13 @@ export interface AccountRecord {
   role: "user" | "admin";
   avatarKey: string | null;
   createdAt: number;
-  /** Set while a ban is in force; a timed ban past its end is not one. */
-  ban: { reason: string | null; until: number | null } | null;
+  /**
+   * Set while the account is read-only: a ban in force (a timed ban past its
+   * end is not one), or karma at or below the floor.
+   */
+  ban: Restriction | null;
+  /** The karma at or below which the account is read-only. */
+  karmaFloor: number;
   deleted: boolean;
   /** The member who runs this account, when it is an agent. */
   ownerId: string | null;
@@ -116,7 +123,8 @@ export async function accountRecord(
       `SELECT profile.user_id, profile.karma, profile.role, profile.avatar_key,
               profile.created_at, profile.banned_at, profile.banned_until,
               profile.ban_reason, profile.deleted_at, profile.owner_id,
-              profile.limits, profile.plan_until, profile.show_mark, profile.digest, username.name,
+              profile.limits, profile.plan_until, profile.show_mark, profile.digest,
+              profile.karma_floor, username.name,
               owner.banned_at AS owner_banned_at, owner.banned_until AS owner_banned_until,
               owner.ban_reason AS owner_ban_reason, owner.role AS owner_role,
               owner.plan_until AS owner_plan_until
@@ -142,6 +150,7 @@ export async function accountRecord(
       plan_until: number | null;
       show_mark: number;
       digest: "daily" | "weekly" | "monthly" | null;
+      karma_floor: number | null;
       name: string;
       owner_banned_at: number | null;
       owner_banned_until: number | null;
@@ -152,12 +161,17 @@ export async function accountRecord(
   if (!row) return null;
 
   const inForce = (at: number | null, until: number | null) => at !== null && (until === null || until > now);
+  // Admins and their agent are never held by karma.
+  const exempt = row.role === "admin" || row.owner_role === "admin";
+  const floor = floorOf(row.karma_floor);
   // An agent is read-only while the member who runs it is banned.
-  const ban = inForce(row.banned_at, row.banned_until)
-    ? { reason: row.ban_reason, until: row.banned_until }
+  const ban: Restriction | null = inForce(row.banned_at, row.banned_until)
+    ? { kind: "ban", reason: row.ban_reason, until: row.banned_until }
     : inForce(row.owner_banned_at, row.owner_banned_until)
-      ? { reason: row.owner_ban_reason, until: row.owner_banned_until }
-      : null;
+      ? { kind: "ban", reason: row.owner_ban_reason, until: row.owner_banned_until }
+      : !exempt && row.karma <= floor
+        ? { kind: "karma", reason: null, until: null, floor }
+        : null;
 
   const supporter = row.plan_until !== null && row.plan_until > now;
   // An agent has the plan its owner has.
@@ -173,6 +187,7 @@ export async function accountRecord(
     avatarKey: row.avatar_key,
     createdAt: row.created_at,
     ban,
+    karmaFloor: floor,
     deleted: row.deleted_at !== null,
     ownerId: row.owner_id,
     limits: parseLimits(row.limits),
@@ -186,9 +201,10 @@ export async function accountRecord(
 
 /**
  * The SQL condition, for an account bound as `?{index}`, that holds only
- * while it may take part: not banned, not deleted, and, for an agent, run
- * by a member who is neither. Participation writes repeat it so a ban
- * landing mid-request still wins.
+ * while it may take part: not banned, not deleted, karma above its floor
+ * (which an agent shares with its owner; admins and their agent are exempt),
+ * and, for an agent, run by a member who is neither banned nor deleted.
+ * Participation writes repeat it so a ban landing mid-request still wins.
  */
 export function participantCondition(index: number, now: number): string {
   const free = (alias: string) => `(${alias}.banned_at IS NULL
@@ -201,6 +217,8 @@ export function participantCondition(index: number, now: number): string {
       AND ${free("participant")}
       AND (participant.owner_id IS NULL
            OR (participant_owner.deleted_at IS NULL AND ${free("participant_owner")}))
+      AND (participant.karma > COALESCE(participant.karma_floor, ${KARMA_FLOOR})
+           OR participant.role = 'admin' OR participant_owner.role = 'admin')
   )`;
 }
 

@@ -84,7 +84,11 @@ export async function createAgent(
     try {
       await db.batch([
         db
-          .prepare(`INSERT INTO profiles (user_id, owner_id, created_at, karma) VALUES (?1, ?2, ?3, ${karmaSql("?2")})`)
+          // The agent starts with its owner's karma and floor, which they share.
+          .prepare(
+            `INSERT INTO profiles (user_id, owner_id, created_at, karma, karma_floor)
+             VALUES (?1, ?2, ?3, ${karmaSql("?2")}, (SELECT karma_floor FROM profiles WHERE user_id = ?2))`,
+          )
           .bind(id, input.ownerId, input.now),
         db.prepare(`INSERT INTO usernames (name, user_id, is_current, created_at) VALUES (?1, ?2, 1, ?3)`).bind(name, id, input.now),
       ]);

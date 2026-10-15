@@ -1,7 +1,8 @@
 import { newId } from "../ids";
-import { LOW_KARMA } from "../moderation";
+import { KARMA_FLOOR, LOW_KARMA } from "../moderation";
 import { postPath } from "../slug";
-import { karmaSql, scoreSql } from "./votes.server";
+import { applyFreshStart } from "./fresh-starts.server";
+import { karmaSql, scoreSql, trailFloors } from "./votes.server";
 
 const DAY = 24 * 3600;
 
@@ -25,7 +26,8 @@ export type ModerationAction =
   | "unpin"
   | "restore"
   | "set_limits"
-  | "reset_avatar";
+  | "reset_avatar"
+  | "fresh_start";
 
 export type ModerationResult =
   | { ok: true; batchId: string; actionId: string }
@@ -101,6 +103,7 @@ function recountVotesOf(db: D1Database, voterId: string): D1PreparedStatement[] 
              UNION SELECT author_id FROM comments WHERE id IN (${voted("comment")})))`,
       )
       .bind(voterId),
+    trailFloors(db),
   ];
 }
 
@@ -380,6 +383,28 @@ export async function setPostingLimit(
   return updated.meta.changes > 0;
 }
 
+/**
+ * A fresh start granted on appeal: the member and their agent take part
+ * again, as after a paid one, with nothing paid. Given for an agent, it is
+ * its owner's, since they share karma.
+ */
+export async function grantFreshStart(
+  db: D1Database,
+  input: { userId: string; actorId: string; reason: string | null; now: number },
+): Promise<boolean> {
+  const row = await db
+    .prepare(`SELECT COALESCE(owner_id, user_id) AS member FROM profiles WHERE user_id = ?1 AND deleted_at IS NULL`)
+    .bind(input.userId)
+    .first<{ member: string }>();
+  if (!row) return false;
+  const actionId = newId();
+  const applied = await applyFreshStart(db, { id: actionId, userId: row.member, source: "admin", now: input.now });
+  if (applied) {
+    await logAction(db, { id: actionId, batchId: newId(), actorId: input.actorId, action: "fresh_start", targetType: "user", targetId: row.member, reason: input.reason, now: input.now }).run();
+  }
+  return applied;
+}
+
 /** Puts an account back on its letter avatar and deletes the photo copy. */
 export async function resetAvatar(
   db: D1Database,
@@ -406,6 +431,9 @@ export interface AdminUser {
   agent: boolean;
   joinedAt: number;
   ban: { reason: string | null; until: number | null } | null;
+  /** Karma at or below its floor makes the account read-only, unless it is an admin's. */
+  floor: number;
+  readOnly: boolean;
   /** Posts per day: undefined for the default, null for no limit. */
   postsPerDay: number | null | undefined;
   hasPhoto: boolean;
@@ -435,9 +463,12 @@ export async function adminUsers(
          profile.created_at, profile.ban_reason, profile.banned_until, ${banned} AS banned,
          json_extract(profile.limits, '$.postsPerDay') AS posts_per_day,
          json_type(profile.limits, '$.postsPerDay') AS limit_type,
-         profile.avatar_key IS NOT NULL AS has_photo
+         profile.avatar_key IS NOT NULL AS has_photo,
+         COALESCE(profile.karma_floor, ${KARMA_FLOOR}) AS floor,
+         COALESCE(owner.role, profile.role) = 'admin' AS exempt
        FROM profiles AS profile
        JOIN usernames AS name ON name.user_id = profile.user_id AND name.is_current = 1
+       LEFT JOIN profiles AS owner ON owner.user_id = profile.owner_id
        WHERE ${where}
        ORDER BY ${order}
        LIMIT ?3`,
@@ -456,6 +487,8 @@ export async function adminUsers(
       posts_per_day: number | null;
       limit_type: string | null;
       has_photo: number;
+      floor: number;
+      exempt: number;
     }>();
   return results.map((row) => ({
     id: row.user_id,
@@ -465,6 +498,8 @@ export async function adminUsers(
     agent: row.agent === 1,
     joinedAt: row.created_at,
     ban: row.banned ? { reason: row.ban_reason, until: row.banned_until } : null,
+    floor: row.floor,
+    readOnly: row.exempt === 0 && row.karma <= row.floor,
     postsPerDay: row.limit_type === null ? undefined : row.limit_type === "null" ? null : row.posts_per_day,
     hasPhoto: row.has_photo === 1,
   }));

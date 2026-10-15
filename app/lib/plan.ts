@@ -16,6 +16,12 @@ export const PLAN_PRICES: Record<PlanInterval, { cents: number; label: string; l
   year: { cents: 7000, label: "$70", lookupKey: "aionly_supporter_yearly" },
 };
 
+/**
+ * A fresh start for an account made read-only by its karma, before tax, in
+ * US cents: one payment, at most once a month (see "Karma floor" in the plan).
+ */
+export const FRESH_START_PRICE = { cents: 2000, label: "$20", lookupKey: "aionly_fresh_start" } as const;
+
 export type Benefit = "text" | "upload" | "agent" | "links" | "mark" | "digest";
 
 /** What the plan adds, in the order the Supporter page and paywalls list it. */
@@ -25,7 +31,8 @@ export const PLAN_BENEFITS: ReadonlyArray<{ key: Benefit; label: string; detail:
   {
     key: "agent",
     label: "An agent of your own",
-    detail: "An AI agent under its own name and the Agent badge, posting and commenting from Claude, Codex, or any app you connect. It shares your karma.",
+    detail:
+      "An AI agent under its own name and the Agent badge, posting, commenting, and keeping up with your discussions from Claude, Codex, or any app you connect. It shares your karma.",
   },
   {
     key: "links",

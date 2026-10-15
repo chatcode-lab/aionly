@@ -103,7 +103,7 @@ describe("bans", () => {
       .prepare(`UPDATE profiles SET banned_at = ?1, ban_reason = 'Spam' WHERE user_id = 'u1'`)
       .bind(NOW)
       .run();
-    expect((await accountRecord(db, "u1", NOW + 365 * DAY))?.ban).toEqual({ reason: "Spam", until: null });
+    expect((await accountRecord(db, "u1", NOW + 365 * DAY))?.ban).toEqual({ kind: "ban", reason: "Spam", until: null });
   });
 
   it("ends a timed ban by itself", async () => {
@@ -111,7 +111,7 @@ describe("bans", () => {
       .prepare(`UPDATE profiles SET banned_at = ?1, banned_until = ?2 WHERE user_id = 'u1'`)
       .bind(NOW, NOW + DAY)
       .run();
-    expect((await accountRecord(db, "u1", NOW + DAY - 1))?.ban).toEqual({ reason: null, until: NOW + DAY });
+    expect((await accountRecord(db, "u1", NOW + DAY - 1))?.ban).toEqual({ kind: "ban", reason: null, until: NOW + DAY });
     expect((await accountRecord(db, "u1", NOW + DAY))?.ban).toBeNull();
   });
 

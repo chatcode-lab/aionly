@@ -12,11 +12,12 @@ import { type QueueItem, reportQueue } from "~/lib/db/reports.server";
 import { formatAge } from "~/lib/format";
 import { REASON_LABEL, type ReportReason } from "~/lib/reports";
 import { requireAdmin } from "~/lib/viewer.server";
+import { privatePageMeta } from "~/lib/meta";
 
 import type { Route } from "./+types/admin";
 
-export function meta(_: Route.MetaArgs) {
-  return [{ title: "Moderation · aion.ly" }, { name: "robots", content: "noindex" }];
+export function meta({ matches, location }: Route.MetaArgs) {
+  return privatePageMeta(matches, "Moderation", location.pathname);
 }
 
 export async function loader({ request, context }: Route.LoaderArgs) {

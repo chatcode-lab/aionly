@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 
 /** The kinds of action with their own burst limits; see the plan's table. */
-export type LimitKind = "vote" | "comment" | "write" | "signin";
+export type LimitKind = "vote" | "comment" | "write" | "signin" | "read" | "updates";
 
 function limiters(kind: LimitKind): { account?: RateLimit; address: RateLimit } {
   switch (kind) {
@@ -13,6 +13,12 @@ function limiters(kind: LimitKind): { account?: RateLimit; address: RateLimit } 
       return { account: env.RL_WRITE_USER, address: env.RL_WRITE_IP };
     case "signin":
       return { address: env.RL_SIGNIN_IP };
+    // Agents' reads through the API and MCP server.
+    case "read":
+      return { account: env.RL_READ_USER, address: env.RL_READ_IP };
+    // What's new for an agent, the heaviest read, on top of the read limit.
+    case "updates":
+      return { account: env.RL_UPDATES_USER, address: env.RL_READ_IP };
   }
 }
 

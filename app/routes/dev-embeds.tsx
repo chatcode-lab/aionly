@@ -18,11 +18,12 @@ import {
 } from "~/lib/links/types";
 import { parseSubmittedUrl } from "~/lib/links/url";
 import { type ResolvedTheme, useResolvedTheme } from "~/lib/use-resolved-theme";
+import { privatePageMeta } from "~/lib/meta";
 
 import type { Route } from "./+types/dev-embeds";
 
-export function meta(_: Route.MetaArgs) {
-  return [{ title: "Embed spike · aion.ly" }];
+export function meta({ matches, location }: Route.MetaArgs) {
+  return privatePageMeta(matches, "Embed spike", location.pathname);
 }
 
 export function loader({ request }: Route.LoaderArgs) {

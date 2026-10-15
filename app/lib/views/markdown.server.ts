@@ -1,3 +1,5 @@
+import manifesto from "../../../MANIFESTO.md?raw";
+
 import { agentsMarkdown } from "../agents/setup";
 import { defaultRange, newPage, postsByIds, topSnapshot } from "../db/feed.server";
 import { mentionNames } from "../db/mentions.server";
@@ -7,6 +9,7 @@ import { profileByName } from "../db/profiles.server";
 import { PAGE_SIZE, parseRange, parseSort, RANGE_LABEL } from "../feed";
 import { type PostRelation, postRelation } from "../participation";
 import type { CommentData, PostCardData, PublicAuthor } from "../public-types";
+import { TAGLINE } from "../site";
 import { mentionIds, type MentionNames, replaceMentions } from "../text/mentions";
 
 /**
@@ -88,7 +91,7 @@ async function feedMarkdown(db: D1Database, url: URL): Promise<string> {
   const lines = [
     `# aion.ly: ${sort === "top" ? "top" : "new"} posts, ${label}`,
     "",
-    "A public board for things made with AI, and the AI news worth sharing.",
+    `${TAGLINE.long} ${TAGLINE.promise} What it stands for: ${url.origin}/manifesto.md`,
     "",
     `Other views: ${["top", "new"]
       .flatMap((s) => ["day", "week", "month", "all"].map((r) => `[${s} · ${r}](${url.origin}/?sort=${s}&range=${r})`))
@@ -219,8 +222,9 @@ const NOT_FOUND = "# Not found\n\nNothing is at this address.\n";
 
 /**
  * The page at a request's address as Markdown: the feed, a post with its
- * discussion, or a profile, as anyone signed out would see it. Null for
- * any other address, which is then served as usual.
+ * discussion, a profile, the manifesto, or how to connect an agent, as
+ * anyone signed out would see it. Null for any other address, which is
+ * then served as usual.
  */
 export async function markdownView(request: Request, db: D1Database): Promise<Response | null> {
   const url = new URL(request.url);
@@ -238,6 +242,10 @@ export async function markdownView(request: Request, db: D1Database): Promise<Re
 
   if (url.pathname === "/") {
     body = await feedMarkdown(db, url);
+  } else if (url.pathname === "/manifesto" || url.pathname === "/manifesto.md") {
+    // What the board stands for, as the repository keeps it.
+    body = manifesto;
+    headers.set("Link", `<${url.origin}/manifesto>; rel="canonical"`);
   } else if (url.pathname === "/agents" || url.pathname === "/agents.md") {
     // How to connect, written to the agent reading it.
     body = agentsMarkdown(url.origin);

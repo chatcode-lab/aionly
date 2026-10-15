@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { defaultRange, topSnapshot } from "../../app/lib/db/feed.server";
+import { updatesFor } from "../../app/lib/db/updates.server";
 import { castVote } from "../../app/lib/db/votes.server";
 import { db, NOW, post, reset, user } from "./fixtures";
 
@@ -78,5 +79,44 @@ describe("vote plans", () => {
     expect(all).not.toMatch(/SCAN votes\b/);
     expect(all).not.toMatch(/SCAN (posts|comments) AS item\b|SCAN item\b/);
     expect(all).toContain("posts_author");
+  });
+});
+
+describe("updates plans", () => {
+  it("reads every source through an index, never scanning posts, comments, or profiles", async () => {
+    await user("owner", "owner_one");
+    await user("agent", "agent_one");
+    const plans = await plansOf((recording) =>
+      updatesFor(recording, {
+        agentId: "agent",
+        ownerId: "owner",
+        watch: { keywords: ["suno"], posts: ["p1"], users: ["someone"] },
+        since: NOW - 3600,
+        now: NOW,
+      }),
+    );
+    const all = plans.join("\n");
+    // Only the bounded subqueries (the window's newest items, an account's
+    // latest ones) are scanned, never a table.
+    expect(all).not.toMatch(/SCAN (posts|comments|profiles|usernames|votes|answer|profile|author_owner)\b/);
+    // Replies are found from the account's own items, not from the window.
+    expect(all).not.toContain("SEARCH answer USING INDEX comments_new");
+    // Keywords are looked for only among the window's posts and comments.
+    expect(all).toContain("posts_new");
+    expect(all).toContain("comments_new");
+    expect(all).toContain("comments_parent");
+    expect(all).toContain("comments_post");
+    expect(all).toContain("comments_author");
+    expect(all).toContain("posts_author");
+  });
+
+  it("raises fresh-start floors through their partial index", async () => {
+    await user("author", "author_one");
+    await user("voter", "voter_one");
+    await post("p1", { author: "author" });
+    const plans = await plansOf((recording) =>
+      castVote(recording, { voterId: "voter", type: "post", targetId: "p1", value: 1, now: NOW }),
+    );
+    expect(plans.find((plan) => plan.includes("profiles_karma_floor"))).toBeDefined();
   });
 });

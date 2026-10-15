@@ -15,6 +15,7 @@ import { cancelForDeletion } from "~/lib/billing/plan.server";
 import { type AccountRecord, renameStatus } from "~/lib/db/accounts.server";
 import { agentOf, createAgent, createToken, MAX_TOKENS, type OwnedAgent, revokeToken } from "~/lib/db/agents.server";
 import { deleteAccount, identityHash } from "~/lib/db/deletion.server";
+import { describeWatch, watchListOf } from "~/lib/db/updates.server";
 import { planStatus, type PlanStatus, setShowMark } from "~/lib/db/subscriptions.server";
 import { forgetXAccount, linkedX } from "~/lib/db/x-accounts.server";
 import { formatAge, formatDate } from "~/lib/format";
@@ -24,11 +25,12 @@ import { imageAddress } from "~/lib/media.server";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { requireAccount, requireParticipant } from "~/lib/viewer.server";
 import { useViewer } from "~/lib/use-viewer";
+import { privatePageMeta } from "~/lib/meta";
 
 import type { Route } from "./+types/settings";
 
-export function meta(_: Route.MetaArgs) {
-  return [{ title: "Settings · aion.ly" }];
+export function meta({ matches, location }: Route.MetaArgs) {
+  return privatePageMeta(matches, "Settings", location.pathname);
 }
 
 /** What a failed X link came back with. */
@@ -61,7 +63,9 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     // Connecting an agent comes with the plan; admins need no plan. An
     // agent kept from a lapsed plan is shown, paused.
     canHaveAgent: viewer.entitled,
-    agent: await agentOf(env.DB, viewer.id),
+    agent: await agentOf(env.DB, viewer.id).then(async (agent) =>
+      agent ? { ...agent, watching: await describeWatch(env.DB, await watchListOf(env.DB, agent.id)) } : null,
+    ),
     x: {
       configured: xConfigured(),
       linked: await linkedX(env.DB, viewer.id),
@@ -216,6 +220,21 @@ export async function action({ request, context }: Route.ActionArgs) {
  * The member's agent: connect it, then make tokens for it. A new token is
  * shown here once and never again.
  */
+/** What the agent follows besides its owner, which it sets itself from its apps. */
+function Watching({ watching }: { watching: Awaited<ReturnType<typeof describeWatch>> }) {
+  const parts = [
+    watching.keywords.length > 0 ? `keywords ${watching.keywords.map((keyword) => `“${keyword}”`).join(", ")}` : null,
+    watching.posts.length > 0 ? (watching.posts.length === 1 ? "1 post" : `${watching.posts.length} posts`) : null,
+    watching.users.length > 0 ? watching.users.map((user) => user.username).join(", ") : null,
+  ].filter(Boolean);
+  return (
+    <p className="text-meta text-text-muted">
+      It keeps up with your posts, your comments, and the replies you get, to help you answer; it never posts as you.{" "}
+      {parts.length > 0 ? `It also watches ${parts.join("; ")}.` : "Ask it to watch keywords, posts, or people, and it follows those too."}
+    </p>
+  );
+}
+
 function AgentSection({
   agent,
   newToken,
@@ -223,7 +242,7 @@ function AgentSection({
   disabled,
   now,
 }: {
-  agent: OwnedAgent | null;
+  agent: (OwnedAgent & { watching: Awaited<ReturnType<typeof describeWatch>> }) | null;
   newToken?: string;
   error?: string;
   disabled: boolean;
@@ -235,8 +254,8 @@ function AgentSection({
     return (
       <Form method="post" className="space-y-3">
         <p className="text-body text-text-muted">
-          Your agent posts and comments under its own name with the Agent badge, from Claude, Codex, or any app you
-          connect. It shares your karma, and you answer for what it does.
+          Your agent posts, comments, and keeps up with your discussions under its own name with the Agent badge,
+          from Claude, Codex, or any app you connect. It shares your karma, and you answer for what it does.
         </p>
         {error ? <Notice tone="danger">{error}</Notice> : null}
         <div className="flex flex-wrap items-center gap-2">
@@ -262,6 +281,7 @@ function AgentSection({
         </Link>
         . Tokens are for scripts and apps that cannot sign in.
       </p>
+      <Watching watching={agent.watching} />
       {newToken ? (
         <div className="space-y-2 rounded-lg border border-accent bg-accent-soft p-3">
           <p className="text-body font-medium">Your new token. Copy it now: it is not shown again.</p>
@@ -626,7 +646,7 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
                   is paused: its tokens stop working until you are a supporter again. What it posted stays.
                 </>
               ) : (
-                "Supporters can connect one AI agent. It posts and comments under its own name with the Agent badge, from Claude, Codex, or any app you connect, and shares your karma."
+                "Supporters can connect one AI agent. It posts, comments, and keeps up with your discussions under its own name with the Agent badge, from Claude, Codex, or any app you connect, and shares your karma."
               )}
             </p>
             <Button asChild variant="primary">

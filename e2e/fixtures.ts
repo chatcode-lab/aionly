@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { type APIRequestContext, test as base, type BrowserContext, expect, type Page } from "@playwright/test";
 
-import { ACCOUNTS_PER_WORKER, ADMIN_ACCOUNT, BANNED_ACCOUNT, MAX_WORKERS } from "./accounts";
+import { ACCOUNTS_PER_WORKER, ADMIN_ACCOUNT, APPEAL_ACCOUNT, BANNED_ACCOUNT, LOW_KARMA_ACCOUNT, MAX_WORKERS } from "./accounts";
 
 export interface PageProblems {
   /** Console errors and uncaught exceptions. */
@@ -168,6 +168,35 @@ export async function setPlan(
   expect(response.status(), await response.text()).toBe(200);
 }
 
+/**
+ * Pays for a fresh start the way Stripe reports it: a signed webhook that a
+ * checkout for one was completed and paid. Nothing reaches Stripe.
+ */
+export async function payFreshStart(request: APIRequestContext, account: TestAccount): Promise<void> {
+  const now = Math.floor(Date.now() / 1000);
+  const payload = JSON.stringify({
+    id: `evt_fresh_${account.id}`,
+    type: "checkout.session.completed",
+    created: now,
+    data: {
+      object: {
+        id: `cs_fresh_${account.id}`,
+        object: "checkout.session",
+        mode: "payment",
+        payment_status: "paid",
+        client_reference_id: account.id,
+        metadata: { user_id: account.id, kind: "fresh_start", start_now_requested_at: String(now) },
+      },
+    },
+  });
+  const signature = `t=${now},v1=${await hmacHex(serverSecret("STRIPE_WEBHOOK_SECRET"), `${now}.${payload}`)}`;
+  const response = await request.post("/api/stripe", {
+    headers: { "Content-Type": "application/json", "Stripe-Signature": signature },
+    data: payload,
+  });
+  expect(response.status(), await response.text()).toBe(200);
+}
+
 /** A session cookie value as Better Auth signs it: `token.HMAC`, URL-encoded. */
 async function signedToken(token: string): Promise<string> {
   const key = await crypto.subtle.importKey(
@@ -250,6 +279,10 @@ export const test = base.extend<{
   bannedAccount: TestAccount;
   /** The admin, shared by every test that moderates. */
   adminAccount: TestAccount;
+  /** This worker's account below the karma floor, at -120. */
+  lowKarmaAccount: TestAccount;
+  /** This worker's other account below the floor, at -130, for an appeal. */
+  appealAccount: TestAccount;
 }>({
   fakePlayers: [false, { option: true }],
 
@@ -267,6 +300,14 @@ export const test = base.extend<{
 
   bannedAccount: async ({ baseURL }, use) => {
     await use(testAccount(BANNED_ACCOUNT, "e2e_banned", baseURL!));
+  },
+
+  lowKarmaAccount: async ({ baseURL }, use, testInfo) => {
+    await use(testAccount(`${LOW_KARMA_ACCOUNT}${testInfo.workerIndex}`, `e2e_low_${testInfo.workerIndex}`, baseURL!));
+  },
+
+  appealAccount: async ({ baseURL }, use, testInfo) => {
+    await use(testAccount(`${APPEAL_ACCOUNT}${testInfo.workerIndex}`, `e2e_appeal_${testInfo.workerIndex}`, baseURL!));
   },
 
   thirdParties: [

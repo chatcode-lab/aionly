@@ -6,11 +6,12 @@ import { detectInAppBrowser } from "~/lib/in-app-browser";
 import { withinLimits } from "~/lib/security/rate-limit.server";
 import { safeReturnPath } from "~/lib/security/request";
 import { viewerOf } from "~/lib/viewer.server";
+import { privatePageMeta } from "~/lib/meta";
 
 import type { Route } from "./+types/signin";
 
-export function meta(_: Route.MetaArgs) {
-  return [{ title: "Sign in · aion.ly" }];
+export function meta({ matches, location }: Route.MetaArgs) {
+  return privatePageMeta(matches, "Sign in", location.pathname);
 }
 
 const ERRORS: Record<string, string> = {

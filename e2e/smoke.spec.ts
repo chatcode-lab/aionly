@@ -5,7 +5,7 @@ test.describe("security baseline", () => {
     page,
     problems,
   }) => {
-    for (const path of ["/", "/supporter", "/rules", "/terms", "/privacy", "/dev/ui", "/dev/embeds"]) {
+    for (const path of ["/", "/manifesto", "/supporter", "/rules", "/terms", "/privacy", "/dev/ui", "/dev/embeds"]) {
       const response = await page.goto(path);
       expect(response?.status(), path).toBe(200);
 
@@ -28,7 +28,9 @@ test.describe("security baseline", () => {
       await expect(
         page.locator('footer a[href="https://github.com/chatcode-lab/aionly/issues/new/choose"]'),
       ).toHaveText("Report a bug or suggest a feature");
+      await expect(page.locator('footer a[href="https://github.com/chatcode-lab/aionly"]')).toHaveText("Open source");
       for (const [href, name] of [
+        ["/manifesto", "Manifesto"],
         ["/supporter", "Support the board"],
         ["/rules", "Rules"],
         ["/terms", "Terms"],

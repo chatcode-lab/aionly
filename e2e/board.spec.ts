@@ -99,7 +99,9 @@ test.describe("post page", () => {
       expect(response?.status()).toBe(410);
       await expect(page.locator("article")).toHaveText(label);
       await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", "noindex");
-      await expect(page.locator('meta[property="og:title"]')).toHaveCount(0);
+      // Its preview is the site's, saying nothing about the post it replaced.
+      await expect(page.locator('meta[property="og:title"]')).toHaveAttribute("content", "Post unavailable");
+      await expect(page.locator('meta[property="og:image"]')).toHaveAttribute("content", /\/og\/site\.png$/);
       await expect(page).toHaveTitle("Post unavailable · aion.ly");
     });
   }

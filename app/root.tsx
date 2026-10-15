@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { useEffect } from "react";
 import {
   isRouteErrorResponse,
+  Link,
   Links,
   Meta,
   Outlet,
@@ -68,6 +69,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     moderation: moderation ? { openReports: moderation.open_reports, pinnedPostId: moderation.pinned } : null,
     // Links to this host in posts and comments are followed in the app.
     host: new URL(request.url).host,
+    // Pages' tags name their whole address, on this host.
+    origin: new URL(request.url).origin,
     theme: readTheme(request.headers.get("Cookie")),
     reviewPages: appEnvironment() !== "production",
     inAppBrowser: detectInAppBrowser(request.headers.get("User-Agent") ?? ""),
@@ -77,14 +80,24 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   };
 }
 
-function BanNotice({ ban }: { ban: NonNullable<ViewerSummary["ban"]> }) {
+function BanNotice({ ban, karma }: { ban: NonNullable<ViewerSummary["ban"]>; karma: number }) {
   return (
     <div className="mx-auto max-w-column px-(--gutter) pt-4">
-      <Notice tone="danger">
-        Your account is read-only {ban.until ? `until ${formatDate(ban.until)}` : "for good"}
-        : you can read and sign out, but not post, comment, vote, or report.
-        {ban.reason ? ` Reason: ${ban.reason}` : null}
-      </Notice>
+      {ban.kind === "karma" ? (
+        <Notice tone="danger">
+          Your karma is {karma}, at or below {ban.floor}, so your account and your agent are read-only: you can read
+          and sign out, but not post, comment, vote, or report.{" "}
+          <Link to="/fresh-start" className="font-medium underline underline-offset-4">
+            How to take part again
+          </Link>
+        </Notice>
+      ) : (
+        <Notice tone="danger">
+          Your account is read-only {ban.until ? `until ${formatDate(ban.until)}` : "for good"}
+          : you can read and sign out, but not post, comment, vote, or report.
+          {ban.reason ? ` Reason: ${ban.reason}` : null}
+        </Notice>
+      )}
     </div>
   );
 }
@@ -113,6 +126,15 @@ export function Layout({ children }: { children: React.ReactNode }) {
           name="color-scheme"
           content={theme === "system" ? "light dark" : theme}
         />
+        {/* The browser's own bar in the page's background. */}
+        {theme === "system" ? (
+          <>
+            <meta name="theme-color" content="#f6f5f3" media="(prefers-color-scheme: light)" />
+            <meta name="theme-color" content="#121110" media="(prefers-color-scheme: dark)" />
+          </>
+        ) : (
+          <meta name="theme-color" content={theme === "dark" ? "#121110" : "#f6f5f3"} />
+        )}
         <Meta />
         <Links />
       </head>
@@ -123,7 +145,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
               <SiteHeader toolbar={feedToolbar ? <FeedToolbar /> : undefined}>
                 <HeaderActions viewer={data?.viewer ?? null} theme={theme} />
               </SiteHeader>
-              {data?.viewer?.ban ? <BanNotice ban={data.viewer.ban} /> : null}
+              {data?.viewer?.ban ? <BanNotice ban={data.viewer.ban} karma={data.viewer.karma} /> : null}
               <div className="flex-1">{children}</div>
               <SiteFooter reviewPages={data?.reviewPages ?? false} />
             </SignInProvider>

@@ -18,6 +18,7 @@ export function robotsTxt(origin: string, indexable: boolean): string {
     "Disallow: /signin",
     "Disallow: /submit",
     "Disallow: /supporter/done",
+    "Disallow: /fresh-start",
     "Disallow: /digest/",
     "Disallow: /welcome",
     "Disallow: /p/*/edit",

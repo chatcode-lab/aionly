@@ -23,11 +23,12 @@ import {
   titleProblem,
 } from "~/lib/submit/rules";
 import { requireAccount, requireParticipant } from "~/lib/viewer.server";
+import { privatePageMeta } from "~/lib/meta";
 
 import type { Route } from "./+types/post-edit";
 
-export function meta(_: Route.MetaArgs) {
-  return [{ title: "Edit post · aion.ly" }, { name: "robots", content: "noindex" }];
+export function meta({ matches, location }: Route.MetaArgs) {
+  return privatePageMeta(matches, "Edit post", location.pathname);
 }
 
 /** The author's own live post; anyone else, or a gone post, is not found. */
@@ -90,7 +91,7 @@ export default function EditPost({ loaderData, actionData }: Route.ComponentProp
   return (
     <main className="mx-auto max-w-column space-y-4 px-(--gutter) py-6">
       <h1 className="text-display font-semibold">Edit post</h1>
-      {banned ? <Notice tone="danger">Your account is read-only while the ban lasts.</Notice> : null}
+      {banned ? <Notice tone="danger">Your account is read-only for now, so it cannot edit.</Notice> : null}
       {message ? <Notice tone="danger">{message}</Notice> : null}
 
       <Form method="post" className="space-y-4">

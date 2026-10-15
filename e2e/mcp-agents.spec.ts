@@ -89,6 +89,72 @@ test("a supporter's agent posts, reads replies, and uploads through MCP with its
   expect(JSON.stringify(refused.content)).toMatch(/aion\.ly refused \(\d{3} /);
 });
 
+test("an agent keeps up with its owner and what it watches, reading only", async ({ page, context, account, request }) => {
+  await setPlan(request, account);
+  await account.signIn(context);
+  await open(page, "/settings");
+  const section = page.getByRole("region", { name: "Your agent" });
+  await section.getByRole("button", { name: "Connect an agent" }).click();
+  await section.getByRole("button", { name: "New token" }).click();
+  const token = (await section.locator("code").textContent())!.trim();
+  const mcp = client(request, token);
+  await mcp.send("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "e2e", version: "1" } });
+  const listed = await mcp.send("tools/list");
+  expect((listed.result.tools as Array<{ name: string }>).map((tool) => tool.name)).toEqual(expect.arrayContaining(["whats_new", "watch"]));
+  const since = Math.floor(Date.now() / 1000) - 5;
+
+  // Only what is on the board can be watched, and the refusal says what is not.
+  const unknown = await mcp.call("watch", { users: ["nobody_here_404"] });
+  expect(unknown.isError).toBe(true);
+  expect(JSON.stringify(unknown.content)).toContain("No member or agent is named nobody_here_404");
+  const watched = await mcp.call("watch", { keywords: ["lighthouse keeper"], posts: ["/p/s_post_01"] });
+  expect(watched.structuredContent).toMatchObject({
+    keywords: ["lighthouse keeper"],
+    posts: [expect.objectContaining({ id: "s_post_01", live: true })],
+  });
+  const me = await mcp.call("whoami");
+  expect(me.structuredContent).toMatchObject({
+    owner: { username: account.username, posting: { allowed: true }, read_only: null },
+    read_only: null,
+    karma_floor: -100,
+    watching: { keywords: ["lighthouse keeper"] },
+  });
+
+  // The owner comments on the watched post, with the keyword; the agent sees why it matters.
+  // Its own words, since other runs comment on the same post.
+  const said = `A Lighthouse   keeper would love this, says ${account.username}.`;
+  await open(page, "/p/s_post_01");
+  await page.getByLabel("Comment", { exact: true }).fill(said);
+  await page.getByRole("button", { name: "Comment", exact: true }).click();
+  await expect(page.getByLabel("Comment", { exact: true })).toHaveValue("");
+  await expect(page.locator("li[id^='c-']", { has: page.getByText(`says ${account.username}.`) })).toBeVisible();
+  const news = await mcp.call("whats_new", { since });
+  expect(news.isError, JSON.stringify(news)).toBeUndefined();
+  expect(news.structuredContent).toMatchObject({ complete: true });
+  // Other runs comment on the same post meanwhile, so only this one is checked.
+  const items = news.structuredContent!.items as Array<{ id: string; body?: string }>;
+  expect(items).toContainEqual(
+    expect.objectContaining({
+      type: "comment",
+      body: said,
+      author: { username: account.username, agent: false },
+      why: ["owner", "watched_post", "keyword"],
+      keywords: ["lighthouse keeper"],
+      post: expect.objectContaining({ id: "s_post_01" }),
+    }),
+  );
+  const mine = items.find((item) => item.body === said)!;
+  // From where the last call ended, it does not come again.
+  const later = await mcp.call("whats_new", { since: news.structuredContent!.next_since as number });
+  expect((later.structuredContent!.items as Array<{ id: string }>).map((item) => item.id)).not.toContain(mine.id);
+
+  // The owner sees what the agent watches, and the agent can let it go.
+  await open(page, "/settings");
+  await expect(section.getByText("It also watches keywords “lighthouse keeper”; 1 post.")).toBeVisible();
+  const removed = await mcp.call("watch", { action: "remove", keywords: ["LIGHTHOUSE keeper"], posts: ["s_post_01"] });
+  expect(removed.structuredContent).toMatchObject({ keywords: [], posts: [] });
+});
+
 test("the MCP server speaks the modern protocol and asks unsigned clients to sign in", async ({ request, baseURL }) => {
   const unsigned = await request.post("/mcp", { data: { jsonrpc: "2.0", id: 1, method: "initialize", params: {} } });
   expect(unsigned.status()).toBe(401);

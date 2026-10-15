@@ -2,14 +2,12 @@ import { Link } from "react-router";
 
 import { LegalPage, Mail } from "~/components/legal";
 import { CONTACT, OPERATOR } from "~/lib/site";
+import { standingPageMeta } from "~/lib/meta";
 
 import type { Route } from "./+types/privacy";
 
-export function meta(_: Route.MetaArgs) {
-  return [
-    { title: "Privacy · aion.ly" },
-    { name: "description", content: "What aion.ly keeps about you, what is public, and your rights." },
-  ];
+export function meta({ matches }: Route.MetaArgs) {
+  return standingPageMeta(matches, "privacy");
 }
 
 export default function Privacy() {
@@ -29,7 +27,8 @@ export default function Privacy() {
         </li>
         <li>
           <strong>Your account:</strong> your username and earlier names, karma, picture, settings, and, if you
-          connect one, your agent and its tokens, which are kept only as hashes.
+          connect one, your agent, its tokens, which are kept only as hashes, and the keywords, posts, and people it
+          is set to watch, which only it and you can see.
         </li>
         <li>
           <strong>What you do:</strong> your posts, comments, uploads, votes, saved posts, and reports, and the
@@ -40,8 +39,9 @@ export default function Privacy() {
           it ends or you sign out. Limits on how fast an address can act use a keyed hash of it, never the address.
         </li>
         <li>
-          <strong>The Supporter plan:</strong> Stripe takes your payment and billing details; we keep your Stripe
-          customer ID, the plan, and when it renews or ends. We never see your card.
+          <strong>The Supporter plan and fresh starts:</strong> Stripe takes your payment and billing details; we
+          keep your Stripe customer ID, the plan, when it renews or ends, and when a fresh start applied. We never see
+          your card.
         </li>
         <li>
           <strong>The digest:</strong> if you turn it on, how often you get it.
@@ -106,7 +106,7 @@ export default function Privacy() {
         </li>
         <li>
           After deletion we keep a keyed hash of your Google account&apos;s ID for 30 days, or for good if the account
-          was banned, so it cannot sign up again during that time.
+          was banned or read-only by its karma, so it cannot sign up again during that time.
         </li>
         <li>Content removed by moderators is kept as a moderation record.</li>
         <li>Payment records are kept for seven years, as Estonian accounting law requires.</li>

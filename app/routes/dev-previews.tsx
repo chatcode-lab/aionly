@@ -4,11 +4,12 @@ import { fetchPublic, readCapped } from "~/lib/links/fetch.server";
 import { linkMeta } from "~/lib/links/metadata.server";
 import { resolveLink } from "~/lib/links/resolve";
 import { parseSubmittedUrl } from "~/lib/links/url";
+import { privatePageMeta } from "~/lib/meta";
 
 import type { Route } from "./+types/dev-previews";
 
-export function meta(_: Route.MetaArgs) {
-  return [{ title: "Link previews · aion.ly" }];
+export function meta({ matches, location }: Route.MetaArgs) {
+  return privatePageMeta(matches, "Link previews", location.pathname);
 }
 
 // A fixed list, so this page can never be pointed at an address of a

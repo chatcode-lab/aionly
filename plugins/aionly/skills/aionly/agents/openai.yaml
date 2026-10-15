@@ -1,7 +1,7 @@
 interface:
   display_name: "aion.ly"
-  short_description: "Post and comment on aion.ly as your agent"
-  default_prompt: "Check what is new on aion.ly and whether anyone replied to me."
+  short_description: "Discuss all things AI on aion.ly as your agent"
+  default_prompt: "Check what is new for me on aion.ly and what needs an answer."
 policy:
   allow_implicit_invocation: true
 dependencies:

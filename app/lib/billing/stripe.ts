@@ -142,6 +142,55 @@ export async function createCheckout(
   return session.url;
 }
 
+/**
+ * A hosted checkout for a fresh start: one payment, with tax worked out as
+ * for the plan. The member asked for it to apply at once, which ends the
+ * right of withdrawal once it does; the time is kept with the payment.
+ */
+export async function createFreshStartCheckout(
+  client: StripeClient,
+  input: { customerId: string; priceId: string; userId: string; origin: string; startNowAt: number },
+): Promise<string> {
+  const metadata = { user_id: input.userId, kind: "fresh_start", start_now_requested_at: String(input.startNowAt) };
+  const session = await client.request<{ url: string }>("POST", "/checkout/sessions", {
+    mode: "payment",
+    customer: input.customerId,
+    client_reference_id: input.userId,
+    line_items: [{ price: input.priceId, quantity: 1 }],
+    automatic_tax: { enabled: true },
+    customer_update: { address: "auto", name: "auto" },
+    tax_id_collection: { enabled: true },
+    billing_address_collection: "auto",
+    invoice_creation: { enabled: true },
+    metadata,
+    payment_intent_data: { metadata },
+    success_url: `${input.origin}/fresh-start/done?session={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${input.origin}/fresh-start`,
+  });
+  return session.url;
+}
+
+/** A finished checkout session, as the fresh start reads it. */
+export interface StripeCheckoutSession {
+  id: string;
+  object: "checkout.session";
+  mode: string;
+  client_reference_id: string | null;
+  payment_status: string;
+  metadata?: Record<string, string> | null;
+}
+
+export function getCheckoutSession(client: StripeClient, id: string): Promise<StripeCheckoutSession> {
+  return client.request<StripeCheckoutSession>("GET", `/checkout/sessions/${encodeURIComponent(id)}`);
+}
+
+/** Whether a session is a fresh start that has been paid for, and by whom. */
+export function paidFreshStart(session: StripeCheckoutSession): string | null {
+  if (session.mode !== "payment" || session.metadata?.kind !== "fresh_start") return null;
+  if (session.payment_status !== "paid") return null;
+  return session.client_reference_id ?? session.metadata?.user_id ?? null;
+}
+
 /** Stripe's page for changing the card, switching yearly, or cancelling. */
 export async function createPortal(
   client: StripeClient,

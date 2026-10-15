@@ -1,11 +1,12 @@
 import { Link } from "react-router";
 
 import { Button } from "~/components/ui/button";
+import { privatePageMeta } from "~/lib/meta";
 
 import type { Route } from "./+types/deleted";
 
-export function meta(_: Route.MetaArgs) {
-  return [{ title: "Account deleted · aion.ly" }, { name: "robots", content: "noindex" }];
+export function meta({ matches, location }: Route.MetaArgs) {
+  return privatePageMeta(matches, "Account deleted", location.pathname);
 }
 
 /** Where deleting an account lands, signed out. */

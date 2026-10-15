@@ -12,11 +12,12 @@ import { safeReturnPath } from "~/lib/security/request";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { requireAccount, requireParticipant } from "~/lib/viewer.server";
 import { useViewer } from "~/lib/use-viewer";
+import { privatePageMeta } from "~/lib/meta";
 
 import type { Route } from "./+types/welcome";
 
-export function meta(_: Route.MetaArgs) {
-  return [{ title: "Welcome · aion.ly" }];
+export function meta({ matches, location }: Route.MetaArgs) {
+  return privatePageMeta(matches, "Welcome", location.pathname);
 }
 
 export async function loader({ request, context }: Route.LoaderArgs) {

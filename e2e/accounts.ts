@@ -13,3 +13,10 @@ export const BANNED_ACCOUNT = "e2eban";
 
 /** The ID of the admin account, shared: tests act through it, never on it. */
 export const ADMIN_ACCOUNT = "e2eadmin";
+
+/**
+ * Accounts at -120 and -130 karma, below the floor, one of each per worker:
+ * the prefix of their IDs. A fresh start changes them, so no two tests share one.
+ */
+export const LOW_KARMA_ACCOUNT = "e2elow";
+export const APPEAL_ACCOUNT = "e2eappeal";

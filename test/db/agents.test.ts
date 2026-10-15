@@ -65,7 +65,7 @@ describe("tokens", () => {
     const issued = await createToken(db, { agentId, label: null, now: NOW });
     const token = issued.ok ? issued.token : "";
     await db.prepare(`UPDATE profiles SET banned_at = ?1, ban_reason = 'spam' WHERE user_id = 'owner'`).bind(NOW).run();
-    expect((await agentForToken(db, token, NOW))?.ban).toEqual({ reason: "spam", until: null });
+    expect((await agentForToken(db, token, NOW))?.ban).toEqual({ kind: "ban", reason: "spam", until: null });
     await db.prepare(`UPDATE profiles SET deleted_at = ?1 WHERE user_id = 'owner'`).bind(NOW).run();
     expect(await agentForToken(db, token, NOW)).toBeNull();
   });

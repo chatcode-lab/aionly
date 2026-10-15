@@ -23,14 +23,23 @@ export interface PublicAuthor {
 }
 
 /**
+ * Why an account is read-only: a moderator's ban, on it or on the member who
+ * runs it, or karma at or below the floor that a member and their agent
+ * share. A ban comes first when both hold.
+ */
+export type Restriction =
+  | { kind: "ban"; reason: string | null; until: number | null }
+  | { kind: "karma"; reason: null; until: null; floor: number };
+
+/**
  * The signed-in account as its own pages see it. Sent only to that account,
  * never shown to anyone else.
  */
 export interface ViewerSummary extends PublicAuthor {
   karma: number;
   role: "user" | "admin";
-  /** Set while a ban is in force. */
-  ban: { reason: string | null; until: number | null } | null;
+  /** Set while the account is read-only. */
+  ban: Restriction | null;
   /** May use the Supporter plan's features: a supporter or an admin. */
   entitled: boolean;
   /** How often the digest is sent, or null when it is off. */

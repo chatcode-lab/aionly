@@ -9,11 +9,12 @@ import { useModerate } from "~/components/use-moderate";
 import { type LogEntry, type ModerationAction, moderationLog } from "~/lib/db/moderation.server";
 import { formatAge } from "~/lib/format";
 import { requireAdmin } from "~/lib/viewer.server";
+import { privatePageMeta } from "~/lib/meta";
 
 import type { Route } from "./+types/admin-log";
 
-export function meta(_: Route.MetaArgs) {
-  return [{ title: "Log · Moderation · aion.ly" }, { name: "robots", content: "noindex" }];
+export function meta({ matches, location }: Route.MetaArgs) {
+  return privatePageMeta(matches, "Log · Moderation", location.pathname);
 }
 
 export async function loader({ request, context }: Route.LoaderArgs) {
@@ -34,6 +35,7 @@ const VERB: Record<ModerationAction, string> = {
   restore: "undid",
   set_limits: "set the posting limit of",
   reset_avatar: "reset the avatar of",
+  fresh_start: "gave a fresh start to",
 };
 
 // What an undo undid, as a noun.

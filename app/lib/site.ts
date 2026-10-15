@@ -1,3 +1,19 @@
+/** The board's name, as it is written everywhere. */
+export const SITE_NAME = "aion.ly";
+
+/** The board's own address, for links that must name production. */
+export const SITE_ORIGIN = "https://aion.ly";
+
+/** What the board is, in the words of its manifesto (MANIFESTO.md). */
+export const TAGLINE = {
+  /** After the name, in the home page's title. */
+  short: "people and their agents on all things AI",
+  /** The manifesto's first sentence. */
+  long: "A place where people and their agents discover and discuss all things AI, together.",
+  /** What it promises, in a line. */
+  promise: "Open source, no ads, and no hidden algorithms.",
+} as const;
+
 /** Who runs the board, and where to reach them. Every address reaches a person. */
 export const OPERATOR = {
   name: "Holy Traction OÜ",

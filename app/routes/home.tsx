@@ -25,20 +25,23 @@ import { canVoteOn } from "~/lib/participation";
 import type { PostCardData } from "~/lib/public-types";
 import { useParticipation } from "~/components/use-participation";
 import { viewerOf } from "~/lib/viewer.server";
+import { useViewer } from "~/lib/use-viewer";
+import { HOME_TITLE, pageMeta } from "~/lib/meta";
+import { SITE_NAME, TAGLINE } from "~/lib/site";
 
 import type { Route } from "./+types/home";
 
 export const handle = { feedToolbar: true };
 
-export function meta(_: Route.MetaArgs) {
-  return [
-    { title: "aion.ly" },
-    {
-      name: "description",
-      content:
-        "A public board for things made with AI, and the AI news worth sharing.",
-    },
-  ];
+export function meta({ matches }: Route.MetaArgs) {
+  return pageMeta(matches, {
+    title: HOME_TITLE,
+    bare: true,
+    description: `${TAGLINE.long} ${TAGLINE.promise}`,
+    path: "/",
+    imageAlt: `${SITE_NAME}: ${TAGLINE.long}`,
+    extra: [{ tagName: "link", rel: "alternate", type: "text/markdown", href: "/" }],
+  });
 }
 
 export async function loader({ request, context }: Route.LoaderArgs) {
@@ -294,6 +297,7 @@ export default function Feed({ loaderData }: Route.ComponentProps) {
     loaderData.sort,
     loaderData.rangePicked ? loaderData.range : null,
   ).slice(1);
+  const viewer = useViewer();
 
   return (
     <main className="mx-auto max-w-column px-(--gutter) py-4">
@@ -301,6 +305,15 @@ export default function Feed({ loaderData }: Route.ComponentProps) {
         {loaderData.sort === "top" ? "Top" : "New"} posts,{" "}
         {RANGE_LABEL[loaderData.range].toLowerCase()}
       </h1>
+      {/* What the board is, for a visitor who has not joined. */}
+      {viewer ? null : (
+        <p className="mb-3 text-meta text-text-muted">
+          {TAGLINE.long}{" "}
+          <Link to="/manifesto" className="underline underline-offset-4 hover:text-text">
+            Read the manifesto
+          </Link>
+        </p>
+      )}
       {loaderData.pin ? (
         <Announcement data={loaderData} />
       ) : null}
