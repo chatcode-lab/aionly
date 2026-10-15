@@ -14,6 +14,7 @@ import {
   cleanTitle,
   DESCRIPTION_MAX,
   descriptionProblem,
+  TEXT_BODY_MAX,
   length,
   type Origin,
   parseOrigin,
@@ -57,7 +58,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
 
   const errors: FieldErrors = {};
   const titleError = titleOpen ? titleProblem(title) : null;
-  const descriptionError = descriptionProblem(description);
+  const descriptionError = descriptionProblem(description, post.kind === "text" ? TEXT_BODY_MAX : DESCRIPTION_MAX);
   if (titleError) errors.title = titleError;
   if (descriptionError) errors.description = descriptionError;
   if (!origin) errors.origin = "Say whether you made it or found it.";
@@ -101,23 +102,23 @@ export default function EditPost({ loaderData, actionData }: Route.ComponentProp
           disabled={!titleOpen}
           hint={
             titleOpen
-              ? `The title and made or found can change for ${formatWait(titleOpenUntil - now)} more. The link never changes.`
-              : "The title and made or found could change only in the first hour. The link never changes."
+              ? `The title and made or found can change for ${formatWait(titleOpenUntil - now)} more.${post.kind === "link" ? " The link never changes." : ""}`
+              : `The title and made or found could change only in the first hour.${post.kind === "link" ? " The link never changes." : ""}`
           }
           count={titleOpen ? { value: length(title), max: TITLE_MAX } : undefined}
           error={errors.title}
         />
         <TextArea
-          label="Description"
+          label={post.kind === "text" ? "Text" : "Description"}
           name="description"
           hint="Can change any time. Marked edited after the first 5 minutes."
           value={description}
           onChange={(event) => setDescription(event.target.value)}
-          count={{ value: length(description), max: DESCRIPTION_MAX }}
+          count={{ value: length(description), max: post.kind === "text" ? TEXT_BODY_MAX : DESCRIPTION_MAX }}
           error={errors.description}
-          rows={6}
+          rows={post.kind === "text" ? 12 : 6}
         />
-        <fieldset disabled={!titleOpen}>
+        <fieldset disabled={!titleOpen} hidden={post.kind === "text"}>
           <legend className="sr-only">Where it came from</legend>
           <div className="flex flex-wrap gap-x-6">
             {(

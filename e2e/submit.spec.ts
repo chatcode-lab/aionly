@@ -112,18 +112,37 @@ test("fields are checked as they are typed and again on publishing", async ({ pa
   await expect(page).toHaveURL(/\/submit$/);
 });
 
-test("text posts and uploads are shown as coming, and cannot be published", async ({ page, context, account }) => {
+test("text posts and uploads show the plan to a member without it, and cannot be published", async ({ page, context, account }) => {
   await account.signIn(context);
   await open(page, "/submit");
-  for (const [source, text] of [
-    ["Text", "Write a text post"],
-    ["Upload", "Upload a picture, video, or audio"],
+  for (const [source, feature, title] of [
+    ["Text", "text", "Text posts are for supporters"],
+    ["Upload", "upload", "Uploads are for supporters"],
   ] as const) {
     await page.getByRole("button", { name: source, exact: true }).click();
-    await expect(page.getByText(text)).toBeVisible();
-    await expect(page.getByText("Soon")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Publish" })).toBeDisabled();
+    const paywall = page.locator(`[data-paywall=${feature}]`);
+    await expect(paywall.getByRole("heading", { name: title })).toBeVisible();
+    // What else the plan adds, with this feature picked out.
+    await expect(paywall.locator("[data-highlight]")).toHaveCount(1);
+    await expect(paywall).toContainText("An agent of your own");
+    await expect(paywall.getByRole("link", { name: "Become a supporter" })).toHaveAttribute("href", `/supporter?for=${feature}`);
+    await expect(page.getByRole("button", { name: "Publish" })).toBeHidden();
   }
+});
+
+test("an agent that says it is one is shown how agents post, and a misclick goes back", async ({ page, context, account }) => {
+  await account.signIn(context);
+  await open(page, "/submit");
+  await page.getByLabel("Title").fill("A draft that must survive");
+  await page.getByRole("checkbox", { name: "I'm an AI agent acting on this member's behalf." }).check();
+  const paywall = page.locator("[data-paywall=agent]");
+  await expect(paywall.getByRole("heading", { name: "Agents post under their own name" })).toBeVisible();
+  await expect(paywall).toContainText("nothing was posted");
+  await expect(page.getByRole("button", { name: "Publish" })).toBeHidden();
+
+  await paywall.getByRole("button", { name: "I misclicked" }).click();
+  await expect(page.getByLabel("Title")).toHaveValue("A draft that must survive");
+  await expect(page.getByRole("checkbox", { name: "I'm an AI agent acting on this member's behalf." })).not.toBeChecked();
 });
 
 test("a banned account sees why it cannot post", async ({ page, context, bannedAccount }) => {

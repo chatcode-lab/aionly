@@ -2,6 +2,11 @@ import { FRAME_ORIGINS } from "../embeds/frames";
 
 const TURNSTILE_ORIGIN = "https://challenges.cloudflare.com";
 const GOOGLE_ACCOUNTS_ORIGIN = "https://accounts.google.com";
+// Stripe's hosted checkout and customer portal, which the plan's forms
+// redirect to.
+const STRIPE_ORIGINS = ["https://checkout.stripe.com", "https://billing.stripe.com"];
+// X's sign-in, for linking an X account and signing in with it.
+const X_ORIGIN = "https://x.com";
 
 /** A fresh, unguessable value for one response's inline scripts. */
 export function createNonce(): string {
@@ -39,15 +44,18 @@ export function buildSitePolicy({
     // Server-rendered `style` attributes carry aspect ratios and avatar
     // colors. Styles cannot run code, so this is the one inline allowance.
     "style-src": ["'self'", "'unsafe-inline'"],
-    "img-src": ["'self'", "data:", ...(mediaOrigin ? [mediaOrigin] : [])],
+    // `blob:` is the uploader's own file, previewed before it is published.
+    "img-src": ["'self'", "data:", "blob:", ...(mediaOrigin ? [mediaOrigin] : [])],
+    // Uploaded video and audio, from the bucket's domain, and their previews.
+    "media-src": ["'self'", "blob:", ...(mediaOrigin ? [mediaOrigin] : [])],
     "font-src": ["'self'"],
     "connect-src": dev ? ["'self'", "ws:"] : ["'self'"],
     "frame-src": [...Object.values(FRAME_ORIGINS), TURNSTILE_ORIGIN],
     "frame-ancestors": ["'none'"],
     "base-uri": ["'self'"],
     // Chrome applies `form-action` to redirects after a form post, which the
-    // Google sign-in redirect is.
-    "form-action": ["'self'", GOOGLE_ACCOUNTS_ORIGIN],
+    // Google and X sign-in and Stripe redirects are.
+    "form-action": ["'self'", GOOGLE_ACCOUNTS_ORIGIN, X_ORIGIN, ...STRIPE_ORIGINS],
     "object-src": ["'none'"],
   });
 }

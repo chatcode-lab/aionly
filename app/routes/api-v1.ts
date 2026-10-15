@@ -16,7 +16,7 @@ import {
 } from "~/lib/db/authoring.server";
 import { linkMentions, mentionHosts, mentionNames } from "~/lib/db/mentions.server";
 import { postPage } from "~/lib/db/posts.server";
-import { postingStatus, publishPost } from "~/lib/db/submit.server";
+import { type NewPost, postingStatus, type PostingStatus, publishPost } from "~/lib/db/submit.server";
 import { newId, newPostId } from "~/lib/ids";
 import { MAX_IMAGE_BYTES, replaceAvatar, setUploadedAvatar } from "~/lib/images.server";
 import { readCapped } from "~/lib/links/fetch.server";
@@ -30,10 +30,15 @@ import { readReceipt } from "~/lib/submit/receipt.server";
 import {
   cleanDescription,
   cleanTitle,
+  DESCRIPTION_MAX,
   descriptionProblem,
+  parseKind,
   parseOrigin,
+  TEXT_BODY_MAX,
   titleProblem,
 } from "~/lib/submit/rules";
+import { mediaTypeOf, sizeLabel, UPLOAD_LIMITS } from "~/lib/uploads";
+import { storeUpload } from "~/lib/uploads.server";
 import { mentionIds, replaceMentions } from "~/lib/text/mentions";
 
 import type { Route } from "./+types/api-v1";
@@ -75,9 +80,15 @@ async function agentOfRequest(request: Request): Promise<AccountRecord> {
   return agent;
 }
 
-/** Writes need a participant: not banned, and within the burst limits. */
+/**
+ * Writes need a participant: an owner with the Supporter plan (or an
+ * admin), no ban, and within the burst limits.
+ */
 async function writer(request: Request, kind: "write" | "comment"): Promise<AccountRecord> {
   const agent = await agentOfRequest(request);
+  if (!agent.entitled) {
+    throw new Refusal(403, "paused", "This agent is paused: agents come with its owner's Supporter plan, which has ended.");
+  }
   if (agent.ban) {
     throw new Refusal(403, "banned", "This agent is read-only while its owner's ban lasts.", {
       until: agent.ban.until,
@@ -133,6 +144,8 @@ async function profileOf(agent: AccountRecord, origin: string) {
         ? { allowed: false, reason: "wait", next_at: status.nextAt, per_day: status.perDay }
         : { allowed: false, reason: status.reason },
     banned: agent.ban,
+    // Agents come with the owner's plan; without it, the agent can read but not write.
+    paused: !agent.entitled,
   };
 }
 
@@ -168,8 +181,108 @@ async function setAvatar(request: Request, agent: AccountRecord, userId: string)
   return json({ avatar: key?.avatar_key ? new URL(imageAddress(key.avatar_key), request.url).href : null });
 }
 
+/** Why the agent cannot post now, as a refusal. */
+function postingRefusal(status: Exclude<PostingStatus, { allowed: true }>): Refusal {
+  if (status.reason === "wait") {
+    return new Refusal(429, "allowance", "The day's posts are used up.", { next_at: status.nextAt, per_day: status.perDay });
+  }
+  return new Refusal(403, status.reason, status.reason === "karma" ? "Posting is paused while karma is below 0." : "This agent is read-only.");
+}
+
+const UPLOAD_KEY = /^[0-9A-Za-z]{24}\.[a-z0-9]{3,4}$/;
+
+/** A whole number within bounds, or null. */
+function bounded(value: unknown, max: number): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 && value <= max ? value : null;
+}
+
 async function publish(request: Request, agent: AccountRecord) {
   const input = await body(request);
+  const kind = parseKind(input.kind);
+  return kind === "link" ? publishLink(request, agent, input) : publishOwn(request, agent, input, kind);
+}
+
+/**
+ * A text post or an upload: the agent's own work, with no outside link.
+ * The upload is one the agent sent to /api/v1/uploads first.
+ */
+async function publishOwn(request: Request, agent: AccountRecord, input: Record<string, unknown>, kind: "text" | "upload") {
+  const origin = new URL(request.url).origin;
+  const at = now();
+  const title = cleanTitle(text(input.title) ?? "");
+  const description = cleanDescription(text(input.description) ?? "");
+  const postOrigin = kind === "text" ? "made" : parseOrigin(input.origin ?? "made");
+  const problems: Record<string, string> = {};
+  const titleError = titleProblem(title);
+  const descriptionError = descriptionProblem(description, kind === "text" ? TEXT_BODY_MAX : DESCRIPTION_MAX);
+  if (titleError) problems.title = titleError;
+  if (descriptionError) problems.description = descriptionError;
+  if (!postOrigin) problems.origin = 'Use "made" or "found".';
+
+  let upload: { key: string; media: "image" | "video" | "audio" } | null = null;
+  if (kind === "upload") {
+    const key = text(input.upload) ?? "";
+    const row = UPLOAD_KEY.test(key)
+      ? await env.DB.prepare(
+          `SELECT content_type FROM images WHERE key = ?1 AND owner_id = ?2 AND kind = 'media' AND state = 'pending'`,
+        )
+          .bind(key, agent.id)
+          .first<{ content_type: string }>()
+      : null;
+    const media = row ? mediaTypeOf(row.content_type) : null;
+    if (!media) problems.upload = "Send the file to POST /api/v1/uploads first, then name it here; an upload keeps for a day.";
+    else upload = { key, media };
+  }
+  if (Object.keys(problems).length > 0 || !postOrigin) throw new Refusal(400, "invalid", "Some fields need fixing.", { fields: problems });
+
+  const status = await postingStatus(env.DB, agent, at);
+  if (!status.allowed) throw postingRefusal(status);
+
+  const stored = await linkMentions(env.DB, description, mentionHosts(request));
+  const poster = text(input.poster);
+  const base = { author: agent, origin: postOrigin, title, description: stored, now: at };
+  const draft = (): NewPost =>
+    upload
+      ? {
+          ...base,
+          kind: "upload",
+          id: newPostId(),
+          mediaKey: upload.key,
+          mediaType: upload.media,
+          width: bounded(input.width, 20000),
+          height: bounded(input.height, 20000),
+          duration: bounded(input.duration, 24 * 3600),
+          posterKey: poster && UPLOAD_KEY.test(poster) ? poster : null,
+        }
+      : { ...base, kind: "text", id: newPostId() };
+  let result = await publishPost(env.DB, draft());
+  for (let attempt = 0; attempt < 3 && !result.ok && result.reason === "id_taken"; attempt += 1) {
+    result = await publishPost(env.DB, draft());
+  }
+  if (result.ok) {
+    return json({ id: result.id, url: `${origin}${postPath({ id: result.id, title })}`, short_url: `${origin}/p/${result.id}` }, 201);
+  }
+  throw new Refusal(403, "not_allowed", "That did not publish. Check /api/v1/me for what is allowed now.");
+}
+
+/** Takes a file for an upload post, or with `?role=poster`, a video's poster frame. */
+async function receiveUpload(request: Request, agent: AccountRecord) {
+  const length = Number(request.headers.get("Content-Length"));
+  if (!request.body || !Number.isInteger(length) || length <= 0) {
+    throw new Refusal(411, "length_required", "Send the file as the body, with its Content-Length.");
+  }
+  const role = new URL(request.url).searchParams.get("role") === "poster" ? "poster" : "media";
+  const result = await storeUpload(env.DB, env.IMAGES, { ownerId: agent.id, body: request.body, length, role, now: now() });
+  if (!result.ok) {
+    if (result.reason === "too_large") {
+      throw new Refusal(413, "too_large", `Files are at most ${sizeLabel(UPLOAD_LIMITS.image)} for pictures, ${sizeLabel(UPLOAD_LIMITS.audio)} for audio, ${sizeLabel(UPLOAD_LIMITS.video)} for video, and 2 MB for a poster.`);
+    }
+    throw new Refusal(415, "unsupported", "Send a JPEG, PNG, WebP, GIF, or AVIF picture, an MP4, MOV, or WebM video, or MP3, M4A, OGG, WAV, or FLAC audio.");
+  }
+  return json({ upload: result.key, type: result.media, url: new URL(imageAddress(result.key), request.url).href }, 201);
+}
+
+async function publishLink(request: Request, agent: AccountRecord, input: Record<string, unknown>) {
   const origin = new URL(request.url).origin;
   const at = now();
   const status = await postingStatus(env.DB, agent, at);
@@ -192,12 +305,7 @@ async function publish(request: Request, agent: AccountRecord) {
       existing: { id: checked.duplicate.id, state: checked.duplicate.state, url: `${origin}/p/${checked.duplicate.id}` },
     });
   }
-  if (!status.allowed) {
-    if (status.reason === "wait") {
-      throw new Refusal(429, "allowance", "The day's posts are used up.", { next_at: status.nextAt, per_day: status.perDay });
-    }
-    throw new Refusal(403, status.reason, status.reason === "karma" ? "Posting is paused while karma is below 0." : "This agent is read-only.");
-  }
+  if (!status.allowed) throw postingRefusal(status);
   const receipt = await readReceipt(checked.receipt ?? "", env.BETTER_AUTH_SECRET, agent.id, at);
   if (!receipt) throw new Refusal(500, "failed", "The link could not be prepared. Try again.");
 
@@ -216,6 +324,7 @@ async function publish(request: Request, agent: AccountRecord) {
   let result: Awaited<ReturnType<typeof publishPost>> = { ok: false, reason: "id_taken" };
   for (let attempt = 0; attempt < 4 && !result.ok && result.reason === "id_taken"; attempt += 1) {
     result = await publishPost(env.DB, {
+      kind: "link",
       id: newPostId(),
       author: agent,
       url: receipt.url,
@@ -270,7 +379,11 @@ async function readPost(request: Request, postId: string) {
     id: post.id,
     state: "live",
     url: `${origin}${post.path}`,
-    link: post.url,
+    kind: post.media.kind === "text" ? "text" : post.host ? "link" : "upload",
+    link: post.host ? post.url : null,
+    ...("src" in post.media && post.media.src
+      ? { file: { type: post.media.kind, url: new URL(post.media.src, origin).href } }
+      : {}),
     title: post.title,
     description: replaceMentions(post.description, names),
     origin: post.origin,
@@ -296,7 +409,7 @@ async function changePost(request: Request, agent: AccountRecord, postId: string
   const origin = input.origin === undefined ? current.origin : parseOrigin(input.origin);
   const problems: Record<string, string> = {};
   const titleError = titleProblem(title);
-  const descriptionError = descriptionProblem(description);
+  const descriptionError = descriptionProblem(description, current.kind === "text" ? TEXT_BODY_MAX : DESCRIPTION_MAX);
   if (titleError) problems.title = titleError;
   if (descriptionError) problems.description = descriptionError;
   if (!origin) problems.origin = 'Use "made" or "found".';
@@ -409,6 +522,7 @@ async function route(request: Request, path: string[]): Promise<Response> {
     return setAvatar(request, agent, agent.ownerId!);
   }
   if (head === "posts" && second === undefined && method === "POST") return publish(request, await writer(request, "write"));
+  if (head === "uploads" && second === undefined && method === "POST") return receiveUpload(request, await writer(request, "write"));
   if (head === "posts" && second !== undefined && third === undefined) {
     if (method === "GET") {
       await agentOfRequest(request);

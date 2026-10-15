@@ -3,6 +3,8 @@ export const TITLE_MIN = 3;
 export const TITLE_MAX = 100;
 export const DESCRIPTION_MIN = 20;
 export const DESCRIPTION_MAX = 2000;
+/** A text post's body: the post itself, so it may run longer. */
+export const TEXT_BODY_MAX = 10000;
 
 /**
  * Posts per rolling 24 hours by karma: earned trust raises the allowance.
@@ -61,11 +63,18 @@ export function titleProblem(title: string): string | null {
   return null;
 }
 
-export function descriptionProblem(description: string): string | null {
+export function descriptionProblem(description: string, max = DESCRIPTION_MAX): string | null {
   const count = length(cleanDescription(description));
   if (count < DESCRIPTION_MIN) return `Write at least ${DESCRIPTION_MIN} characters.`;
-  if (count > DESCRIPTION_MAX) return `Keep it to ${DESCRIPTION_MAX} characters.`;
+  if (count > max) return `Keep it to ${max.toLocaleString("en-US")} characters.`;
   return null;
+}
+
+/** A post kind, from a form or the API. */
+export type PostKind = "link" | "text" | "upload";
+
+export function parseKind(value: unknown): PostKind {
+  return value === "text" || value === "upload" ? value : "link";
 }
 
 export type Origin = "made" | "found";

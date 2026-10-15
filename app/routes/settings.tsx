@@ -1,18 +1,25 @@
 import { env } from "cloudflare:workers";
-import { useId } from "react";
-import { Form, Link, useNavigation } from "react-router";
+import { useId, useState } from "react";
+import { Form, Link, redirect, useNavigation } from "react-router";
 
 import { Avatar } from "~/components/avatar";
+import { SupporterMark, XMark } from "~/components/post-card";
 import { CopyButton } from "~/components/sign-in";
 import { UsernameForm } from "~/components/username-form";
 import { Button } from "~/components/ui/button";
-import { Notice, SoonBadge } from "~/components/ui/states";
+import { Notice } from "~/components/ui/states";
 import { applyRename } from "~/lib/accounts/rename.server";
 import { RENAME_INTERVAL_DAYS } from "~/lib/accounts/usernames";
+import { authFor, xConfigured } from "~/lib/auth.server";
+import { cancelForDeletion } from "~/lib/billing/plan.server";
 import { type AccountRecord, renameStatus } from "~/lib/db/accounts.server";
 import { agentOf, createAgent, createToken, MAX_TOKENS, type OwnedAgent, revokeToken } from "~/lib/db/agents.server";
+import { deleteAccount, identityHash } from "~/lib/db/deletion.server";
+import { planStatus, type PlanStatus, setShowMark } from "~/lib/db/subscriptions.server";
+import { forgetXAccount, linkedX } from "~/lib/db/x-accounts.server";
 import { formatAge, formatDate } from "~/lib/format";
-import { setGooglePhoto } from "~/lib/images.server";
+import { PLAN_PRICES } from "~/lib/plan";
+import { setGooglePhoto, setXPhoto } from "~/lib/images.server";
 import { imageAddress } from "~/lib/media.server";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { requireAccount, requireParticipant } from "~/lib/viewer.server";
@@ -24,9 +31,18 @@ export function meta(_: Route.MetaArgs) {
   return [{ title: "Settings · aion.ly" }];
 }
 
+/** What a failed X link came back with. */
+const X_ERRORS: Record<string, string> = {
+  plan_required: "Linking X comes with the Supporter plan.",
+  account_already_linked_to_different_user: "That X account is already linked to another account here.",
+  access_denied: "Linking was cancelled on X.",
+};
+
 export async function loader({ request, context }: Route.LoaderArgs) {
   const viewer = await requireAccount(request, context);
   const status = await renameStatus(env.DB, viewer.id);
+  const url = new URL(request.url);
+  const xError = url.searchParams.get("x") === "error" ? (url.searchParams.get("error") ?? "") : null;
   // The one page that shows the account's email, and only to its owner.
   const google = await env.DB.prepare(
     `SELECT "email", "image" IS NOT NULL AS has_photo FROM "user" WHERE "id" = ?1`,
@@ -42,9 +58,21 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     banned: viewer.ban !== null,
     firstChange: status.firstChange,
     nextChangeAt: status.nextChangeAt,
-    // Connecting an agent comes with the paid plan; admins need no plan.
-    canHaveAgent: viewer.role === "admin",
-    agent: viewer.role === "admin" ? await agentOf(env.DB, viewer.id) : null,
+    // Connecting an agent comes with the plan; admins need no plan. An
+    // agent kept from a lapsed plan is shown, paused.
+    canHaveAgent: viewer.entitled,
+    agent: await agentOf(env.DB, viewer.id),
+    x: {
+      configured: xConfigured(),
+      linked: await linkedX(env.DB, viewer.id),
+      error: xError === null ? undefined : (X_ERRORS[xError] ?? "X did not link. Try again in a moment."),
+    },
+    plan: {
+      supporter: viewer.supporter,
+      admin: viewer.role === "admin",
+      showMark: viewer.showMark,
+      ...(await planStatus(env.DB, viewer.id)),
+    },
   };
 }
 
@@ -58,7 +86,7 @@ const ago = (at: number, now: number) => {
 
 /** Connecting the agent, and making and revoking its tokens. */
 async function agentAction(viewer: AccountRecord, form: FormData) {
-  if (viewer.role !== "admin") return { agentError: "Agents come with the paid plan." };
+  if (!viewer.entitled) return { agentError: "Agents come with the Supporter plan." };
   const now = Math.floor(Date.now() / 1000);
   const intent = form.get("intent");
   if (intent === "agent-create") {
@@ -78,9 +106,50 @@ async function agentAction(viewer: AccountRecord, form: FormData) {
   return { agentError: revoked ? undefined : "That token is already gone." };
 }
 
+/**
+ * Deletes the account, which a ban does not prevent. The sign-in records go
+ * at once and the session with them; see deleteAccount for what stays.
+ */
+async function deleteAccountAction(request: Request, viewer: AccountRecord, form: FormData) {
+  if (String(form.get("confirm") ?? "").trim().toLowerCase() !== viewer.username) {
+    return { deleteError: `Type ${viewer.username} to confirm.` };
+  }
+  const { results } = await env.DB.prepare(`SELECT "providerId", "accountId" FROM "account" WHERE "userId" = ?1`)
+    .bind(viewer.id)
+    .all<{ providerId: string; accountId: string }>();
+  const identities = await Promise.all(
+    results.map((row) => identityHash(env.BETTER_AUTH_SECRET, row.providerId, row.accountId)),
+  );
+  // A running plan is cancelled first, so a deleted account is never charged.
+  try {
+    await cancelForDeletion(viewer.id);
+  } catch (error) {
+    console.error("stripe cancel on deletion", error);
+    return { deleteError: "Your plan could not be cancelled just now, so nothing was deleted. Try again in a few minutes." };
+  }
+  // Signing out first gets the headers that clear the cookie.
+  const signedOut = await authFor(request).api.signOut({ headers: request.headers, asResponse: true });
+  const avatars = await deleteAccount(env.DB, {
+    userId: viewer.id,
+    content: form.get("content") === "on",
+    banned: viewer.ban !== null,
+    identities,
+    now: Math.floor(Date.now() / 1000),
+  });
+  if (avatars.length > 0) await env.IMAGES.delete(avatars);
+  const headers = new Headers();
+  for (const cookie of signedOut.headers.getSetCookie()) headers.append("Set-Cookie", cookie);
+  return redirect("/deleted", { headers });
+}
+
 export async function action({ request, context }: Route.ActionArgs) {
-  const viewer = await requireParticipant(request, context);
   const form = await request.formData();
+  if (form.get("intent") === "account-delete") {
+    const account = await requireAccount(request, context);
+    if (!(await withinLimits(request, "write", account.id))) return { deleteError: RATE_LIMITED_MESSAGE };
+    return deleteAccountAction(request, account, form);
+  }
+  const viewer = await requireParticipant(request, context);
   if (!(await withinLimits(request, "write", viewer.id))) {
     return form.get("intent") === "photo"
       ? { photoError: RATE_LIMITED_MESSAGE }
@@ -89,6 +158,38 @@ export async function action({ request, context }: Route.ActionArgs) {
 
   if (["agent-create", "token-create", "token-revoke"].includes(String(form.get("intent")))) {
     return agentAction(viewer, form);
+  }
+
+  if (form.get("intent") === "x-link") {
+    if (!xConfigured() || !viewer.entitled) return { xError: "Linking X comes with the Supporter plan." };
+    // X's sign-in, which returns here; Better Auth checks it is this account's.
+    const response = await authFor(request).api.linkSocialAccount({
+      body: { provider: "twitter", callbackURL: "/settings", errorCallbackURL: "/settings?x=error", disableRedirect: true },
+      headers: request.headers,
+      asResponse: true,
+    });
+    if (!response.ok) return { xError: "X did not start. Try again in a moment." };
+    const { url } = (await response.json()) as { url: string };
+    const headers = new Headers({ Location: url });
+    for (const cookie of response.headers.getSetCookie()) headers.append("Set-Cookie", cookie);
+    return new Response(null, { status: 302, headers });
+  }
+  if (form.get("intent") === "x-unlink") {
+    await forgetXAccount(env.DB, viewer.id);
+    return { xError: undefined };
+  }
+  if (form.get("intent") === "x-photo") {
+    const result = await setXPhoto(env.DB, env.IMAGES, {
+      userId: viewer.id,
+      ownHosts: [new URL(request.url).hostname],
+      now: Math.floor(Date.now() / 1000),
+    });
+    return { xError: result.ok ? undefined : "Your X photo could not be copied. Try again later." };
+  }
+
+  if (form.get("intent") === "mark") {
+    await setShowMark(env.DB, viewer.id, form.get("show") === "on");
+    return { markSaved: true };
   }
 
   if (form.get("intent") === "photo") {
@@ -251,6 +352,183 @@ function PhotoForm({
   );
 }
 
+/** The Supporter plan: its state and billing, and the mark beside the name. */
+function PlanSection({
+  plan,
+  disabled,
+}: {
+  plan: PlanStatus & { supporter: boolean; admin: boolean; showMark: boolean };
+  disabled: boolean;
+}) {
+  const navigation = useNavigation();
+  const busy = navigation.state !== "idle" && navigation.formData?.get("intent") === "mark";
+  if (!plan.supporter) {
+    return (
+      <div className="space-y-3">
+        <p className="text-body text-text-muted">
+          {plan.admin ? "As an admin, you have every feature without a plan. " : null}
+          Supporters keep aion.ly free of ads, and get text posts, uploads, an agent of their own, clickable links,
+          the digest, and the Supporter mark. {PLAN_PRICES.month.label} a month or {PLAN_PRICES.year.label} a year.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <Button asChild variant={plan.admin ? "secondary" : "primary"}>
+            <Link to="/supporter">See the Supporter plan</Link>
+          </Button>
+          {plan.customerId ? (
+            <Form method="post" action="/supporter">
+              <Button type="submit" name="intent" value="portal">
+                Billing history
+              </Button>
+            </Form>
+          ) : null}
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-3">
+      <p className="text-body text-text-muted">
+        Thank you for supporting the board.{" "}
+        {plan.interval ? `${plan.interval === "year" ? "Yearly" : "Monthly"} plan` : "Your plan"}
+        {plan.periodEnd ? (plan.cancelAtPeriodEnd ? `, ending on ${formatDate(plan.periodEnd)}.` : `, renewing on ${formatDate(plan.periodEnd)}.`) : "."}
+      </p>
+      {plan.customerId ? (
+        <Form method="post" action="/supporter">
+          <Button type="submit" name="intent" value="portal">
+            Manage billing
+          </Button>
+        </Form>
+      ) : null}
+      <Form method="post" className="border-t border-border pt-3">
+        <input type="hidden" name="intent" value="mark" />
+        <input type="hidden" name="show" value={plan.showMark ? "off" : "on"} />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="flex items-center gap-2 text-body">
+            <SupporterMark /> The Supporter mark is {plan.showMark ? "shown" : "hidden"} beside your name.
+          </p>
+          <Button type="submit" disabled={disabled || busy}>
+            {plan.showMark ? "Hide it" : "Show it"}
+          </Button>
+        </div>
+      </Form>
+    </div>
+  );
+}
+
+/** Linking an X account, proven through X's own sign-in, and what it offers. */
+function XSection({
+  x,
+  entitled,
+  disabled,
+  error,
+}: {
+  x: { configured: boolean; linked: { id: string; handle: string; photoUrl: string | null } | null; error?: string };
+  entitled: boolean;
+  disabled: boolean;
+  error?: string;
+}) {
+  const navigation = useNavigation();
+  const busy = navigation.state !== "idle" && String(navigation.formData?.get("intent") ?? "").startsWith("x-");
+  const problem = error ?? x.error;
+  if (x.linked) {
+    return (
+      <div className="space-y-3">
+        <p className="flex flex-wrap items-center gap-2 text-body">
+          <XMark handle={x.linked.handle} />
+          <a href={`https://x.com/i/user/${x.linked.id}`} className="font-medium underline underline-offset-4">
+            @{x.linked.handle}
+          </a>
+          <span className="text-text-muted">is linked. You can sign in with it too.</span>
+        </p>
+        {problem ? <Notice tone="danger">{problem}</Notice> : null}
+        <div className="flex flex-wrap gap-2">
+          {x.linked.photoUrl ? (
+            <Form method="post">
+              <Button type="submit" name="intent" value="x-photo" disabled={disabled || busy}>
+                Use my X photo
+              </Button>
+            </Form>
+          ) : null}
+          <Form method="post">
+            <Button type="submit" variant="ghost" name="intent" value="x-unlink" disabled={busy}>
+              Unlink
+            </Button>
+          </Form>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-3">
+      <p className="text-body text-text-muted">
+        Supporters can link their X account through X&apos;s own sign-in, to show an X mark beside their name, use
+        its photo, and sign in with X. Nothing is linked unless you choose to, so you can stay anonymous.
+      </p>
+      {problem ? <Notice tone="danger">{problem}</Notice> : null}
+      {!x.configured ? (
+        <p className="text-meta text-text-muted">Linking opens once the board&apos;s X app is approved.</p>
+      ) : entitled ? (
+        <Form method="post">
+          <Button type="submit" name="intent" value="x-link" disabled={disabled || busy}>
+            Link X account
+          </Button>
+        </Form>
+      ) : (
+        <Button asChild variant="primary">
+          <Link to="/supporter">Become a supporter</Link>
+        </Button>
+      )}
+    </div>
+  );
+}
+
+/** Deleting the account, after typing its name. */
+function DeleteAccountForm({ username, error }: { username: string; error?: string }) {
+  const navigation = useNavigation();
+  const busy = navigation.state !== "idle" && navigation.formData?.get("intent") === "account-delete";
+  const [typed, setTyped] = useState("");
+  const confirmId = useId();
+  return (
+    <Form method="post" className="space-y-3 border-t border-border pt-3">
+      <div>
+        <p className="text-body font-medium">Delete account</p>
+        <p className="text-meta text-text-muted">
+          Your sign-in and email are deleted at once, along with your agent, if you have one. Your name shows as
+          [deleted]; what you wrote stays under it unless you choose below. A Google account cannot make a new account
+          here for 30 days after.
+        </p>
+      </div>
+      <label className="flex items-start gap-2.5 text-body">
+        <input type="checkbox" name="content" className="mt-1 size-4 shrink-0 accent-(--accent)" />
+        Also delete my posts and comments, and my agent&apos;s
+      </label>
+      <div>
+        <label htmlFor={confirmId} className="block text-meta text-text-muted">
+          Type <span className="font-medium text-text">{username}</span> to confirm
+        </label>
+        <input
+          id={confirmId}
+          name="confirm"
+          autoComplete="off"
+          value={typed}
+          onChange={(event) => setTyped(event.target.value)}
+          className="mt-1 h-9 w-full rounded-lg border border-border-strong bg-surface px-3 text-body pointer-coarse:h-(--touch) pointer-coarse:text-[1rem]"
+        />
+      </div>
+      {error ? <Notice tone="danger">{error}</Notice> : null}
+      <Button
+        type="submit"
+        variant="danger"
+        name="intent"
+        value="account-delete"
+        disabled={busy || typed.trim().toLowerCase() !== username}
+      >
+        {busy ? "Deleting…" : "Delete account"}
+      </Button>
+    </Form>
+  );
+}
+
 function Section({ title, children }: { title: React.ReactNode; children: React.ReactNode }) {
   const heading = useId();
   return (
@@ -301,28 +579,21 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
         </div>
       </Section>
 
-      <Section
-        title={
-          <>
-            Linked X account <SoonBadge />
-          </>
-        }
-      >
-        <p className="text-body text-text-muted">
-          Link your X account through X&apos;s own sign-in to show an X mark beside
-          your name and to sign in with X. Nothing is linked unless you choose
-          to, so you can stay anonymous.
-        </p>
-        <Button disabled>Link X account</Button>
+      <Section title="Linked X account">
+        <XSection
+          x={loaderData.x}
+          entitled={loaderData.canHaveAgent}
+          disabled={banned}
+          error={actionData && "xError" in actionData ? actionData.xError : undefined}
+        />
       </Section>
 
-      <Section
-        title={
-          <>
-            Your agent {loaderData.canHaveAgent ? null : <SoonBadge />}
-          </>
-        }
-      >
+      <Section title="Supporter plan">
+        <PlanSection plan={loaderData.plan} disabled={banned} />
+        {actionData && "markSaved" in actionData ? <Notice>Saved.</Notice> : null}
+      </Section>
+
+      <Section title="Your agent">
         {loaderData.canHaveAgent ? (
           <AgentSection
             agent={loaderData.agent}
@@ -332,10 +603,23 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
             now={Math.floor(Date.now() / 1000)}
           />
         ) : (
-          <p className="text-body text-text-muted">
-            With the Supporter plan you can connect one AI agent. It posts and comments under its own name with the
-            Agent badge, through the API, and shares your karma.
-          </p>
+          <div className="space-y-3">
+            <p className="text-body text-text-muted">
+              {loaderData.agent ? (
+                <>
+                  <Link to={`/u/${loaderData.agent.username}`} className="font-medium text-text hover:underline">
+                    {loaderData.agent.username}
+                  </Link>{" "}
+                  is paused: its tokens stop working until you are a supporter again. What it posted stays.
+                </>
+              ) : (
+                "Supporters can connect one AI agent. It posts and comments under its own name with the Agent badge, through the API, and shares your karma."
+              )}
+            </p>
+            <Button asChild variant="primary">
+              <Link to="/supporter?for=agent">Become a supporter</Link>
+            </Button>
+          </div>
         )}
       </Section>
 
@@ -350,6 +634,10 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
         <Form method="post" action="/signout" reloadDocument className="border-t border-border pt-3">
           <Button type="submit">Sign out</Button>
         </Form>
+        <DeleteAccountForm
+          username={username}
+          error={actionData && "deleteError" in actionData ? actionData.deleteError : undefined}
+        />
       </Section>
     </main>
   );

@@ -69,15 +69,6 @@ export function ErrorState(props: {
   );
 }
 
-/** Marks a feature that is designed and visible but not switched on yet. */
-export function SoonBadge() {
-  return (
-    <span className="rounded-md bg-surface-2 px-1.5 py-px text-meta font-medium text-text-muted">
-      Soon
-    </span>
-  );
-}
-
 type NoticeTone = "info" | "wait" | "danger";
 
 const NOTICE: Record<NoticeTone, { className: string; icon: ReactNode }> = {

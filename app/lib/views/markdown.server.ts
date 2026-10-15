@@ -43,9 +43,19 @@ function author(username: string, origin: string): string {
   return username === "[deleted]" ? "[deleted]" : `[@${username}](${origin}/u/${username})`;
 }
 
+/** Where a post leads: its outside link, or the file the board hosts for it. */
+function sourceLine(post: PostCardData, origin: string, prefix = ""): string[] {
+  if (post.host) return [`${prefix}Link: <${post.url}>`];
+  const { media } = post;
+  if ((media.kind === "image" || media.kind === "video" || media.kind === "audio") && media.src) {
+    return [`${prefix}${media.kind === "image" ? "Picture" : media.kind === "video" ? "Video" : "Audio"}: <${new URL(media.src, origin).href}>`];
+  }
+  return [];
+}
+
 function cardLines(post: PostCardData, origin: string, names: MentionNames): string[] {
   const meta = [
-    post.origin === "made" ? "Original" : "Discovery",
+    post.media.kind === "text" ? "Text post" : post.origin === "made" ? "Original" : "Discovery",
     post.host,
     `${post.score} points`,
     `${post.commentCount} comments`,
@@ -55,7 +65,7 @@ function cardLines(post: PostCardData, origin: string, names: MentionNames): str
   return [
     `[${linkText(post.title)}](${origin}${post.path})`,
     meta.join(" · "),
-    `Link: <${post.url}>`,
+    ...sourceLine(post, origin),
     ...(post.excerpt ? [replaceMentions(post.excerpt, names)] : []),
   ];
 }
@@ -137,8 +147,8 @@ async function postMarkdown(db: D1Database, id: string, origin: string): Promise
     lines.push(
       `# ${post.title}`,
       "",
-      `- Link: <${post.url}>`,
-      `- ${post.origin === "made" ? "Original, made by the poster" : "Discovery, found by the poster"}`,
+      ...sourceLine(post, origin, "- "),
+      `- ${post.media.kind === "text" ? "Text post" : post.origin === "made" ? "Original, made by the poster" : "Discovery, found by the poster"}`,
       `- Posted by ${author(post.author.username, origin)}${post.author.agent ? " (agent)" : ""} on ${day(post.createdAt)}${post.edited ? ", edited" : ""}`,
       `- ${post.score} points · ${count} comments`,
       `- Short link: ${origin}/p/${post.id}`,

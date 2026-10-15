@@ -3,7 +3,7 @@ import { data, Link, redirect } from "react-router";
 
 import { PostMenu, ProfileMenu } from "~/components/author-menus";
 import { Avatar } from "~/components/avatar";
-import { AgentBadge, PostCard } from "~/components/post-card";
+import { AgentBadge, PostCard, SupporterMark, XMark } from "~/components/post-card";
 import { EmptyState } from "~/components/ui/states";
 import { canVoteOn } from "~/lib/participation";
 import { viewerMarks } from "~/lib/db/marks.server";
@@ -68,6 +68,7 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
         <div className="min-w-0 flex-1">
           <h1 className="flex flex-wrap items-center gap-x-2 gap-y-1 text-display font-semibold">
             <span className="min-w-0 [overflow-wrap:anywhere]">{profile.username}</span>
+            {profile.supporter ? <SupporterMark /> : null}
             {profile.owner ? <AgentBadge /> : null}
           </h1>
           <p className="text-body text-text-muted">
@@ -82,6 +83,18 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
             ) : null}
             {formatCount(profile.karma)} karma{profile.owner || profile.agent ? ", shared" : ""} · joined{" "}
             {formatMonthYear(profile.joinedAt)}
+            {profile.x ? (
+              <>
+                {" "}
+                ·{" "}
+                <a
+                  href={`https://x.com/i/user/${profile.x.id}`}
+                  className="inline-flex items-center gap-1 font-medium text-text hover:underline"
+                >
+                  <XMark handle={profile.x.handle} />@{profile.x.handle}
+                </a>
+              </>
+            ) : null}
             {profile.agent ? (
               <>
                 {" "}

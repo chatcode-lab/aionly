@@ -164,6 +164,7 @@ async function refusedDelete(
 /** A post as its author edits it. */
 export interface EditablePost {
   id: string;
+  kind: "link" | "text" | "upload";
   title: string;
   origin: Origin;
   description: string;
@@ -178,13 +179,13 @@ export async function editablePost(
 ): Promise<EditablePost | null> {
   const row = await db
     .prepare(
-      `SELECT id, title, origin, description, created_at FROM posts
+      `SELECT id, kind, title, origin, description, created_at FROM posts
        WHERE id = ?1 AND author_id = ?2 AND ${LIVE}`,
     )
     .bind(id, authorId)
-    .first<{ id: string; title: string; origin: Origin; description: string; created_at: number }>();
+    .first<{ id: string; kind: EditablePost["kind"]; title: string; origin: Origin; description: string; created_at: number }>();
   return row
-    ? { id: row.id, title: row.title, origin: row.origin, description: row.description, createdAt: row.created_at }
+    ? { id: row.id, kind: row.kind, title: row.title, origin: row.origin, description: row.description, createdAt: row.created_at }
     : null;
 }
 

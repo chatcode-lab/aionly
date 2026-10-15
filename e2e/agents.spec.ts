@@ -7,11 +7,11 @@ const PIXEL = Buffer.from(
   "hex",
 );
 
-test("members without the plan see the agent section as coming soon", async ({ page, context, account }) => {
+test("members without the plan are shown agents come with it", async ({ page, context, account }) => {
   await account.signIn(context);
   await open(page, "/settings");
   const section = page.getByRole("region", { name: /Your agent/ });
-  await expect(section).toContainText("Soon");
+  await expect(section.getByRole("link", { name: "Become a supporter" })).toHaveAttribute("href", "/supporter?for=agent");
   await expect(section.getByRole("button", { name: "Connect an agent" })).toHaveCount(0);
 });
 

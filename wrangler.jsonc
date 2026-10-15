@@ -34,13 +34,16 @@
 		"MEDIA_ORIGIN": ""
 	},
 	// Set with `npm run secret:staging -- <NAME>`, and in .dev.vars locally
-	// (see .dev.vars.example). A deploy fails while any is missing.
+	// (see .dev.vars.example). A deploy fails while any is missing. Only
+	// these reach a local build; optional secrets such as STRIPE_SECRET_KEY
+	// and SITE_ORIGIN are set on the deployed Worker alone.
 	"secrets": {
 		"required": [
 			"BETTER_AUTH_SECRET",
 			"GOOGLE_CLIENT_ID",
 			"GOOGLE_CLIENT_SECRET",
-			"TURNSTILE_SECRET_KEY"
+			"TURNSTILE_SECRET_KEY",
+			"STRIPE_WEBHOOK_SECRET"
 		]
 	},
 	// Local development and tests use a simulated database under this name.
@@ -60,6 +63,9 @@
 			"bucket_name": "aionly-board-local-images"
 		}
 	],
+	// The email digest goes out through Cloudflare's Email Sending. Locally
+	// it is simulated. Every environment names its own.
+	"send_email": [{ "name": "EMAIL" }],
 	// Burst limits per minute, per account and per address (see the plan's
 	// "Basic throttling"). Counters are shared by namespace across the whole
 	// account, so each environment has its own numbers: 1000s here, 2000s on
@@ -73,8 +79,8 @@
 		{ "name": "RL_WRITE_IP", "namespace_id": "1006", "simple": { "limit": 30, "period": 60 } },
 		{ "name": "RL_SIGNIN_IP", "namespace_id": "1007", "simple": { "limit": 10, "period": 60 } }
 	],
-	// The hourly sweep of abandoned pending images. Every environment inherits
-	// this schedule.
+	// The hourly sweep of abandoned pending images and sign-in states, and the
+	// digests that are due. Every environment inherits this schedule.
 	"triggers": {
 		"crons": ["17 * * * *"]
 	},
@@ -92,14 +98,20 @@
 				// Public by design: the widget's secret is a Worker secret.
 				"TURNSTILE_SITE_KEY": "0x4AAAAAAFWnhl63uRx1Z-wS",
 				// The staging IMAGES bucket's custom domain.
-				"MEDIA_ORIGIN": "https://media-staging.aion.ly"
+				"MEDIA_ORIGIN": "https://media-staging.aion.ly",
+				// Digest links point at SITE_ORIGIN, a secret here so the
+				// staging hostname stays out of the repository. Unset, no
+				// digest is sent.
+				"DIGEST_FROM": "digest@aion.ly"
 			},
+			"send_email": [{ "name": "EMAIL" }],
 			"secrets": {
 				"required": [
 					"BETTER_AUTH_SECRET",
 					"GOOGLE_CLIENT_ID",
 					"GOOGLE_CLIENT_SECRET",
-					"TURNSTILE_SECRET_KEY"
+					"TURNSTILE_SECRET_KEY",
+					"STRIPE_WEBHOOK_SECRET"
 				]
 			},
 			"ratelimits": [
@@ -138,14 +150,19 @@
 				// The staging widget's key; add aion.ly to its hostnames at cutover.
 				"TURNSTILE_SITE_KEY": "0x4AAAAAAFWnhl63uRx1Z-wS",
 				// The production IMAGES bucket's custom domain.
-				"MEDIA_ORIGIN": "https://media.aion.ly"
+				"MEDIA_ORIGIN": "https://media.aion.ly",
+				"DIGEST_FROM": "digest@aion.ly",
+				// Where digest links point; the scheduled run has no request.
+				"SITE_ORIGIN": "https://aion.ly"
 			},
+			"send_email": [{ "name": "EMAIL" }],
 			"secrets": {
 				"required": [
 					"BETTER_AUTH_SECRET",
 					"GOOGLE_CLIENT_ID",
 					"GOOGLE_CLIENT_SECRET",
-					"TURNSTILE_SECRET_KEY"
+					"TURNSTILE_SECRET_KEY",
+					"STRIPE_WEBHOOK_SECRET"
 				]
 			},
 			// The production database is created at launch, in Eastern North

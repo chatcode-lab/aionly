@@ -1,9 +1,9 @@
 import { Check, Newspaper } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
+import { Link, useFetcher } from "react-router";
 
 import { MENU_CONTENT, MENU_RADIO_ITEM } from "./theme-switch";
 import { IconButton } from "./ui/button";
-import { SoonBadge } from "./ui/states";
 
 export const DIGESTS = ["off", "daily", "weekly", "monthly"] as const;
 
@@ -17,52 +17,47 @@ const LABEL: Record<Digest, string> = {
 };
 
 /**
- * The top-bar menu for the email digest of top posts. Until digests are
- * sending, pass `available={false}`: the choices are shown but cannot be
- * picked, so nobody believes they have subscribed.
+ * The top-bar menu for the email digest of top posts, a Supporter feature.
+ * A supporter picks how often it comes; anyone else sees what it is and the
+ * way to the plan, and can still turn off a digest they had.
  */
 export function DigestMenu({
   value,
-  onChange,
-  available,
+  entitled,
 }: {
   value: Digest;
-  onChange?: (next: Digest) => void;
-  available: boolean;
+  /** Has the plan, so the digest can be turned on. */
+  entitled: boolean;
 }) {
+  const fetcher = useFetcher();
+  const pending = fetcher.formData?.get("digest");
+  const current = (typeof pending === "string" ? pending : value) as Digest;
+  const choose = (next: Digest) => fetcher.submit({ digest: next }, { method: "post", action: "/api/digest" });
+
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
-        <IconButton aria-label={`Email digest: ${LABEL[value]}`}>
+        <IconButton aria-label={`Email digest: ${LABEL[current]}`}>
           <Newspaper size={18} aria-hidden />
         </IconButton>
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
-        <DropdownMenu.Content
-          align="end"
-          sideOffset={4}
-          className={`${MENU_CONTENT} w-64`}
-        >
+        <DropdownMenu.Content align="end" sideOffset={4} className={`${MENU_CONTENT} w-64`}>
           <div className="px-2.5 pt-2 pb-1.5">
-            <p className="flex items-center gap-2 text-body font-semibold">
-              Email digest
-              {available ? null : <SoonBadge />}
-            </p>
+            <p className="text-body font-semibold">Email digest</p>
             <p className="mt-0.5 text-meta text-text-muted">
-              {available
+              {entitled
                 ? "The top posts, sent to your sign-in email."
-                : "The top posts by email. Not sending yet."}
+                : "The top posts by email, for supporters."}
             </p>
           </div>
-          <DropdownMenu.RadioGroup
-            value={value}
-            onValueChange={(next) => onChange?.(next as Digest)}
-          >
+          <DropdownMenu.RadioGroup value={current} onValueChange={(next) => choose(next as Digest)}>
             {DIGESTS.map((option) => (
               <DropdownMenu.RadioItem
                 key={option}
                 value={option}
-                disabled={!available}
+                // Without the plan, only Off can be picked.
+                disabled={!entitled && option !== "off"}
                 className={MENU_RADIO_ITEM}
               >
                 {LABEL[option]}
@@ -72,6 +67,13 @@ export function DigestMenu({
               </DropdownMenu.RadioItem>
             ))}
           </DropdownMenu.RadioGroup>
+          {entitled ? null : (
+            <DropdownMenu.Item asChild className={MENU_RADIO_ITEM}>
+              <Link to="/supporter?for=digest" className="font-medium text-accent">
+                Become a supporter
+              </Link>
+            </DropdownMenu.Item>
+          )}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>

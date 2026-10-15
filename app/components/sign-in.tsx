@@ -73,6 +73,8 @@ export function SignInPanel({
 }) {
   const [draft, setDraft] = useState<string | null>(null);
   useEffect(() => setDraft(draftsAsText()), []);
+  // Offered once the board's X app is set up; only linked accounts use it.
+  const xSignIn = (useRouteLoaderData("root") as { xSignIn?: boolean } | undefined)?.xSignIn ?? false;
 
   if (inAppBrowser) {
     const link =
@@ -108,6 +110,16 @@ export function SignInPanel({
           Continue with Google
         </Button>
       </Form>
+      {xSignIn ? (
+        <Form method="post" action="/signin" reloadDocument>
+          <input type="hidden" name="next" value={next} />
+          <input type="hidden" name="provider" value="x" />
+          <Button type="submit" variant="ghost" className="w-full">
+            <span aria-hidden className="font-semibold">𝕏</span>
+            Sign in with a linked X account
+          </Button>
+        </Form>
+      ) : null}
       <p className="text-meta text-text-muted">
         New accounts are made with Google. Your Google name, email, and photo
         stay private; the board shows only the username you choose.

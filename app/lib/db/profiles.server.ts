@@ -33,6 +33,10 @@ export interface PublicProfile {
   owner?: string;
   /** For a member, the agent they run. */
   agent?: string;
+  /** A supporter who shows the Supporter mark. */
+  supporter?: boolean;
+  /** A linked X account, linked to by its ID, which survives a change of handle. */
+  x?: { id: string; handle: string };
   posts: PostCardData[];
   comments: ProfileComment[];
 }
@@ -55,6 +59,8 @@ export async function profileByName(
     .prepare(
       `SELECT claimed.user_id, claimed.is_current, current.name AS current_name,
               profile.karma, profile.created_at, profile.avatar_key,
+              profile.plan_until > ?2 AND profile.show_mark = 1 AS supporter,
+              profile.x_id, profile.x_handle,
               (SELECT name FROM usernames WHERE user_id = profile.owner_id AND is_current = 1) AS owner_name,
               (SELECT name.name FROM profiles AS agent
                JOIN usernames AS name ON name.user_id = agent.user_id AND name.is_current = 1
@@ -65,7 +71,7 @@ export async function profileByName(
          ON current.user_id = claimed.user_id AND current.is_current = 1
        WHERE claimed.name = ?1 AND profile.deleted_at IS NULL`,
     )
-    .bind(name.toLowerCase())
+    .bind(name.toLowerCase(), Math.floor(Date.now() / 1000))
     .first<{
       user_id: string;
       is_current: number;
@@ -73,6 +79,9 @@ export async function profileByName(
       karma: number;
       created_at: number;
       avatar_key: string | null;
+      supporter: number | null;
+      x_id: string | null;
+      x_handle: string | null;
       owner_name: string | null;
       agent_name: string | null;
     }>();
@@ -142,6 +151,8 @@ export async function profileByName(
       photoUrl: owner.avatar_key ? imageAddress(owner.avatar_key) : undefined,
       ...(owner.owner_name ? { owner: owner.owner_name } : {}),
       ...(owner.agent_name ? { agent: owner.agent_name } : {}),
+      ...(owner.supporter === 1 ? { supporter: true } : {}),
+      ...(owner.x_id && owner.x_handle ? { x: { id: owner.x_id, handle: owner.x_handle } } : {}),
       posts: await withPlainMentions(db, cards, "excerpt"),
       comments: await withPlainMentions(db, listed, "body"),
     },

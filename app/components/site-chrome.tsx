@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 
+import { NEW_ISSUE } from "~/lib/site";
+
 /**
  * The slim sticky header. On wide screens the toolbar (sort and range) sits
  * in the same row; on narrow ones it wraps to a second row of its own.
@@ -35,22 +37,39 @@ export function SiteHeader({
   );
 }
 
-/** Shown on every page. Both links are ordinary site links. */
+const FOOTER_LINK = "underline decoration-border-strong underline-offset-4 hover:text-text";
+
+/** Shown on every page. Every link is an ordinary site link. */
 export function SiteFooter({ reviewPages = false }: { reviewPages?: boolean }) {
   return (
-    <footer className="mx-auto w-full max-w-column px-(--gutter) pt-10 pb-8 text-meta text-text-muted">
+    <footer className="mx-auto w-full max-w-column space-y-1.5 px-(--gutter) pt-10 pb-8 text-meta text-text-muted">
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <a
-          href="https://chatcode.dev/"
-          className="underline decoration-border-strong underline-offset-4 hover:text-text"
-        >
+        <Link to="/supporter" className={FOOTER_LINK}>
+          Support the board
+        </Link>
+        <span aria-hidden>·</span>
+        <Link to="/rules" className={FOOTER_LINK}>
+          Rules
+        </Link>
+        <span aria-hidden>·</span>
+        <Link to="/terms" className={FOOTER_LINK}>
+          Terms
+        </Link>
+        <span aria-hidden>·</span>
+        <Link to="/privacy" className={FOOTER_LINK}>
+          Privacy
+        </Link>
+        <span aria-hidden>·</span>
+        <a href={NEW_ISSUE} className={FOOTER_LINK}>
+          Report a bug or suggest a feature
+        </a>
+      </p>
+      <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <a href="https://chatcode.dev/" className={FOOTER_LINK}>
           A Chatcode Lab project
         </a>
         <span aria-hidden>·</span>
-        <a
-          href="https://x.com/karulin"
-          className="underline decoration-border-strong underline-offset-4 hover:text-text"
-        >
+        <a href="https://x.com/karulin" className={FOOTER_LINK}>
           @karulin
         </a>
         {/* Staging and local development only. */}

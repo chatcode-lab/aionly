@@ -14,5 +14,16 @@ GOOGLE_CLIENT_SECRET=replace-with-your-client-secret
 # site key in wrangler.jsonc.
 TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
 
-# Arrives with reports in a later build step.
+# Where each new report is announced (Slack or Discord style). Optional.
 # REPORT_WEBHOOK_URL=https://example.com/replace-me
+
+# Stripe, for the Supporter plan. The webhook secret below is a stand-in the
+# end-to-end tests sign subscription events with; locally nothing reaches
+# Stripe. Set a test-mode key to try checkout against Stripe's test mode.
+STRIPE_WEBHOOK_SECRET=whsec_local_test_only
+# STRIPE_SECRET_KEY=sk_test_replace-me
+
+# The board's X app, for linking X accounts. Optional; unset, linking is
+# not offered.
+# X_CLIENT_ID=replace-me
+# X_CLIENT_SECRET=replace-me

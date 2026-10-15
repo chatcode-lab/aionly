@@ -1,0 +1,143 @@
+import { postsByIds, topSnapshot } from "../db/feed.server";
+import type { Range } from "../feed";
+import { plainText } from "../text/markdown";
+import { composeDigest, DIGEST_SIZE, type DigestPost, type Frequency, FREQUENCIES, periodStart } from "./compose";
+
+/** Accounts sent to in one hourly run, per frequency; the next run carries on. */
+const BATCH = 100;
+
+const RANGE: Record<Frequency, Range> = { daily: "day", weekly: "week", monthly: "month" };
+
+const encoder = new TextEncoder();
+
+async function unsubscribeKey(secret: string): Promise<CryptoKey> {
+  const base = await crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const derived = await crypto.subtle.sign("HMAC", base, encoder.encode("aionly digest unsubscribe v1"));
+  return crypto.subtle.importKey("raw", derived, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+}
+
+/**
+ * The unsubscribe token for an account: its ID and a keyed signature, so the
+ * link works without signing in and cannot be made for anyone else.
+ */
+export async function unsubscribeToken(secret: string, userId: string): Promise<string> {
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", await unsubscribeKey(secret), encoder.encode(userId)));
+  const signature = btoa(String.fromCharCode(...mac.subarray(0, 18))).replace(/\+/g, "-").replace(/\//g, "_");
+  return `${userId}.${signature}`;
+}
+
+/** The account an unsubscribe token belongs to, if its signature holds. */
+export async function readUnsubscribeToken(secret: string, token: string): Promise<string | null> {
+  const userId = token.split(".")[0] ?? "";
+  if (!/^[A-Za-z0-9_-]{1,40}$/.test(userId)) return null;
+  const expected = await unsubscribeToken(secret, userId);
+  if (expected.length !== token.length) return null;
+  let difference = 0;
+  for (let index = 0; index < token.length; index += 1) difference |= token.charCodeAt(index) ^ expected.charCodeAt(index);
+  return difference === 0 ? userId : null;
+}
+
+/**
+ * Turns the digest on, at a frequency, or off. Turning it on counts as sent
+ * now, so the first one comes when the next period begins.
+ */
+export async function setDigest(db: D1Database, userId: string, digest: Frequency | null, now: number): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE profiles SET digest = ?2,
+         digest_sent_at = CASE WHEN ?2 IS NULL OR digest IS ?2 THEN digest_sent_at ELSE ?3 END
+       WHERE user_id = ?1`,
+    )
+    .bind(userId, digest, now)
+    .run();
+}
+
+export interface Recipient {
+  userId: string;
+  email: string;
+}
+
+/**
+ * Accounts due this period's digest: turned on, with the plan in force, a
+ * sign-in email, and nothing sent since the period began.
+ */
+export async function dueRecipients(db: D1Database, frequency: Frequency, now: number, limit = BATCH): Promise<Recipient[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT profile.user_id, account."email" FROM profiles AS profile
+       JOIN "user" AS account ON account."id" = profile.user_id
+       WHERE profile.digest = ?1 AND (profile.digest_sent_at IS NULL OR profile.digest_sent_at < ?2)
+         AND profile.deleted_at IS NULL
+         AND (profile.role = 'admin' OR profile.plan_until > ?3)
+       LIMIT ?4`,
+    )
+    .bind(frequency, periodStart(frequency, now), now, limit)
+    .all<{ user_id: string; email: string }>();
+  return results.map((row) => ({ userId: row.user_id, email: row.email }));
+}
+
+/** The period's top posts, as the digest lists them. */
+export async function digestPosts(db: D1Database, frequency: Frequency, origin: string, now: number): Promise<DigestPost[]> {
+  const ids = (await topSnapshot(db, RANGE[frequency], now)).slice(0, DIGEST_SIZE);
+  const cards = await postsByIds(db, ids);
+  return cards.map((card) => ({
+    title: card.title,
+    url: `${origin}${card.path}`,
+    source: card.host ?? (card.media.kind === "text" ? "Text post" : "Upload"),
+    score: card.score,
+    comments: card.commentCount,
+    author: card.author.username,
+    excerpt: plainText(card.excerpt).slice(0, 200),
+  }));
+}
+
+/**
+ * Sends every digest that is due, a batch per frequency per run. A quiet
+ * period with no posts sends nothing, and still counts as sent. Each
+ * address gets its own message, with its own unsubscribe link; a refused
+ * send is skipped and tried again next run.
+ */
+export async function sendDigests(
+  db: D1Database,
+  mailer: SendEmail,
+  input: { origin: string; secret: string; from: string; now: number },
+): Promise<number> {
+  let sent = 0;
+  for (const frequency of FREQUENCIES) {
+    const recipients = await dueRecipients(db, frequency, input.now);
+    if (recipients.length === 0) continue;
+    const posts = await digestPosts(db, frequency, input.origin, input.now);
+    const done: string[] = [];
+    for (const recipient of recipients) {
+      if (posts.length > 0) {
+        const unsubscribeUrl = `${input.origin}/digest/unsubscribe?token=${encodeURIComponent(await unsubscribeToken(input.secret, recipient.userId))}`;
+        const email = composeDigest({ frequency, posts, origin: input.origin, unsubscribeUrl });
+        try {
+          await mailer.send({
+            from: { name: "aion.ly", email: input.from },
+            to: recipient.email,
+            subject: email.subject,
+            html: email.html,
+            text: email.text,
+            headers: {
+              "List-Unsubscribe": `<${unsubscribeUrl}>`,
+              "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+            },
+          });
+          sent += 1;
+        } catch (error) {
+          console.error("digest send", frequency, error);
+          continue;
+        }
+      }
+      done.push(recipient.userId);
+    }
+    if (done.length > 0) {
+      await db
+        .prepare(`UPDATE profiles SET digest_sent_at = ?2 WHERE user_id IN (SELECT value FROM json_each(?1))`)
+        .bind(JSON.stringify(done), input.now)
+        .run();
+    }
+  }
+  return sent;
+}

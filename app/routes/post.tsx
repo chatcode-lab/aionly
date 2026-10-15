@@ -180,7 +180,8 @@ export function meta({ loaderData }: Route.MetaArgs) {
   const { post, canonical } = loaderData;
   const summary =
     post.excerpt.length > 160 ? `${post.excerpt.slice(0, 159).trimEnd()}…` : post.excerpt;
-  const image = "thumbUrl" in post.media ? post.media.thumbUrl : undefined;
+  // An uploaded picture is its own share image; anything else shows its snapshot or poster.
+  const image = post.media.kind === "image" ? post.media.src : "thumbUrl" in post.media ? post.media.thumbUrl : undefined;
   return [
     { title: `${post.title} · aion.ly` },
     { name: "description", content: summary },

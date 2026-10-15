@@ -59,7 +59,44 @@ function CopyUrl({ href }: { href: string }) {
 
 const SITE_LINK = "underline decoration-border-strong underline-offset-4 hover:decoration-current";
 
-function renderInline(nodes: Inline[], host: string | undefined): ReactNode[] {
+/** True when the node at `index` has a line to itself: nothing but space around it. */
+function aloneOnLine(nodes: Inline[], index: number): boolean {
+  const blank = (node: Inline | undefined) => node?.type === "text" && node.text.trim() === "";
+  const edge = (node: Inline | undefined) => node === undefined || node.type === "break";
+  let before = index - 1;
+  while (blank(nodes[before])) before -= 1;
+  let after = index + 1;
+  while (blank(nodes[after])) after += 1;
+  return edge(nodes[before]) && edge(nodes[after]);
+}
+
+/**
+ * An outside address a supporter put on a line of its own: a real link,
+ * shown in full or cut short, which search engines are told not to follow.
+ */
+function OutsideLink({ href }: { href: string }) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="nofollow ugc noopener"
+      referrerPolicy="strict-origin-when-cross-origin"
+      title={href}
+      className={cn("inline-block max-w-full truncate align-bottom", SITE_LINK)}
+    >
+      {href.replace(/^https?:\/\//, "")}
+    </a>
+  );
+}
+
+interface RenderOptions {
+  host: string | undefined;
+  /** Bare outside addresses alone on a line become real links. */
+  outsideLinks: boolean;
+}
+
+function renderInline(nodes: Inline[], options: RenderOptions): ReactNode[] {
+  const { host } = options;
   return nodes.map((node, index) => {
     switch (node.type) {
       case "text":
@@ -75,21 +112,26 @@ function renderInline(nodes: Inline[], host: string | undefined): ReactNode[] {
       case "strong":
         return (
           <strong key={index} className="font-semibold">
-            {renderInline(node.children, host)}
+            {renderInline(node.children, options)}
           </strong>
         );
       case "em":
-        return <em key={index}>{renderInline(node.children, host)}</em>;
+        return <em key={index}>{renderInline(node.children, options)}</em>;
       case "strike":
-        return <del key={index}>{renderInline(node.children, host)}</del>;
+        return <del key={index}>{renderInline(node.children, options)}</del>;
       case "mention":
         return <Mention key={index} id={node.id} />;
       case "url": {
         const path = sitePath(node.href, host);
-        return path ? (
-          <Link key={index} to={path} className={SITE_LINK}>
-            {node.href}
-          </Link>
+        if (path) {
+          return (
+            <Link key={index} to={path} className={SITE_LINK}>
+              {node.href}
+            </Link>
+          );
+        }
+        return options.outsideLinks && aloneOnLine(nodes, index) ? (
+          <OutsideLink key={index} href={node.href} />
         ) : (
           <CopyUrl key={index} href={node.href} />
         );
@@ -99,17 +141,17 @@ function renderInline(nodes: Inline[], host: string | undefined): ReactNode[] {
         if (path) {
           return (
             <Link key={index} to={path} className={SITE_LINK}>
-              {renderInline(node.children, host)}
+              {renderInline(node.children, options)}
             </Link>
           );
         }
         if (!/^https?:\/\//.test(node.href)) {
-          return <span key={index}>{renderInline(node.children, host)} ({node.href})</span>;
+          return <span key={index}>{renderInline(node.children, options)} ({node.href})</span>;
         }
         // The label, then the address it hides, so nothing is disguised.
         return (
           <span key={index}>
-            {node.children.length > 0 ? <>{renderInline(node.children, host)} </> : null}
+            {node.children.length > 0 ? <>{renderInline(node.children, options)} </> : null}
             <CopyUrl href={node.href} />
           </span>
         );
@@ -118,11 +160,11 @@ function renderInline(nodes: Inline[], host: string | undefined): ReactNode[] {
   });
 }
 
-function renderBlocks(blocks: Block[], host: string | undefined): ReactNode[] {
+function renderBlocks(blocks: Block[], options: RenderOptions): ReactNode[] {
   return blocks.map((block, index) => {
     switch (block.type) {
       case "paragraph":
-        return <p key={index}>{renderInline(block.children, host)}</p>;
+        return <p key={index}>{renderInline(block.children, options)}</p>;
       case "code":
         return (
           <pre key={index} className="overflow-x-auto rounded-lg bg-surface-2 px-3 py-2 font-mono text-[0.9em] leading-snug">
@@ -132,11 +174,11 @@ function renderBlocks(blocks: Block[], host: string | undefined): ReactNode[] {
       case "quote":
         return (
           <blockquote key={index} className="space-y-2 border-l-2 border-border-strong pl-3 text-text-muted">
-            {renderBlocks(block.children, host)}
+            {renderBlocks(block.children, options)}
           </blockquote>
         );
       case "list": {
-        const items = block.items.map((item, itemIndex) => <li key={itemIndex}>{renderInline(item, host)}</li>);
+        const items = block.items.map((item, itemIndex) => <li key={itemIndex}>{renderInline(item, options)}</li>);
         return block.ordered ? (
           <ol key={index} start={block.start} className="list-decimal space-y-0.5 pl-6">
             {items}
@@ -154,14 +196,24 @@ function renderBlocks(blocks: Block[], host: string | undefined): ReactNode[] {
 /**
  * A description or comment in the board's limited Markdown. Everything is
  * rendered as elements and text. Links to the board itself are followed;
- * any other address is shown and copied on a tap, never followed.
+ * any other address is shown and copied on a tap, never followed, except
+ * that a supporter's bare address on a line of its own, with `outsideLinks`,
+ * is a real link.
  */
-export function RichText({ text, className }: { text: string; className?: string }) {
+export function RichText({
+  text,
+  className,
+  outsideLinks = false,
+}: {
+  text: string;
+  className?: string;
+  outsideLinks?: boolean;
+}) {
   const host = (useRouteLoaderData("root") as { host?: string } | undefined)?.host;
   const blocks = useMemo(() => parseBlocks(text), [text]);
   return (
     <div className={cn("space-y-2 text-body [overflow-wrap:anywhere]", className)}>
-      {renderBlocks(blocks, host)}
+      {renderBlocks(blocks, { host, outsideLinks })}
     </div>
   );
 }

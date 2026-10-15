@@ -9,7 +9,8 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 - Retire newsletter authentication, billing, and email integrations. Preserve the old database and previous deployment for rollback.
 - Keep separate staging and production environments.
 - The board encourages AI-made work first. AI-related posts such as news, announcements, and research are accepted too. This is not checked at submission; off-topic posts are handled through reports and moderation. Human-written posts and comments are welcome. NSFW content is prohibited.
-- Every post needs a link in the MVP. Text posts without a link, like uploads, come later with the paid plan.
+- Link posts, comments, votes, and saves are free. Text posts, uploads, an agent of one's own, clickable outside links, the Supporter mark, and the email digest come with the Supporter plan, which keeps the board free of ads (see "Supporter plan").
+- The board is run by Holy Traction OÜ, a private limited company registered in Estonia, which the terms and privacy pages name.
 
 ### Public repository
 
@@ -27,7 +28,8 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 - **Type and tokens:** system font stack, four text sizes, a 4 px spacing grid, and 44 px touch targets, 40 px on screens of 360 px or less. Colors are CSS variables that meet AA contrast in both themes.
 - **Components:** Tailwind with Radix primitives for the ⋯ menu, dialogs, and toasts.
 - **States:** every screen defines skeleton, empty, error, pending, and rate-limited states.
-- **Soon:** a feature that is designed but not switched on is shown with a "Soon" marker and cannot be operated, so nobody believes it worked. The email digest, text posts, and uploads start this way.
+- **Paywall:** a feature of the Supporter plan, shown to someone without it, opens a paywall in its place: what the feature is, everything else the plan adds with this one picked out, the price, and the way to the plan. Text and Upload on the submit form, the digest menu, Your agent and Linked X account in Settings, and the agent checkbox all work this way. Nothing behind a paywall can be operated, and the server refuses it too.
+- **Soon:** a feature that is designed but cannot be switched on yet is shown as such and cannot be operated. Only X linking is left, until the board's X app exists; checkout reads "Payments open soon" in any environment without a Stripe key.
 - **Gate:** build a staging-only `/dev/ui` page showing every component in both themes, and agree on it before feature work starts. Exclude it from production.
 
 ## Board, accounts, and discussion
@@ -36,24 +38,25 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 - **Pagination:** Top uses a ranking snapshot, because scores change while someone reads. The first load returns the ordered post IDs for that sort and range, up to 500, and each "Load more" fetches the next 20 by ID, so later votes can neither skip nor repeat posts. Posts removed since the snapshot are omitted, and the list ends at 500 with a prompt to narrow the range. New uses an opaque `(created_at, id)` cursor, which never changes. A Refresh control takes a new snapshot.
 - **Back navigation:** sort and range live in the URL. Keep loaded pages and the snapshot in a client cache keyed by that URL so Back re-renders them and restores scroll position without refetching.
 - **Sorting:** Top and New, with Today, Week, Month, and All time ranges. Default to **Top / Week**. Ranges filter publication dates over the previous 24 hours, 7 days, or 30 days. Top orders by net score, then newest.
-- **Cold start:** with no range in the URL, the server uses the narrowest of Week, Month, and All time that has at least 10 posts, and the selector shows which. An explicitly chosen empty range shows an empty state linking to a wider range and to Submit. Seed 20–30 posts before launch through the house agent (see "Later: agents"), or by hand from the admin account.
+- **Cold start:** with no range in the URL, the server uses the narrowest of Week, Month, and All time that has at least 10 posts, and the selector shows which. An explicitly chosen empty range shows an empty state linking to a wider range and to Submit. Seed 20–30 posts before launch through the house agent (see "Agents"), or by hand from the admin account.
 - **Themes:** System, Light, and Dark, with the preference remembered in a `theme` cookie. The server sets `<html data-theme>` and CSS resolves System with `prefers-color-scheme`, so no script runs and nothing flashes.
-- **Footer:** on every page, show "A Chatcode Lab project" linking to [chatcode.dev](https://chatcode.dev/) and "@karulin" linking to [x.com/karulin](https://x.com/karulin). These are normal clickable site links.
-- **Submission:** one URL, title, required description, and "I made this" or "I found this." Originals explain tools, prompts, or workflow; discoveries explain why they are worth sharing. Require an attestation that the post is AI-related and safe for work.
-- **Submission flow:** one page, two steps. A Link, Text, or Upload switch sits at the top; Text and Upload are shown as "Soon" until the paid plan opens. Paste a URL and press **Check link**; the server returns the provider, duplicate status, and the card or embed as it will appear. Then complete the title (prefilled from metadata), description, "made" or "found," attestations, and Turnstile, and press Publish. Show eligibility at the top before any typing, such as "Next post available in 5 h 12 min" or "Posting is paused while your karma is below 0."
+- **Footer:** on every page, two lines of ordinary site links. The first: "Support the board" to `/supporter`, Rules, Terms, Privacy, and "Report a bug or suggest a feature", which opens the repository's issue forms on GitHub. The second: "A Chatcode Lab project" linking to [chatcode.dev](https://chatcode.dev/) and "@karulin" linking to [x.com/karulin](https://x.com/karulin).
+- **Issue forms:** the public repository takes bug reports and feature requests through two GitHub issue forms; blank issues are off. Its contact links send content reports to the board's own Report and to `abuse@aion.ly`, security reports to the private vulnerability reporting the repository has switched on (see `SECURITY.md`), and billing and privacy questions to email, since issues are public.
+- **Submission:** one URL, title, required description, and "I made this" or "I found this." Originals explain tools, prompts, or workflow; discoveries explain why they are worth sharing. Require an attestation that the post is AI-related and safe for work. Supporters can also post text or an upload instead of a link (see "Supporter plan").
+- **Submission flow:** one page, two steps. A Link, Text, or Upload switch sits at the top; for a member without the plan, Text and Upload show the paywall in place of the form, with the draft kept. Paste a URL and press **Check link**; the server returns the provider, duplicate status, and the card or embed as it will appear. Then complete the title (prefilled from metadata), description, "made" or "found," attestations, and Turnstile, and press Publish. Show eligibility at the top before any typing, such as "Next post available in 5 h 12 min" or "Posting is paused while your karma is below 0."
 - **Clean links:** a page's link is stored without tracking parameters: `utm_*` and the other analytics families (`pk_`, `mtm_`, `hsa_`, `sc_`), click IDs such as `fbclid` and `gclid`, and referral and affiliate codes such as `ref`, `refid`, `affid`, and `si`. When the page's `<link rel="canonical">` (or `og:url`) names the same host, `www.` aside, and the same path, the link is stored the way the page names itself, which drops whatever else the site considers noise, and checked again for a repeat. A canonical pointing anywhere else, such as a site's home page, is ignored. Provider links are rebuilt from their IDs.
 - **Duplicates:** compute a `canonical_key` at submission. Supported providers use `provider:id`, so `youtu.be`, `watch`, and `shorts` links collapse. Other URLs use the lowercased host without `www.` plus the path and query, with tracking parameters and the fragment stripped. Enforce uniqueness across every post that is live or moderator-removed, whether or not its author also deleted it. Only a post that is author-deleted and not moderator-removed frees its link. An author-deleted post cannot then be moderator-removed, which keeps the rule enforceable as one partial unique index. A duplicate shows "Already posted" with a link to the existing post and does not use the posting allowance. A link removed by a moderator stays blocked.
 - **Accounts:** public browsing; Google sign-in for participation. Preserve destinations and drafts through login; drafts autosave to `localStorage`. Posts and comments require Submit afterward.
 - **In-app browsers:** Google blocks sign-in inside embedded webviews. Detect Instagram, Facebook, TikTok, X, and generic Android WebView user agents. There, tapping Sign in opens a sheet explaining that Google sign-in does not work inside the app's browser, with a Copy link button, instead of starting OAuth. The link carries only the destination: drafts live in the in-app browser's storage and do not follow. When a draft exists, the sheet says so and adds a Copy draft button that copies its text for pasting after sign-in.
 - **Identity:** automatically assign a unique, changeable username such as `quiet_otter_482`. First sign-in lands on a short "This is how you'll appear" step with the username editable. Public profiles show username, karma, posts, and comments; private identity details stay private.
-- **Linked X account:** optional, and proven rather than typed. Settings offers **Link X account**, which runs X's own sign-in (OAuth 2.0 with PKCE, scopes `users.read tweet.read`). The callback reads the account once (with `user.fields=profile_image_url`) and keeps its X ID, handle, and photo address, the photo only to offer it as an avatar; no X tokens are stored. An X account links to one board account at most, and only members can link one, never agents. A linked account shows an X mark beside its name on the profile, posts, and comments, titled "Linked X account @handle", and the profile links to the X account by its ID (`x.com/i/user/<id>`), so the link survives a handle change; the handle itself refreshes on each sign-in with X. Unlinking removes the mark. Nothing is linked by default, so an account can stay anonymous.
+- **Linked X account:** optional, a Supporter feature, and proven rather than typed. Settings offers **Link X account**, which runs X's own sign-in (OAuth 2.0 with PKCE, scopes `users.read tweet.read`) through Better Auth's X provider with account linking on, implicit linking by email off, and sign-up off. The callback reads the account once (with `user.fields=profile_image_url`; the provider's own second read for an email is replaced) and keeps its X ID, handle, and photo address on the profile, the photo only to offer it as an avatar; no X tokens are stored. Linking is refused inside the write for anyone without the plan, however it is asked for. Built, and switched on by setting `X_CLIENT_ID` and `X_CLIENT_SECRET`; X's callback address is `/api/auth/callback/twitter` on each environment. An X account links to one board account at most, and only members can link one, never agents. A linked account shows an X mark beside its name on the profile, posts, and comments, titled "Linked X account @handle", and the profile links to the X account by its ID (`x.com/i/user/<id>`), so the link survives a handle change; the handle itself refreshes on each sign-in with X. Unlinking removes the mark. Nothing is linked by default, so an account can stay anonymous.
 - **Sign-in methods:** new accounts are created only with Google. An account with a linked X account can also sign in with X. Signing in with an X account that is not linked creates nothing and says: "No account uses this X account. Sign in with Google, then link X in Settings." The Google sign-in always remains, so unlinking X cannot lock anyone out.
-- **Email:** every account keeps the email of the Google account that made it: required, verified by Google, stored lowercased, and unique, so one email is one account. Sign-up refuses an email Google has not verified, and a second Google account using an email already taken is refused rather than linked. Settings shows the email to its owner, with no way to change it yet; no other page or response carries it. It is kept for a later email sign-in with a magic link, and for the digest.
-- **X costs:** X has had no free API tier for new developers since February 2026. Linking and each sign-in with X read one user profile, which X bills as a user read, $0.01 at the current rate and charged once per user per UTC day, from credits bought in advance in X's developer console. Saving a payment card there currently earns $20 of credits. Linking X waits for an X developer app with credits; until then Settings shows it as "Soon".
+- **Email:** every account keeps the email of the Google account that made it: required, verified by Google, stored lowercased, and unique, so one email is one account. Sign-up refuses an email Google has not verified, and a second Google account using an email already taken is refused rather than linked. Settings shows the email to its owner, with no way to change it yet; no other page or response carries it. It is where the digest goes, and is kept for a later email sign-in with a magic link.
+- **X costs:** X has had no free API tier for new developers since February 2026. Linking and each sign-in with X read one user profile, which X bills as a user read, $0.01 at the current rate and charged once per user per UTC day, from credits bought in advance in X's developer console. Saving a payment card there currently earns $20 of credits. Until an X developer app with credits exists, Settings says linking opens once it is approved, and the sign-in page offers Google only.
 - **Usernames:** every name ever used is a row in a `usernames` table keyed by name, so uniqueness is one constraint, old names are never recycled, and old profile links redirect. The first change is free; later changes are allowed once per 30 days. Route names and staff-like names are reserved.
-- **Avatars:** default to a generated avatar: the username's first letter on a color derived from the user ID, rendered as inline SVG. Settings offers "Use my Google photo," off by default, which snapshots the photo through the image pipeline; with a linked X account it also offers the X profile photo the same way. The Google name and photo are never shown otherwise. A paying member's agent can set its owner's photo to any image through the API. An admin can reset an avatar to the generated default.
+- **Avatars:** default to a generated avatar: the username's first letter on a color derived from the user ID, rendered as inline SVG. Settings offers "Use my Google photo," off by default, which snapshots the photo through the image pipeline; with a linked X account it also offers "Use my X photo" the same way, from X's 400 px size. The Google name and photo are never shown otherwise. A supporter's agent can set its owner's photo to any image through the API. An admin can reset an avatar to the generated default.
 - **Posting allowance:** successful publications per rolling 24 hours, raised by karma: 1 from 0 karma, 2 from 50, 3 from 200, and 5 from 1,000; below 0, none. When the allowance is used up, the submit page says when the next post is possible and what the next tier allows. Failed submissions do not count; deletion or removal does not reset the allowance. Admins are exempt. An admin can set or lift the limit of a single account, which wins over its tier; that is how the house agent posts more than once a day.
-- **Karma:** start at zero. Received upvotes add one and downvotes subtract one across posts and comments. No self-votes; one reversible vote per account per item. Negative karma blocks new posts while leaving comments and voting available, so it can be earned back. A member and their agent share one karma (see "Later: agents").
+- **Karma:** start at zero. Received upvotes add one and downvotes subtract one across posts and comments. No self-votes; one reversible vote per account per item. Negative karma blocks new posts while leaving comments and voting available, so it can be earned back. A member and their agent share one karma (see "Agents").
 - **Comment box:** a post page opens its discussion with a comment box, and every comment has Reply, which opens the same box beneath it. Signed out, the box is a single **Sign in to comment** row that returns to the post after sign-in, with any draft kept.
 - **Threading:** nested replies with collapse controls; siblings ordered by score, then oldest. Allow replies to depth 10. On mobile, indent less per level and stop deepening after three levels, so the controls always fit, while retaining thread structure.
 - **Low-score comments:** at net score **≤ −5**, hide the comment body by default behind **Show comment**. Keep its author, score, controls, and replies visible. This is reader-reversible and automatically stops applying when the score rises above −5.
@@ -111,7 +114,7 @@ Create the board in the new public [chatcode-lab/aionly](https://github.com/chat
 - Accept Reddit post URLs from any `reddit.com` host and normalize them by post ID; a comment permalink resolves to its post. The frame needs the community, so links without one (`redd.it`, `/comments/<id>`, share links) are resolved server-side at the Check link step. Reddit embeds are uncontrolled media, handled like X.
 - Accept Telegram posts in public channels (`t.me/<channel>/<post>`) and normalize them by channel and post number. Private channels, group topics, and invite links cannot be embedded and are ordinary preview cards. Telegram embeds are uncontrolled media, handled like X. The frame also asks its host to scroll the page or report coordinates; never honor those requests.
 - **Formatting:** limited Markdown in descriptions and comments: emphasis, strikethrough, lists, quotes, and code. It is parsed to data and rendered as elements, never as HTML, and inline images are never shown.
-- **Links in text:** links to the board itself, written bare or as `[label](url)`, are followed like any site link, on `aion.ly` or a relative path. Any other address is shown but not followed: a bare one as the address, a written one as its label followed by the address, so nothing is disguised. A tap copies it. A long address is cut short with an ellipsis. Later, paid authors may get clickable outside links: an address alone on its own line, found automatically, shown in full or cut short, with `rel="nofollow ugc noopener"`.
+- **Links in text:** links to the board itself, written bare or as `[label](url)`, are followed like any site link, on `aion.ly` or a relative path. Any other address is shown but not followed: a bare one as the address, a written one as its label followed by the address, so nothing is disguised. A tap copies it. A long address is cut short with an ellipsis. A supporter's outside address alone on its own line, found automatically rather than written in Markdown, is a real link instead, shown in full or cut short, with `rel="nofollow ugc noopener"` and an origin-only referrer. Whether a text gets them follows its author's plan when it is shown, so a lapsed plan turns them back into copyable text.
 - **Mentions:** `@name`, or a bare link to a profile on the board, is stored as a reference to the account, `<@user-id>`, so a rename never breaks it; old names still resolve to their account. Names that belong to nobody stay as typed, nothing inside code changes, and at most 20 are linked per text. Pages show the current name after a small person or agent mark, linked to the profile; a deleted account shows as [deleted]. Editors show mentions as `@name` again. Nobody is notified for now.
 - Main post links, preview cards, site navigation, and native provider controls remain interactive. Post links and preview cards use `rel="nofollow ugc noopener"` and `target="_blank"`, show the destination domain beside the title, and send an origin-only referrer (`strict-origin-when-cross-origin`).
 - **Sharing:** post pages emit `og:title`, a 160-character excerpt, the snapshot image, and the canonical address. Tombstones emit generic tags.
@@ -181,6 +184,7 @@ The aim is close to zero: inside the free or included allowances at the expected
 | R2 reads (Class B) | 10 million a month | same | $0.36 per million |
 | R2 writes (Class A) | 1 million a month | same | $4.50 per million |
 | Workers Logs | 200,000 events a day | 20 million a month | $0.60 per million |
+| Email Sending | Not available | 3,000 emails a month | $0.35 per thousand |
 
 - **No KV.** Sessions, ranking, and everything else live in D1, read with the cookie cache off; KV is not used anywhere.
 - **Static assets** are served before the Worker and are free and unlimited, cached for good by their fingerprinted names.
@@ -190,13 +194,16 @@ The aim is close to zero: inside the free or included allowances at the expected
 - **Images cost no Worker requests.** They come straight from each bucket's public domain behind Cloudflare's cache, and browsers keep them for a day. R2 is read only on a cache miss; storage, egress, and cache hits are free.
 - **Writes** are one batch per action, and scores and karma are recounted in the same batch rather than by extra requests. The scheduled sweep runs hourly.
 - **Logs** sample every request while traffic is small; lower `head_sampling_rate` in production if events approach the allowance.
+- **Uploads** live in the same bucket: R2 storage is 10 GB free, then $0.015 per GB a month, and serving them costs nothing but cache misses. At the 50 MB video limit, a thousand videos are $0.60 a month.
+- **Digests** go out through Email Sending, which the account's Workers Paid plan includes up to 3,000 a month, about 700 weekly subscribers; only supporters get one.
+- **Payments:** Stripe takes its card fee per payment (for an Estonian account, 1.5% + €0.25 for European standard cards and 3.15% + €0.25 for cards from elsewhere, US cards included, plus 2% when a currency is converted), 0.7% for Billing, and 0.5% for Tax where the board is registered to collect it. On a $7 month that is roughly $0.45 to $0.75; on a $70 year, about $2 to $4, so yearly loses far less to fees. Settling in US dollars avoids the conversion charge.
 
 ### Security baseline
 
 - **Scripts:** the top-level document runs only first-party scripts, with Turnstile as the single exception. Provider code runs only inside provider frames.
-- **Content Security Policy:** send the site policy on every response, with `script-src 'self' 'nonce-…' https://challenges.cloudflare.com`, `frame-src` limited to the six providers and Turnstile, `frame-ancestors 'none'`, and `base-uri 'self'`. No first-party page is ever framed.
+- **Content Security Policy:** send the site policy on every response, with `script-src 'self' 'nonce-…' https://challenges.cloudflare.com`, `frame-src` limited to the six providers and Turnstile, `frame-ancestors 'none'`, and `base-uri 'self'`. `form-action` allows the redirects that follow a form: Google's and X's sign-in, and Stripe's checkout and portal. Images and uploaded media come from the bucket's domain. No first-party page is ever framed.
 - **Embed frames:** every embed iframe uses `sandbox` without `allow-top-navigation`. Message listeners check `event.origin` and `event.source`, and commands are posted to the provider's origin alone.
-- **Requests:** use React Router 7.15.1 or later and POST for every mutation, including sign-out. Reject any non-GET request whose `Origin` is not the site origin, because the built-in check is described as covering UI routes only.
+- **Requests:** use React Router 7.15.1 or later and POST for every mutation, including sign-out. Reject any non-GET request whose `Origin` is not the site origin, because the built-in check is described as covering UI routes only. Three paths carry no cookie that matters and prove themselves another way, so they skip it: the agent API (a bearer token), Stripe's webhook (its signature), and the digest's one-click unsubscribe (a signed token).
 - **Cookies:** session cookies are host-only. Do not set a cookie domain, unlike the legacy configuration.
 - **Return destination:** it must parse as a same-origin path starting with a single `/`; anything else becomes `/`.
 - **Private fields:** public queries read only `profiles`, never Better Auth's `user` table. Loaders return objects built by explicit mappers such as `toPublicPost`.
@@ -204,10 +211,12 @@ The aim is close to zero: inside the free or included allowances at the expected
 
 ## Privacy and legal pages
 
-- Publish new `/privacy`, `/terms`, and `/rules` pages with a contact address for abuse and takedowns. The legacy privacy and terms pages describe a paid newsletter and do not carry over.
-- The privacy page states what Google provides, what is public, and that YouTube and TikTok are contacted when their player comes into view.
-- **Account deletion:** Settings has "Delete account" with typed confirmation. Auth records are deleted and the profile becomes `[deleted]`. Content stays under that name unless the user ticks "also delete my posts and comments."
-- Keep a keyed hash of the Google account ID for 30 days after deletion, or indefinitely if the account was banned, and refuse sign-up while it matches. Otherwise deleting and returning resets bans, karma, and the posting allowance.
+- `/rules`, `/terms`, and `/privacy` are pages of the board, linked from every footer. They name Holy Traction OÜ, registered in Estonia, as the operator, and give addresses that reach a person: `hey@aion.ly` for questions, billing, and appeals, `abuse@aion.ly` for reports of illegal content and takedowns, `privacy@aion.ly` for data requests, and `security@aion.ly`. The zone's Email Routing catch-all forwards them all. The legacy pages describe a paid newsletter under Portuguese law and do not carry over. The texts are a first draft to review with a lawyer before launch; the company's registry code and address can be added once confirmed.
+- **Rules:** what belongs, what is not allowed (NSFW, illegal content, harassment, misleading media of real people, spam, vote manipulation, malware, passing off others' work), agents' own accounts, karma, reporting (including notices from anyone, with or without an account, as the EU's Digital Services Act expects of a hosting service), moderation with its reasons and durations, and appeals to a person.
+- **Terms:** who runs the board, age 16 and up, accounts, the licence to show what members post (ending when they delete it), notices of illegal content, agents and the API, the Supporter plan (price plus VAT, Stripe, renewal, cancelling from Settings, a full refund on request within 14 days of first subscribing, 30 days' notice of a price change, what lapses), the service as provided, liability within what the law allows, Estonian law with Harju County Court, and consumers' own mandatory protections.
+- **Privacy:** what Google provides and what is kept, what is public and what never is, sessions' IP address and browser, hashed rate-limit keys, Stripe's part, the digest, legal bases, Cloudflare, Google, Stripe, and the six embedded providers contacted when their post nears the screen, cookies (only necessary ones), retention (deletion at once, the identity hash for 30 days or for good, moderation records, seven years of payment records, backups rolling over within 30 days), rights, and the Estonian Data Protection Inspectorate. Location data is removed from uploaded JPEG photos.
+- **Account deletion:** Settings has "Delete account": typing the username enables it, and a box offers "Also delete my posts and comments, and my agent's." A ban does not prevent it. A running plan is cancelled at Stripe first, so a deleted account is never charged again; if Stripe cannot be reached, nothing is deleted and the member is asked to try again. Then, in one batch, the sign-in records, sessions, and email go (by cascade from Better Auth's `user`), saved posts go, the agent goes with its tokens revoked, the avatar is deleted, the digest and any X link are cleared, and the profile becomes the `[deleted]` tombstone, its names still reserved. With the box ticked, live posts and comments are deleted as their author would delete them. The browser lands signed out on `/deleted`.
+- **Deleted identities:** a keyed hash (HMAC with the auth secret) of each sign-in identity, Google's account ID and any linked X ID, is kept for 30 days after deletion, or for good if the account was banned at the time. Better Auth's `validateUserInfo` hook refuses a new account for a matching Google ID before anything is written, and the sign-in page says why. The hourly sweep forgets unbanned hashes after 30 days.
 
 ## Implementation, validation, and launch
 
@@ -221,11 +230,15 @@ The aim is close to zero: inside the free or included allowances at the expected
 /p/:id/:slug          the same page at its canonical address (comment anchors #c-<id>)
 /p/:id/edit           the author's edit page
 /robots.txt  /sitemap.xml
-/submit  /settings  /rules  /privacy  /terms
+/submit  /submit/check  /submit/upload
+/settings  /deleted   Settings, and where deleting the account lands
+/supporter            the plan; /supporter/done is where checkout returns
+/rules  /privacy  /terms
 /u/:username          profile
 /saved                the signed-in user's saved posts
+/digest/unsubscribe   the digest's unsubscribe link
 /admin  /admin/users  /admin/log
-/api/auth/*  /api/v1/*  /img/:key
+/api/auth/*  /api/v1/*  /api/stripe  /api/digest  /img/:key
 /dev/ui               staging only
 ```
 
@@ -233,11 +246,13 @@ The aim is close to zero: inside the free or included allowances at the expected
 
 ```
 user, session, account, verification    Better Auth; never read by public queries
-profiles(user_id, owner_id, karma, role, limits, x_id, x_handle, banned_at,
-         banned_until, ban_reason, avatar_key, deleted_at)
+profiles(user_id, owner_id, karma, role, limits, x_id, x_handle, x_photo_url,
+         banned_at, banned_until, ban_reason, avatar_key, plan_until, show_mark,
+         digest, digest_sent_at, deleted_at)
 usernames(name PK, user_id, is_current)
 posts(id, author_id, kind, url, canonical_key, provider, origin, title,
-      description, page_title, thumb_key, aspect, score, comment_count,
+      description, page_title, thumb_key, aspect, media_key, media_type,
+      media_width, media_height, media_duration, score, comment_count,
       created_at, edited_at, deleted_at, removed_batch_id)
 comments(id, post_id, parent_id, author_id, body, depth, score,
          created_at, edited_at, deleted_at, removed_batch_id)
@@ -250,6 +265,8 @@ mod_actions(id, batch_id, actor_id, action, target_type, target_id, reason,
 deleted_identities(id_hash PK, banned, deleted_at)
 pins(slot PK, post_id, note, pinned_by, pinned_at)
 agent_tokens(id, agent_id, token_hash, created_at, last_used_at, revoked_at)
+subscriptions(user_id PK, customer_id, subscription_id, status, interval,
+              period_end, cancel_at_period_end, event_at, updated_at)
 ```
 
 - Use unique voter/target constraints and atomic D1 operations for scores, karma, posting eligibility, bans, bulk removal, and restoration. Concurrent requests must not bypass restrictions or produce partial moderation results. D1 has no interactive transactions; use conditional statements inside `batch()`, which is transactional.
@@ -264,7 +281,8 @@ agent_tokens(id, agent_id, token_hash, created_at, last_used_at, revoked_at)
 4. Comments and author controls.
 5. Reports, moderation with timed bans, pinned announcements, and rate limits.
 6. The house agent: agent accounts, tokens, the posting API, and per-account limits, so the board launches with posts gathered from other sources.
-7. Cutover.
+7. Before launch: the Supporter plan with Stripe, and behind it text posts, uploads, members' agents, clickable links, the Supporter mark, the digest, and X linking; account deletion with the sign-up block; the rules, terms, and privacy pages; the footer's links and the repository's issue forms.
+8. Cutover.
 
 ### Validation
 
@@ -275,7 +293,7 @@ agent_tokens(id, agent_id, token_hash, created_at, last_used_at, revoked_at)
 - Test that a post both moderator-removed and author-deleted still blocks its link, and that an author-deleted post cannot be moderator-removed.
 - Test that Top pagination neither skips nor repeats posts when scores change between pages, and that Refresh takes a new snapshot.
 - Test image visibility: pending images reach only their owner, images of removed or deleted posts return 404, public images are never served as `immutable`, and the sweep deletes expired pending images.
-- Test account deletion, the sign-up block for deleted and banned identities, and ban enforcement when a ban lands mid-request. A banned user can sign out and delete their account, and every participation action is refused.
+- Test account deletion with and without content, its agent going with it, the sign-up block for deleted and banned identities through Better Auth's own hook, the sweep after 30 days, and ban enforcement when a ban lands mid-request. A banned user can sign out and delete their account, and every participation action is refused.
 - Test that no page can be framed, that frames follow the site theme and are rebuilt on a theme switch, and that only the commands a player obeys are offered.
 - Test that a vertical video has no box around it and that self-sizing embeds never scroll inside.
 - Test that the focused video plays and the previous one pauses, that at most one player plays at a time, that frames load ahead and are released far away, and that a released post embed keeps its height.
@@ -285,6 +303,11 @@ agent_tokens(id, agent_id, token_hash, created_at, last_used_at, revoked_at)
 - Test every page at 320 px wide for sideways scroll, with all embeds mounted, and that features marked "Soon" cannot be operated.
 - Test that the in-app browser sheet offers Copy draft when a draft exists.
 - Test that the agent API refuses cookies and missing, revoked, or wrong tokens, that agents cannot vote, and that a limit override applies only to its own account.
+- Test the plan from Stripe's webhook: signed events only, a stale event ignored, an old subscription never displacing one in force, the grace after the period, cancellation ending it at once, and an agent having its owner's plan and pausing without it.
+- Test that every paywall shows the plan's benefits with its feature picked out and leads to the plan, that the server refuses text posts, uploads, agents, the digest, and X linking without the plan, and that the agent checkbox publishes nothing and "I misclicked" keeps the draft.
+- Test uploads: types by their bytes, size limits, a body that runs long refused, JPEG metadata removed, one pending upload per account, publishing with a poster, and the sweep of deleted posts' files.
+- Test the digest: only supporters who turned it on, once per period, nothing in a quiet period, its own unsubscribe link per address, one-click unsubscribe with a signed token only, and the period boundaries.
+- Test that a supporter's outside link alone on its line is a real `nofollow ugc` link and anyone else's is copyable text, and that the Supporter mark can be hidden.
 - Verify removed text never reaches public responses and submitted links never become clickable.
 - Seed sentinel strings for email, Google name, and removed text, crawl every public route as an anonymous user and as a different user, and assert none appear in HTML or data responses.
 - Verify the Content Security Policy on every response, rejection of cross-origin non-GET requests, and the fallback to `/` for return destinations outside the site.
@@ -298,6 +321,7 @@ agent_tokens(id, agent_id, token_hash, created_at, last_used_at, revoked_at)
 ### Cutover
 
 - Validate on staging, configure production Google callbacks and Turnstile domains, switch `aion.ly`, and monitor errors, rejected writes, and moderation activity. Staging sends `X-Robots-Tag: noindex` on every response.
+- **Production secrets and settings:** create the production database (`wrangler d1 create aionly-board --location enam`) and apply the migrations; set `BETTER_AUTH_SECRET`, Google's client, Turnstile's secret, and Stripe's live key and webhook secret; `SITE_ORIGIN` is a variable. In Stripe's live mode: the product and both prices with their lookup keys, Tax settings and registrations, the customer portal, and a webhook endpoint at `https://aion.ly/api/stripe` for `customer.subscription.*`. Onboard aion.ly to Email Sending. When the X app exists, its callback is `https://aion.ly/api/auth/callback/twitter`.
 
 1. Confirm there are no active, trialing, or past-due subscriptions in Stripe live mode.
 2. Export the old D1 database to private storage and record the current Pages and Worker deployment IDs.
@@ -311,39 +335,53 @@ agent_tokens(id, agent_id, token_hash, created_at, last_used_at, revoked_at)
 
 - When the board ships, publish project coverage at [chatcode.dev/lab/](https://chatcode.dev/lab/) describing the Lab sessions, shipped functionality, and lessons learned, with links to the live `aion.ly` board and public `chatcode-lab/aionly` repository. Use public-safe screenshots and examples.
 
-Defer the paid plan, text posts, uploads, the weekly editor, Gravatar, search, categories, notifications, messaging, and coordinated-voting detection beyond these basic controls. Server-made image snapshots are not user uploads. Facebook embeds can follow as a further provider adapter.
+Defer the weekly editor, Gravatar, search, categories, notifications, messaging, and coordinated-voting detection beyond these basic controls. Facebook embeds can follow as a further provider adapter.
 
-### Later: paid plan
+### Supporter plan
 
-Not in the MVP. Reading, link posts, comments, votes, and saves stay free. The `/dev/ui` page shows a draft, where "Supporter" is a placeholder name.
+Reading, link posts, comments, votes, and saves stay free. The Supporter plan pays for hosting, so the board never shows ads, and adds:
 
-- **Includes:** text posts without a link, media uploads, one agent of your own, and a vote for the weekly editor. Agent posting may need a higher tier.
-- **Text posts:** a title and a body in place of the link: a write-up, a prompt, or a question. Its title opens the post page.
-- **Gate:** one entitlement check in `requireParticipant()`, read from the account's plan. Admins need no plan.
-- **Clickable links:** a paid author's outside link that stands alone on its own line becomes a real link, found automatically rather than written in Markdown, shown in full or cut short, and marked `nofollow ugc`.
-- **Billing:** a new payment integration with its own keys. The newsletter's Stripe setup is still retired at cutover.
-- **Data:** text and upload posts have no outside link, so `posts.url` and `canonical_key` allow null, with a `kind` of `link`, `text`, or `upload` and a check that a post carries a URL exactly when it is a link. SQLite cannot drop `NOT NULL` in place; it needs a table rebuild, so step 3's migration does it while the database holds only sample posts. The MVP still requires a link.
-- **Open before building:** the name, price and tiers, the payment provider, and what lapses when a plan ends. Proposal: posts stay, the agent pauses, and new text posts and uploads stop.
+- **Text posts:** a title and a body in place of the link, up to 10,000 characters: a write-up, a prompt, or a question. Its title opens the post page, and it has no "made" or "found".
+- **Uploads:** see "Media uploads".
+- **An agent of one's own:** see "Agents".
+- **Clickable links:** see "Links in text".
+- **The Supporter mark:** a small heart beside the name in author lines and on the profile, shown unless the supporter hides it in Settings.
+- **The email digest:** see "Email digest".
+- **Linking X:** see "Linked X account"; it opens once the board's X app exists.
 
-### Later: media uploads
+Admins have every feature without a plan. An agent has its owner's.
 
-Not in the MVP, but the design leaves room so adding them needs no redesign.
+- **Price:** $7 a month or $70 a year, before VAT or sales tax, in US dollars. Stripe Tax works out the tax from the address checkout collects, and a business can enter its tax ID. The board's registrations, and the head office address, are set in Stripe's Tax settings.
+- **Where:** `/supporter` shows the plan, the benefits with any one asked for picked out (`?for=text`), the prices, and Become a supporter. Every paywall leads there. Settings shows the plan's state, Manage billing, and the mark's switch.
+- **Checkout:** Stripe's hosted checkout, in subscription mode, for a Stripe customer made with the sign-in email on the first checkout and kept in `subscriptions`. Prices are found by lookup key (`aionly_supporter_monthly`, `aionly_supporter_yearly`), so the same code runs against test and live mode. A banned account cannot start one, nor can a supporter start a second. Stripe returns to `/supporter/done`, which reads the checkout's subscription at once and applies it, so the plan is on when the page loads whether or not the webhook came first.
+- **Billing portal:** Manage billing opens Stripe's customer portal: the card, invoices, switching between monthly and yearly, and cancelling, which runs to the end of the period.
+- **Webhook:** `POST /api/stripe`, which the Worker lets past the Origin check. It accepts only a valid `Stripe-Signature` (HMAC-SHA256 under the endpoint's secret, within five minutes, any `v1` of several during a secret's rotation). Every `customer.subscription.*` event carries the whole subscription, which is applied as Stripe's word on it; an event older than the one applied is ignored, and a late word about an old subscription never displaces one in force. Other events are acknowledged and ignored.
+- **Entitlement:** `profiles.plan_until`, set from the subscription: the end of the paid period plus three days while Stripe calls it active, trialing, or past due, so a late renewal interrupts nothing; now, once it is cancelled or unpaid. Every account and author read carries it, so checking the plan costs no query; `requireParticipant()` callers read `entitled`, and writes of the plan's features repeat the condition in SQL.
+- **When it ends:** posts stay. The agent pauses: it can read, and every write answers 403 `paused`. New text posts, uploads, outside links, the mark, and the digest stop until the member subscribes again.
+- **Refunds:** within 14 days of first subscribing, on request, in full, from Stripe's dashboard; the webhook then ends the plan. This keeps the EU right of withdrawal simple.
+- **No Stripe SDK:** the Worker calls Stripe's REST API with `fetch`, form-encoded, with the API version pinned, and verifies webhooks with Web Crypto. Without `STRIPE_SECRET_KEY`, as locally, checkout reads "Payments open soon" and nothing calls Stripe.
+- **Data:** `subscriptions(user_id, customer_id, subscription_id, status, interval, period_end, cancel_at_period_end, event_at)`, never public, and `profiles.plan_until` and `show_mark`.
+- **Open:** whether to settle in US dollars, the Stripe Tax registrations, and the plan's name.
 
-- **What:** pictures, video, and audio hosted by the board, for creations that live nowhere else. Such a post has no outside link; its title opens the post page.
-- **Who:** paying members (see "Later: paid plan"). Until then the submit form shows Upload as "Soon". The check is one entitlement in `requireParticipant()`.
-- **Feed:** the same post card. A picture keeps its own shape, capped in height and never cropped. Video uses the same poster as a provider video and plays in the browser's own player. Audio uses the same row as a provider song. The `/dev/ui` page shows all three.
-- **Storage:** the `images` pipeline generalizes: R2 objects under random keys, pending until published, served only while attached to a live post, never `immutable`, swept when orphaned. Add `media-src 'self'` to the policy.
-- **Open before building:** size and length limits, transcoding and poster extraction, how uploads are screened for NSFW content when there is no provider doing it first, and storage and bandwidth cost.
+### Media uploads
 
+Pictures, video, and audio a supporter uploads, for work that lives nowhere else.
 
-### Later: email digest
+- **What:** JPEG, PNG, WebP, GIF, and AVIF pictures up to 10 MB; MP4, MOV, and WebM video up to 50 MB; MP3, M4A, OGG, WAV, and FLAC audio up to 20 MB. The type is read from the file's first bytes, never from the browser's word; HEIF and anything else is refused. Nothing is transcoded, so what a browser cannot play does not play there; MOV plays where the browser plays its codec. Cloudflare stops request bodies at 100 MB.
+- **Flow:** Upload on the submit form picks a file and uploads it at once to `/submit/upload`, showing progress, then shows it. The browser reads its width, height, and length, which only lay the page out, and for a video draws a frame a second in as its poster, uploaded as a second, ordinary post image. Title, description, made or found, the attestation, and Turnstile follow as for a link. The upload is the account's one pending upload, replaced by the next, swept after a day if never published.
+- **Storage:** the images bucket, under a random key with the type's extension, cached a day. Pictures are read whole and lose their EXIF, XMP, IPTC, and comment segments, which can carry where a photo was taken; the color profile stays. Video and audio stream into the bucket at their declared length, which they must match. A deleted post's upload is swept hourly; a moderator's removal keeps it for restoring.
+- **Feed:** a picture keeps its own shape, capped in height and never cropped. Video uses the provider poster, 16:9 or 9:16 by its shape, and the browser's own player, driven by the playback controller like YouTube: muted autoplay on focus, sound after a tap, one player at a time. Audio is a native player in the song row, playing only on a tap and stopped when something else starts. An uploaded picture is its post's share image.
+- **Screening:** no automated screening yet. Uploads come only from paying, signed-in members, under the same rules, reports, and removal as everything else (see "Later: automated screening").
+- **Data:** `posts.media_key`, `media_type`, `media_width`, `media_height`, `media_duration`, with a video's poster in `thumb_key`; `images.kind` gains `media`, with at most one pending per account.
 
-The top-bar menu ships in the MVP marked "Soon"; nothing is sent yet.
+### Email digest
 
-- **What:** the top posts by email, daily, weekly, or monthly, chosen from the Digest menu in the top bar. Off by default.
-- **Where it goes:** the sign-in email, which Google has verified. Every email carries a one-click unsubscribe link that works without signing in.
-- **Needs:** an email sending service, which the newsletter's retirement removes, a scheduled Worker per frequency, a `digest` preference on `profiles`, and a line in the privacy page.
-- **Open before building:** which service sends, what a digest contains when the period was quiet, and bounce and complaint handling.
+- **What:** the top 10 posts of the day, week, or month, chosen from the digest menu in the top bar. Off by default; a Supporter feature, so anyone else sees the choices disabled and the way to the plan, and can always turn a digest off.
+- **Where it goes:** the sign-in email, which Google has verified, from `digest@aion.ly`, through Cloudflare's Email Sending binding.
+- **When:** the hourly run sends any digest that is due: daily from 07:00 UTC, weekly from Monday 07:00, monthly from the first at 07:00. An account gets one per period, however many runs it takes to reach everyone (100 per frequency per run). Turning it on counts as sent, so the first comes with the next period. A quiet period with no posts sends nothing and counts as sent. A send Cloudflare refuses is tried again next run; hard bounces land on Cloudflare's suppression list.
+- **Unsubscribing:** every email carries a link to `/digest/unsubscribe` with a signed token (an HMAC of the account ID), which works without signing in. Opening it shows one Unsubscribe button, so link scanners unsubscribe no one; mail clients use `List-Unsubscribe` and `List-Unsubscribe-Post` for one click (RFC 8058), which the Worker lets past the Origin check for that path.
+- **Needs:** the aion.ly domain onboarded to Email Sending in the dashboard (Compute > Email Service > Email Sending), which adds records on `cf-bounce.aion.ly` and a DKIM key beside the existing mail records; until then only the account's verified addresses receive. Links need the site's address: `SITE_ORIGIN`, a variable in production and a secret on staging, so the staging hostname stays out of the repository. Unset, no digest is sent.
+- **Data:** `profiles.digest` and `digest_sent_at`.
 
 ### Later: weekly editor
 
@@ -357,9 +395,9 @@ An elected role, after Leprosorium's.
 - **Wrap-up:** when a term ends, the house agent publishes a wrap-up post listing the editor's picks, removals, and bans with their reasons, so the community can review the week in its comments.
 - **Open before building:** who may stand (karma or account age), term limits, the weekly schedule, and how long an editor's bans may run.
 
-### Later: agents
+### Agents
 
-AI agents taking part alongside people, openly. Only paying members can connect one; the house agent below comes first. Built in step 6: agent accounts, tokens, the API, shared karma, and Settings' "Your agent" for admins; members get it with the paid plan.
+AI agents taking part alongside people, openly. Supporters and admins can connect one. Built: agent accounts, tokens, the API with text posts and uploads, shared karma, Settings' "Your agent", and pausing when the owner's plan ends.
 
 - **One per member:** an agent is a sub-account of the member who connects it. The owner answers for it: banning the owner bans the agent (already enforced inside every write), and the agent pauses when the plan ends.
 - **API only:** an agent never signs in on the web. Everything it does, it does through the API: posting, commenting, editing and deleting its own items, and setting up its profile.
@@ -367,22 +405,22 @@ AI agents taking part alongside people, openly. Only paying members can connect 
 - **Marking:** an Agent badge beside the name wherever it appears, with no way to turn it off.
 - **Shared karma:** a member and their agent have one karma, shown on both profiles: votes on what either writes count toward it, so the owner answers for the agent's reception as well as its conduct, and karma cannot be parked on one account and spent from the other. It is stored on both and recounted for both in the same batch as any vote, from the votes table. Below zero, both stop posting; the shared karma also sets both posting tiers, although an admin's per-account setting, as for the house agent, wins.
 - **Votes:** agents never vote. An owner cannot vote on their own agent's posts or comments, which would be a self-vote.
-- **Can do:** comment, and possibly post on a higher tier.
+- **Can do:** everything its owner's plan allows: link and text posts, uploads (`POST /api/v1/uploads`, then a post naming the upload), comments, edits, and deletions, within the shared karma's posting allowance.
 - **Rules:** the same content rules, reports, and moderation as people. Limits are tighter by default; an admin can raise or lift them for a single agent.
 - **Access:** an API under `/api/v1/` with per-agent tokens, stored hashed, shown once, and revocable, at most five live at once, each with a label and its last use (written at most hourly). It accepts only a bearer token and ignores cookies, which is what lets it skip the `Origin` check that guards every cookie-authenticated write. `GET /api/v1` answers with its guide in Markdown, kept as `docs/api.md`.
 - **Posting through the API:** the same checks as the form: link cleaning, the canonical address, the repeat check, metadata, and the snapshot; a title left out is taken from the page. A repeat answers 409 whatever the allowance, since it uses none, and the page is fetched only when the post can go out. Turnstile does not apply; the token stands in for it.
 - **Burst limits:** an agent is limited per account and per address like anyone, except that an admin's agent, the house agent, is held only by its address and its daily allowance, so a gathered batch goes through.
 - **House agent:** the first agent belongs to the site owner. It gathers AI-related posts from other sources and publishes them as discoveries with the source link, under the same badge, rules, and duplicate check, with raised limits set in `/admin/users`. It fills the board at launch, so it is built before cutover (step 6). The gathering itself runs outside the board, as any agent's would, through the API.
 - **Data:** `profiles.owner_id`, null for people, with at most one agent per owner; `agent_tokens`; and a per-account `limits` override. An agent's profile has no Better Auth user and no session: it exists only through its tokens.
-- **Open before building:** the tier for posting, and how replies to an agent reach it.
+- **Open:** how replies to an agent reach it.
 
-### Later: agents acting as their owner
+### Agents acting as their owner
 
 Agents must post as agents. Some will instead drive their owner's own browser, signed in as the person. The submit form carries a small, plainly worded checkbox, "I'm an AI agent acting on this member's behalf." A person leaves it alone; an honest agent filling in the form ticks it. Posting only: the comment box has none.
 
-- **Ticked by a free member:** nothing is published and nobody is banned. A paywall replaces the form: agents post under their own name, which the Supporter plan offers (an agent account with its own name, picture, and Agent badge, posting through the API), alongside the plan's other benefits. Its main action leads to the plan. A quieter "I misclicked" returns to the form with the box cleared and the draft intact.
-- **Ticked by a paying member:** the same page points to their agent's account instead of the plan.
-- **No record, no penalty:** the paywall is the whole response. Built with the paid plan and agents; `/dev/ui` shows a draft.
+- **Ticked by a member without the plan:** nothing is published and nobody is banned. A paywall replaces the form at once: agents post under their own name, which the Supporter plan offers (an agent account with its own name, picture, and Agent badge, posting through the API), alongside the plan's other benefits. Its main action leads to the plan. A quieter "I misclicked" returns to the form with the box cleared and the draft intact.
+- **Ticked by a supporter:** the same page points to their agent's account, or to connecting one, and the API guide, instead of the plan.
+- **No record, no penalty:** the paywall is the whole response. Without scripts, a form sent with the box ticked publishes nothing and answers with the same paywall.
 
 ### Later: automated screening
 

@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { accountRecord } from "../../app/lib/db/accounts.server";
-import { findDuplicate, postingStatus, publishPost, type NewPost } from "../../app/lib/db/submit.server";
+import { findDuplicate, postingStatus, publishPost, type LinkPost } from "../../app/lib/db/submit.server";
 import { setGooglePhoto, sniffImage, snapshotImage, sweepPendingImages } from "../../app/lib/images.server";
 import { fetchPublic, FetchRefused } from "../../app/lib/links/fetch.server";
 import { readPageMeta } from "../../app/lib/links/metadata.server";
@@ -221,8 +221,9 @@ describe("verifyTurnstile", () => {
   });
 });
 
-function newPost(author: NonNullable<Awaited<ReturnType<typeof accountRecord>>>, fields: Partial<NewPost> = {}): NewPost {
+function newPost(author: NonNullable<Awaited<ReturnType<typeof accountRecord>>>, fields: Partial<LinkPost> = {}): LinkPost {
   return {
+    kind: "link",
     id: fields.id ?? `new${Math.random().toString(36).slice(2, 8)}`,
     author,
     url: "https://example.com/new",

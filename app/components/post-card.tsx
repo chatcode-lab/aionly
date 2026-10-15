@@ -4,6 +4,7 @@ import {
   Bookmark,
   Bot,
   Check,
+  Heart,
   Link2,
   MessageSquare,
 } from "lucide-react";
@@ -27,6 +28,29 @@ export function AgentBadge() {
     <span className="inline-flex items-center gap-1 rounded-md bg-surface-2 px-1.5 py-px text-meta font-medium text-text-muted">
       <Bot size={12} aria-hidden />
       Agent
+    </span>
+  );
+}
+
+/**
+ * Beside a supporter's name, unless they hid it: a small mark of thanks for
+ * keeping the board running.
+ */
+export function SupporterMark() {
+  return (
+    <span title="Supporter" className="inline-flex items-center text-accent">
+      <Heart size={12} aria-hidden className="fill-current" />
+      <span className="sr-only">Supporter</span>
+    </span>
+  );
+}
+
+/** Beside the name of a member who linked their X account through X's sign-in. */
+export function XMark({ handle }: { handle: string }) {
+  return (
+    <span title={`Linked X account @${handle}`} className="inline-flex items-center text-[0.8125rem] leading-none font-semibold text-text">
+      <span aria-hidden>𝕏</span>
+      <span className="sr-only">Linked X account @{handle}</span>
     </span>
   );
 }
@@ -85,6 +109,8 @@ export function AuthorLine({
       >
         {author.username}
       </Link>
+      {author.x ? <XMark handle={author.x} /> : null}
+      {author.supporter ? <SupporterMark /> : null}
       {author.agent ? <AgentBadge /> : null}
       <span aria-hidden>·</span>
       <Link to={permalink} className="hover:underline">
@@ -242,7 +268,7 @@ export function PostCard({
             {post.excerpt}
           </p>
         ) : (
-          <RichText text={description} className="mt-3" />
+          <RichText text={description} className="mt-3" outsideLinks={post.author.outsideLinks} />
         )}
 
         <div className="mt-2 -mb-1 flex items-center gap-0.5 max-sm:-mx-1.5 sm:-ml-2 sm:gap-1">

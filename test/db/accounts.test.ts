@@ -1,3 +1,4 @@
+import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { usernameProblem } from "../../app/lib/accounts/usernames";
@@ -144,7 +145,16 @@ describe("pagePath", async () => {
 
 describe("sign-up", async () => {
   const { authFor } = await import("../../app/lib/auth.server");
-  const adapter = async () => (await authFor(new Request("http://localhost/")).$context).internalAdapter;
+  const { runWithEndpointContext } = await import("@better-auth/core/context");
+  // Sign-up checks run inside a request to the auth endpoints; tests stand one in.
+  const adapter = async () => {
+    const context = await authFor(new Request("http://localhost/")).$context;
+    const internal = context.internalAdapter;
+    return {
+      createUser: (...args: Parameters<typeof internal.createUser>) =>
+        runWithEndpointContext({ context } as unknown as Parameters<typeof runWithEndpointContext>[0], () => internal.createUser(...args)),
+    };
+  };
   const google = { method: "oauth", oauth: { providerId: "google" } } as const;
 
   beforeEach(async () => {
@@ -158,6 +168,25 @@ describe("sign-up", async () => {
     ).rejects.toMatchObject({ body: { code: "email_not_verified" } });
     const row = await db.prepare(`SELECT 1 FROM "user" WHERE "email" = 'someone@signup.invalid'`).first();
     expect(row).toBeNull();
+  });
+
+  it("refuses a Google account whose board account was deleted lately", async () => {
+    const { deleteAccount, identityHash } = await import("../../app/lib/db/deletion.server");
+    await user("gone", "gone_otter");
+    await deleteAccount(db, {
+      userId: "gone",
+      content: false,
+      banned: false,
+      identities: [await identityHash(env.BETTER_AUTH_SECRET, "google", "sub-of-gone")],
+      now: Math.floor(Date.now() / 1000),
+    });
+    const auth = await adapter();
+    const again = { method: "oauth", oauth: { providerId: "google", profile: { sub: "sub-of-gone" } } } as const;
+    await expect(
+      auth.createUser({ name: "Back again", email: "back@signup.invalid", emailVerified: true }, again),
+    ).rejects.toMatchObject({ body: { code: "identity_deleted" } });
+    const fresh = { method: "oauth", oauth: { providerId: "google", profile: { sub: "someone-new" } } } as const;
+    expect((await auth.createUser({ name: "New", email: "new@signup.invalid", emailVerified: true }, fresh)).email).toBe("new@signup.invalid");
   });
 
   it("keeps the email lowercased and one account per email", async () => {

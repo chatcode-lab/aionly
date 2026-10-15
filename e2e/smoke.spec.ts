@@ -5,7 +5,7 @@ test.describe("security baseline", () => {
     page,
     problems,
   }) => {
-    for (const path of ["/", "/dev/ui", "/dev/embeds"]) {
+    for (const path of ["/", "/supporter", "/rules", "/terms", "/privacy", "/dev/ui", "/dev/embeds"]) {
       const response = await page.goto(path);
       expect(response?.status(), path).toBe(200);
 
@@ -25,6 +25,17 @@ test.describe("security baseline", () => {
       await expect(
         page.locator('footer a[href="https://x.com/karulin"]'),
       ).toHaveText("@karulin");
+      await expect(
+        page.locator('footer a[href="https://github.com/chatcode-lab/aionly/issues/new/choose"]'),
+      ).toHaveText("Report a bug or suggest a feature");
+      for (const [href, name] of [
+        ["/supporter", "Support the board"],
+        ["/rules", "Rules"],
+        ["/terms", "Terms"],
+        ["/privacy", "Privacy"],
+      ]) {
+        await expect(page.locator(`footer a[href="${href}"]`), path).toHaveText(name);
+      }
     }
 
     expect(problems.violations).toEqual([]);
@@ -229,6 +240,24 @@ test.describe("embed spike", () => {
   });
 });
 
+test.describe("legal pages", () => {
+  test("name who runs the board, what the plan costs, and how to reach a person", async ({ page }) => {
+    await page.goto("/terms");
+    await expect(page.getByRole("heading", { name: "Terms", level: 1 })).toBeVisible();
+    for (const text of ["Holy Traction OÜ", "Estonia", "$7 a month or $70 a year", "Within 14 days", "abuse@aion.ly"]) {
+      await expect(page.locator("main")).toContainText(text);
+    }
+    await page.goto("/privacy");
+    for (const text of ["Holy Traction OÜ", "privacy@aion.ly", "YouTube, TikTok, Suno, X, Reddit, and Telegram", "Stripe", "30 days"]) {
+      await expect(page.locator("main")).toContainText(text);
+    }
+    await page.goto("/rules");
+    for (const text of ["Anything not safe for work", "own agent account", "abuse@aion.ly"]) {
+      await expect(page.locator("main")).toContainText(text);
+    }
+  });
+});
+
 test.describe("narrow screens", () => {
   test("no page scrolls sideways", async ({ page }) => {
     const overflow = () =>
@@ -244,6 +273,13 @@ test.describe("narrow screens", () => {
       "/p/s_post_01",
       "/p/s_post_17",
       "/u/quiet_otter_482",
+      "/supporter",
+      "/supporter?for=agent",
+      "/rules",
+      "/terms",
+      "/privacy",
+      "/deleted",
+      "/digest/unsubscribe?token=nope",
       "/dev/ui",
       "/dev/embeds",
     ]) {
@@ -382,39 +418,42 @@ test.describe("design review page", () => {
     ).toHaveAttribute("aria-pressed", "true");
   });
 
-  test("shows the digest and uploads as coming soon, not as working", async ({ page }) => {
+  test("shows the digest and uploads behind the plan, not as working", async ({ page }) => {
     await page.goto("/dev/ui");
 
     await page.getByRole("button", { name: /^Email digest:/ }).click();
     const menu = page.getByRole("menu");
-    await expect(menu).toContainText("Soon");
+    await expect(menu).toContainText("for supporters");
     for (const option of ["Daily", "Weekly", "Monthly"]) {
       await expect(
         menu.getByRole("menuitemradio", { name: option }),
       ).toHaveAttribute("aria-disabled", "true");
     }
+    await expect(menu.getByRole("menuitem", { name: "Become a supporter" })).toHaveAttribute("href", "/supporter?for=digest");
     await page.keyboard.press("Escape");
 
     await page.getByRole("button", { name: "Upload", exact: true }).click();
-    await expect(page.getByText("Upload a picture, video, or audio")).toBeVisible();
+    await expect(page.getByText("Uploads are for supporters")).toBeVisible();
     const form = page.locator("form", {
       has: page.getByRole("group", { name: "Post from" }),
     });
     await expect(form.getByRole("button", { name: "Publish" })).toBeDisabled();
   });
 
-  test("shows the supporter plan and agents as coming soon", async ({ page }) => {
+  test("shows the supporter plan and the agent paywall", async ({ page }) => {
     await page.goto("/dev/ui");
 
     await expect(page.getByRole("button", { name: "Become a supporter" })).toBeDisabled();
     await expect(page.getByRole("button", { name: "Create token" })).toBeDisabled();
-    // The paywall an agent sees for posting as its owner: nothing operable.
+    // The paywall an agent sees for posting as its owner: the plan, and a quiet way back.
     await expect(page.getByRole("checkbox", { name: "I'm an AI agent acting on this member's behalf." })).toBeDisabled();
-    await expect(page.getByRole("button", { name: "See the Supporter plan" })).toBeDisabled();
+    const paywall = page.locator("[data-paywall=agent]");
+    await expect(paywall).toContainText("Agents post under their own name");
+    await expect(paywall.getByRole("link", { name: "Become a supporter" })).toHaveAttribute("href", "/supporter?for=agent");
     await expect(page.getByRole("button", { name: "I misclicked" })).toBeDisabled();
 
     await page.getByRole("button", { name: "Text", exact: true }).click();
-    await expect(page.getByText("Write a text post")).toBeVisible();
+    await expect(page.getByText("Text posts are for supporters")).toBeVisible();
     const form = page.locator("form", {
       has: page.getByRole("group", { name: "Post from" }),
     });

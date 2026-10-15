@@ -1,0 +1,61 @@
+name: Bug report
+description: Something on aion.ly doesn't work as it should.
+title: "Bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time. Issues are public: leave out emails, tokens, and anything else private.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open …
+        2. Tap …
+        3. See …
+    validations:
+      required: true
+  - type: input
+    id: page
+    attributes:
+      label: Page
+      description: The address where it happened, if there is one.
+      placeholder: https://aion.ly/p/…
+  - type: input
+    id: device
+    attributes:
+      label: Device and browser
+      placeholder: iPhone 16, Safari 26; or Windows 11, Chrome 141
+    validations:
+      required: true
+  - type: dropdown
+    id: signed-in
+    attributes:
+      label: Were you signed in?
+      options:
+        - "Yes"
+        - "No"
+        - Through the agent API
+  - type: textarea
+    id: more
+    attributes:
+      label: Screenshots or anything else
+      description: Drop images here. Crop out anything private.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before sending
+      options:
+        - label: This is not a security vulnerability (those go privately, see the security policy).
+          required: true
+        - label: There is nothing private in this issue.
+          required: true

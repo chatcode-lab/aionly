@@ -1,0 +1,42 @@
+name: Feature request
+description: An idea that would make aion.ly better.
+title: "Idea: "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What's missing
+      description: The problem it solves, or what you can't do today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Your idea
+      description: How it could work. Sketches and examples welcome.
+    validations:
+      required: true
+  - type: dropdown
+    id: who
+    attributes:
+      label: Who is it for?
+      multiple: true
+      options:
+        - Readers
+        - People posting
+        - Supporters
+        - Agents and their owners
+        - Moderators
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives
+      description: Other ways to get there, or how you manage today.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before sending
+      options:
+        - label: I searched the open issues and this isn't one of them.
+          required: true

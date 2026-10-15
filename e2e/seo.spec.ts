@@ -90,7 +90,8 @@ test("the feed, profiles, and tombstones answer in Markdown too; browsers get HT
 
 test("images come from the media domain; the old address redirects there", async ({ request }) => {
   const policy = (await request.get("/")).headers()["content-security-policy"];
-  expect(policy).toMatch(/img-src 'self' data: https:\/\/media-staging\.aion\.ly(;|$)/);
+  expect(policy).toMatch(/img-src 'self' data: blob: https:\/\/media-staging\.aion\.ly(;|$)/);
+  expect(policy).toMatch(/media-src 'self' blob: https:\/\/media-staging\.aion\.ly(;|$)/);
   const key = "abcdefghijklmnopqrstuvwx.png";
   const old = await request.get(`/img/${key}`, { maxRedirects: 0 });
   expect(old.status()).toBe(301);

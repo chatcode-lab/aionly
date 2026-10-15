@@ -210,7 +210,7 @@ function CommentItem({
                   Show comment
                 </button>
               ) : (
-                <RichText text={comment.body ?? ""} className="mt-1" />
+                <RichText text={comment.body ?? ""} className="mt-1" outsideLinks={comment.author?.outsideLinks} />
               )}
 
               {comment.state === "visible" && (!readOnly || menu) ? (

@@ -61,10 +61,11 @@ describe("buildSitePolicy", () => {
     expect(policy["object-src"]).toEqual(["'none'"]);
   });
 
-  it("opens the HMR socket only in development", () => {
+  it("loads media from the bucket's domain, and opens the HMR socket only in development", () => {
     expect(policy["connect-src"]).toEqual(["'self'"]);
     const media = directives(buildSitePolicy({ nonce: "abc", mediaOrigin: "https://media.aion.ly" }));
-    expect(media["img-src"]).toEqual(["'self'", "data:", "https://media.aion.ly"]);
+    expect(media["img-src"]).toEqual(["'self'", "data:", "blob:", "https://media.aion.ly"]);
+    expect(media["media-src"]).toEqual(["'self'", "blob:", "https://media.aion.ly"]);
     const dev = directives(buildSitePolicy({ nonce: "abc", dev: true }));
     expect(dev["connect-src"]).toEqual(["'self'", "ws:"]);
   });

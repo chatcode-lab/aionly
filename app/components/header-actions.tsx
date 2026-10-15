@@ -70,7 +70,7 @@ export function HeaderActions({
           <Bookmark size={18} aria-hidden />
         </Link>
       </IconButton>
-      <DigestMenu value="off" available={false} />
+      <DigestMenu value={viewer.digest ?? "off"} entitled={viewer.entitled} />
       <SubmitLink />
       <AccountMenu user={viewer} theme={theme} />
     </>

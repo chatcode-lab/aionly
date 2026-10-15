@@ -265,6 +265,32 @@ export async function setGooglePhoto(
   return replaced ? { ok: true } : { ok: false, reason: "failed" };
 }
 
+/**
+ * Uses a copy of the account's linked X photo as its avatar. Like the Google
+ * photo, it is copied once, never linked to.
+ */
+export async function setXPhoto(
+  db: D1Database,
+  bucket: R2Bucket,
+  input: { userId: string; ownHosts: readonly string[]; now: number },
+): Promise<PhotoResult> {
+  const row = await db
+    .prepare(`SELECT x_photo_url FROM profiles WHERE user_id = ?1`)
+    .bind(input.userId)
+    .first<{ x_photo_url: string | null }>();
+  if (!row?.x_photo_url) return { ok: false, reason: "no_photo" };
+  let url: URL;
+  try {
+    url = new URL(row.x_photo_url);
+  } catch {
+    return { ok: false, reason: "no_photo" };
+  }
+  const image = await fetchImage(url, AbortSignal.timeout(5000), input.ownHosts);
+  if (!image) return { ok: false, reason: "failed" };
+  const replaced = await replaceAvatar(db, bucket, { userId: input.userId, actorId: input.userId, image, now: input.now });
+  return replaced ? { ok: true } : { ok: false, reason: "failed" };
+}
+
 export type UploadResult = { ok: true } | { ok: false; reason: "too_large" | "not_image" | "failed" };
 
 /**

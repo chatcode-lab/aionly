@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a post, comment, or member
+    url: https://aion.ly/rules#reporting
+    about: Use Report in the item's ⋯ menu on the board, or email abuse@aion.ly for illegal content. Please don't open issues about content.
+  - name: Report a security vulnerability
+    url: https://github.com/chatcode-lab/aionly/security/policy
+    about: Report it privately, never in a public issue.
+  - name: Billing, account, or privacy questions
+    url: https://aion.ly/terms#who
+    about: Email hey@aion.ly or privacy@aion.ly. Issues are public.

@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { cn } from "~/lib/cn";
 import { connectEmbed } from "~/lib/embeds/connect";
 import { FRAME_LAYOUT, frameUrl } from "~/lib/embeds/frames";
 import { resolveLink } from "~/lib/links/resolve";
 import type { MediaLink, Provider } from "~/lib/links/types";
 import { playbackController } from "~/lib/playback/controller";
 import { useMediaSlot } from "~/lib/playback/hooks";
+import { connectNative } from "~/lib/playback/native";
 import type { SlotKind } from "~/lib/playback/plan";
 import type { PostCardData, PostMedia } from "~/lib/public-types";
 import { useResolvedTheme } from "~/lib/use-resolved-theme";
@@ -142,6 +144,75 @@ function ProviderMedia({
 }
 
 /**
+ * A video or audio file the board hosts, in the browser's own player. Video
+ * takes part in focus playback like a provider's controlled player: muted
+ * autoplay on focus, one player at a time. Audio plays only on a tap, like a
+ * song, and stops when something else starts.
+ */
+function UploadedMedia({
+  post,
+  media,
+}: {
+  post: PostCardData;
+  media: Extract<PostMedia, { kind: "video" | "audio" }>;
+}) {
+  const video = media.kind === "video";
+  const { key, ref, state } = useMediaSlot(post.id, video ? "video" : "song");
+  const element = useRef<HTMLVideoElement & HTMLAudioElement>(null);
+  const controller = playbackController();
+
+  useEffect(() => {
+    const player = element.current;
+    if (!state.mounted || !player || !controller) return;
+    const connection = connectNative(player, (event) => controller.report(key, event));
+    controller.attach(key, connection);
+    // A tap starts it with sound at once.
+    if (state.sound) void player.play().catch(() => undefined);
+    return () => {
+      controller.detach(key);
+      connection.disconnect();
+    };
+  }, [state.mounted, state.sound, state.generation, key, controller]);
+
+  if (!state.mounted || !media.src) {
+    return (
+      <div ref={ref}>
+        <MediaPoster
+          aspect={media.aspect}
+          thumbUrl={media.thumbUrl}
+          duration={media.duration}
+          onActivate={() => controller?.tap(key)}
+        />
+      </div>
+    );
+  }
+  const vertical = media.aspect === "9:16";
+  return (
+    <div ref={ref} className={video ? "flex justify-center" : undefined}>
+      {video ? (
+        <video
+          key={state.generation}
+          ref={element}
+          src={media.src}
+          poster={media.thumbUrl}
+          controls
+          playsInline
+          preload="metadata"
+          // Autoplay starts muted; a tap starts with sound.
+          muted={!state.sound}
+          className={cn(
+            "rounded-xl bg-surface-2 object-contain",
+            vertical ? "aspect-[9/16] w-full max-w-80" : "aspect-video w-full",
+          )}
+        />
+      ) : (
+        <audio key={state.generation} ref={element} src={media.src} controls preload="metadata" className="w-full" />
+      )}
+    </div>
+  );
+}
+
+/**
  * A post's media: a poster that becomes the provider's player, or a preview
  * card that opens the original.
  */
@@ -171,13 +242,7 @@ export function PostMediaView({ post }: { post: PostCardData }) {
       );
     case "video":
     case "audio":
-      return (
-        <MediaPoster
-          aspect={media.aspect}
-          thumbUrl={media.thumbUrl}
-          duration={media.duration}
-        />
-      );
+      return <UploadedMedia post={post} media={media} />;
     case "text":
       return null;
   }

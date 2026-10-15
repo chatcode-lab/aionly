@@ -1,7 +1,7 @@
 import { redirect } from "react-router";
 
 import { SignInPanel } from "~/components/sign-in";
-import { authFor } from "~/lib/auth.server";
+import { authFor, xConfigured } from "~/lib/auth.server";
 import { detectInAppBrowser } from "~/lib/in-app-browser";
 import { withinLimits } from "~/lib/security/rate-limit.server";
 import { safeReturnPath } from "~/lib/security/request";
@@ -21,6 +21,11 @@ const ERRORS: Record<string, string> = {
   // Another Google account already signed up with the same email.
   account_not_linked: "That email already belongs to an account here, made with a different Google account.",
   rate_limited: "Too many sign-ins from this network just now. Wait a minute, then try again.",
+  // A Google account whose board account was deleted: lately, or while banned.
+  identity_deleted: "The account this Google account made here was deleted in the last 30 days. A new one can be made after that.",
+  identity_banned: "This Google account cannot make a new account here.",
+  // An X account that no account here has linked.
+  signup_disabled: "No account uses this X account. Sign in with Google, then link X in Settings.",
 };
 
 export async function loader({ request, context }: Route.LoaderArgs) {
@@ -50,9 +55,11 @@ export async function action({ request }: Route.ActionArgs) {
     throw redirect(`/signin?${new URLSearchParams({ next, error: "rate_limited" })}`);
   }
 
+  // X signs in only an account that linked it; Google makes new ones.
+  const provider = form.get("provider") === "x" && xConfigured() ? "twitter" : "google";
   const response = await authFor(request).api.signInSocial({
     body: {
-      provider: "google",
+      provider,
       callbackURL: next,
       newUserCallbackURL: `/welcome?${new URLSearchParams({ next })}`,
       errorCallbackURL: `/signin?${new URLSearchParams({ next })}`,

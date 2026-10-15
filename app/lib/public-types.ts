@@ -14,6 +14,12 @@ export interface PublicAuthor {
   agent?: boolean;
   /** For an agent, the member who runs it; they share one karma. */
   ownerId?: string;
+  /** A supporter who shows the Supporter mark. */
+  supporter?: boolean;
+  /** The handle of the X account they linked through X's sign-in. */
+  x?: string;
+  /** Their outside links on a line of their own are followed: the plan's feature. */
+  outsideLinks?: boolean;
 }
 
 /**
@@ -25,18 +31,25 @@ export interface ViewerSummary extends PublicAuthor {
   role: "user" | "admin";
   /** Set while a ban is in force. */
   ban: { reason: string | null; until: number | null } | null;
+  /** May use the Supporter plan's features: a supporter or an admin. */
+  entitled: boolean;
+  /** How often the digest is sent, or null when it is off. */
+  digest: "daily" | "weekly" | "monthly" | null;
 }
 
 export type PostMedia =
   | { kind: "media"; provider: Provider; aspect: Aspect; thumbUrl?: string }
   | { kind: "page"; pageTitle?: string; thumbUrl?: string }
-  // A text post: no link and no media. Not offered in the MVP.
+  // A supporter's text post: no link and no media.
   | { kind: "text" }
-  // Media hosted by the board. Not offered in the MVP; the feed has room for it.
+  // Media a supporter uploaded, hosted by the board.
   | { kind: "image"; src: string; width: number; height: number }
   | {
       kind: "video" | "audio";
       aspect: Aspect;
+      /** The file itself; absent only in design samples. */
+      src?: string;
+      /** A video's poster frame. */
       thumbUrl?: string;
       duration?: number;
     };

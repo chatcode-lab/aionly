@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { test as base, type BrowserContext, expect, type Page } from "@playwright/test";
+import { type APIRequestContext, test as base, type BrowserContext, expect, type Page } from "@playwright/test";
 
 import { ACCOUNTS_PER_WORKER, ADMIN_ACCOUNT, BANNED_ACCOUNT, MAX_WORKERS } from "./accounts";
 
@@ -114,14 +114,58 @@ export interface TestAccount {
 }
 
 /**
- * The secret the test server signs session cookies with. The build copies the
- * local secrets into its output, wherever they came from.
+ * A secret of the test server's. The build copies the local secrets into its
+ * output, wherever they came from, quoted.
  */
-function authSecret(): string {
+export function serverSecret(name: string): string {
   const vars = readFileSync(new URL("../build/server/.dev.vars", import.meta.url), "utf8");
-  const match = /^BETTER_AUTH_SECRET=(['"`])(.*)\1$/m.exec(vars);
-  if (!match) throw new Error("BETTER_AUTH_SECRET is missing from build/server/.dev.vars");
+  const match = new RegExp(`^${name}=(['"\`]?)(.*)\\1$`, "m").exec(vars);
+  if (!match) throw new Error(`${name} is missing from build/server/.dev.vars; see .dev.vars.example`);
   return match[2];
+}
+
+/** The secret the test server signs session cookies with. */
+const authSecret = () => serverSecret("BETTER_AUTH_SECRET");
+
+async function hmacHex(secret: string, message: string): Promise<string> {
+  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(message)));
+  return Buffer.from(mac).toString("hex");
+}
+
+/**
+ * Gives an account the Supporter plan the way Stripe does: a signed webhook
+ * saying its subscription is active for a month, or with `status`, that it
+ * changed. Nothing reaches Stripe.
+ */
+export async function setPlan(
+  request: APIRequestContext,
+  account: TestAccount,
+  status: "active" | "canceled" = "active",
+): Promise<void> {
+  const now = Math.floor(Date.now() / 1000);
+  const payload = JSON.stringify({
+    id: `evt_${account.id}_${status}`,
+    type: status === "active" ? "customer.subscription.created" : "customer.subscription.deleted",
+    created: now,
+    data: {
+      object: {
+        id: `sub_${account.id}`,
+        object: "subscription",
+        customer: `cus_${account.id}`,
+        status,
+        cancel_at_period_end: false,
+        metadata: { user_id: account.id },
+        items: { data: [{ current_period_end: now + 30 * 24 * 3600, price: { id: "price_e2e", lookup_key: "aionly_supporter_monthly", recurring: { interval: "month" } } }] },
+      },
+    },
+  });
+  const signature = `t=${now},v1=${await hmacHex(serverSecret("STRIPE_WEBHOOK_SECRET"), `${now}.${payload}`)}`;
+  const response = await request.post("/api/stripe", {
+    headers: { "Content-Type": "application/json", "Stripe-Signature": signature },
+    data: payload,
+  });
+  expect(response.status(), await response.text()).toBe(200);
 }
 
 /** A session cookie value as Better Auth signs it: `token.HMAC`, URL-encoded. */

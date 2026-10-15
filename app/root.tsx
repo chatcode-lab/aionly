@@ -28,6 +28,7 @@ import { detectInAppBrowser } from "./lib/in-app-browser";
 import type { ViewerSummary } from "./lib/public-types";
 import { writesSettled } from "./lib/pending-writes";
 import { readTheme } from "./lib/theme";
+import { xConfigured } from "./lib/auth.server";
 import { viewerOf } from "./lib/viewer.server";
 
 // A navigation right after a vote or save waits for it, so the next page,
@@ -49,6 +50,9 @@ export async function loader({ request, context }: Route.LoaderArgs) {
         karma: account.karma,
         role: account.role,
         ban: account.ban,
+        entitled: account.entitled,
+        digest: account.digest,
+        ...(account.supporter && account.showMark ? { supporter: true } : {}),
       }
     : null;
   // What admins need on every page: the queue's size for the menu, and the
@@ -67,6 +71,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     theme: readTheme(request.headers.get("Cookie")),
     reviewPages: appEnvironment() !== "production",
     inAppBrowser: detectInAppBrowser(request.headers.get("User-Agent") ?? ""),
+    // Signing in with a linked X account, once the board's X app is set up.
+    xSignIn: !account && xConfigured(),
     viewer,
   };
 }

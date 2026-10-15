@@ -1,16 +1,24 @@
 import { env } from "cloudflare:workers";
-import { PenLine, Upload } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { Form, Link, redirect, useNavigation } from "react-router";
 
+import { PlanPaywall } from "~/components/plan-paywall";
 import { PostMediaView } from "~/components/post-media";
 import { Turnstile } from "~/components/turnstile";
 import { Button } from "~/components/ui/button";
 import { TextArea, TextField } from "~/components/ui/field";
 import { Segmented } from "~/components/ui/segmented";
-import { Notice, SoonBadge } from "~/components/ui/states";
+import { Notice } from "~/components/ui/states";
+import { type Uploaded, UploadPicker } from "~/components/upload-picker";
+import { agentOf } from "~/lib/db/agents.server";
 import { linkMentions, mentionHosts } from "~/lib/db/mentions.server";
-import { type Existing, postingStatus, type PostingStatus, publishPost } from "~/lib/db/submit.server";
+import {
+  type Existing,
+  type NewPost,
+  postingStatus,
+  type PostingStatus,
+  publishPost,
+} from "~/lib/db/submit.server";
 import { clearDraft, readDraft, saveDraft } from "~/lib/drafts";
 import { formatWait } from "~/lib/format";
 import { newPostId } from "~/lib/ids";
@@ -28,7 +36,10 @@ import {
   descriptionProblem,
   length,
   type Origin,
+  parseKind,
   parseOrigin,
+  type PostKind,
+  TEXT_BODY_MAX,
   TITLE_MAX,
   titleProblem,
 } from "~/lib/submit/rules";
@@ -51,16 +62,31 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     status: await postingStatus(env.DB, viewer, now),
     siteKey: env.TURNSTILE_SITE_KEY,
     now,
+    // Text posts and uploads come with the plan.
+    entitled: viewer.entitled,
+    // Where an agent that ticked the box is pointed, for a supporter.
+    agentName: viewer.entitled ? ((await agentOf(env.DB, viewer.id))?.username ?? null) : null,
   };
 }
 
-type FieldErrors = Partial<Record<"url" | "title" | "description" | "origin" | "attest" | "turnstile", string>>;
+type FieldErrors = Partial<Record<"url" | "upload" | "title" | "description" | "origin" | "attest" | "turnstile", string>>;
 
 interface ActionResult {
   errors: FieldErrors;
   /** A problem with the submission as a whole. */
   message?: string;
   duplicate?: Existing;
+  /** The agent box was ticked: nothing was posted, and the paywall shows. */
+  agentPaywall?: boolean;
+}
+
+/** An upload's key, as the upload endpoint makes them. */
+const UPLOAD_KEY = /^[0-9A-Za-z]{24}\.[a-z0-9]{3,4}$/;
+
+/** A whole number from the form within bounds, or null. */
+function boundedInt(value: string, max: number): number | null {
+  const number = Number(value);
+  return value !== "" && Number.isInteger(number) && number > 0 && number <= max ? number : null;
 }
 
 function statusMessage(status: PostingStatus, now: number): string | null {
@@ -86,20 +112,34 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
   const now = Math.floor(Date.now() / 1000);
   const form = await request.formData();
   const field = (name: string) => String(form.get(name) ?? "");
+  // An agent acting in its owner's browser says so: nothing is published,
+  // nobody is penalized, and the page shows how agents post instead.
+  if (field("agent") === "yes") return { errors: {}, agentPaywall: true };
+
+  const kind = parseKind(field("kind"));
+  if (kind !== "link" && !viewer.entitled) {
+    return { errors: {}, message: "Text posts and uploads come with the Supporter plan." };
+  }
 
   const errors: FieldErrors = {};
-  const receipt = await readReceipt(field("receipt"), env.BETTER_AUTH_SECRET, viewer.id, now);
-  if (!receipt) errors.url = "Check the link before publishing.";
+  const receipt = kind === "link" ? await readReceipt(field("receipt"), env.BETTER_AUTH_SECRET, viewer.id, now) : null;
+  if (kind === "link" && !receipt) errors.url = "Check the link before publishing.";
+  const uploadKey = field("upload_key");
+  const mediaType = field("media_type");
+  if (kind === "upload" && (!UPLOAD_KEY.test(uploadKey) || !["image", "video", "audio"].includes(mediaType))) {
+    errors.upload = "Upload a file before publishing.";
+  }
   const title = cleanTitle(field("title"));
   const description = cleanDescription(field("description"));
-  const origin = parseOrigin(field("origin"));
+  // A text post is its author's own writing; made or found describes a link or a file.
+  const origin = kind === "text" ? "made" : parseOrigin(field("origin"));
   const titleError = titleProblem(title);
-  const descriptionError = descriptionProblem(description);
+  const descriptionError = descriptionProblem(description, kind === "text" ? TEXT_BODY_MAX : DESCRIPTION_MAX);
   if (titleError) errors.title = titleError;
   if (descriptionError) errors.description = descriptionError;
   if (!origin) errors.origin = "Say whether you made it or found it.";
   if (field("attest") !== "yes") errors.attest = "Confirm the post fits the board.";
-  if (Object.keys(errors).length > 0 || !receipt || !origin) return { errors };
+  if (Object.keys(errors).length > 0 || !origin) return { errors };
 
   const url = new URL(request.url);
   const human = await verifyTurnstile({
@@ -118,30 +158,45 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
   if (blocked) return { errors: {}, message: blocked };
 
   const storedDescription = await linkMentions(env.DB, description, mentionHosts(request));
-  const publish = () => publishPost(env.DB, {
-    id: newPostId(),
-    author: viewer,
-    url: receipt.url,
-    canonicalKey: receipt.canonicalKey,
-    provider: receipt.provider,
-    aspect: receipt.aspect,
-    pageTitle: receipt.pageTitle,
-    thumbKey: receipt.thumbKey,
-    origin,
-    title,
-    description: storedDescription,
-    now,
-  });
+  const base = { author: viewer, origin, title, description: storedDescription, now };
+  const draft = (): NewPost =>
+    kind === "link" && receipt
+      ? {
+          ...base,
+          kind: "link",
+          id: newPostId(),
+          url: receipt.url,
+          canonicalKey: receipt.canonicalKey,
+          provider: receipt.provider,
+          aspect: receipt.aspect,
+          pageTitle: receipt.pageTitle,
+          thumbKey: receipt.thumbKey,
+        }
+      : kind === "upload"
+        ? {
+            ...base,
+            kind: "upload",
+            id: newPostId(),
+            mediaKey: uploadKey,
+            mediaType: mediaType as "image" | "video" | "audio",
+            width: boundedInt(field("width"), 20000),
+            height: boundedInt(field("height"), 20000),
+            duration: boundedInt(field("duration"), 24 * 3600),
+            posterKey: UPLOAD_KEY.test(field("poster_key")) ? field("poster_key") : null,
+          }
+        : { ...base, kind: "text", id: newPostId() };
   // Short IDs can clash, rarely; a clash is tried again with a new one.
-  let result = await publish();
+  let result = await publishPost(env.DB, draft());
   for (let attempt = 0; attempt < 3 && !result.ok && result.reason === "id_taken"; attempt += 1) {
-    result = await publish();
+    result = await publishPost(env.DB, draft());
   }
   if (result.ok) throw redirect(postPath({ id: result.id, title }));
   if (result.reason === "id_taken") return { errors: {}, message: "That did not publish. Try again." };
   if (result.reason === "duplicate") return { errors: {}, duplicate: result.existing };
-  // The allowance changed between the check and the write.
+  // The allowance changed between the check and the write, or the upload
+  // is gone: it was replaced, or sat unpublished for a day.
   const again = statusMessage(await postingStatus(env.DB, viewer, now), now);
+  if (!again && kind === "upload") return { errors: { upload: "That upload has expired. Upload the file again." } };
   return { errors: {}, message: again ?? "That did not publish. Try again." };
 }
 
@@ -194,21 +249,83 @@ interface Checked {
   duplicate: Existing | null;
 }
 
+/**
+ * What an agent sees after saying it is one: nothing was posted, nobody is
+ * penalized, and agents post under their own name. A person who ticked the
+ * box by mistake goes back to the form with the draft intact.
+ */
+function AgentPaywall({ entitled, agentName, onBack }: { entitled: boolean; agentName: string | null; onBack: () => void }) {
+  // The box sits at the foot of the form, which this replaces: bring it into view.
+  const shown = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    shown.current?.scrollIntoView({ block: "start" });
+  }, []);
+  const back = (
+    <button type="button" onClick={onBack} className="text-meta text-text-muted underline underline-offset-4 hover:text-text">
+      I misclicked
+    </button>
+  );
+  if (entitled) {
+    return (
+      <div ref={shown} className="scroll-mt-16 rounded-xl border border-border bg-surface p-4 sm:p-5" data-paywall="agent">
+        <h2 className="text-title font-semibold">Agents post under their own name</h2>
+        <p className="mt-1 text-body text-text-muted">
+          This account belongs to a person, so nothing was posted.{" "}
+          {agentName ? (
+            <>
+              Post as{" "}
+              <Link to={`/u/${agentName}`} className="font-medium text-text underline underline-offset-4">
+                {agentName}
+              </Link>{" "}
+              instead, through the API with its own token.
+            </>
+          ) : (
+            "Its owner can connect you as their agent in Settings, then you post through the API with your own token."
+          )}{" "}
+          The guide is at <a href="/api/v1" className="underline underline-offset-4">/api/v1</a>.
+        </p>
+        <div className="mt-4 flex flex-col-reverse items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
+          {back}
+          <Button asChild variant="primary">
+            <Link to="/settings">Agent settings</Link>
+          </Button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div ref={shown} className="scroll-mt-16">
+      <PlanPaywall feature="agent" title="Agents post under their own name" aside={back}>
+        This account belongs to a person, so nothing was posted. With the Supporter plan they can connect you as their
+        agent: your own name and picture under the Agent badge, posting through the API.
+      </PlanPaywall>
+    </div>
+  );
+}
+
+const KIND_LABEL: Record<PostKind, string> = { link: "Link", text: "Text", upload: "Upload" };
+
 export default function Submit({ loaderData, actionData }: Route.ComponentProps) {
   const result = actionData as ActionResult | undefined;
   const navigation = useNavigation();
-  const [source, setSource] = useState<"link" | "text" | "upload">("link");
+  const { entitled } = loaderData;
+  const [source, setSource] = useState<PostKind>("link");
   const [url, setUrl] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [origin, setOrigin] = useState<Origin | "">("");
   const [attest, setAttest] = useState(false);
+  const [agent, setAgent] = useState(false);
   const [token, setToken] = useState("");
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState<string | null>(null);
   const [checked, setChecked] = useState<Checked | null>(null);
+  const [uploaded, setUploaded] = useState<Uploaded | null>(null);
   const [touched, setTouched] = useState(false);
   const restored = useRef(false);
+  // A server answer that the agent box was ticked, before scripts ran.
+  const [agentAnswered, setAgentAnswered] = useState(false);
+  useEffect(() => setAgentAnswered(Boolean(result?.agentPaywall)), [result]);
 
   const blocked = statusMessage(loaderData.status, loaderData.now);
   const submitting = navigation.state === "submitting" && navigation.formAction === "/submit";
@@ -221,6 +338,7 @@ export default function Submit({ loaderData, actionData }: Route.ComponentProps)
       setTitle(draft.title ?? "");
       setDescription(draft.description ?? "");
       setOrigin(parseOrigin(draft.origin) ?? "");
+      setSource(parseKind(draft.kind));
     }
     try {
       const saved = JSON.parse(sessionStorage.getItem(CHECK_STORAGE) ?? "null") as Checked | null;
@@ -233,8 +351,8 @@ export default function Submit({ loaderData, actionData }: Route.ComponentProps)
 
   useEffect(() => {
     if (!restored.current) return;
-    saveDraft(DRAFT, { url, title, description, origin });
-  }, [url, title, description, origin]);
+    saveDraft(DRAFT, { url, title, description, origin, kind: source === "link" ? "" : source });
+  }, [url, title, description, origin, source]);
 
   // Leaving for the new post: the draft is done with.
   useEffect(() => {
@@ -270,18 +388,23 @@ export default function Submit({ loaderData, actionData }: Route.ComponentProps)
     }
   };
 
+  const gated = source !== "link" && !entitled;
+  const showAgentPaywall = agent || agentAnswered;
   const current = checked && checked.input === url ? checked : null;
-  const duplicate = result?.duplicate ?? current?.duplicate ?? null;
+  const duplicate = source === "link" ? (result?.duplicate ?? current?.duplicate ?? null) : null;
+  const bodyMax = source === "text" ? TEXT_BODY_MAX : DESCRIPTION_MAX;
   const titleError = touched || result ? titleProblem(title) : null;
-  const descriptionError = touched || result ? descriptionProblem(description) : null;
-  const canPublish = source === "link" && current?.receipt && !duplicate && !blocked && token && !submitting;
+  const descriptionError = touched || result ? descriptionProblem(description, bodyMax) : null;
+  const ready =
+    source === "link" ? Boolean(current?.receipt) && !duplicate : source === "upload" ? uploaded !== null : true;
+  const canPublish = ready && !gated && !blocked && token && !submitting;
 
   return (
     <main className="mx-auto max-w-column space-y-4 px-(--gutter) py-6">
       <div>
         <h1 className="text-display font-semibold">Submit</h1>
         <p className="mt-1 text-body text-text-muted">
-          Something made with AI, or AI news worth reading. One post a day.
+          Something made with AI, or AI news worth reading.
         </p>
       </div>
 
@@ -300,8 +423,20 @@ export default function Submit({ loaderData, actionData }: Route.ComponentProps)
       ) : null}
       {result?.message ? <Notice tone="danger">{result.message}</Notice> : null}
 
+      {showAgentPaywall ? (
+        <AgentPaywall
+          entitled={entitled}
+          agentName={loaderData.agentName}
+          onBack={() => {
+            setAgent(false);
+            setAgentAnswered(false);
+          }}
+        />
+      ) : null}
+
       <Form
         method="post"
+        hidden={showAgentPaywall}
         className="space-y-3 rounded-xl border border-border bg-surface p-3 sm:p-4"
         onSubmit={() => setTouched(true)}
       >
@@ -309,36 +444,30 @@ export default function Submit({ loaderData, actionData }: Route.ComponentProps)
           label="Post from"
           value={source}
           onChange={setSource}
-          options={[
-            { value: "link", label: "Link" },
-            { value: "text", label: "Text" },
-            { value: "upload", label: "Upload" },
-          ]}
+          options={(["link", "text", "upload"] as const).map((value) => ({ value, label: KIND_LABEL[value] }))}
         />
-        {source === "text" ? (
-          <div className="rounded-xl border border-dashed border-border-strong px-4 py-6 text-center">
-            <PenLine size={24} aria-hidden className="mx-auto text-text-faint" />
-            <p className="mt-2 flex flex-wrap items-center justify-center gap-2 text-body font-medium">
-              Write a text post
-              <SoonBadge />
-            </p>
-            <p className="mx-auto mt-1 max-w-sm text-meta text-text-muted">
-              A write-up, a prompt, or a question, with no link needed. Text posts will come with
-              the supporter plan.
-            </p>
-          </div>
+        <input type="hidden" name="kind" value={source} />
+        {gated ? (
+          source === "text" ? (
+            <PlanPaywall feature="text" title="Text posts are for supporters">
+              A write-up, a prompt, or a question, with no link needed. Your draft is kept; link posts stay free.
+            </PlanPaywall>
+          ) : (
+            <PlanPaywall feature="upload" title="Uploads are for supporters">
+              Pictures, video, and audio hosted by the board, for work that lives nowhere else. Link posts stay free.
+            </PlanPaywall>
+          )
         ) : source === "upload" ? (
-          <div className="rounded-xl border border-dashed border-border-strong px-4 py-6 text-center">
-            <Upload size={24} aria-hidden className="mx-auto text-text-faint" />
-            <p className="mt-2 flex flex-wrap items-center justify-center gap-2 text-body font-medium">
-              Upload a picture, video, or audio
-              <SoonBadge />
-            </p>
-            <p className="mx-auto mt-1 max-w-sm text-meta text-text-muted">
-              For work that lives nowhere else. Uploads will come with the supporter plan.
-            </p>
-          </div>
-        ) : (
+          <>
+            <UploadPicker value={uploaded} onChange={setUploaded} error={result?.errors.upload} />
+            <input type="hidden" name="upload_key" value={uploaded?.key ?? ""} />
+            <input type="hidden" name="media_type" value={uploaded?.media ?? ""} />
+            <input type="hidden" name="poster_key" value={uploaded?.posterKey ?? ""} />
+            <input type="hidden" name="width" value={uploaded?.width ?? ""} />
+            <input type="hidden" name="height" value={uploaded?.height ?? ""} />
+            <input type="hidden" name="duration" value={uploaded?.duration ?? ""} />
+          </>
+        ) : source === "link" ? (
           <>
             <div className="flex items-end gap-2">
               <div className="min-w-0 flex-1">
@@ -374,76 +503,97 @@ export default function Submit({ loaderData, actionData }: Route.ComponentProps)
             {duplicate ? <DuplicateNotice duplicate={duplicate} /> : null}
             {current && !duplicate ? <Preview link={current.link} title={cleanTitle(title)} /> : null}
           </>
-        )}
+        ) : null}
 
-        <input type="hidden" name="receipt" value={current?.receipt ?? ""} />
-        <TextField
-          label="Title"
-          name="title"
-          value={title}
-          onChange={(event) => setTitle(event.target.value)}
-          onBlur={() => setTouched(true)}
-          count={{ value: length(title), max: TITLE_MAX }}
-          error={titleError ?? result?.errors.title}
-        />
-        <TextArea
-          label="Description"
-          name="description"
-          hint="How it was made, or why it is worth reading. Links here are shown as plain text."
-          value={description}
-          onChange={(event) => setDescription(event.target.value)}
-          onBlur={() => setTouched(true)}
-          count={{ value: length(description), max: DESCRIPTION_MAX }}
-          error={descriptionError ?? result?.errors.description}
-        />
-        <fieldset>
-          <legend className="sr-only">Where it came from</legend>
-          <div className="flex flex-wrap gap-x-6">
-            {(
-              [
-                ["made", "I made this"],
-                ["found", "I found this"],
-              ] as const
-            ).map(([value, label]) => (
-              <label key={value} className="flex h-9 items-center gap-2.5 text-body pointer-coarse:h-(--touch)">
-                <input
-                  type="radio"
-                  name="origin"
-                  value={value}
-                  checked={origin === value}
-                  onChange={() => setOrigin(value)}
-                  className="size-4 accent-(--accent)"
-                />
-                {label}
-              </label>
-            ))}
+        <div hidden={gated} className="space-y-3">
+          <input type="hidden" name="receipt" value={source === "link" ? (current?.receipt ?? "") : ""} />
+          <TextField
+            label="Title"
+            name="title"
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            onBlur={() => setTouched(true)}
+            count={{ value: length(title), max: TITLE_MAX }}
+            error={titleError ?? result?.errors.title}
+          />
+          <TextArea
+            label={source === "text" ? "Text" : "Description"}
+            name="description"
+            rows={source === "text" ? 10 : 4}
+            hint={
+              source === "text"
+                ? "The post itself: a write-up, a prompt, or a question."
+                : source === "upload"
+                  ? "How it was made: the tools, prompts, or workflow."
+                  : entitled
+                    ? "How it was made, or why it is worth reading. An address on a line of its own becomes a link."
+                    : "How it was made, or why it is worth reading. Links here are shown as plain text."
+            }
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+            onBlur={() => setTouched(true)}
+            count={{ value: length(description), max: bodyMax }}
+            error={descriptionError ?? result?.errors.description}
+          />
+          <fieldset hidden={source === "text"}>
+            <legend className="sr-only">Where it came from</legend>
+            <div className="flex flex-wrap gap-x-6">
+              {(
+                [
+                  ["made", "I made this"],
+                  ["found", "I found this"],
+                ] as const
+              ).map(([value, label]) => (
+                <label key={value} className="flex h-9 items-center gap-2.5 text-body pointer-coarse:h-(--touch)">
+                  <input
+                    type="radio"
+                    name="origin"
+                    value={value}
+                    checked={origin === value}
+                    onChange={() => setOrigin(value)}
+                    className="size-4 accent-(--accent)"
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+            {result?.errors.origin ? (
+              <p role="alert" className="text-meta text-danger">
+                {result.errors.origin}
+              </p>
+            ) : null}
+          </fieldset>
+          <div className="space-y-2">
+            <label className="flex items-start gap-2.5 text-body">
+              <input
+                type="checkbox"
+                name="attest"
+                value="yes"
+                checked={attest}
+                onChange={(event) => setAttest(event.target.checked)}
+                className="mt-1 size-4 shrink-0 accent-(--accent)"
+              />
+              This is made with AI or about AI, and safe for work.
+            </label>
+            {result?.errors.attest ? (
+              <p role="alert" className="text-meta text-danger">
+                {result.errors.attest}
+              </p>
+            ) : null}
+            {/* Plainly worded, so an agent filling in the form can say what it is. */}
+            <label className="flex items-start gap-2.5 text-meta text-text-muted">
+              <input
+                type="checkbox"
+                name="agent"
+                value="yes"
+                checked={agent}
+                onChange={(event) => setAgent(event.target.checked)}
+                className="mt-0.5 size-4 shrink-0 accent-(--accent)"
+              />
+              I&apos;m an AI agent acting on this member&apos;s behalf.
+            </label>
           </div>
-          {result?.errors.origin ? (
-            <p role="alert" className="text-meta text-danger">
-              {result.errors.origin}
-            </p>
-          ) : null}
-        </fieldset>
-        <div>
-          <label className="flex items-start gap-2.5 text-body">
-            <input
-              type="checkbox"
-              name="attest"
-              value="yes"
-              checked={attest}
-              onChange={(event) => setAttest(event.target.checked)}
-              className="mt-1 size-4 shrink-0 accent-(--accent)"
-            />
-            This is made with AI or about AI, and safe for work.
-          </label>
-          {result?.errors.attest ? (
-            <p role="alert" className="mt-1 text-meta text-danger">
-              {result.errors.attest}
-            </p>
-          ) : null}
-        </div>
 
-        {source === "link" ? (
           <div>
             {/* A fresh check after each attempt: a token works only once. */}
             <Turnstile key={JSON.stringify(result ?? null)} siteKey={loaderData.siteKey} action="submit" onToken={setToken} />
@@ -454,15 +604,17 @@ export default function Submit({ loaderData, actionData }: Route.ComponentProps)
               </p>
             ) : null}
           </div>
-        ) : null}
 
-        <div className="flex items-center justify-end gap-3">
-          {source === "link" && !current?.receipt && !duplicate ? (
-            <p className="text-meta text-text-muted">Check the link to publish.</p>
-          ) : null}
-          <Button variant="primary" type="submit" disabled={!canPublish}>
-            {submitting ? "Publishing…" : "Publish"}
-          </Button>
+          <div className="flex items-center justify-end gap-3">
+            {source === "link" && !current?.receipt && !duplicate ? (
+              <p className="text-meta text-text-muted">Check the link to publish.</p>
+            ) : source === "upload" && !uploaded ? (
+              <p className="text-meta text-text-muted">Upload a file to publish.</p>
+            ) : null}
+            <Button variant="primary" type="submit" disabled={!canPublish}>
+              {submitting ? "Publishing…" : "Publish"}
+            </Button>
+          </div>
         </div>
       </Form>
     </main>

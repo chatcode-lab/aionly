@@ -71,6 +71,19 @@ export interface AccountRecord {
   /** The member who runs this account, when it is an agent. */
   ownerId: string | null;
   limits: AccountLimits;
+  /** The end of the account's own Supporter plan, past or future, or null. */
+  planUntil: number | null;
+  /** The account's own plan is in force. */
+  supporter: boolean;
+  /**
+   * The account may use the plan's features: an admin, a supporter, or the
+   * agent of either. Admins need no plan.
+   */
+  entitled: boolean;
+  /** A supporter shows the Supporter mark beside their name. */
+  showMark: boolean;
+  /** How often the digest is sent, or null when it is off. */
+  digest: "daily" | "weekly" | "monthly" | null;
 }
 
 function parseLimits(raw: string | null): AccountLimits {
@@ -103,9 +116,10 @@ export async function accountRecord(
       `SELECT profile.user_id, profile.karma, profile.role, profile.avatar_key,
               profile.created_at, profile.banned_at, profile.banned_until,
               profile.ban_reason, profile.deleted_at, profile.owner_id,
-              profile.limits, username.name,
+              profile.limits, profile.plan_until, profile.show_mark, profile.digest, username.name,
               owner.banned_at AS owner_banned_at, owner.banned_until AS owner_banned_until,
-              owner.ban_reason AS owner_ban_reason
+              owner.ban_reason AS owner_ban_reason, owner.role AS owner_role,
+              owner.plan_until AS owner_plan_until
        FROM profiles AS profile
        JOIN usernames AS username
          ON username.user_id = profile.user_id AND username.is_current = 1
@@ -125,10 +139,15 @@ export async function accountRecord(
       deleted_at: number | null;
       owner_id: string | null;
       limits: string | null;
+      plan_until: number | null;
+      show_mark: number;
+      digest: "daily" | "weekly" | "monthly" | null;
       name: string;
       owner_banned_at: number | null;
       owner_banned_until: number | null;
       owner_ban_reason: string | null;
+      owner_role: "user" | "admin" | null;
+      owner_plan_until: number | null;
     }>();
   if (!row) return null;
 
@@ -139,6 +158,12 @@ export async function accountRecord(
     : inForce(row.owner_banned_at, row.owner_banned_until)
       ? { reason: row.owner_ban_reason, until: row.owner_banned_until }
       : null;
+
+  const supporter = row.plan_until !== null && row.plan_until > now;
+  // An agent has the plan its owner has.
+  const entitled = row.owner_id
+    ? row.owner_role === "admin" || (row.owner_plan_until !== null && row.owner_plan_until > now)
+    : row.role === "admin" || supporter;
 
   return {
     id: row.user_id,
@@ -151,6 +176,11 @@ export async function accountRecord(
     deleted: row.deleted_at !== null,
     ownerId: row.owner_id,
     limits: parseLimits(row.limits),
+    planUntil: row.plan_until,
+    supporter,
+    entitled,
+    showMark: row.show_mark === 1,
+    digest: row.digest,
   };
 }
 
@@ -171,6 +201,24 @@ export function participantCondition(index: number, now: number): string {
       AND ${free("participant")}
       AND (participant.owner_id IS NULL
            OR (participant_owner.deleted_at IS NULL AND ${free("participant_owner")}))
+  )`;
+}
+
+/**
+ * The SQL condition, for an account bound as `?{index}`, that holds while it
+ * may use the Supporter plan's features: an admin, a member whose plan is in
+ * force, or the agent of either. Writes of those features repeat it.
+ */
+export function entitledCondition(index: number, now: number): string {
+  const at = Math.floor(now);
+  return `EXISTS (
+    SELECT 1 FROM profiles AS member
+    LEFT JOIN profiles AS member_owner ON member_owner.user_id = member.owner_id
+    WHERE member.user_id = ?${index}
+      AND CASE WHEN member.owner_id IS NULL
+        THEN member.role = 'admin' OR member.plan_until > ${at}
+        ELSE member_owner.role = 'admin' OR member_owner.plan_until > ${at}
+      END
   )`;
 }
 

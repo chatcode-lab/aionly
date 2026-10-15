@@ -1,6 +1,6 @@
 import { nextTier, postsPerDayFor } from "../submit/rules";
 import type { AccountRecord } from "./accounts.server";
-import { participantCondition } from "./accounts.server";
+import { entitledCondition, participantCondition } from "./accounts.server";
 
 const DAY = 24 * 3600;
 
@@ -77,20 +77,42 @@ export async function findDuplicate(db: D1Database, canonicalKey: string): Promi
   return { id: row.id, state: row.removed_batch_id === null ? "live" : "removed" };
 }
 
-export interface NewPost {
+interface PostBase {
   id: string;
   author: AccountRecord;
+  origin: "made" | "found";
+  title: string;
+  description: string;
+  now: number;
+}
+
+export interface LinkPost extends PostBase {
+  kind: "link";
   url: string;
   canonicalKey: string;
   provider: string | null;
   aspect: string | null;
   pageTitle: string | null;
   thumbKey: string | null;
-  origin: "made" | "found";
-  title: string;
-  description: string;
-  now: number;
 }
+
+/** A supporter's post with no link: a title and a body. */
+export interface TextPost extends PostBase {
+  kind: "text";
+}
+
+/** A supporter's uploaded picture, video, or audio, with a video's poster frame. */
+export interface UploadPost extends PostBase {
+  kind: "upload";
+  mediaKey: string;
+  mediaType: "image" | "video" | "audio";
+  width: number | null;
+  height: number | null;
+  duration: number | null;
+  posterKey: string | null;
+}
+
+export type NewPost = LinkPost | TextPost | UploadPost;
 
 export type PublishResult =
   | { ok: true; id: string }
@@ -100,61 +122,76 @@ export type PublishResult =
   | { ok: false; reason: "not_allowed" };
 
 /**
- * Publishes a link post and attaches its pending snapshot, in one batch.
- * The posting rules are part of the insert, so two quick submissions cannot
- * both pass the allowance; the duplicate rule is the unique index.
+ * Publishes a post and attaches its pending images, in one batch: a link's
+ * snapshot, or an upload's file and poster. The posting rules are part of
+ * the insert, so two quick submissions cannot both pass the allowance; text
+ * posts and uploads also need the plan, checked the same way. The duplicate
+ * rule for links is the unique index.
  */
 export async function publishPost(db: D1Database, post: NewPost): Promise<PublishResult> {
   const limit = dailyLimit(post.author);
+  const link = post.kind === "link" ? post : null;
+  const upload = post.kind === "upload" ? post : null;
+  const thumbKey = link?.thumbKey ?? upload?.posterKey ?? "";
+  const mediaKey = upload?.mediaKey ?? "";
+  const pending = (index: number, kind: "post" | "media") =>
+    `(SELECT key FROM images WHERE key = ?${index} AND owner_id = ?2 AND kind = '${kind}' AND state = 'pending')`;
   const allowed = `${participantCondition(2, post.now)} AND (
     EXISTS (SELECT 1 FROM profiles WHERE user_id = ?2 AND role = 'admin')
     OR (
       (SELECT karma FROM profiles WHERE user_id = ?2) >= 0
       AND (?13 < 0 OR (SELECT COUNT(*) FROM posts WHERE author_id = ?2 AND created_at > ?12 - ${DAY}) < ?13)
     )
-  )`;
+  )
+  AND (?3 = 'link' OR ${entitledCondition(2, post.now)})
+  AND (?3 <> 'upload' OR ${pending(15, "media")} IS NOT NULL)`;
 
   try {
     const [inserted] = await db.batch([
       db
         .prepare(
           `INSERT INTO posts (id, author_id, kind, url, canonical_key, provider, origin,
-             title, description, page_title, thumb_key, aspect, created_at)
-           SELECT ?1, ?2, 'link', ?3, ?4, ?5, ?6, ?7, ?8, ?9,
-             (SELECT key FROM images
-              WHERE key = ?10 AND owner_id = ?2 AND kind = 'post' AND state = 'pending'),
-             ?11, ?12
+             title, description, page_title, thumb_key, aspect, created_at,
+             media_key, media_type, media_width, media_height, media_duration)
+           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ${pending(11, "post")}, ?14, ?12,
+             ${pending(15, "media")}, ?16, ?17, ?18, ?19
            WHERE ${allowed}`,
         )
         .bind(
           post.id,
           post.author.id,
-          post.url,
-          post.canonicalKey,
-          post.provider,
+          post.kind,
+          link?.url ?? null,
+          link?.canonicalKey ?? null,
+          link?.provider ?? null,
           post.origin,
           post.title,
           post.description,
-          post.pageTitle,
-          post.thumbKey ?? "",
-          post.aspect,
+          link?.pageTitle ?? null,
+          thumbKey,
           post.now,
           limit === null ? -1 : limit,
+          link?.aspect ?? null,
+          mediaKey,
+          upload?.mediaType ?? null,
+          upload?.width ?? null,
+          upload?.height ?? null,
+          upload?.duration ?? null,
         ),
       db
         .prepare(
           `UPDATE images SET state = 'attached'
-           WHERE key = ?1 AND state = 'pending'
-             AND EXISTS (SELECT 1 FROM posts WHERE id = ?2 AND thumb_key = ?1)`,
+           WHERE key IN (?1, ?2) AND state = 'pending'
+             AND EXISTS (SELECT 1 FROM posts WHERE id = ?3 AND (thumb_key = images.key OR media_key = images.key))`,
         )
-        .bind(post.thumbKey ?? "", post.id),
+        .bind(thumbKey, mediaKey, post.id),
     ]);
     if (inserted.meta.changes === 0) return { ok: false, reason: "not_allowed" };
     return { ok: true, id: post.id };
   } catch (error) {
     if (!String(error).includes("UNIQUE")) throw error;
     if (String(error).includes("posts.id")) return { ok: false, reason: "id_taken" };
-    const existing = await findDuplicate(db, post.canonicalKey);
+    const existing = link ? await findDuplicate(db, link.canonicalKey) : null;
     if (!existing) throw error;
     return { ok: false, reason: "duplicate", existing };
   }

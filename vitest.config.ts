@@ -28,6 +28,7 @@ export default defineConfig({
               d1Databases: ["DB"],
               r2Buckets: ["IMAGES"],
               bindings: {
+                BETTER_AUTH_SECRET: "a-test-secret-for-the-database-tests",
                 TEST_MIGRATIONS: await readD1Migrations(
                   path.join(root, "migrations"),
                 ),

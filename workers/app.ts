@@ -3,6 +3,9 @@ import { createRequestHandler, RouterContextProvider } from "react-router";
 
 import { nonceContext, viewerContext, waitUntilContext } from "../app/context";
 import { sweepExpiredVerifications } from "../app/lib/db/accounts.server";
+import { sweepDeletedIdentities } from "../app/lib/db/deletion.server";
+import { sendDigests } from "../app/lib/digest/digest.server";
+import { sweepDeletedUploads } from "../app/lib/uploads.server";
 import { sweepDeletedPostImages, sweepPendingImages } from "../app/lib/images.server";
 import { createNonce } from "../app/lib/security/csp";
 import { withSecurityHeaders } from "../app/lib/security/headers";
@@ -48,8 +51,11 @@ export default {
 
     // The agents' API reads only a bearer token, never cookies, so a request
     // from anywhere carries no one's session and needs no Origin check.
-    const agentApi = new URL(request.url).pathname.startsWith("/api/v1/");
-    if (!agentApi && !isSameOriginRequest(request)) {
+    // Stripe's webhook, and mail clients unsubscribing in one click, prove
+    // themselves by a signature instead.
+    const pathname = new URL(request.url).pathname;
+    const crossOrigin = pathname.startsWith("/api/v1/") || pathname === "/api/stripe" || pathname === "/digest/unsubscribe";
+    if (!crossOrigin && !isSameOriginRequest(request)) {
       return withSecurityHeaders(
         request,
         new Response("Forbidden", { status: 403 }),
@@ -99,13 +105,29 @@ export default {
     return secured;
   },
 
-  // Hourly: removes preview snapshots never published, pictures of deleted
-  // posts, and sign-in states that expired unused.
+  // Hourly: removes preview snapshots never published, pictures and uploads
+  // of deleted posts, sign-in states that expired unused, and deleted
+  // accounts' identities once they may sign up again; and sends the digests
+  // that are due.
   async scheduled(_controller, workerEnv, ctx) {
     ctx.waitUntil(
       sweepPendingImages(workerEnv.DB, workerEnv.IMAGES, Math.floor(Date.now() / 1000)),
     );
     ctx.waitUntil(sweepDeletedPostImages(workerEnv.DB, workerEnv.IMAGES));
     ctx.waitUntil(sweepExpiredVerifications(workerEnv.DB, new Date()));
+    ctx.waitUntil(sweepDeletedIdentities(workerEnv.DB, Math.floor(Date.now() / 1000)));
+    ctx.waitUntil(sweepDeletedUploads(workerEnv.DB, workerEnv.IMAGES));
+    // Digests that are due: each period's, for whoever has not had it yet.
+    const origin = workerEnv.SITE_ORIGIN;
+    if (origin) {
+      ctx.waitUntil(
+        sendDigests(workerEnv.DB, workerEnv.EMAIL, {
+          origin,
+          secret: workerEnv.BETTER_AUTH_SECRET,
+          from: workerEnv.DIGEST_FROM ?? "digest@aion.ly",
+          now: Math.floor(Date.now() / 1000),
+        }),
+      );
+    }
   },
 } satisfies ExportedHandler<Env>;

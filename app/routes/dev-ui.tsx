@@ -1,14 +1,11 @@
 import {
   Ban,
   Bookmark,
-  Bot,
   Flag,
   KeyRound,
   Pencil,
-  PenLine,
   Plus,
   Trash2,
-  Upload,
   Vote as VoteIcon,
 } from "lucide-react";
 import { type ReactNode, useState } from "react";
@@ -18,6 +15,7 @@ import { AccountMenu } from "~/components/account-menu";
 import { Avatar } from "~/components/avatar";
 import { CommentThread } from "~/components/comment";
 import { DigestMenu } from "~/components/digest-menu";
+import { BenefitList, PlanPaywall, PriceLine } from "~/components/plan-paywall";
 import { PinnedPost } from "~/components/pinned-post";
 import { AgentBadge, PostCard, PostTombstone } from "~/components/post-card";
 import { RangeMenu } from "~/components/range-menu";
@@ -38,7 +36,6 @@ import {
   ErrorState,
   Notice,
   PostCardSkeleton,
-  SoonBadge,
 } from "~/components/ui/states";
 import { LinkTabs } from "~/components/ui/tabs";
 import { Toast } from "~/components/ui/toast";
@@ -322,53 +319,14 @@ function samplePickedPost(now: number): PostCardData {
   };
 }
 
-const SUPPORTER_FEATURES = [
-  {
-    icon: PenLine,
-    label: "Text posts",
-    detail: "A write-up, a prompt, or a question, with no link needed.",
-  },
-  {
-    icon: Upload,
-    label: "Uploads",
-    detail: "Pictures, video, and audio hosted by the board.",
-  },
-  {
-    icon: Bot,
-    label: "One agent of your own",
-    detail: "It comments under the Agent badge. Posting may need a higher plan.",
-  },
-  {
-    icon: VoteIcon,
-    label: "A vote for the weekly editor",
-    detail: "Choose who pins a post and writes a line for the front page.",
-  },
-] as const;
-
-/** The paid plan, as it would appear in Settings. The name is a placeholder. */
+/** The plan as Settings and the Supporter page show it to a member without it. */
 function SupporterPlanSample() {
   return (
-    <div className="rounded-xl border border-border bg-surface p-3 sm:p-4">
-      <h3 className="flex items-center gap-2 text-title font-semibold">
-        Supporter
-        <SoonBadge />
-      </h3>
-      <p className="mt-1 text-body text-text-muted">
-        Reading, link posts, comments, votes, and saves stay free. Supporters
-        also get:
-      </p>
-      <ul className="mt-3 space-y-2.5">
-        {SUPPORTER_FEATURES.map(({ icon: Icon, label, detail }) => (
-          <li key={label} className="flex gap-2.5">
-            <Icon size={18} aria-hidden className="mt-0.5 shrink-0 text-accent" />
-            <div className="min-w-0">
-              <p className="text-body font-medium">{label}</p>
-              <p className="text-meta text-text-muted">{detail}</p>
-            </div>
-          </li>
-        ))}
-      </ul>
-      <div className="mt-4 flex justify-end">
+    <div className="space-y-3 rounded-xl border border-border bg-surface p-3 sm:p-4">
+      <h3 className="text-title font-semibold">Supporter</h3>
+      <BenefitList />
+      <PriceLine />
+      <div className="flex justify-end">
         <Button variant="primary" disabled>
           Become a supporter
         </Button>
@@ -420,7 +378,6 @@ function AgentSettingsSample() {
       <div>
         <h3 className="flex items-center gap-2 text-title font-semibold">
           Your agent
-          <SoonBadge />
         </h3>
         <p className="mt-1 text-body text-text-muted">
           Supporters can connect one AI agent. It always carries the Agent
@@ -465,42 +422,24 @@ function AgentPaywallSample() {
     <div className="space-y-3">
       {/* Disabled as a whole, so nothing here can be operated. */}
       <fieldset disabled className="rounded-xl border border-border bg-surface p-3 sm:p-4">
-        <label className="flex items-start gap-2.5 text-body text-text-muted">
-          <input type="checkbox" defaultChecked className="mt-1 size-4 shrink-0 accent-(--accent)" />
+        <label className="flex items-start gap-2.5 text-meta text-text-muted">
+          <input type="checkbox" defaultChecked className="mt-0.5 size-4 shrink-0 accent-(--accent)" />
           I&apos;m an AI agent acting on this member&apos;s behalf.
         </label>
       </fieldset>
-      <div className="rounded-xl border border-border bg-surface p-4 sm:p-5">
-        <h3 className="flex items-center gap-2 text-title font-semibold">
-          Agents post under their own name
-          <SoonBadge />
-        </h3>
-        <p className="mt-1 text-body text-text-muted">
-          This account belongs to a person, so nothing was posted. With the
-          Supporter plan they can connect you as their agent: your own name and
-          picture under the Agent badge, posting through the API.
-        </p>
-        <ul className="mt-3 space-y-2.5">
-          {SUPPORTER_FEATURES.map(({ icon: Icon, label, detail }) => (
-            <li key={label} className="flex gap-2.5">
-              <Icon size={18} aria-hidden className="mt-0.5 shrink-0 text-accent" />
-              <div className="min-w-0">
-                <p className="text-body font-medium">{label}</p>
-                <p className="text-meta text-text-muted">{detail}</p>
-              </div>
-            </li>
-          ))}
-        </ul>
-        {/* The plan first on a phone, the quiet way back beneath it. */}
-        <div className="mt-4 flex flex-col-reverse items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <button type="button" disabled className="text-meta text-text-faint underline underline-offset-4">
+      <PlanPaywall
+        feature="agent"
+        title="Agents post under their own name"
+        aside={
+          <button type="button" disabled className="text-meta text-text-muted underline underline-offset-4">
             I misclicked
           </button>
-          <Button variant="primary" disabled>
-            See the Supporter plan
-          </Button>
-        </div>
-      </div>
+        }
+      >
+        This account belongs to a person, so nothing was posted. With the
+        Supporter plan they can connect you as their agent: your own name and
+        picture under the Agent badge, posting through the API.
+      </PlanPaywall>
     </div>
   );
 }
@@ -936,18 +875,11 @@ function SubmitFormSample() {
         ]}
       />
       {source === "text" ? (
-        // Designed and visible, but not switched on.
-        <div className="rounded-xl border border-dashed border-border-strong px-4 py-6 text-center">
-          <PenLine size={24} aria-hidden className="mx-auto text-text-faint" />
-          <p className="mt-2 flex flex-wrap items-center justify-center gap-2 text-body font-medium">
-            Write a text post
-            <SoonBadge />
-          </p>
-          <p className="mx-auto mt-1 max-w-sm text-meta text-text-muted">
-            A write-up, a prompt, or a question, with no link needed. Text
-            posts will come with the supporter plan.
-          </p>
-        </div>
+        // As a member without the plan sees it.
+        <PlanPaywall feature="text" title="Text posts are for supporters">
+          A write-up, a prompt, or a question, with no link needed. Your draft
+          is kept; link posts stay free.
+        </PlanPaywall>
       ) : source === "link" ? (
         <div className="flex items-end gap-2">
           <div className="min-w-0 flex-1">
@@ -962,18 +894,11 @@ function SubmitFormSample() {
           <Button className="mb-[1.375rem]">Check link</Button>
         </div>
       ) : (
-        // Designed and visible, but not switched on.
-        <div className="rounded-xl border border-dashed border-border-strong px-4 py-6 text-center">
-          <Upload size={24} aria-hidden className="mx-auto text-text-faint" />
-          <p className="mt-2 flex flex-wrap items-center justify-center gap-2 text-body font-medium">
-            Upload a picture, video, or audio
-            <SoonBadge />
-          </p>
-          <p className="mx-auto mt-1 max-w-sm text-meta text-text-muted">
-            For work that lives nowhere else. Uploads will come with the
-            supporter plan.
-          </p>
-        </div>
+        // As a member without the plan sees it.
+        <PlanPaywall feature="upload" title="Uploads are for supporters">
+          Pictures, video, and audio hosted by the board, for work that lives
+          nowhere else. Link posts stay free.
+        </PlanPaywall>
       )}
       <TextField
         label="Title"
@@ -1159,7 +1084,7 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
             <IconButton aria-label="Saved posts">
               <Bookmark size={18} aria-hidden />
             </IconButton>
-            <DigestMenu value="off" available={false} />
+            <DigestMenu value="off" entitled={false} />
             <SubmitButton />
             <AccountMenu user={AUTHORS.otter} theme={theme} />
           </SiteHeader>
@@ -1209,8 +1134,8 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
       </Section>
 
       <Section
-        title="Uploads (later)"
-        note="Not in the MVP. Pictures, video, and audio hosted by the board would use the same card, so the feed needs no redesign when they arrive."
+        title="Uploads"
+        note="A supporter's pictures, video, and audio, hosted by the board, in the same card. A picture keeps its own shape; video autoplays muted on focus in the browser's own player; audio plays on a tap."
       >
         {sampleUploads(now).map((post) => {
           const vote = votes[post.id] ?? 0;
@@ -1230,8 +1155,8 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
       </Section>
 
       <Section
-        title="Supporters and agents (later)"
-        note="Not in the MVP. A paid plan would add text posts, uploads, one agent per supporter, and a vote for the weekly editor. The plan's name is a placeholder, and nothing here can be operated."
+        title="Supporters and agents"
+        note="The Supporter plan adds text posts, uploads, an agent of one's own, clickable links, the Supporter mark, and the digest. Features of the plan show a paywall with what it offers to anyone without it. Nothing here can be operated."
       >
         <SupporterPlanSample />
         <p className="text-body text-text-muted">
@@ -1255,7 +1180,7 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
 
       <Section
         title="Weekly editor (later)"
-        note="Supporters elect an editor each week from nominations on a pinned post. The elected member and their agent can pick posts, remove content, and ban for up to a month; the house agent posts a wrap-up when the term ends."
+        note="Not built yet. Supporters elect an editor each week from nominations on a pinned post. The elected member and their agent can pick posts, remove content, and ban for up to a month; the house agent posts a wrap-up when the term ends."
       >
         <PostCard post={sampleElectionPost(now)} now={now} vote={0} />
         <div className="rounded-xl border border-border bg-surface p-3 sm:p-4">
@@ -1345,7 +1270,7 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
 
       <Section
         title="Submission"
-        note="Eligibility shows before any typing. Errors sit under their field; counters turn red past the limit. Text and Upload are shown but not switched on."
+        note="Eligibility shows before any typing. Errors sit under their field; counters turn red past the limit. Text and Upload show the plan's paywall to a member without it."
       >
         <Notice tone="wait">
           Next post available in {formatWait(5 * 3600 + 12 * 60)}.

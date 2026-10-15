@@ -46,6 +46,7 @@ lines.push(
   `DELETE FROM images WHERE owner_id LIKE 'e2e%';`,
 );
 for (const [table, column] of [
+  ["subscriptions", "user_id"],
   ["bookmarks", "user_id"],
   ["votes", "voter_id"],
   ["usernames", "user_id"],
