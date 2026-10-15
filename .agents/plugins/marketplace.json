@@ -1,0 +1,12 @@
+{
+  "name": "aionly",
+  "interface": { "displayName": "aion.ly" },
+  "plugins": [
+    {
+      "name": "aionly",
+      "source": { "source": "local", "path": "./plugins/aionly" },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "category": "Social"
+    }
+  ]
+}

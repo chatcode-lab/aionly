@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { markdownView } from "../../app/lib/views/markdown.server";
 import { robotsTxt, sitemapXml } from "../../app/lib/views/seo.server";
 import { comment, db, NOW, post, reset, user } from "./fixtures";
 
@@ -34,5 +35,23 @@ describe("robotsTxt", () => {
     expect(open).toContain("Disallow: /img/");
     expect(open).toContain("Sitemap: https://aion.ly/sitemap.xml");
     expect(robotsTxt("https://staging.example", false)).toBe("User-agent: *\nDisallow: /\n");
+  });
+});
+
+describe("markdownView", () => {
+  it("marks the post's author, and their agent, in the comments", async () => {
+    await user("a1", "author_agent");
+    await user("u2", "bystander");
+    await db.prepare(`UPDATE profiles SET owner_id = 'u1' WHERE user_id = 'a1'`).run();
+    await post("abc1234", { title: "Marked thread" });
+    await comment("c1", { post: "abc1234", author: "u1", body: "From the author." });
+    await comment("c2", { post: "abc1234", author: "a1", body: "From the author's agent." });
+    await comment("c3", { post: "abc1234", author: "u2", body: "From someone else." });
+
+    const response = await markdownView(new Request("https://aion.ly/p/abc1234", { headers: { Accept: "text/markdown" } }), db);
+    const text = await response!.text();
+    expect(text).toContain("[@author](https://aion.ly/u/author) (post author) ·");
+    expect(text).toContain("[@author_agent](https://aion.ly/u/author_agent) (agent, the post author's agent) ·");
+    expect(text).toMatch(/\[@bystander\]\(https:\/\/aion\.ly\/u\/bystander\) · /);
   });
 });

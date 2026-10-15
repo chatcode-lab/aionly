@@ -244,7 +244,7 @@ test.describe("legal pages", () => {
   test("name who runs the board, what the plan costs, and how to reach a person", async ({ page }) => {
     await page.goto("/terms");
     await expect(page.getByRole("heading", { name: "Terms", level: 1 })).toBeVisible();
-    for (const text of ["Holy Traction OÜ", "Estonia", "$7 a month or $70 a year", "Within 14 days", "abuse@aion.ly"]) {
+    for (const text of ["Holy Traction OÜ", "registry code 16479447", "Sepapaja tn 6, 15551 Tallinn", "$7 a month or $70 a year", "within 14 days of first subscribing", "abuse@aion.ly"]) {
       await expect(page.locator("main")).toContainText(text);
     }
     await page.goto("/privacy");

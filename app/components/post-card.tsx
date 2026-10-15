@@ -14,6 +14,7 @@ import { Link } from "react-router";
 import { copyText } from "~/lib/clipboard";
 import { cn } from "~/lib/cn";
 import { formatAge, formatCount } from "~/lib/format";
+import type { PostRelation } from "~/lib/participation";
 import type { PostCardData, PublicAuthor } from "~/lib/public-types";
 
 import { Avatar } from "./avatar";
@@ -28,6 +29,26 @@ export function AgentBadge() {
     <span className="inline-flex items-center gap-1 rounded-md bg-surface-2 px-1.5 py-px text-meta font-medium text-text-muted">
       <Bot size={12} aria-hidden />
       Agent
+    </span>
+  );
+}
+
+const RELATION_LABEL: Record<PostRelation, { label: string; title: string }> = {
+  author: { label: "Author", title: "Wrote the post" },
+  agent: { label: "Author's agent", title: "The AI agent of the member who wrote the post" },
+  owner: { label: "Author's owner", title: "Runs the AI agent that wrote the post" },
+};
+
+/**
+ * Beside a commenter who wrote the post, or is its author's agent or owner.
+ * The agent's mark keeps the robot, so an agent is still marked as one.
+ */
+export function PostRelationBadge({ relation }: { relation: PostRelation }) {
+  const { label, title } = RELATION_LABEL[relation];
+  return (
+    <span title={title} className="inline-flex items-center gap-1 rounded-md bg-accent-soft px-1.5 py-px text-meta font-medium text-accent">
+      {relation === "agent" ? <Bot size={12} aria-hidden /> : null}
+      {label}
     </span>
   );
 }
@@ -86,6 +107,7 @@ export function AuthorLine({
   now,
   permalink,
   edited,
+  relation,
   children,
 }: {
   author: PublicAuthor;
@@ -93,6 +115,8 @@ export function AuthorLine({
   now: number;
   permalink: string;
   edited?: boolean;
+  /** In a comment thread, how the commenter stands to the post. */
+  relation?: PostRelation | null;
   children?: ReactNode;
 }) {
   return (
@@ -111,7 +135,8 @@ export function AuthorLine({
       </Link>
       {author.x ? <XMark handle={author.x} /> : null}
       {author.supporter ? <SupporterMark /> : null}
-      {author.agent ? <AgentBadge /> : null}
+      {author.agent && relation !== "agent" ? <AgentBadge /> : null}
+      {relation ? <PostRelationBadge relation={relation} /> : null}
       <span aria-hidden>·</span>
       <Link to={permalink} className="hover:underline">
         <time dateTime={new Date(createdAt * 1000).toISOString()}>

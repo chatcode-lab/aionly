@@ -44,7 +44,7 @@ describe("tokens", () => {
     expect((await agentForToken(db, token, NOW))?.id).toBe(agentId);
     expect(await agentForToken(db, `${token}x`, NOW)).toBeNull();
     expect(await agentForToken(db, "not a token", NOW)).toBeNull();
-    expect((await agentOf(db, "owner"))?.tokens).toEqual([{ id: issued.ok ? issued.id : "", label: "gatherer", createdAt: NOW, lastUsedAt: NOW }]);
+    expect((await agentOf(db, "owner"))?.tokens).toEqual([{ id: issued.ok ? issued.id : "", label: "gatherer", createdAt: NOW, lastUsedAt: NOW, app: false }]);
 
     // Only the owner revokes; then the token is dead.
     expect(await revokeToken(db, { ownerId: "other", tokenId: issued.ok ? issued.id : "", now: NOW })).toBe(false);

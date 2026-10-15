@@ -2,6 +2,9 @@
 export const OPERATOR = {
   name: "Holy Traction OÜ",
   country: "Estonia",
+  /** In the Estonian Business Register. */
+  registryCode: "16479447",
+  address: "Sepapaja tn 6, 15551 Tallinn, Estonia",
 } as const;
 
 export const CONTACT = {

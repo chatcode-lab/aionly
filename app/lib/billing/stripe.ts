@@ -118,8 +118,12 @@ export async function createCustomer(client: StripeClient, input: { email: strin
  */
 export async function createCheckout(
   client: StripeClient,
-  input: { customerId: string; priceId: string; userId: string; origin: string },
+  input: { customerId: string; priceId: string; userId: string; origin: string; startNowAt: number },
 ): Promise<string> {
+  // The member asked for the plan to start at once, which consumer law needs
+  // before a withdrawal can be refunded less the days used. Kept with the
+  // subscription, as the record of it.
+  const metadata = { user_id: input.userId, start_now_requested_at: String(input.startNowAt) };
   const session = await client.request<{ url: string }>("POST", "/checkout/sessions", {
     mode: "subscription",
     customer: input.customerId,
@@ -130,7 +134,8 @@ export async function createCheckout(
     tax_id_collection: { enabled: true },
     billing_address_collection: "auto",
     allow_promotion_codes: true,
-    subscription_data: { metadata: { user_id: input.userId } },
+    metadata,
+    subscription_data: { metadata },
     success_url: `${input.origin}/supporter/done?session={CHECKOUT_SESSION_ID}`,
     cancel_url: `${input.origin}/supporter`,
   });

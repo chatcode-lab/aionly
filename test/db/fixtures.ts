@@ -5,6 +5,8 @@ export const NOW = 1_800_000_000;
 export const DAY = 24 * 3600;
 
 const TABLES = [
+  "oauth_codes",
+  "oauth_clients",
   "subscriptions",
   "agent_tokens",
   "pins",

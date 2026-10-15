@@ -39,13 +39,21 @@ async function customerFor(viewer: AccountRecord): Promise<string> {
   return (await planStatus(env.DB, viewer.id)).customerId ?? customerId;
 }
 
-/** Stripe's checkout page for the plan, billed monthly or yearly. */
-export async function checkoutUrl(viewer: AccountRecord, interval: PlanInterval, origin: string): Promise<string> {
+/**
+ * Stripe's checkout page for the plan, billed monthly or yearly, for a member
+ * who asked for it to start at once.
+ */
+export async function checkoutUrl(
+  viewer: AccountRecord,
+  interval: PlanInterval,
+  origin: string,
+  startNowAt: number,
+): Promise<string> {
   const lookupKey = PLAN_PRICES[interval].lookupKey;
   const prices = await pricesByLookupKey(client(), [lookupKey]);
   const priceId = prices.get(lookupKey);
   if (!priceId) throw new Error(`no active Stripe price has the lookup key ${lookupKey}`);
-  return createCheckout(client(), { customerId: await customerFor(viewer), priceId, userId: viewer.id, origin });
+  return createCheckout(client(), { customerId: await customerFor(viewer), priceId, userId: viewer.id, origin, startNowAt });
 }
 
 /** Stripe's customer portal, where a supporter changes or cancels the plan. */

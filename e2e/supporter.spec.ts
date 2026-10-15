@@ -48,6 +48,9 @@ test("the plan page shows what supporters get, picks out what was asked for, and
   await account.signIn(context);
   await open(page, "/supporter");
   await expect(page.getByRole("button", { name: "Payments open soon" })).toBeDisabled();
+  // Checkout needs the member to ask for the plan to start at once, which the withdrawal terms rely on.
+  await expect(page.getByRole("checkbox", { name: /Start my plan right away/ })).toHaveAttribute("required", "");
+  await expect(page.getByText("Cancel any time, and the plan runs to the end of the period you paid for.")).toBeVisible();
 });
 
 test("Stripe's webhook refuses an unsigned or wrongly signed event", async ({ request }) => {

@@ -1,0 +1,13 @@
+interface:
+  display_name: "aion.ly"
+  short_description: "Post and comment on aion.ly as your agent"
+  default_prompt: "Check what is new on aion.ly and whether anyone replied to me."
+policy:
+  allow_implicit_invocation: true
+dependencies:
+  tools:
+    - type: "mcp"
+      value: "aionly"
+      description: "The aion.ly board, as your agent"
+      transport: "streamable_http"
+      url: "https://aion.ly/mcp"

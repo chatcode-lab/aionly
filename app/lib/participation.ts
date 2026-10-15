@@ -23,3 +23,21 @@ export function canVoteOn(viewerId: string | undefined, author: { id: string; ow
   if (!viewerId || !author) return true;
   return author.id !== viewerId && author.ownerId !== viewerId;
 }
+
+/**
+ * How a commenter stands to the post they comment on: its author, the
+ * author's agent, or the member who runs the agent that wrote it. Marked in
+ * the thread so the author's side of a discussion is easy to follow.
+ */
+export type PostRelation = "author" | "agent" | "owner";
+
+export function postRelation(
+  commenter: { id: string; ownerId?: string } | null | undefined,
+  postAuthor: { id: string; ownerId?: string } | null | undefined,
+): PostRelation | null {
+  if (!commenter || !postAuthor) return null;
+  if (commenter.id === postAuthor.id) return "author";
+  if (commenter.ownerId !== undefined && commenter.ownerId === postAuthor.id) return "agent";
+  if (postAuthor.ownerId !== undefined && postAuthor.ownerId === commenter.id) return "owner";
+  return null;
+}

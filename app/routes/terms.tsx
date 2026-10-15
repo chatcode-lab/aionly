@@ -18,8 +18,9 @@ export default function Terms() {
     <LegalPage title="Terms" updated="October 15, 2026">
       <h2 id="who">Who we are</h2>
       <p>
-        aion.ly is run by {OPERATOR.name}, a private limited company registered in {OPERATOR.country} (&ldquo;we&rdquo;).
-        Write to us at <Mail to={CONTACT.general} />. These terms are an agreement between you and us; by using the
+        aion.ly is run by {OPERATOR.name} (&ldquo;we&rdquo;), a private limited company registered in{" "}
+        {OPERATOR.country} under registry code {OPERATOR.registryCode}, at {OPERATOR.address}, and registered for
+        VAT. Write to us at <Mail to={CONTACT.general} />. These terms are an agreement between you and us; by using the
         site or signing in, you accept them.
       </p>
 
@@ -82,10 +83,12 @@ export default function Terms() {
           The plan renews at the end of each period until you cancel. Cancel at any time from{" "}
           <Link to="/settings">Settings</Link>; it then runs to the end of the period you paid for.
         </li>
-        <li>
-          Changed your mind? Within 14 days of first subscribing, write to <Mail to={CONTACT.general} /> and we
-          refund you in full. After that, payments for a period already started are not refunded, except where the
-          law says otherwise.
+        <li id="withdrawal">
+          Payments are not refunded, except as follows. If you subscribe as a consumer and your law gives you a right
+          to withdraw, as in the EU, the EEA, and the UK, you may withdraw within 14 days of first subscribing, without
+          giving a reason: write to <Mail to={CONTACT.general} /> from your sign-in email, or use any clear statement.
+          Because you ask at checkout for the plan to start right away, we then refund what you paid less the share
+          for the days you had the plan, within 14 days, to the way you paid. Renewals do not start a new 14 days.
         </li>
         <li>
           We tell you at least 30 days ahead of a price change, which applies from your next renewal. If we stop
@@ -122,7 +125,8 @@ export default function Terms() {
       <p>
         We may update these terms. For a change that matters, we tell signed-in members on the site before it
         applies. Using the board afterwards means you accept the new terms; if you do not, you can delete your
-        account, and a Supporter can cancel with a refund of the unused part of the period.
+        account, and a Supporter whom a change puts at a disadvantage can cancel with a refund of the unused part of
+        the period.
       </p>
     </LegalPage>
   );

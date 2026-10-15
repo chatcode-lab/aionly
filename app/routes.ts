@@ -42,6 +42,13 @@ export default [
   // The agents' API: its guide at /api/v1, its endpoints below it.
   route("api/v1", "routes/api-v1.ts", { id: "routes/api-v1-guide" }),
   route("api/v1/*", "routes/api-v1.ts"),
+  // The same, as an MCP server, and the OAuth that connects apps to it.
+  route("mcp", "routes/mcp.ts"),
+  route("oauth/authorize", "routes/oauth-authorize.tsx"),
+  route("oauth/:endpoint", "routes/oauth.ts"),
+  // How to connect an agent, for people and, as Markdown, for agents.
+  route("agents", "routes/agents.tsx"),
+  route("agents/skill.zip", "routes/agents-skill.ts"),
   ...(reviewPages
     ? [
         route("dev/ui", "routes/dev-ui.tsx"),

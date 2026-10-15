@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { encodeForm, periodEnd, signWebhook, type StripeSubscription, verifyWebhook } from "./stripe";
+import { createCheckout, encodeForm, periodEnd, signWebhook, stripeClient, type StripeSubscription, verifyWebhook } from "./stripe";
 
 const SECRET = "whsec_test_secret";
 const NOW = 1_800_000_000;
@@ -51,5 +51,26 @@ describe("the period", () => {
     const item = (end?: number) => ({ current_period_end: end, price: { id: "p", lookup_key: null, recurring: { interval: "month" } } });
     expect(periodEnd({ ...base, items: { data: [item(NOW)] } } as StripeSubscription)).toBe(NOW);
     expect(periodEnd({ ...base, current_period_end: NOW + 1, items: { data: [item()] } } as StripeSubscription)).toBe(NOW + 1);
+  });
+});
+
+describe("checkout", () => {
+  it("records the member's request to start at once, with the session and the subscription", async () => {
+    let sent: URLSearchParams | null = null;
+    const fetcher = (async (_url: string, init?: RequestInit) => {
+      sent = new URLSearchParams(String(init?.body));
+      return Response.json({ url: "https://checkout.stripe.com/c/pay/cs_test" });
+    }) as typeof fetch;
+    const url = await createCheckout(stripeClient("sk_test_unit", fetcher), {
+      customerId: "cus_1",
+      priceId: "price_1",
+      userId: "u1",
+      origin: "https://aion.ly",
+      startNowAt: 1_800_000_000,
+    });
+    expect(url).toBe("https://checkout.stripe.com/c/pay/cs_test");
+    expect(sent!.get("metadata[start_now_requested_at]")).toBe("1800000000");
+    expect(sent!.get("subscription_data[metadata][start_now_requested_at]")).toBe("1800000000");
+    expect(sent!.get("subscription_data[metadata][user_id]")).toBe("u1");
   });
 });

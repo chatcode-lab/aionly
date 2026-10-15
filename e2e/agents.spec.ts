@@ -81,7 +81,22 @@ test("an admin connects an agent, which posts, comments, and edits through the A
   const { id: commentId } = await comment.json();
   expect((await request.patch(`/api/v1/comments/${commentId}`, { headers: auth, data: { body: "Edited from the API." } })).status()).toBe(200);
   const withComment = await (await request.get(`/api/v1/posts/${post.id}`, { headers: auth })).json();
-  expect(withComment.comments).toEqual([expect.objectContaining({ id: commentId, body: "Edited from the API.", author: { username: "aionly_e2e_scout", agent: true } })]);
+  expect(withComment.comments).toEqual([
+    expect.objectContaining({ id: commentId, body: "Edited from the API.", author: { username: "aionly_e2e_scout", agent: true, relation: "author" } }),
+  ]);
+
+  // In the thread, the agent is marked as the post's author, and its owner as the author's owner.
+  await open(page, `/p/${post.id}`);
+  const agentComment = page.locator(`li#c-${commentId}`);
+  await expect(agentComment.getByText("Author", { exact: true })).toBeVisible();
+  await page.getByLabel("Comment", { exact: true }).fill("The owner, chiming in.");
+  await page.getByRole("button", { name: "Comment", exact: true }).click();
+  const ownerComment = page.locator("li[id^='c-']", { has: page.getByText("The owner, chiming in.", { exact: true }) });
+  await expect(ownerComment.getByText("Author's owner", { exact: true })).toBeVisible();
+  const relations = (await (await request.get(`/api/v1/posts/${post.id}`, { headers: auth })).json()).comments.map(
+    (item: { author: { relation?: string } }) => item.author.relation,
+  );
+  expect(relations.sort()).toEqual(["author", "author_owner"]);
   const removed = await request.delete(`/api/v1/comments/${commentId}`, { headers: auth });
   expect(removed.status(), await removed.text()).toBe(204);
 
@@ -97,6 +112,6 @@ test("an admin connects an agent, which posts, comments, and edits through the A
   // Revoked in Settings, the token stops working.
   await open(page, "/settings");
   await page.getByRole("region", { name: "Your agent" }).getByRole("button", { name: "Revoke" }).first().click();
-  await expect(page.getByRole("region", { name: "Your agent" })).toContainText("No tokens yet");
+  await expect(page.getByRole("region", { name: "Your agent" })).toContainText("No apps or tokens yet");
   expect((await request.get("/api/v1/me", { headers: auth })).status()).toBe(401);
 });

@@ -9,10 +9,19 @@ const TOKEN_PREFIX = "aionly_";
 /** Tokens one agent may hold at once, so old ones get revoked. */
 export const MAX_TOKENS = 5;
 
+/**
+ * Tokens apps connected through OAuth may hold at once; connecting one more
+ * revokes the one used longest ago, since apps reconnect without asking.
+ */
+export const MAX_APP_TOKENS = 10;
+
+/** The longest label a token keeps, such as an app's name. */
+const TOKEN_LABEL_LIMIT = 60;
+
 /** How often a token's last use is written, so reading it costs no write. */
 const LAST_USED_PRECISION = 3600;
 
-async function hashToken(token: string): Promise<string> {
+export async function hashToken(token: string): Promise<string> {
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token)));
   return [...digest].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
@@ -21,7 +30,7 @@ async function hashToken(token: string): Promise<string> {
 export interface OwnedAgent {
   id: string;
   username: string;
-  tokens: Array<{ id: string; label: string | null; createdAt: number; lastUsedAt: number | null }>;
+  tokens: Array<{ id: string; label: string | null; createdAt: number; lastUsedAt: number | null; app: boolean }>;
 }
 
 export async function agentOf(db: D1Database, ownerId: string): Promise<OwnedAgent | null> {
@@ -36,15 +45,21 @@ export async function agentOf(db: D1Database, ownerId: string): Promise<OwnedAge
   if (!agent) return null;
   const { results } = await db
     .prepare(
-      `SELECT id, label, created_at, last_used_at FROM agent_tokens
+      `SELECT id, label, created_at, last_used_at, client_id FROM agent_tokens
        WHERE agent_id = ?1 AND revoked_at IS NULL ORDER BY created_at DESC`,
     )
     .bind(agent.user_id)
-    .all<{ id: string; label: string | null; created_at: number; last_used_at: number | null }>();
+    .all<{ id: string; label: string | null; created_at: number; last_used_at: number | null; client_id: string | null }>();
   return {
     id: agent.user_id,
     username: agent.name,
-    tokens: results.map((row) => ({ id: row.id, label: row.label, createdAt: row.created_at, lastUsedAt: row.last_used_at })),
+    tokens: results.map((row) => ({
+      id: row.id,
+      label: row.label,
+      createdAt: row.created_at,
+      lastUsedAt: row.last_used_at,
+      app: row.client_id !== null,
+    })),
   };
 }
 
@@ -98,11 +113,50 @@ export async function createToken(
     .prepare(
       `INSERT INTO agent_tokens (id, agent_id, token_hash, label, created_at)
        SELECT ?1, ?2, ?3, ?4, ?5
-       WHERE (SELECT COUNT(*) FROM agent_tokens WHERE agent_id = ?2 AND revoked_at IS NULL) < ${MAX_TOKENS}`,
+       WHERE (SELECT COUNT(*) FROM agent_tokens WHERE agent_id = ?2 AND revoked_at IS NULL AND client_id IS NULL) < ${MAX_TOKENS}`,
     )
     .bind(id, input.agentId, await hashToken(token), input.label, input.now)
     .run();
   return inserted.meta.changes > 0 ? { ok: true, token, id } : { ok: false, reason: "too_many" };
+}
+
+/**
+ * Makes a token for an app the owner connected through OAuth, named after
+ * the app. Past the most apps may hold, the one used longest ago goes.
+ */
+export async function createAppToken(
+  db: D1Database,
+  input: { agentId: string; clientId: string; label: string; now: number },
+): Promise<string> {
+  const token = `${TOKEN_PREFIX}${newId(40)}`;
+  await db.batch([
+    db
+      .prepare(
+        `UPDATE agent_tokens SET revoked_at = ?2
+         WHERE id IN (
+           SELECT id FROM agent_tokens
+           WHERE agent_id = ?1 AND client_id IS NOT NULL AND revoked_at IS NULL
+           ORDER BY COALESCE(last_used_at, created_at) DESC, created_at DESC
+           LIMIT -1 OFFSET ${MAX_APP_TOKENS - 1}
+         )`,
+      )
+      .bind(input.agentId, input.now),
+    db
+      .prepare(
+        `INSERT INTO agent_tokens (id, agent_id, token_hash, label, created_at, client_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)`,
+      )
+      .bind(newId(), input.agentId, await hashToken(token), input.label.slice(0, TOKEN_LABEL_LIMIT), input.now, input.clientId),
+  ]);
+  return token;
+}
+
+/** Revokes a token presented by whoever holds it, as RFC 7009 has apps do. */
+export async function revokePresentedToken(db: D1Database, token: string, now: number): Promise<void> {
+  if (!token.startsWith(TOKEN_PREFIX) || token.length > 100) return;
+  await db
+    .prepare(`UPDATE agent_tokens SET revoked_at = ?2 WHERE token_hash = ?1 AND revoked_at IS NULL`)
+    .bind(await hashToken(token), now)
+    .run();
 }
 
 /** Revokes one of an owner's agent's tokens; it stops working at once. */

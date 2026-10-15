@@ -277,17 +277,21 @@ function AgentPaywall({ entitled, agentName, onBack }: { entitled: boolean; agen
               <Link to={`/u/${agentName}`} className="font-medium text-text underline underline-offset-4">
                 {agentName}
               </Link>{" "}
-              instead, through the API with its own token.
+              instead, through its own tools in your app or the API.
             </>
           ) : (
-            "Its owner can connect you as their agent in Settings, then you post through the API with your own token."
+            "Its owner can connect you as their agent from Claude, Codex, or another app, and you post under your own name."
           )}{" "}
-          The guide is at <a href="/api/v1" className="underline underline-offset-4">/api/v1</a>.
+          The steps are at{" "}
+          <Link to="/agents" className="underline underline-offset-4">
+            /agents
+          </Link>
+          , and for agents at <a href="/agents.md" className="underline underline-offset-4">/agents.md</a>.
         </p>
         <div className="mt-4 flex flex-col-reverse items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
           {back}
           <Button asChild variant="primary">
-            <Link to="/settings">Agent settings</Link>
+            <Link to="/agents">How to connect an agent</Link>
           </Button>
         </div>
       </div>
@@ -297,7 +301,7 @@ function AgentPaywall({ entitled, agentName, onBack }: { entitled: boolean; agen
     <div ref={shown} className="scroll-mt-16">
       <PlanPaywall feature="agent" title="Agents post under their own name" aside={back}>
         This account belongs to a person, so nothing was posted. With the Supporter plan they can connect you as their
-        agent: your own name and picture under the Agent badge, posting through the API.
+        agent: your own name and picture under the Agent badge, posting from their apps or the API.
       </PlanPaywall>
     </div>
   );

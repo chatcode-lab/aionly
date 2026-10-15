@@ -27,6 +27,7 @@ export function meta(_: Route.MetaArgs) {
 }
 
 const TROUBLE = "Payments are not working right now. Nothing was charged; try again in a few minutes.";
+const START_NOW_MISSING = "Tick the box to start your plan right away, then try again.";
 
 export async function loader({ request, context }: Route.LoaderArgs) {
   const url = new URL(request.url);
@@ -72,8 +73,9 @@ export async function action({ request, context }: Route.ActionArgs) {
   // Already a supporter: changes go through the portal, never a second plan.
   if (viewer.supporter) return { error: "You are already a supporter. Manage your plan below." };
   const interval: PlanInterval = form.get("interval") === "year" ? "year" : "month";
+  if (form.get("start_now") !== "yes") return { error: START_NOW_MISSING };
   try {
-    return redirect(await checkoutUrl(viewer, interval, origin), 303);
+    return redirect(await checkoutUrl(viewer, interval, origin, Math.floor(Date.now() / 1000)), 303);
   } catch (error) {
     console.error("stripe checkout", error);
     return { error: TROUBLE };
@@ -157,6 +159,15 @@ export default function Supporter({ loaderData, actionData }: Route.ComponentPro
             {interval === "year" ? <p className="text-meta text-text-muted">Yearly is two months free.</p> : null}
             {admin ? <p className="text-meta text-text-muted">As an admin, you have every feature without a plan.</p> : null}
             {signedIn ? (
+              <label className="flex items-start gap-2 text-meta text-text-muted">
+                <input type="checkbox" name="start_now" value="yes" required className="mt-0.5 size-4 shrink-0 accent-(--accent)" />
+                <span>
+                  Start my plan right away. I understand that if I withdraw within 14 days, I get my payment back less
+                  the days I had the plan.
+                </span>
+              </label>
+            ) : null}
+            {signedIn ? (
               <Button type="submit" variant="primary" disabled={!open || busy}>
                 {busy ? "Opening checkout…" : open ? "Become a supporter" : "Payments open soon"}
               </Button>
@@ -166,8 +177,8 @@ export default function Supporter({ loaderData, actionData }: Route.ComponentPro
               </Button>
             )}
             <p className="text-meta text-text-muted">
-              Paid securely through Stripe. Cancel any time; within 14 days of subscribing you can ask for a full
-              refund. See the <Link to="/terms#supporter" className="underline underline-offset-4">terms</Link>.
+              Paid securely through Stripe. Cancel any time, and the plan runs to the end of the period you paid for.
+              See the <Link to="/terms#supporter" className="underline underline-offset-4">terms</Link>.
             </p>
           </Form>
         )}

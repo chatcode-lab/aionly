@@ -3,7 +3,8 @@ import { type ReactNode, useState } from "react";
 
 import { cn } from "~/lib/cn";
 import { MAX_DEPTH } from "~/lib/comments/rules";
-import type { CommentData } from "~/lib/public-types";
+import { postRelation } from "~/lib/participation";
+import type { CommentData, PublicAuthor } from "~/lib/public-types";
 
 import { AuthorLine } from "./post-card";
 import { RichText } from "./rich-text";
@@ -28,6 +29,7 @@ export function CommentThread({
   comments,
   now,
   postPath,
+  postAuthor,
   depth = 0,
   votes,
   scoreOf,
@@ -46,6 +48,8 @@ export function CommentThread({
   now: number;
   /** The post's canonical path, for comment permalinks. */
   postPath: string;
+  /** The post's author, whose comments, and their agent's or owner's, are marked. */
+  postAuthor?: PublicAuthor;
   depth?: number;
   /** True under a removed or deleted post, where nothing can be added. */
   readOnly?: boolean;
@@ -88,6 +92,7 @@ export function CommentThread({
           comment={comment}
           now={now}
           postPath={postPath}
+          postAuthor={postAuthor}
           depth={depth}
           votes={votes}
           scoreOf={scoreOf}
@@ -111,6 +116,7 @@ function CommentItem({
   comment,
   now,
   postPath,
+  postAuthor,
   depth,
   votes,
   scoreOf,
@@ -129,6 +135,7 @@ function CommentItem({
   now: number;
   /** The post's canonical path, for comment permalinks. */
   postPath: string;
+  postAuthor?: PublicAuthor;
   depth: number;
   readOnly: boolean;
   votes?: Record<string, Vote>;
@@ -176,6 +183,7 @@ function CommentItem({
             now={now}
             permalink={`${postPath}#c-${comment.id}`}
             edited={comment.edited}
+            relation={postRelation(comment.author, postAuthor)}
           >
             {renderBadge?.(comment)}
           </AuthorLine>
@@ -248,6 +256,7 @@ function CommentItem({
             comments={comment.replies}
             now={now}
             postPath={postPath}
+            postAuthor={postAuthor}
             depth={depth + 1}
             votes={votes}
             scoreOf={scoreOf}

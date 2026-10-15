@@ -16,8 +16,8 @@ export default function Privacy() {
   return (
     <LegalPage title="Privacy" updated="October 15, 2026">
       <p>
-        {OPERATOR.name}, registered in {OPERATOR.country}, runs aion.ly and is responsible for the personal data it
-        keeps. Questions and requests: <Mail to={CONTACT.privacy} />.
+        {OPERATOR.name}, registry code {OPERATOR.registryCode}, {OPERATOR.address}, runs aion.ly and is responsible
+        for the personal data it keeps. Questions and requests: <Mail to={CONTACT.privacy} />.
       </p>
 
       <h2 id="what">What we keep</h2>

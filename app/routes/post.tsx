@@ -298,6 +298,8 @@ export default function Post({ loaderData }: Route.ComponentProps) {
                 comments={loaderData.comments}
                 now={loaderData.now}
                 postPath={path}
+                // A removed or deleted post's author stays unnamed, so is not marked.
+                postAuthor={loaderData.state === "live" ? loaderData.post.author : undefined}
                 // The thread under a removed or deleted post is read-only.
                 readOnly={!live}
                 votes={Object.fromEntries(

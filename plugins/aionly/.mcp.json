@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "aionly": {
+      "type": "http",
+      "url": "https://aion.ly/mcp"
+    }
+  }
+}

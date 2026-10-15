@@ -1,10 +1,12 @@
+import { agentsMarkdown } from "../agents/setup";
 import { defaultRange, newPage, postsByIds, topSnapshot } from "../db/feed.server";
 import { mentionNames } from "../db/mentions.server";
 import { announcement } from "../db/pins.server";
 import { postPage } from "../db/posts.server";
 import { profileByName } from "../db/profiles.server";
 import { PAGE_SIZE, parseRange, parseSort, RANGE_LABEL } from "../feed";
-import type { CommentData, PostCardData } from "../public-types";
+import { type PostRelation, postRelation } from "../participation";
+import type { CommentData, PostCardData, PublicAuthor } from "../public-types";
 import { mentionIds, type MentionNames, replaceMentions } from "../text/mentions";
 
 /**
@@ -105,12 +107,27 @@ async function feedMarkdown(db: D1Database, url: URL): Promise<string> {
   return lines.join("\n");
 }
 
-function commentLines(comments: CommentData[], depth: number, origin: string, path: string, names: MentionNames): string[] {
+const RELATION_NOTE: Record<PostRelation, string> = {
+  author: "post author",
+  agent: "the post author's agent",
+  owner: "runs the agent that posted",
+};
+
+function commentLines(
+  comments: CommentData[],
+  depth: number,
+  origin: string,
+  path: string,
+  names: MentionNames,
+  postAuthor: PublicAuthor | undefined,
+): string[] {
   const indent = "  ".repeat(depth);
   return comments.flatMap((comment) => {
+    const relation = postRelation(comment.author, postAuthor);
+    const notes = [comment.author?.agent ? "agent" : null, relation ? RELATION_NOTE[relation] : null].filter(Boolean);
     const head =
       comment.state === "visible" && comment.author
-        ? `${author(comment.author.username, origin)}${comment.author.agent ? " (agent)" : ""} · ${comment.score} points · ${day(comment.createdAt)}${comment.edited ? " · edited" : ""} · [link](${origin}${path}#c-${comment.id})`
+        ? `${author(comment.author.username, origin)}${notes.length > 0 ? ` (${notes.join(", ")})` : ""} · ${comment.score} points · ${day(comment.createdAt)}${comment.edited ? " · edited" : ""} · [link](${origin}${path}#c-${comment.id})`
         : comment.state === "removed"
           ? "*[removed by moderator]*"
           : "*[deleted by author]*";
@@ -124,7 +141,7 @@ function commentLines(comments: CommentData[], depth: number, origin: string, pa
       `${indent}- ${head}`,
       ...(body.length > 0 ? ["", ...body] : []),
       "",
-      ...commentLines(comment.replies, depth + 1, origin, path, names),
+      ...commentLines(comment.replies, depth + 1, origin, path, names, postAuthor),
     ];
   });
 }
@@ -161,7 +178,7 @@ async function postMarkdown(db: D1Database, id: string, origin: string): Promise
   }
   lines.push(`## Comments (${count})`, "");
   if (count === 0) lines.push("No comments yet.", "");
-  lines.push(...commentLines(page.comments, 0, origin, path, names));
+  lines.push(...commentLines(page.comments, 0, origin, path, names, live ? page.post.author : undefined));
   return { status: live ? 200 : 410, body: lines.join("\n"), canonical: live ? `${origin}${path}` : undefined };
 }
 
@@ -221,6 +238,10 @@ export async function markdownView(request: Request, db: D1Database): Promise<Re
 
   if (url.pathname === "/") {
     body = await feedMarkdown(db, url);
+  } else if (url.pathname === "/agents" || url.pathname === "/agents.md") {
+    // How to connect, written to the agent reading it.
+    body = agentsMarkdown(url.origin);
+    headers.set("Link", `<${url.origin}/agents>; rel="canonical"`);
   } else if (post) {
     const view = await postMarkdown(db, post[1]!, url.origin);
     if (view) {
