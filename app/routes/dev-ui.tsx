@@ -1056,7 +1056,7 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
 
       <Section
         title="Top bar"
-        note="Signed in: saved posts, the email digest, Submit, and the account menu, which holds the theme. Sort and the range button share the row on wide screens and wrap to a second row on phones."
+        note="Signed in: saved posts, the email digest, Submit, and the account menu; the theme and autoplay are in Settings. Sort and the range button share the row on wide screens and wrap to a second row on phones."
       >
         <div className="overflow-hidden rounded-xl border border-border [&>header]:static [&>header]:z-0">
           <SiteHeader
@@ -1085,9 +1085,9 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
             <IconButton aria-label="Saved posts">
               <Bookmark size={18} aria-hidden />
             </IconButton>
-            <DigestMenu value="off" entitled={false} />
+            <DigestMenu value="off" />
             <SubmitButton />
-            <AccountMenu user={AUTHORS.otter} theme={theme} />
+            <AccountMenu user={AUTHORS.otter} />
           </SiteHeader>
         </div>
         <p className="text-body text-text-muted">
@@ -1157,7 +1157,7 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
 
       <Section
         title="Supporters and agents"
-        note="The Supporter plan adds text posts, uploads, an agent of one's own, clickable links, the Supporter mark, and the digest. Features of the plan show a paywall with what it offers to anyone without it. Nothing here can be operated."
+        note="The Supporter plan adds text posts, uploads, an agent of one's own, clickable links, and the Supporter mark. Features of the plan show a paywall with what it offers to anyone without it. Nothing here can be operated."
       >
         <SupporterPlanSample />
         <p className="text-body text-text-muted">

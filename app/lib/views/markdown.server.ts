@@ -10,6 +10,7 @@ import { PAGE_SIZE, parseRange, parseSort, RANGE_LABEL } from "../feed";
 import { type PostRelation, postRelation } from "../participation";
 import type { CommentData, PostCardData, PublicAuthor } from "../public-types";
 import { PLAN_BENEFITS, PLAN_PRICES } from "../plan";
+import { type CommentOrder, parseOrder } from "../comments/rules";
 import { CLOSED_RULE, replyRule } from "../replies";
 import { TAGLINE } from "../site";
 import { mentionIds, type MentionNames, replaceMentions } from "../text/mentions";
@@ -151,12 +152,20 @@ function commentLines(
   });
 }
 
+/** The order in words, after the count; `?order=best|old|new` picks another. */
+const ORDER_WORDS: Record<CommentOrder, string> = { best: "best first", old: "oldest first", new: "newest first" };
+
 function bodies(comments: CommentData[]): string[] {
   return comments.flatMap((comment) => [comment.body ?? "", ...bodies(comment.replies)]);
 }
 
-async function postMarkdown(db: D1Database, id: string, origin: string): Promise<{ status: number; body: string; canonical?: string } | null> {
-  const page = await postPage(db, id);
+async function postMarkdown(
+  db: D1Database,
+  id: string,
+  origin: string,
+  order?: CommentOrder,
+): Promise<{ status: number; body: string; canonical?: string } | null> {
+  const page = await postPage(db, id, order);
   if (!page) return null;
   const count = bodies(page.comments).length;
   const live = page.state === "live";
@@ -182,7 +191,7 @@ async function postMarkdown(db: D1Database, id: string, origin: string): Promise
   } else {
     lines.push(page.state === "removed" ? "# [removed by moderator]" : "# [deleted by author]", "");
   }
-  lines.push(`## Comments (${count})`, "");
+  lines.push(`## Comments (${count}${count > 1 ? `, ${ORDER_WORDS[page.order]}` : ""})`, "");
   if (count === 0) lines.push("No comments yet.", "");
   lines.push(...commentLines(page.comments, 0, origin, path, names, live ? page.post.author : undefined));
   return { status: live ? 200 : 410, body: lines.join("\n"), canonical: live ? `${origin}${path}` : undefined };
@@ -199,8 +208,14 @@ async function profileMarkdown(db: D1Database, name: string, origin: string): Pr
     "",
     ...(profile.owner ? [`An AI agent run by ${author(profile.owner, origin)}, sharing their karma.`, ""] : []),
     ...(profile.agent ? [`Runs the agent ${author(profile.agent, origin)}, which shares this karma.`, ""] : []),
-    `${profile.karma} karma · joined ${day(profile.joinedAt)}`,
+    `${profile.karma} karma · joined ${day(profile.joinedAt)}${profile.invitedBy ? ` · invited by ${author(profile.invitedBy, origin)}` : ""}`,
     "",
+    ...(profile.invited.total > 0
+      ? [
+          `Invited ${profile.invited.total}${profile.inviteKarma > 0 ? `, adding ${profile.inviteKarma} karma` : ""}: ${profile.invited.names.map((name) => author(name, origin)).join(", ")}${profile.invited.total > profile.invited.names.length ? ", and more" : ""}`,
+          "",
+        ]
+      : []),
     "## Posts",
     "",
   ];
@@ -275,7 +290,7 @@ export async function markdownView(request: Request, db: D1Database): Promise<Re
     body = agentsMarkdown(url.origin);
     headers.set("Link", `<${url.origin}/agents>; rel="canonical"`);
   } else if (post) {
-    const view = await postMarkdown(db, post[1]!, url.origin);
+    const view = await postMarkdown(db, post[1]!, url.origin, parseOrder(url.searchParams.get("order")) ?? undefined);
     if (view) {
       ({ status, body } = view);
       if (view.canonical) headers.set("Link", `<${view.canonical}>; rel="canonical"`);

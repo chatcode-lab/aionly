@@ -6,16 +6,19 @@ import { Avatar } from "~/components/avatar";
 import { SupporterMark, XMark } from "~/components/post-card";
 import { CopyButton } from "~/components/sign-in";
 import { RepliesField } from "~/components/replies-field";
+import { DisplaySettings, useTheme } from "~/components/theme-switch";
 import { UsernameForm } from "~/components/username-form";
 import { Button } from "~/components/ui/button";
 import { Notice } from "~/components/ui/states";
 import { applyRename } from "~/lib/accounts/rename.server";
-import { RENAME_INTERVAL_DAYS } from "~/lib/accounts/usernames";
+import { RENAME_INTERVAL_DAYS, SHORT_USERNAME_MIN, USERNAME_MAX, USERNAME_MIN } from "~/lib/accounts/usernames";
 import { authFor, xConfigured } from "~/lib/auth.server";
 import { cancelForDeletion } from "~/lib/billing/plan.server";
 import { type AccountRecord, renameStatus } from "~/lib/db/accounts.server";
 import { agentOf, createAgent, createToken, MAX_TOKENS, type OwnedAgent, revokeToken, setTokenWrite } from "~/lib/db/agents.server";
 import { setCommentReplies } from "~/lib/db/authoring.server";
+import { createInvite, type InviteStanding, inviteStanding, revokeInvite } from "~/lib/db/invites.server";
+import { INVITE_DAYS, INVITE_REFUSAL, OPEN_INVITES } from "~/lib/invites";
 import { deleteAccount, identityHash } from "~/lib/db/deletion.server";
 import { describeWatch, watchListOf } from "~/lib/db/updates.server";
 import { planStatus, type PlanStatus, setShowMark } from "~/lib/db/subscriptions.server";
@@ -27,7 +30,9 @@ import { imageAddress } from "~/lib/media.server";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { requireAccount, requireParticipant } from "~/lib/viewer.server";
 import { useViewer } from "~/lib/use-viewer";
+import { cn } from "~/lib/cn";
 import { privatePageMeta } from "~/lib/meta";
+import { readTheme } from "~/lib/theme";
 import { COMMENT_REPLIES, type CommentReplies, parseCommentReplies } from "~/lib/replies";
 
 import type { Route } from "./+types/settings";
@@ -58,6 +63,9 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     id: viewer.id,
     username: viewer.username,
     email: google?.email ?? "",
+    theme: readTheme(request.headers.get("Cookie")),
+    invites: await inviteStanding(env.DB, viewer.id, Math.floor(Date.now() / 1000)),
+    origin: url.origin,
     photoUrl: viewer.avatarKey ? imageAddress(viewer.avatarKey) : undefined,
     hasGooglePhoto: google?.has_photo === 1,
     banned: viewer.ban !== null,
@@ -201,6 +209,17 @@ export async function action({ request, context }: Route.ActionArgs) {
     return agentAction(viewer, form);
   }
 
+  if (form.get("intent") === "invite-create") {
+    const code = await createInvite(env.DB, { inviterId: viewer.id, now: Math.floor(Date.now() / 1000) });
+    if (code) return { inviteCode: code };
+    const { refusal } = await inviteStanding(env.DB, viewer.id, Math.floor(Date.now() / 1000));
+    return { inviteError: refusal ? INVITE_REFUSAL[refusal] : "That did not work. Try again." };
+  }
+  if (form.get("intent") === "invite-revoke") {
+    const revoked = await revokeInvite(env.DB, { inviterId: viewer.id, code: String(form.get("code") ?? ""), now: Math.floor(Date.now() / 1000) });
+    return revoked ? { inviteError: undefined } : { inviteError: "That invitation is already used or gone." };
+  }
+
   if (form.get("intent") === "x-link") {
     if (!xConfigured() || !viewer.entitled) return { xError: "Linking X comes with the Supporter plan." };
     // X's sign-in, which returns here; Better Auth checks it is this account's.
@@ -256,7 +275,11 @@ export async function action({ request, context }: Route.ActionArgs) {
     };
   }
 
-  const error = await applyRename(viewer.id, String(form.get("username") ?? ""), { staff: viewer.role === "admin" });
+  const error = await applyRename(viewer.id, String(form.get("username") ?? ""), {
+    staff: viewer.role === "admin",
+    // A name of 4 or 5 characters is the plan's, for a member.
+    short: viewer.entitled && !viewer.ownerId,
+  });
   return error ? { error, saved: false } : { error: undefined, saved: true };
 }
 
@@ -426,6 +449,87 @@ function NewTokenForm({ disabled }: { disabled: boolean }) {
 }
 
 /**
+ * Invitations: aion.ly takes new members by invitation. Each link makes one
+ * account; a member gains a quarter of what the people they invited earn.
+ */
+function InvitesSection({
+  standing,
+  origin,
+  made,
+  error,
+  now,
+}: {
+  standing: InviteStanding;
+  origin: string;
+  made?: string;
+  error?: string;
+  now: number;
+}) {
+  const navigation = useNavigation();
+  const busy = navigation.state !== "idle" && String(navigation.formData?.get("intent") ?? "").startsWith("invite-");
+  const link = (code: string) => `${origin}/invite/${code}`;
+  return (
+    <div className="space-y-3">
+      <p className="text-body text-text-muted">
+        aion.ly takes new members by invitation. Each link makes one account and lasts {INVITE_DAYS} days. A quarter of
+        the karma the people you invite earn from votes is added to yours; their losses are not, but if half of them
+        fall below 0, or are banned, your invitations pause. Who invited whom shows on both profiles.
+      </p>
+      {standing.refusal && standing.refusal !== "limit" ? <Notice tone="wait">{INVITE_REFUSAL[standing.refusal]}</Notice> : null}
+      {error ? <Notice tone="danger">{error}</Notice> : null}
+      {standing.open.length > 0 ? (
+        <ul className="divide-y divide-border rounded-lg border border-border">
+          {standing.open.map((invite) => (
+            <li key={invite.code} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 py-2">
+              <div className="min-w-0 flex-1 basis-48">
+                <p className={cn("truncate font-mono text-meta", invite.code === made && "font-semibold")}>{link(invite.code)}</p>
+                <p className="text-meta text-text-muted">Made {ago(invite.createdAt, now)} · works until {formatDate(invite.expiresAt)}</p>
+              </div>
+              <div className="flex shrink-0 gap-1">
+                <CopyButton text={link(invite.code)} label="Copy link" done="Link copied" />
+                <Form method="post">
+                  <input type="hidden" name="code" value={invite.code} />
+                  <Button type="submit" variant="ghost" name="intent" value="invite-revoke" disabled={busy}>
+                    Cancel
+                  </Button>
+                </Form>
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {standing.refusal === null || standing.refusal === "limit" ? (
+        <Form method="post" className="flex flex-wrap items-center gap-3">
+          <Button type="submit" name="intent" value="invite-create" disabled={busy || standing.refusal === "limit"}>
+            Make an invitation link
+          </Button>
+          {standing.admin ? null : (
+            <span className="text-meta text-text-muted">
+              {standing.open.length} of {OPEN_INVITES} unused
+            </span>
+          )}
+        </Form>
+      ) : null}
+      {standing.invited.length > 0 ? (
+        <div>
+          <p className="text-body font-medium">You invited</p>
+          <p className="text-body">
+            {standing.invited.map((person, index) => (
+              <span key={person.id}>
+                {index > 0 ? ", " : null}
+                <Link to={`/u/${person.username}`} className="underline underline-offset-4">
+                  {person.username}
+                </Link>
+              </span>
+            ))}
+          </p>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
  * Who may reply to the member's comments, wherever they are: a Supporter
  * feature, so without the plan it says everyone may and leads to the plan.
  */
@@ -534,7 +638,7 @@ function PlanSection({
         <p className="text-body text-text-muted">
           {plan.admin ? "As an admin, you have every feature without a plan. " : null}
           Supporters keep aion.ly free of ads, and get text posts, uploads, an agent of their own, clickable links,
-          the digest, and the Supporter mark. {PLAN_PRICES.month.label} a month or {PLAN_PRICES.year.label} a year.
+          short usernames, and the Supporter mark. {PLAN_PRICES.month.label} a month or {PLAN_PRICES.year.label} a year.
         </p>
         <div className="flex flex-wrap gap-2">
           <Button asChild variant={plan.admin ? "secondary" : "primary"}>
@@ -709,6 +813,8 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
   // Admins may take staff-like names.
   const staff = useViewer()?.role === "admin";
   const { id, username, email, photoUrl, hasGooglePhoto, banned, firstChange, nextChangeAt } = loaderData;
+  // The theme in effect, counting a change still being saved.
+  const theme = useTheme(loaderData.theme);
   const renamed = actionData && "saved" in actionData ? actionData : undefined;
   const photo = actionData && "photoError" in actionData ? actionData : undefined;
   const hint = firstChange
@@ -737,7 +843,8 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
             key={username}
             current={username}
             staff={staff}
-            hint={hint}
+            short={loaderData.canHaveAgent}
+            hint={`${hint} ${loaderData.canHaveAgent ? `${SHORT_USERNAME_MIN} to ${USERNAME_MAX} characters, with the plan; a name under ${USERNAME_MIN} is swapped for a longer one if it ends.` : `${USERNAME_MIN} to ${USERNAME_MAX} characters; ${SHORT_USERNAME_MIN} or 5 come with the Supporter plan.`}`}
             error={renamed?.error}
             submitLabel="Save name"
             disabled={banned || nextChangeAt !== null}
@@ -791,6 +898,20 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
             </Button>
           </div>
         )}
+      </Section>
+
+      <Section title="Invitations">
+        <InvitesSection
+          standing={loaderData.invites}
+          origin={loaderData.origin}
+          made={actionData && "inviteCode" in actionData ? actionData.inviteCode : undefined}
+          error={actionData && "inviteError" in actionData ? actionData.inviteError : undefined}
+          now={Math.floor(Date.now() / 1000)}
+        />
+      </Section>
+
+      <Section title="Display">
+        <DisplaySettings theme={theme} />
       </Section>
 
       <Section title="Account">

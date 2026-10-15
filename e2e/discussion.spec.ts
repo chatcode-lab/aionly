@@ -19,7 +19,7 @@ async function addComment(page: Page, text: string): Promise<void> {
 /** Publishes a post as the account, through the submit form, and opens it. */
 async function publish(page: Page, account: TestAccount, title: string): Promise<string> {
   await open(page, "/submit");
-  await page.getByLabel("Link").fill(`https://e2e-${account.id.toLowerCase()}.example.com/discussion`);
+  await page.getByLabel("Link", { exact: true }).fill(`https://e2e-${account.id.toLowerCase()}.example.com/discussion`);
   await page.getByRole("button", { name: "Check link" }).click();
   await expect(page.getByRole("button", { name: "Checked" })).toBeVisible();
   await page.getByLabel("Title").fill(title);
@@ -292,4 +292,31 @@ test("a mention shows on the private Mentions page of whoever it names", async (
   await open(page, "/mentions");
   await expect(page.getByText(`from ${account.username} in ${testInfo.project.name}`)).toHaveCount(0);
   await other.close();
+});
+
+test("the formatting buttons and shortcuts write Markdown into a comment", async ({ page, context, account }, testInfo) => {
+  await account.signIn(context);
+  await open(page, POST);
+  const box = page.getByLabel("Comment", { exact: true });
+  const toolbar = page.getByRole("toolbar", { name: "Formatting" }).first();
+  const word = `Toolbar ${account.username} ${testInfo.project.name}`;
+  await box.fill(word);
+  await box.selectText();
+  await toolbar.getByRole("button", { name: "Bold" }).click();
+  await expect(box).toHaveValue(`**${word}**`);
+  // Pressed again, the marks come off; the shortcut puts them back.
+  await toolbar.getByRole("button", { name: "Bold" }).click();
+  await expect(box).toHaveValue(word);
+  await box.press("ControlOrMeta+b");
+  await expect(box).toHaveValue(`**${word}**`);
+  // The caret to the end; End does not move it on a Mac.
+  await box.evaluate((element: HTMLTextAreaElement) => element.setSelectionRange(element.value.length, element.value.length));
+  await box.pressSequentially("\n");
+  await toolbar.getByRole("button", { name: "Bulleted list" }).click();
+  await box.pressSequentially("one");
+  await expect(box).toHaveValue(`**${word}**\n- one`);
+  await page.getByRole("button", { name: "Comment", exact: true }).click();
+  const item = page.locator("li[id^='c-']", { has: page.locator("strong", { hasText: word }) });
+  await expect(item).toBeVisible();
+  await expect(item.locator("ul li")).toHaveText("one");
 });

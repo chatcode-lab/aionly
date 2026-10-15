@@ -115,7 +115,7 @@ test.describe("embed spike", () => {
       has: page.getByRole("heading", { name: "YouTube" }),
     });
 
-    await youtube.getByLabel("Link").fill("http://www.youtube.com/watch?v=jNQXAC9IVRw");
+    await youtube.getByLabel("Link", { exact: true }).fill("http://www.youtube.com/watch?v=jNQXAC9IVRw");
     await expect(youtube.getByRole("alert")).toHaveText("Rejected: not_https");
     await expect(youtube.getByRole("button", { name: "Load", exact: true })).toBeDisabled();
   });
@@ -420,18 +420,16 @@ test.describe("design review page", () => {
     ).toHaveAttribute("aria-pressed", "true");
   });
 
-  test("shows the digest and uploads behind the plan, not as working", async ({ page }) => {
+  test("offers the digest to everyone, and shows uploads behind the plan", async ({ page }) => {
     await page.goto("/dev/ui");
 
     await page.getByRole("button", { name: /^Email digest:/ }).click();
     const menu = page.getByRole("menu");
-    await expect(menu).toContainText("for supporters");
+    await expect(menu).toContainText("sent to your sign-in email");
     for (const option of ["Daily", "Weekly", "Monthly"]) {
-      await expect(
-        menu.getByRole("menuitemradio", { name: option }),
-      ).toHaveAttribute("aria-disabled", "true");
+      await expect(menu.getByRole("menuitemradio", { name: option })).not.toHaveAttribute("aria-disabled", "true");
     }
-    await expect(menu.getByRole("menuitem", { name: "Become a supporter" })).toHaveAttribute("href", "/supporter?for=digest");
+    await expect(menu.getByRole("menuitem", { name: "Become a supporter" })).toHaveCount(0);
     await page.keyboard.press("Escape");
 
     await page.getByRole("button", { name: "Upload", exact: true }).click();

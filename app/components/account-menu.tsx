@@ -2,25 +2,19 @@ import { AtSign, Bookmark, LogOut, Settings, Shield, User } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
 import { Link, useSubmit } from "react-router";
 
-import type { Theme } from "~/lib/theme";
 import { useModeration } from "~/lib/use-moderation";
 
 import { Avatar } from "./avatar";
 import type { PublicAuthor } from "~/lib/public-types";
-import { AutoplayItem, MENU_CONTENT, ThemeRadioGroup } from "./theme-switch";
+import { MENU_CONTENT } from "./theme-switch";
 import { MenuItem, MenuSeparator } from "./ui/menu";
 
 /**
- * The signed-in user's menu, opened from their avatar. It also holds the
- * theme, which keeps the top bar to four controls on a narrow phone.
+ * The signed-in user's menu, opened from their avatar. The theme and
+ * autoplay live in Settings, which keeps the top bar to four controls on a
+ * narrow phone.
  */
-export function AccountMenu({
-  user,
-  theme,
-}: {
-  user: PublicAuthor;
-  theme: Theme;
-}) {
+export function AccountMenu({ user }: { user: PublicAuthor }) {
   const submit = useSubmit();
   const moderation = useModeration();
   const waiting = moderation?.openReports ?? 0;
@@ -89,12 +83,6 @@ export function AccountMenu({
               </Link>
             </MenuItem>
           ) : null}
-          <MenuSeparator />
-          <DropdownMenu.Label className="px-2.5 pt-1.5 pb-1 text-meta text-text-muted">
-            Theme
-          </DropdownMenu.Label>
-          <ThemeRadioGroup theme={theme} />
-          <AutoplayItem />
           <MenuSeparator />
           <MenuItem
             onSelect={() => {

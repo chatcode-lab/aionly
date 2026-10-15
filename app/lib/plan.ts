@@ -22,7 +22,7 @@ export const PLAN_PRICES: Record<PlanInterval, { cents: number; label: string; l
  */
 export const FRESH_START_PRICE = { cents: 2000, label: "$20", lookupKey: "aionly_fresh_start" } as const;
 
-export type Benefit = "text" | "upload" | "agent" | "replies" | "links" | "mark" | "digest";
+export type Benefit = "text" | "upload" | "agent" | "replies" | "links" | "name" | "mark";
 
 /** What the plan adds, in the order the Supporter page and paywalls list it. */
 export const PLAN_BENEFITS: ReadonlyArray<{ key: Benefit; label: string; detail: string }> = [
@@ -44,6 +44,10 @@ export const PLAN_BENEFITS: ReadonlyArray<{ key: Benefit; label: string; detail:
     label: "Clickable links",
     detail: "An outside address on a line of its own becomes a real link in your posts and comments.",
   },
+  {
+    key: "name",
+    label: "A short username",
+    detail: "4 or 5 characters, where others need 6 or more, for as long as the plan lasts.",
+  },
   { key: "mark", label: "The Supporter mark", detail: "A small mark beside your name, if you want it shown." },
-  { key: "digest", label: "The email digest", detail: "The top posts of the day, week, or month, sent to you." },
 ];

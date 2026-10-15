@@ -140,6 +140,7 @@ export default function EditPost({ loaderData, actionData }: Route.ComponentProp
           hint="Can change any time. Marked edited after the first 5 minutes."
           value={description}
           onChange={(event) => setDescription(event.target.value)}
+          onFormat={setDescription}
           count={{ value: length(description), max: post.kind === "text" ? TEXT_BODY_MAX : DESCRIPTION_MAX }}
           error={errors.description}
           rows={post.kind === "text" ? 12 : 6}

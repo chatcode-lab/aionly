@@ -46,6 +46,10 @@ export default function Privacy() {
         <li>
           <strong>The digest:</strong> if you turn it on, how often you get it.
         </li>
+        <li>
+          <strong>Invitations:</strong> who invited you, and whom you invited, which your profile shows to everyone;
+          the invitation links you make; and, while a sign-up through one of them is under way, the email it is for.
+        </li>
       </ul>
 
       <h2 id="public">What is public</h2>

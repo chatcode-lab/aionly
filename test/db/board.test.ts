@@ -227,20 +227,31 @@ describe("postPage", () => {
     expect(page?.comments).toHaveLength(1);
   });
 
-  it("orders siblings by score, then oldest first", async () => {
+  it("orders a discussion oldest first, best first, or newest first, replies alike", async () => {
     await post("p1");
     await comment("old_low", { score: 1, age: 900 });
     await comment("new_high", { score: 8, age: 100 });
     await comment("tie_newer", { score: 4, age: 200 });
     await comment("tie_older", { score: 4, age: 700 });
+    await comment("reply_new", { parent: "old_low", depth: 1, score: 9, age: 50 });
+    await comment("reply_old", { parent: "old_low", depth: 1, score: 0, age: 800 });
 
+    const ids = async (order?: "old" | "best" | "new") => {
+      const page = await postPage(db, "p1", order);
+      return { order: page?.order, top: page?.comments.map((c) => c.id), replies: page?.comments.find((c) => c.id === "old_low")?.replies.map((c) => c.id) };
+    };
+    // A small discussion reads in order by default.
+    expect(await ids()).toEqual({ order: "old", top: ["old_low", "tie_older", "tie_newer", "new_high"], replies: ["reply_old", "reply_new"] });
+    expect(await ids("best")).toEqual({ order: "best", top: ["new_high", "tie_older", "tie_newer", "old_low"], replies: ["reply_new", "reply_old"] });
+    expect(await ids("new")).toEqual({ order: "new", top: ["new_high", "tie_newer", "tie_older", "old_low"], replies: ["reply_new", "reply_old"] });
+  });
+
+  it("opens a busy discussion best first", async () => {
+    await post("p1");
+    for (let index = 0; index < 30; index += 1) await comment(`c${index}`, { score: index % 7, age: 1000 - index });
     const page = await postPage(db, "p1");
-    expect(page?.comments.map((c) => c.id)).toEqual([
-      "new_high",
-      "tie_older",
-      "tie_newer",
-      "old_low",
-    ]);
+    expect(page?.order).toBe("best");
+    expect(page?.comments[0]?.score).toBe(6);
   });
 
   it("keeps removed and deleted comments in place, without text or author", async () => {

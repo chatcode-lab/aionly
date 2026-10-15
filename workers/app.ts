@@ -2,7 +2,8 @@ import { env } from "cloudflare:workers";
 import { createRequestHandler, RouterContextProvider } from "react-router";
 
 import { nonceContext, viewerContext, waitUntilContext } from "../app/context";
-import { sweepExpiredVerifications } from "../app/lib/db/accounts.server";
+import { revokeShortNames, sweepExpiredVerifications } from "../app/lib/db/accounts.server";
+import { sweepInviteClaims } from "../app/lib/db/invites.server";
 import { sweepDeletedIdentities } from "../app/lib/db/deletion.server";
 import { sendDigests } from "../app/lib/digest/digest.server";
 import { sweepDeletedUploads } from "../app/lib/uploads.server";
@@ -231,6 +232,9 @@ export default {
     ctx.waitUntil(sweepDeletedIdentities(workerEnv.DB, Math.floor(Date.now() / 1000)));
     ctx.waitUntil(sweepDeletedUploads(workerEnv.DB, workerEnv.IMAGES));
     ctx.waitUntil(sweepOAuth(workerEnv.DB, Math.floor(Date.now() / 1000)));
+    // Short names whose plan ended, and invitation claims whose sign-up never finished.
+    ctx.waitUntil(revokeShortNames(workerEnv.DB, Math.floor(Date.now() / 1000)));
+    ctx.waitUntil(sweepInviteClaims(workerEnv.DB, Math.floor(Date.now() / 1000)));
     // Digests that are due: each period's, for whoever has not had it yet.
     const origin = workerEnv.SITE_ORIGIN;
     if (origin) {

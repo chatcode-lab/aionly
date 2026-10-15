@@ -37,6 +37,12 @@ export interface PublicProfile {
   supporter?: boolean;
   /** A linked X account, linked to by its ID, which survives a change of handle. */
   x?: { id: string; handle: string };
+  /** Who invited this member, when they came by invitation. */
+  invitedBy?: string;
+  /** Members they invited, newest first, and how many in all. */
+  invited: { names: string[]; total: number };
+  /** The part of their karma that comes from those they invited. */
+  inviteKarma: number;
   posts: PostCardData[];
   comments: ProfileComment[];
 }
@@ -58,7 +64,10 @@ export async function profileByName(
   const owner = await db
     .prepare(
       `SELECT claimed.user_id, claimed.is_current, current.name AS current_name,
-              profile.karma, profile.created_at, profile.avatar_key,
+              profile.karma, profile.vote_karma, profile.created_at, profile.avatar_key,
+              (SELECT name FROM usernames WHERE user_id = profile.invited_by AND is_current = 1
+                 AND NOT EXISTS (SELECT 1 FROM profiles WHERE user_id = profile.invited_by AND deleted_at IS NOT NULL)) AS inviter_name,
+              (SELECT COUNT(*) FROM profiles WHERE invited_by = COALESCE(profile.owner_id, profile.user_id) AND deleted_at IS NULL) AS invited_total,
               profile.plan_until > ?2 AND profile.show_mark = 1 AS supporter,
               profile.x_id, profile.x_handle,
               (SELECT name FROM usernames WHERE user_id = profile.owner_id AND is_current = 1) AS owner_name,
@@ -77,6 +86,9 @@ export async function profileByName(
       is_current: number;
       current_name: string;
       karma: number;
+      vote_karma: number;
+      inviter_name: string | null;
+      invited_total: number;
       created_at: number;
       avatar_key: string | null;
       supporter: number | null;
@@ -90,7 +102,7 @@ export async function profileByName(
     return { kind: "renamed", username: owner.current_name };
   }
 
-  const [posts, comments] = await db.batch([
+  const [posts, comments, invited] = await db.batch([
     db
       .prepare(
         `SELECT ${POST_COLUMNS}
@@ -115,6 +127,16 @@ export async function profileByName(
          LIMIT ?2`,
       )
       .bind(owner.user_id, LISTING_LIMIT),
+    // Those this member invited, by name; an agent shows its owner's.
+    db
+      .prepare(
+        `SELECT name.name FROM profiles AS invitee
+         JOIN usernames AS name ON name.user_id = invitee.user_id AND name.is_current = 1
+         WHERE invitee.invited_by = COALESCE((SELECT owner_id FROM profiles WHERE user_id = ?1), ?1)
+           AND invitee.deleted_at IS NULL
+         ORDER BY invitee.created_at DESC LIMIT 50`,
+      )
+      .bind(owner.user_id),
   ]);
 
   const cards = (posts.results as PostRow[]).map((row) => {
@@ -153,6 +175,9 @@ export async function profileByName(
       ...(owner.agent_name ? { agent: owner.agent_name } : {}),
       ...(owner.supporter === 1 ? { supporter: true } : {}),
       ...(owner.x_id && owner.x_handle ? { x: { id: owner.x_id, handle: owner.x_handle } } : {}),
+      ...(owner.inviter_name ? { invitedBy: owner.inviter_name } : {}),
+      invited: { names: (invited!.results as Array<{ name: string }>).map((row) => row.name), total: owner.invited_total },
+      inviteKarma: owner.karma - owner.vote_karma,
       posts: await withPlainMentions(db, cards, "excerpt"),
       comments: await withPlainMentions(db, listed, "body"),
     },

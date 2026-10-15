@@ -26,9 +26,9 @@ function SubmitLink() {
 
 /**
  * The top bar's right side. Signed out: the theme switch, Submit, and Sign
- * in. Signed in: saved posts, the email digest, Submit, and the account menu,
- * which holds the theme. Never more than four controls, so it fits a 320 px
- * screen.
+ * in. Signed in: saved posts, the email digest, Submit, and the account
+ * menu; the theme and autoplay are in Settings. Never more than four
+ * controls, so it fits a 320 px screen.
  */
 export function HeaderActions({
   viewer,
@@ -70,9 +70,9 @@ export function HeaderActions({
           <Bookmark size={18} aria-hidden />
         </Link>
       </IconButton>
-      <DigestMenu value={viewer.digest ?? "off"} entitled={viewer.entitled} />
+      <DigestMenu value={viewer.digest ?? "off"} />
       <SubmitLink />
-      <AccountMenu user={viewer} theme={theme} />
+      <AccountMenu user={viewer} />
     </>
   );
 }

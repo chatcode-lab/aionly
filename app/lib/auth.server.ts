@@ -5,6 +5,8 @@ import { APIError } from "better-auth/api";
 
 import { accountRecord, createProfile } from "./db/accounts.server";
 import { signUpRefusal } from "./db/deletion.server";
+import { attachInvite, claimInvite } from "./db/invites.server";
+import { INVITE_CODE, INVITE_COOKIE } from "./invites";
 import { rememberXAccount, type XProfile } from "./db/x-accounts.server";
 import { newId } from "./ids";
 
@@ -24,6 +26,18 @@ export function requireVerifiedEmail(user: { email?: string | null; emailVerifie
       message: "The Google account's email is not verified.",
     });
   }
+}
+
+/** Whether a new account needs an invitation, as it does unless sign-up is opened. */
+export function invitesRequired(): boolean {
+  return env.OPEN_SIGNUP !== "true";
+}
+
+/** The invitation this browser carries, from its invitation link. */
+export function inviteFrom(request: Request | undefined): string | null {
+  const cookie = request?.headers.get("Cookie") ?? "";
+  const code = new RegExp(`(?:^|;\\s*)${INVITE_COOKIE}=([^;]+)`).exec(cookie)?.[1] ?? null;
+  return code && INVITE_CODE.test(code) ? code : null;
 }
 
 /** Provider tokens are never kept: the board needs only who signed in. */
@@ -76,7 +90,7 @@ function xProvider(seen: (profile: XProfile) => void) {
   };
 }
 
-function createAuth(origin: string) {
+function createAuth(origin: string, request?: Request) {
   // What X said in this request, for the hooks below. The instance serves
   // one request only, so this is never shared.
   let seenX: XProfile | null = null;
@@ -138,11 +152,25 @@ function createAuth(origin: string) {
         create: {
           before: async (user) => {
             requireVerifiedEmail(user);
+            // New members come by invitation: the link's code, claimed for
+            // this email inside the write, so one invitation makes one account.
+            if (invitesRequired()) {
+              const code = inviteFrom(request);
+              const claimed = code ? await claimInvite(env.DB, { code, email: user.email!, now: Math.floor(Date.now() / 1000) }) : false;
+              if (!claimed) {
+                throw APIError.from("FORBIDDEN", {
+                  code: code ? "invite_invalid" : "invite_required",
+                  message: "A new account needs an invitation from a member.",
+                });
+              }
+            }
           },
           // Every account gets its public profile and a generated name as
-          // it is created. A failure here is repaired on the next request.
+          // it is created, and who invited it. A failure here is repaired on
+          // the next request.
           after: async (user) => {
             await createProfile(env.DB, user.id);
+            await attachInvite(env.DB, { userId: user.id, email: user.email });
           },
         },
       },
@@ -186,5 +214,5 @@ export type Auth = ReturnType<typeof createAuth>;
  * match the address the visitor is on with no hostname in configuration.
  */
 export function authFor(request: Request): Auth {
-  return createAuth(new URL(request.url).origin);
+  return createAuth(new URL(request.url).origin, request);
 }

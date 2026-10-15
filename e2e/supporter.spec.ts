@@ -125,8 +125,8 @@ test("uploads refuse what is not a picture, video, or audio", async ({ page, con
   expect(refused.status()).toBe(403);
 });
 
-test("a supporter turns the digest on from the top bar, and its link unsubscribes without signing in", async ({ page, context, account, request, browser }) => {
-  await setPlan(request, account);
+test("any member turns the digest on from the top bar, and its link unsubscribes without signing in", async ({ page, context, account, request, browser }) => {
+  // Free: no plan needed.
   await account.signIn(context);
   await open(page, "/");
   await page.getByRole("button", { name: "Email digest: Off" }).click();
@@ -340,4 +340,22 @@ test("an account with a running plan is not deleted while Stripe cannot cancel i
   // Locally there is no Stripe key, so the plan cannot be cancelled, and nothing goes.
   await expect(page.getByText("Your plan could not be cancelled just now, so nothing was deleted.")).toBeVisible();
   expect((await page.request.get(`/u/${account.username}`)).status()).toBe(200);
+});
+
+test("a name of 4 or 5 characters comes with the plan", async ({ page, context, account, request }) => {
+  const short = `q${account.id.replace(/\D/g, "").slice(-3)}a`;
+  await account.signIn(context);
+  await open(page, "/settings");
+  const name = page.getByLabel("Username");
+  await name.fill(short);
+  await expect(page.getByText("At least 6 characters; 4 or 5 come with the Supporter plan.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save name" })).toBeDisabled();
+
+  await setPlan(request, account);
+  await open(page, "/settings");
+  await page.getByLabel("Username").fill(short);
+  await page.getByRole("button", { name: "Save name" }).click();
+  await expect(page.getByText(`Your name is now ${short}.`)).toBeVisible();
+  // Brand names stay reserved, plan or not.
+  await expect(page.getByLabel("Username")).toHaveValue(short);
 });

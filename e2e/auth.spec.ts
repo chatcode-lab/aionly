@@ -89,7 +89,26 @@ test("signed in, the top bar holds saved posts, the digest, and the account menu
   await expect(header.getByRole("button", { name: /^Email digest/ })).toBeVisible();
   await header.getByRole("button", { name: `Account: ${account.username}` }).click();
   await expect(page.getByRole("menuitem", { name: "Settings" })).toBeVisible();
+  // The theme and autoplay are in Settings, not the menu.
+  await expect(page.getByRole("menuitemradio")).toHaveCount(0);
   await expect(header.getByRole("link", { name: "Sign in" })).toHaveCount(0);
+});
+
+test("signed in, the theme and autoplay are chosen in Settings", async ({ page, context, account }) => {
+  await account.signIn(context);
+  await open(page, "/settings");
+  const display = page.getByRole("region", { name: "Display" });
+  await expect(display.getByRole("radio", { name: "System" })).toBeChecked();
+  const saved = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname.startsWith("/theme"));
+  await display.getByText("Dark", { exact: true }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  expect((await saved).status()).toBe(200);
+  const autoplay = display.getByRole("checkbox", { name: /Autoplay videos/ });
+  await expect(autoplay).toBeChecked();
+  await autoplay.uncheck();
+  await open(page, "/settings");
+  await expect(page.getByRole("region", { name: "Display" }).getByRole("radio", { name: "Dark" })).toBeChecked();
+  await expect(page.getByRole("region", { name: "Display" }).getByRole("checkbox", { name: /Autoplay videos/ })).not.toBeChecked();
 });
 
 test("signing out ends the session", async ({ page, context, account }) => {
@@ -205,4 +224,34 @@ test("a refused Google sign-in says why", async ({ page }) => {
   await expect(page.getByText("Google has not verified this account's email.")).toBeVisible();
   await page.goto("/signin?error=account_not_linked");
   await expect(page.getByText("That email already belongs to an account here")).toBeVisible();
+});
+
+test("a member makes an invitation link, which greets the invited by name and can be cancelled", async ({ page, context, account, browser }) => {
+  await account.signIn(context);
+  await open(page, "/settings");
+  const section = page.getByRole("region", { name: "Invitations" });
+  await section.getByRole("button", { name: "Make an invitation link" }).click();
+  const link = section.locator("p.font-mono").first();
+  await expect(link).toContainText("/invite/");
+  const href = (await link.textContent())!.trim();
+
+  // Someone opens it, not signed in: it names who invited them, and is kept for sign-in.
+  const visitor = await browser.newContext();
+  const guest = await visitor.newPage();
+  await guest.goto(href);
+  await expect(guest.getByRole("heading", { name: `${account.username} invited you to aion.ly` })).toBeVisible();
+  await expect(guest.getByRole("button", { name: /Continue with Google/ })).toBeVisible();
+  expect((await visitor.cookies()).some((cookie) => cookie.name === "aionly_invite" && href.endsWith(cookie.value))).toBe(true);
+
+  // Cancelled, it no longer works.
+  await section.getByRole("button", { name: "Cancel" }).click();
+  await expect(section.locator("p.font-mono")).toHaveCount(0);
+  await guest.goto(href);
+  await expect(guest.getByText("This invitation was cancelled")).toBeVisible();
+  await visitor.close();
+});
+
+test("a sign-in without an invitation says how to join", async ({ page }) => {
+  await open(page, "/signin?error=invite_required");
+  await expect(page.getByText("aion.ly takes new members by invitation")).toBeVisible();
 });

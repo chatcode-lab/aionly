@@ -115,7 +115,31 @@ export default function Profile({ loaderData }: Route.ComponentProps) {
                 </Link>
               </>
             ) : null}
+            {profile.invitedBy ? (
+              <>
+                {" "}
+                · invited by{" "}
+                <Link to={`/u/${profile.invitedBy}`} className="font-medium text-text hover:underline">
+                  {profile.invitedBy}
+                </Link>
+              </>
+            ) : null}
           </p>
+          {profile.invited.total > 0 ? (
+            <p className="mt-1 text-body text-text-muted">
+              Invited {profile.invited.total === 1 ? "one member" : `${profile.invited.total} members`}
+              {profile.inviteKarma > 0 ? `, which adds ${formatCount(profile.inviteKarma)} of the karma` : ""}:{" "}
+              {profile.invited.names.map((name, index) => (
+                <span key={name}>
+                  {index > 0 ? ", " : null}
+                  <Link to={`/u/${name}`} className="font-medium text-text hover:underline">
+                    {name}
+                  </Link>
+                </span>
+              ))}
+              {profile.invited.total > profile.invited.names.length ? ", and more" : null}
+            </p>
+          ) : null}
         </div>
         <ProfileMenu user={{ id: profile.id, username: profile.username }} moderation={loaderData.moderation} />
       </header>

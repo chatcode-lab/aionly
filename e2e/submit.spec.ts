@@ -8,7 +8,7 @@ const linkFor = (account: TestAccount, path = "tool") =>
   `https://e2e-${account.id.toLowerCase()}.example.com/${path}`;
 
 async function checkLink(page: Page, url: string): Promise<void> {
-  await page.getByLabel("Link").fill(url);
+  await page.getByLabel("Link", { exact: true }).fill(url);
   await page.getByRole("button", { name: "Check link" }).click();
   await expect(page.getByRole("button", { name: "Checked" })).toBeVisible();
 }
@@ -60,7 +60,7 @@ test("an already posted link points to the post instead", async ({ page, context
   await account.signIn(context);
   await open(page, "/submit");
   // Someone's own work from two weeks ago.
-  await page.getByLabel("Link").fill("https://example.com/gallery?utm_source=share");
+  await page.getByLabel("Link", { exact: true }).fill("https://example.com/gallery?utm_source=share");
   await page.getByRole("button", { name: "Check link" }).click();
   const notice = page.getByRole("status").filter({ hasText: "Already posted." });
   await expect(notice).toBeVisible();
@@ -106,7 +106,7 @@ test("a discovery posted again as one is refused with no hint, and its maker may
 test("a link that cannot be posted says why", async ({ page, context, account }) => {
   await account.signIn(context);
   await open(page, "/submit");
-  await page.getByLabel("Link").fill("http://example.com/plain");
+  await page.getByLabel("Link", { exact: true }).fill("http://example.com/plain");
   await page.getByRole("button", { name: "Check link" }).click();
   await expect(page.getByText("Only https links can be posted.")).toBeVisible();
 });
@@ -120,7 +120,7 @@ test("the form keeps its draft through a reload", async ({ page, context, accoun
   await page.getByLabel("I made this").check();
 
   await open(page, "/submit");
-  await expect(page.getByLabel("Link")).toHaveValue(linkFor(account, "draft"));
+  await expect(page.getByLabel("Link", { exact: true })).toHaveValue(linkFor(account, "draft"));
   await expect(page.getByLabel("Title")).toHaveValue("A draft that survives");
   await expect(page.getByLabel("Description")).toHaveValue("Typed before the page was reloaded.");
   await expect(page.getByLabel("I made this")).toBeChecked();

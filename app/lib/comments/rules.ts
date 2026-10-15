@@ -1,3 +1,4 @@
+import type { CommentData } from "../public-types";
 import { cleanDescription, length } from "../submit/rules";
 
 /** The limits on a comment, shared by the form and the server. */
@@ -23,4 +24,43 @@ export function commentProblem(body: string): string | null {
   if (count === 0) return "Write something first.";
   if (count > COMMENT_MAX) return `Keep it to ${COMMENT_MAX} characters.`;
   return null;
+}
+
+/**
+ * How a discussion is read: oldest first, as it happened; best first, by
+ * score; or newest first. Replies follow the same order under each comment.
+ */
+export type CommentOrder = "old" | "best" | "new";
+
+export const COMMENT_ORDERS: ReadonlyArray<{ value: CommentOrder; label: string }> = [
+  { value: "best", label: "Best" },
+  { value: "old", label: "Oldest" },
+  { value: "new", label: "Newest" },
+];
+
+/**
+ * A discussion with this many comments opens best first, where the votes
+ * help most; a smaller one reads in order.
+ */
+export const BEST_FIRST_FROM = 30;
+
+export function defaultOrder(comments: number): CommentOrder {
+  return comments >= BEST_FIRST_FROM ? "best" : "old";
+}
+
+export function parseOrder(value: unknown): CommentOrder | null {
+  return COMMENT_ORDERS.some((option) => option.value === value) ? (value as CommentOrder) : null;
+}
+
+const COMPARE: Record<CommentOrder, (a: CommentData, b: CommentData) => number> = {
+  old: (a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id),
+  best: (a, b) => b.score - a.score || a.createdAt - b.createdAt || a.id.localeCompare(b.id),
+  new: (a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id),
+};
+
+/** Orders a reply tree in place, every level alike. */
+export function orderThread(comments: CommentData[], order: CommentOrder): CommentData[] {
+  comments.sort(COMPARE[order]);
+  for (const comment of comments) orderThread(comment.replies, order);
+  return comments;
 }

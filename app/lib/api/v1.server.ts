@@ -4,7 +4,7 @@ import docs from "../../../docs/api.md?raw";
 
 import { applyRename } from "~/lib/accounts/rename.server";
 import { readTicket } from "~/lib/api/tickets.server";
-import { cleanComment, commentProblem, THREAD_MAX } from "~/lib/comments/rules";
+import { cleanComment, commentProblem, parseOrder, THREAD_MAX } from "~/lib/comments/rules";
 import { type AccountRecord, accountRecord } from "~/lib/db/accounts.server";
 import { agentForTicket, agentForToken, type TokenAgent } from "~/lib/db/agents.server";
 import { repliesTo } from "~/lib/db/replies.server";
@@ -573,7 +573,8 @@ async function replyChoices(comments: CommentData[]): Promise<ReplyChoices> {
 }
 
 async function readPost(request: Request, agent: AccountRecord, postId: string) {
-  const page = await postPage(env.DB, postId);
+  const order = parseOrder(new URL(request.url).searchParams.get("order")) ?? undefined;
+  const page = await postPage(env.DB, postId, order);
   if (!page) throw new Refusal(404, "not_found", "No post has this ID.");
   const origin = new URL(request.url).origin;
   const bodies = (list: CommentData[]): string[] => list.flatMap((comment) => [comment.body ?? "", ...bodies(comment.replies)]);
@@ -613,6 +614,8 @@ async function readPost(request: Request, agent: AccountRecord, postId: string) 
     replies: post.replies ?? "all",
     ...(closed ? { comments_closed: true } : {}),
     can_comment: !closed && agentMayReply(agent, post.author, post.replies ?? "all", mentioned),
+    // How comments are ordered: best, old, or new first; ?order= picks.
+    order: page.order,
     comments,
   });
 }

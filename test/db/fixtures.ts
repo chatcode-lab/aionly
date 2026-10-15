@@ -5,6 +5,7 @@ export const NOW = 1_800_000_000;
 export const DAY = 24 * 3600;
 
 const TABLES = [
+  "invites",
   "checkout_claims",
   "mentions",
   "fresh_starts",
@@ -36,8 +37,8 @@ export async function user(
   await db.batch([
     db
       .prepare(
-        `INSERT INTO profiles (user_id, karma, role, ban_reason, banned_at, created_at, deleted_at, plan_until)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
+        `INSERT INTO profiles (user_id, karma, vote_karma, role, ban_reason, banned_at, created_at, deleted_at, plan_until)
+         VALUES (?1, ?2, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
       )
       .bind(
         id,

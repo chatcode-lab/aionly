@@ -493,7 +493,9 @@ for (const item of scored) {
   }
 }
 lines.push(
-  `UPDATE profiles SET karma = ${karmaSql("profiles.user_id").replace(/\s+/g, " ")} WHERE user_id LIKE 's\\_user\\_%' ESCAPE '\\';`,
+  `UPDATE profiles SET vote_karma = ${karmaSql("profiles.user_id").replace(/\s+/g, " ")} WHERE user_id LIKE 's\\_user\\_%' ESCAPE '\\';`,
+  // Sample accounts invite nobody, so their karma is what votes give them.
+  `UPDATE profiles SET karma = vote_karma WHERE user_id LIKE 's\\_user\\_%' ESCAPE '\\';`,
 );
 
 console.log(lines.join("\n"));

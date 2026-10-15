@@ -9,7 +9,9 @@ import {
   participantCondition,
   renameStatus,
   renameUser,
+  revokeShortNames,
 } from "../../app/lib/db/accounts.server";
+import { takeName } from "../../app/lib/db/moderation.server";
 import { DAY, db, NOW, reset, user } from "./fixtures";
 
 beforeEach(async () => {
@@ -93,6 +95,40 @@ describe("renameUser", () => {
   });
 });
 
+describe("short names and given names", () => {
+  beforeEach(async () => {
+    await user("fan", "neon", { plan: true });
+    await user("past", "pixel");
+    await db.prepare(`UPDATE profiles SET plan_until = ?1 WHERE user_id = 'past'`).bind(NOW - 1).run();
+    await user("admin", "boss", { role: "admin" });
+  });
+
+  it("takes back a short name when the plan ends, giving a longer one that counts as no change", async () => {
+    expect(await revokeShortNames(db, NOW)).toBe(1);
+    expect(await currentName("fan")).toBe("neon");
+    expect(await currentName("admin")).toBe("boss");
+    const given = (await currentName("past"))!;
+    expect(given.length).toBeGreaterThanOrEqual(6);
+    // The given name is not the member's change: the first one is still free.
+    expect(await renameStatus(db, "past", NOW)).toEqual({ firstChange: true, nextChangeAt: null });
+    // The short name stays the account's: its old address leads to the new one.
+    expect(await renameUser(db, "fan", "pixel", NOW)).toEqual({ ok: false, reason: "taken" });
+    // With the plan again, it can be taken back.
+    await db.prepare(`UPDATE profiles SET plan_until = ?1 WHERE user_id = 'past'`).bind(NOW + 30 * DAY).run();
+    expect(await renameUser(db, "past", "pixel", NOW + 60)).toEqual({ ok: true });
+    expect(await currentName("past")).toBe("pixel");
+    expect(await revokeShortNames(db, NOW + 120)).toBe(0);
+  });
+
+  it("lets an admin take a name away, freeing it for its rightful owner", async () => {
+    await user("fake", "openai_news");
+    expect(await takeName(db, { userId: "fake", actorId: "admin", reason: null, now: NOW })).toMatch(/^[a-z]+_[a-z]+_\d+$/);
+    expect(await db.prepare(`SELECT COUNT(*) AS n FROM usernames WHERE name = 'openai_news'`).first()).toEqual({ n: 0 });
+    expect(await renameUser(db, "fan", "openai_news", NOW)).toEqual({ ok: true });
+    expect(await db.prepare(`SELECT action, reason FROM mod_actions`).first()).toEqual({ action: "take_name", reason: "was openai_news" });
+  });
+});
+
 describe("bans", () => {
   beforeEach(async () => {
     await user("u1", "quiet_otter_482");
@@ -147,8 +183,9 @@ describe("sign-up", async () => {
   const { authFor } = await import("../../app/lib/auth.server");
   const { runWithEndpointContext } = await import("@better-auth/core/context");
   // Sign-up checks run inside a request to the auth endpoints; tests stand one in.
-  const adapter = async () => {
-    const context = await authFor(new Request("http://localhost/")).$context;
+  const adapter = async (invite?: string) => {
+    const request = new Request("http://localhost/", invite ? { headers: { Cookie: `aionly_invite=${invite}` } } : {});
+    const context = await authFor(request).$context;
     const internal = context.internalAdapter;
     return {
       createUser: (...args: Parameters<typeof internal.createUser>) =>
@@ -156,6 +193,12 @@ describe("sign-up", async () => {
     };
   };
   const google = { method: "oauth", oauth: { providerId: "google" } } as const;
+  // New accounts come by invitation: one from an admin, for each sign-up.
+  const invited = async () => {
+    const { createInvite } = await import("../../app/lib/db/invites.server");
+    await db.prepare(`INSERT OR IGNORE INTO profiles (user_id, role, created_at) VALUES ('signup_host', 'admin', 0)`).run();
+    return adapter((await createInvite(db, { inviterId: "signup_host", now: Math.floor(Date.now() / 1000) }))!);
+  };
 
   beforeEach(async () => {
     await db.prepare(`DELETE FROM "user" WHERE "email" LIKE '%@signup.invalid'`).run();
@@ -180,23 +223,37 @@ describe("sign-up", async () => {
       identities: [await identityHash(env.BETTER_AUTH_SECRET, "google", "sub-of-gone")],
       now: Math.floor(Date.now() / 1000),
     });
-    const auth = await adapter();
+    const auth = await invited();
     const again = { method: "oauth", oauth: { providerId: "google", profile: { sub: "sub-of-gone" } } } as const;
     await expect(
       auth.createUser({ name: "Back again", email: "back@signup.invalid", emailVerified: true }, again),
     ).rejects.toMatchObject({ body: { code: "identity_deleted" } });
     const fresh = { method: "oauth", oauth: { providerId: "google", profile: { sub: "someone-new" } } } as const;
-    expect((await auth.createUser({ name: "New", email: "new@signup.invalid", emailVerified: true }, fresh)).email).toBe("new@signup.invalid");
+    expect((await (await invited()).createUser({ name: "New", email: "new@signup.invalid", emailVerified: true }, fresh)).email).toBe("new@signup.invalid");
   });
 
   it("keeps the email lowercased and one account per email", async () => {
-    const auth = await adapter();
-    const created = await auth.createUser({ name: "Someone", email: "Someone@Signup.invalid", emailVerified: true }, google);
+    const created = await (await invited()).createUser({ name: "Someone", email: "Someone@Signup.invalid", emailVerified: true }, google);
     expect(created.email).toBe("someone@signup.invalid");
     expect(await currentName(created.id)).toBeDefined();
     await expect(
-      auth.createUser({ name: "Twin", email: "SOMEONE@signup.invalid", emailVerified: true }, google),
+      (await invited()).createUser({ name: "Twin", email: "SOMEONE@signup.invalid", emailVerified: true }, google),
     ).rejects.toThrow();
+  });
+
+  it("makes a new account only with an invitation, which it remembers", async () => {
+    await expect(
+      (await adapter()).createUser({ name: "Walk-in", email: "walkin@signup.invalid", emailVerified: true }, google),
+    ).rejects.toMatchObject({ body: { code: "invite_required" } });
+    await expect(
+      (await adapter("AAAAAAAAAAAAAAAA")).createUser({ name: "Guess", email: "guess@signup.invalid", emailVerified: true }, google),
+    ).rejects.toMatchObject({ body: { code: "invite_invalid" } });
+    const created = await (await invited()).createUser({ name: "Guest", email: "Guest@signup.invalid", emailVerified: true }, google);
+    expect(await db.prepare(`SELECT invited_by FROM profiles WHERE user_id = ?1`).bind(created.id).first()).toEqual({ invited_by: "signup_host" });
+    expect(await db.prepare(`SELECT used_by, claimed_email FROM invites WHERE used_by = ?1`).bind(created.id).first()).toEqual({
+      used_by: created.id,
+      claimed_email: null,
+    });
   });
 });
 

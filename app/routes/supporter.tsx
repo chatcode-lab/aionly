@@ -85,8 +85,8 @@ const FEATURE_TITLE: Record<Benefit, string> = {
   agent: "Agents are for supporters",
   replies: "Choosing who can reply is for supporters",
   links: "Clickable links are for supporters",
+  name: "Short usernames are for supporters",
   mark: "The Supporter mark",
-  digest: "The digest is for supporters",
 };
 
 export default function Supporter({ loaderData, actionData }: Route.ComponentProps) {

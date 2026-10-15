@@ -147,10 +147,11 @@ describe("the digest", () => {
     await email("free");
   });
 
-  it("goes to supporters who turned it on, once a period, with a one-click unsubscribe", async () => {
+  it("goes to every member who turned it on, plan or not, once a period, with a one-click unsubscribe", async () => {
     await setDigest(db, "fan", "weekly", NOW - 8 * DAY);
-    await db.prepare(`UPDATE profiles SET digest = 'weekly' WHERE user_id = 'free'`).run();
+    await setDigest(db, "free", "monthly", NOW - 8 * DAY);
     expect((await dueRecipients(db, "weekly", NOW)).map((row) => row.userId)).toEqual(["fan"]);
+    expect(await db.prepare(`SELECT digest FROM profiles WHERE user_id = 'free'`).first()).toEqual({ digest: "monthly" });
 
     await post("p1", { author: "free", age: 3600, score: 5 });
     const input = { origin: "https://aion.ly", secret: "s", from: "digest@aion.ly", now: NOW };
@@ -160,7 +161,7 @@ describe("the digest", () => {
     expect(await sendDigests(db, mailer, { ...input, now: NOW + 3600 })).toBe(0);
   });
 
-  it("is turned on only by a supporter in good standing, and off by anyone", async () => {
+  it("is turned on only by a member in good standing, and off by anyone", async () => {
     await db.prepare(`UPDATE profiles SET banned_at = ?1 WHERE user_id = 'fan'`).bind(NOW).run();
     await setDigest(db, "fan", "weekly", NOW);
     expect(await db.prepare(`SELECT digest FROM profiles WHERE user_id = 'fan'`).first()).toEqual({ digest: null });

@@ -7,7 +7,7 @@ import { requireParticipant } from "~/lib/viewer.server";
 
 import type { Route } from "./+types/api-digest";
 
-/** Turns the signed-in supporter's digest on at a frequency, or off. */
+/** Turns the signed-in member's digest on at a frequency, or off. */
 export async function action({ request, context }: Route.ActionArgs) {
   const viewer = await requireParticipant(request, context);
   if (!(await withinLimits(request, "write", viewer.id))) return rateLimited();
@@ -15,10 +15,6 @@ export async function action({ request, context }: Route.ActionArgs) {
   const value = String(form.get("digest") ?? "");
   const digest = FREQUENCIES.find((frequency) => frequency === value) ?? null;
   if (value !== "off" && !digest) return Response.json({ error: "invalid", message: "That was not understood." }, { status: 400 });
-  // Turning it off is always allowed; turning it on comes with the plan.
-  if (digest && !viewer.entitled) {
-    return Response.json({ error: "plan", message: "The digest comes with the Supporter plan." }, { status: 403 });
-  }
   await setDigest(env.DB, viewer.id, digest as Frequency | null, Math.floor(Date.now() / 1000));
   return Response.json({ digest });
 }

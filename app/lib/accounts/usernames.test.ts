@@ -6,18 +6,33 @@ import { generateUsername, normalizeUsername, usernameProblem } from "./username
 describe("usernameProblem", () => {
   it("accepts names of lowercase letters, digits, and underscores", () => {
     expect(usernameProblem("quiet_otter_482")).toBeNull();
-    expect(usernameProblem("abc")).toBeNull();
+    expect(usernameProblem("abcdef")).toBeNull();
     expect(usernameProblem("a".repeat(20))).toBeNull();
   });
 
   it("enforces length, the first letter, and the character set", () => {
-    expect(usernameProblem("ab")).toBe("too_short");
+    expect(usernameProblem("abc")).toBe("too_short");
     expect(usernameProblem("a".repeat(21))).toBe("too_long");
-    expect(usernameProblem("1abc")).toBe("pattern");
-    expect(usernameProblem("_abc")).toBe("pattern");
-    expect(usernameProblem("ab-c")).toBe("pattern");
-    expect(usernameProblem("abc d")).toBe("pattern");
-    expect(usernameProblem("Abc")).toBe("pattern");
+    expect(usernameProblem("1abcde")).toBe("pattern");
+    expect(usernameProblem("_abcde")).toBe("pattern");
+    expect(usernameProblem("ab-cde")).toBe("pattern");
+    expect(usernameProblem("abc def")).toBe("pattern");
+    expect(usernameProblem("Abcdef")).toBe("pattern");
+  });
+
+  it("keeps 4 and 5 characters for members with the plan", () => {
+    expect(usernameProblem("neon")).toBe("short_plan");
+    expect(usernameProblem("pixel")).toBe("short_plan");
+    expect(usernameProblem("neon", { short: true })).toBeNull();
+    expect(usernameProblem("abc", { short: true })).toBe("too_short");
+  });
+
+  it("reserves AI brands for everyone, staff and supporters too", () => {
+    for (const name of ["openai", "claude", "gemini", "codex", "hermes", "kling", "suno", "meta", "anthropic"]) {
+      expect(usernameProblem(name, { staff: true, short: true }), name).toBe("reserved");
+    }
+    // Only the exact names: a person may still be called "metal_fan".
+    expect(usernameProblem("metal_fan")).toBeNull();
   });
 
   it("reserves routes and staff-like names in any spelling", () => {

@@ -1,3 +1,4 @@
+import { INVITE_SHARE } from "../invites";
 import { FRESH_START_ROOM, KARMA_FLOOR } from "../moderation";
 import { participantCondition } from "./accounts.server";
 
@@ -60,6 +61,44 @@ export function trailFloors(db: D1Database, holders: string, ...binds: unknown[]
        WHERE user_id IN ${holders} AND karma_floor IS NOT NULL AND karma_floor IS NOT ${next}`,
     )
     .bind(...binds);
+}
+
+/**
+ * What a member's invitees add to their karma: a quarter of each one's vote
+ * karma, rounded down, from those above zero. `root` is the SQL for the
+ * member's ID. Invitees' own shares never pass further up.
+ */
+export function inviteShareSql(root: string): string {
+  return `COALESCE((SELECT SUM(invitee.vote_karma / ${INVITE_SHARE}) FROM profiles AS invitee
+    WHERE invitee.invited_by = ${root} AND invitee.vote_karma >= ${INVITE_SHARE} AND invitee.deleted_at IS NULL), 0)`;
+}
+
+/** An account's karma from its stored vote karma and its group's invitees. */
+const TOTAL_KARMA = `vote_karma + ${inviteShareSql("COALESCE(profiles.owner_id, profiles.user_id)")}`;
+
+/**
+ * Recounts karma for the accounts `holders` (an SQL list, with its
+ * bindings): their vote karma from the votes table, their karma with their
+ * invitees' share, then the karma of whoever invited them, whose share just
+ * moved; each floor follows. Statements for the batch that changed votes.
+ */
+export function recountKarma(db: D1Database, holders: string, ...binds: unknown[]): D1PreparedStatement[] {
+  const invited = `(SELECT invited_by FROM profiles WHERE user_id IN ${holders} AND invited_by IS NOT NULL)`;
+  const inviters = `(SELECT member.user_id FROM profiles AS member
+    WHERE member.user_id IN ${invited} OR member.owner_id IN ${invited})`;
+  return [
+    db.prepare(`UPDATE profiles SET vote_karma = ${karmaSql("profiles.user_id")} WHERE user_id IN ${holders}`).bind(...binds),
+    db.prepare(`UPDATE profiles SET karma = ${TOTAL_KARMA} WHERE user_id IN ${holders}`).bind(...binds),
+    db.prepare(`UPDATE profiles SET karma = ${TOTAL_KARMA} WHERE user_id IN ${inviters}`).bind(...binds),
+    trailFloors(db, holders, ...binds),
+    trailFloors(db, inviters, ...binds),
+  ];
+}
+
+/** Recounts the karma of a member's group from what is stored: after an invitee came or went. */
+export function settleKarma(db: D1Database, member: string, ...binds: unknown[]): D1PreparedStatement[] {
+  const group = karmaGroupSql(member);
+  return [db.prepare(`UPDATE profiles SET karma = ${TOTAL_KARMA} WHERE user_id IN ${group}`).bind(...binds), trailFloors(db, group, ...binds)];
 }
 
 /** The accounts whose karma votes on an item move: its author's group. */
@@ -133,13 +172,7 @@ export async function castVote(
   const [changed] = await db.batch([
     change,
     db.prepare(`UPDATE ${table} SET score = ${scoreSql(type, "?1")} WHERE id = ?1`).bind(targetId),
-    db
-      .prepare(
-        `UPDATE profiles SET karma = ${karmaSql("profiles.user_id")}
-         WHERE user_id IN ${karmaHoldersSql(type, "?1")}`,
-      )
-      .bind(targetId),
-    trailFloors(db, karmaHoldersSql(type, "?1"), targetId),
+    ...recountKarma(db, karmaHoldersSql(type, "?1"), targetId),
   ]);
 
   const state = await db

@@ -31,10 +31,7 @@ export function useTheme(saved: Theme | undefined): Theme {
   return parseTheme(fetcher.formData?.get("theme") ?? saved);
 }
 
-/**
- * The three theme choices, for use inside any dropdown menu: the header's
- * theme switch when signed out, the account menu when signed in.
- */
+/** The three theme choices, in the header's theme switch for visitors. */
 export function ThemeRadioGroup({ theme }: { theme: Theme }) {
   const fetcher = useFetcher({ key: THEME_FETCHER_KEY });
 
@@ -68,6 +65,59 @@ export function ThemeRadioGroup({ theme }: { theme: Theme }) {
   );
 }
 
+/**
+ * The theme and autoplay as a section of Settings, where a signed-in member
+ * finds them: radio buttons for the theme, kept in a cookie, and a checkbox
+ * for autoplay, kept in this browser.
+ */
+export function DisplaySettings({ theme }: { theme: Theme }) {
+  const fetcher = useFetcher({ key: THEME_FETCHER_KEY });
+  const { autoplay, blockedBy } = usePlaybackSettings();
+  return (
+    <div className="space-y-4">
+      <fieldset>
+        <legend className="text-body font-medium">Theme</legend>
+        <div className="mt-1.5 flex flex-wrap gap-2">
+          {THEMES.map((option) => {
+            const { label, Icon } = OPTIONS[option];
+            return (
+              <label
+                key={option}
+                className="flex h-9 cursor-pointer items-center gap-2 rounded-lg border border-border-strong px-3 text-body has-checked:border-accent has-checked:bg-accent-soft pointer-coarse:h-(--touch)"
+              >
+                <input
+                  type="radio"
+                  name="theme"
+                  value={option}
+                  checked={theme === option}
+                  onChange={() => void fetcher.submit({ theme: option }, { method: "post", action: "/theme" })}
+                  className="sr-only"
+                />
+                <Icon size={16} aria-hidden className="text-text-muted" />
+                {label}
+              </label>
+            );
+          })}
+        </div>
+      </fieldset>
+      <label className="flex items-start gap-2.5 text-body">
+        <input
+          type="checkbox"
+          checked={autoplay && blockedBy === null}
+          disabled={blockedBy !== null}
+          onChange={(event) => playbackController()?.setAutoplay(event.target.checked)}
+          className="mt-1 size-4 shrink-0 accent-(--accent)"
+        />
+        <span>
+          Autoplay videos as they come into view, muted until you turn the sound on.
+          {blockedBy ? <span className="block text-meta text-text-muted">{AUTOPLAY_BLOCKED[blockedBy]}.</span> : null}
+          <span className="block text-meta text-text-muted">Kept in this browser.</span>
+        </span>
+      </label>
+    </div>
+  );
+}
+
 const AUTOPLAY_BLOCKED: Record<
   NonNullable<PlaybackSettings["blockedBy"]>,
   string
@@ -77,8 +127,8 @@ const AUTOPLAY_BLOCKED: Record<
 };
 
 /**
- * The autoplay switch, remembered in this browser. It sits with the theme,
- * in the header's theme menu or the account menu.
+ * The autoplay switch, remembered in this browser. It sits with the theme
+ * in the header's theme menu, for visitors; members find both in Settings.
  */
 export function AutoplayItem() {
   const { autoplay, blockedBy } = usePlaybackSettings();

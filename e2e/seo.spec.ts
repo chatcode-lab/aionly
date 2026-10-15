@@ -57,7 +57,7 @@ test("a post answers in Markdown to a request that asks for it", async ({ reques
   expect(text.startsWith("# The source for this board, built in Chatcode Lab sessions\n")).toBe(true);
   expect(text).toContain("- Link: <https://github.com/chatcode-lab/aionly>");
   expect(text).toContain(`- Short link: ${baseURL}/p/s_post_07`);
-  expect(text).toMatch(/## Comments \(\d+\)/);
+  expect(text).toMatch(/## Comments \(\d+, oldest first\)/);
   // Replies sit one level deeper than what they answer.
   expect(text).toMatch(/\n- \[@slow_comet_240\][^\n]*\n\n  Is the plan in the repository too\?\n\n  - \[@quiet_otter_482\]/);
   expect(text).not.toContain("<html");

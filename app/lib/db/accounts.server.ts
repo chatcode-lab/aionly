@@ -1,6 +1,7 @@
 import {
   generateUsername,
   RENAME_INTERVAL_DAYS,
+  USERNAME_MIN,
 } from "../accounts/usernames";
 import { floorOf, KARMA_FLOOR } from "../moderation";
 import type { Restriction } from "../public-types";
@@ -260,10 +261,11 @@ export async function renameStatus(
   userId: string,
   now = nowSeconds(),
 ): Promise<RenameStatus> {
+  // A name the board gave, in place of a short one, is not the member's change.
   const row = await db
     .prepare(
       `SELECT COUNT(*) AS names, MAX(created_at) AS latest
-       FROM usernames WHERE user_id = ?1`,
+       FROM usernames WHERE user_id = ?1 AND given = 0`,
     )
     .bind(userId)
     .first<{ names: number; latest: number | null }>();
@@ -292,18 +294,36 @@ export async function renameUser(
     .prepare(`SELECT user_id, is_current FROM usernames WHERE name = ?1`)
     .bind(name)
     .first<{ user_id: string; is_current: number }>();
-  if (holder) {
-    return {
-      ok: false,
-      reason: holder.user_id === userId && holder.is_current === 1 ? "same" : "taken",
-    };
-  }
+  if (holder && holder.user_id !== userId) return { ok: false, reason: "taken" };
+  if (holder?.is_current === 1) return { ok: false, reason: "same" };
+  // An account's own earlier names stay retired, except a short one, which
+  // the plan's end took back and the plan returns.
+  if (holder && name.length >= USERNAME_MIN) return { ok: false, reason: "taken" };
 
   const earliest = now - RENAME_INTERVAL_DAYS * DAY;
+  // Names the board gave count toward neither the first free change nor the wait.
   const allowed = `(
-    (SELECT COUNT(*) FROM usernames WHERE user_id = ?1) <= 1
-    OR (SELECT MAX(created_at) FROM usernames WHERE user_id = ?1) <= ?2
+    (SELECT COUNT(*) FROM usernames WHERE user_id = ?1 AND given = 0) <= 1
+    OR (SELECT MAX(created_at) FROM usernames WHERE user_id = ?1 AND given = 0) <= ?2
   )`;
+  if (holder) {
+    // The account's own earlier short name: current again, dated now, as a change.
+    const [retired] = await db.batch([
+      db
+        .prepare(
+          `UPDATE usernames SET is_current = 0
+           WHERE user_id = ?1 AND is_current = 1 AND ${allowed} AND ${participantCondition(1, now)}`,
+        )
+        .bind(userId, earliest),
+      db
+        .prepare(
+          `UPDATE usernames SET is_current = 1, created_at = ?3, given = 0
+           WHERE name = ?2 AND user_id = ?1 AND NOT EXISTS (SELECT 1 FROM usernames WHERE user_id = ?1 AND is_current = 1)`,
+        )
+        .bind(userId, name, now),
+    ]);
+    return retired!.meta.changes === 0 ? { ok: false, reason: "too_soon" } : { ok: true };
+  }
   try {
     const [retired] = await db.batch([
       db
@@ -342,4 +362,64 @@ export async function renameUser(
 export async function sweepExpiredVerifications(db: D1Database, now: Date): Promise<number> {
   const result = await db.prepare(`DELETE FROM "verification" WHERE "expiresAt" < ?1`).bind(now.toISOString()).run();
   return result.meta.changes;
+}
+
+/**
+ * Gives an account a fresh generated name in place of its current one, as
+ * the board does, not the member: when the plan behind a 4- or 5-character
+ * name ends (`short`: only such a name is replaced, and it stays the
+ * account's, to take back with the plan), or when an admin takes a name
+ * away (`release`: the name is freed for whoever it belongs to and no
+ * longer leads to this account). The given name counts toward neither the
+ * free first change nor the wait between changes. The new name, or null
+ * when there was nothing to replace.
+ */
+export async function giveName(
+  db: D1Database,
+  input: { userId: string; now: number; short?: boolean; release?: boolean },
+): Promise<string | null> {
+  const which = `user_id = ?1 AND is_current = 1${input.short ? " AND length(name) < 6" : ""}`;
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const name = generateUsername();
+    try {
+      const [replaced] = await db.batch([
+        db.prepare(input.release ? `DELETE FROM usernames WHERE ${which}` : `UPDATE usernames SET is_current = 0 WHERE ${which}`).bind(input.userId),
+        // Only once the old name stepped aside, so the account never holds two.
+        db
+          .prepare(
+            `INSERT INTO usernames (name, user_id, is_current, created_at, given)
+             SELECT ?2, ?1, 1, ?3, 1 WHERE NOT EXISTS (SELECT 1 FROM usernames WHERE user_id = ?1 AND is_current = 1)`,
+          )
+          .bind(input.userId, name, input.now),
+      ]);
+      return replaced!.meta.changes > 0 ? name : null;
+    } catch (error) {
+      // The generated name was taken: the batch undid itself; draw again.
+      if (!String(error).includes("UNIQUE")) throw error;
+    }
+  }
+  throw new Error("could not find a free name");
+}
+
+/**
+ * Takes back 4- and 5-character names whose plan has ended, a batch a run:
+ * the account gets a longer name, and its short one waits for the plan.
+ * Agents never hold one. Returns how many changed.
+ */
+export async function revokeShortNames(db: D1Database, now: number, limit = 100): Promise<number> {
+  const { results } = await db
+    .prepare(
+      `SELECT name.user_id FROM usernames AS name
+       JOIN profiles AS profile ON profile.user_id = name.user_id
+       WHERE name.is_current = 1 AND length(name.name) < 6 AND profile.deleted_at IS NULL
+         AND (profile.owner_id IS NOT NULL OR (profile.role <> 'admin' AND COALESCE(profile.plan_until, 0) <= ?1))
+       LIMIT ?2`,
+    )
+    .bind(now, limit)
+    .all<{ user_id: string }>();
+  let changed = 0;
+  for (const { user_id: userId } of results) {
+    if (await giveName(db, { userId, now, short: true })) changed += 1;
+  }
+  return changed;
 }

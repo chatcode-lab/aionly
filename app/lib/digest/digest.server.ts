@@ -1,4 +1,4 @@
-import { entitledCondition, participantCondition } from "../db/accounts.server";
+import { participantCondition } from "../db/accounts.server";
 import { postsByIds, topSnapshot } from "../db/feed.server";
 import type { Range } from "../feed";
 import { plainText } from "../text/markdown";
@@ -39,8 +39,9 @@ export async function readUnsubscribeToken(secret: string, token: string): Promi
 }
 
 /**
- * Turns the digest on, at a frequency, or off. Turning it on counts as sent
- * now, so the first one comes when the next period begins.
+ * Turns the digest on, at a frequency, or off: free for every member.
+ * Turning it on counts as sent now, so the first one comes when the next
+ * period begins.
  */
 export async function setDigest(db: D1Database, userId: string, digest: Frequency | null, now: number): Promise<void> {
   await db
@@ -48,9 +49,9 @@ export async function setDigest(db: D1Database, userId: string, digest: Frequenc
       `UPDATE profiles SET digest = ?2,
          digest_sent_at = CASE WHEN ?2 IS NULL OR digest IS ?2 THEN digest_sent_at ELSE ?3 END
        WHERE user_id = ?1
-         -- Turning it on is the plan's, and a participant's, checked here too;
-         -- turning it off is always allowed.
-         AND (?2 IS NULL OR (${entitledCondition(1, now)} AND ${participantCondition(1, now)}))`,
+         -- Turning it on is a participant's, checked here too; turning it off
+         -- is always allowed.
+         AND (?2 IS NULL OR ${participantCondition(1, now)})`,
     )
     .bind(userId, digest, now)
     .run();
@@ -62,8 +63,8 @@ export interface Recipient {
 }
 
 /**
- * Accounts due this period's digest: turned on, with the plan in force, a
- * sign-in email, and nothing sent since the period began.
+ * Accounts due this period's digest: turned on, with a sign-in email, and
+ * nothing sent since the period began.
  */
 export async function dueRecipients(db: D1Database, frequency: Frequency, now: number, limit = BATCH): Promise<Recipient[]> {
   const { results } = await db
@@ -71,11 +72,10 @@ export async function dueRecipients(db: D1Database, frequency: Frequency, now: n
       `SELECT profile.user_id, account."email" FROM profiles AS profile
        JOIN "user" AS account ON account."id" = profile.user_id
        WHERE profile.digest = ?1 AND (profile.digest_sent_at IS NULL OR profile.digest_sent_at < ?2)
-         AND profile.deleted_at IS NULL
-         AND (profile.role = 'admin' OR profile.plan_until > ?3)
-       LIMIT ?4`,
+         AND profile.deleted_at IS NULL AND profile.owner_id IS NULL
+       LIMIT ?3`,
     )
-    .bind(frequency, periodStart(frequency, now), now, limit)
+    .bind(frequency, periodStart(frequency, now), limit)
     .all<{ user_id: string; email: string }>();
   return results.map((row) => ({ userId: row.user_id, email: row.email }));
 }

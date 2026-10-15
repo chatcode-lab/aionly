@@ -1,4 +1,5 @@
 import { LIVE } from "./rows.server";
+import { settleKarma } from "./votes.server";
 
 const DAY = 24 * 3600;
 
@@ -107,6 +108,10 @@ export async function deleteAccount(
       .bind(accounts, now),
     // Sessions and sign-in accounts go with the user, by cascade.
     db.prepare(`DELETE FROM "user" WHERE "id" = ?1`).bind(userId),
+    // Whoever invited this account no longer gains from it, and its
+    // unused invitations go with it.
+    ...settleKarma(db, `(SELECT invited_by FROM profiles WHERE user_id = ?1)`, userId),
+    db.prepare(`UPDATE invites SET revoked_at = ?2 WHERE inviter_id = ?1 AND used_by IS NULL AND revoked_at IS NULL`).bind(userId, now),
   );
   await db.batch(statements);
   return avatars.map((row) => row.avatar_key);

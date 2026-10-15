@@ -9,6 +9,7 @@ import { length } from "~/lib/submit/rules";
 import { replaceMentions } from "~/lib/text/mentions";
 import { useViewer } from "~/lib/use-viewer";
 
+import { FormatToolbar } from "./format-toolbar";
 import { useMentionNames } from "./mentions";
 import { useSignIn } from "./sign-in";
 import { Button } from "./ui/button";
@@ -41,6 +42,7 @@ export function CommentField({
   rows?: number;
 }) {
   const id = useId();
+  const textarea = useRef<HTMLTextAreaElement>(null);
   const count = length(value);
   const over = count > COMMENT_MAX;
   return (
@@ -48,7 +50,9 @@ export function CommentField({
       <label htmlFor={id} className="sr-only">
         {label}
       </label>
+      <FormatToolbar textarea={textarea} onChange={onChange} />
       <textarea
+        ref={textarea}
         id={id}
         name="body"
         rows={rows}

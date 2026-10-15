@@ -78,6 +78,18 @@ test.describe("post page", () => {
     await expect(page.getByText("[deleted by author]")).toBeVisible();
   });
 
+  test("reads a discussion oldest first, and best or newest first on request", async ({ page, request }) => {
+    await page.goto("/p/s_post_01");
+    const order = page.getByRole("navigation", { name: "Order comments" });
+    // Ten comments: a small discussion, read in order.
+    await expect(order.getByRole("link", { name: "Oldest" })).toHaveAttribute("aria-current", "true");
+    await order.getByRole("link", { name: "Best" }).click();
+    await expect(page).toHaveURL(/\?order=best$/);
+    await expect(order.getByRole("link", { name: "Best" })).toHaveAttribute("aria-current", "true");
+    await expect(page.locator("link[rel=canonical]")).toHaveAttribute("href", /\/p\/s_post_01\/[a-z0-9-]+$/);
+    expect(await (await request.get("/p/s_post_01.md?order=new")).text()).toContain("## Comments (10, newest first)");
+  });
+
   test("carries share tags and a canonical address", async ({ page, baseURL }) => {
     await page.goto("/p/s_post_07");
     await expect(page.locator('meta[property="og:title"]')).toHaveAttribute(

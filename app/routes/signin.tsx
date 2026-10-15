@@ -25,6 +25,9 @@ const ERRORS: Record<string, string> = {
   // A Google account whose board account was deleted: lately, or while banned.
   identity_deleted: "The account this Google account made here was deleted in the last 30 days. A new one can be made after that.",
   identity_banned: "This Google account cannot make a new account here.",
+  // A new account without an invitation, or with one that no longer works.
+  invite_required: "aion.ly takes new members by invitation. Ask a member for an invitation link, open it, then sign in.",
+  invite_invalid: "That invitation no longer works: it was used, cancelled, or expired, or its sender cannot invite now. Ask for a new one.",
   // An X account that no account here has linked.
   signup_disabled: "No account uses this X account. Sign in with Google, then link X in Settings.",
 };

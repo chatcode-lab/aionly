@@ -1,8 +1,9 @@
 import { newId } from "../ids";
 import { KARMA_FLOOR, LOW_KARMA } from "../moderation";
 import { postPath } from "../slug";
+import { giveName } from "./accounts.server";
 import { applyFreshStart } from "./fresh-starts.server";
-import { karmaSql, scoreSql, trailFloors } from "./votes.server";
+import { recountKarma, scoreSql } from "./votes.server";
 
 const DAY = 24 * 3600;
 
@@ -28,7 +29,8 @@ export type ModerationAction =
   | "set_limits"
   | "reset_avatar"
   | "fresh_start"
-  | "purge_media";
+  | "purge_media"
+  | "take_name";
 
 export type ModerationResult =
   | { ok: true; batchId: string; actionId: string }
@@ -99,8 +101,7 @@ function recountVotesOf(db: D1Database, voterId: string): D1PreparedStatement[] 
     db
       .prepare(`UPDATE comments SET score = ${scoreSql("comment", "comments.id")} WHERE id IN (${voted("comment")})`)
       .bind(voterId),
-    db.prepare(`UPDATE profiles SET karma = ${karmaSql("profiles.user_id")} WHERE user_id IN ${holders}`).bind(voterId),
-    trailFloors(db, holders, voterId),
+    ...recountKarma(db, holders, voterId),
   ];
 }
 
@@ -431,6 +432,36 @@ export async function purgePostMedia(
     logAction(db, { id: newId(), batchId: newId(), actorId: input.actorId, action: "purge_media", targetType: "post", targetId: input.postId, reason: null, now: input.now }),
   ]);
   return keys;
+}
+
+/**
+ * Takes an account's name away, as for one passing as a brand or someone
+ * else: it gets a generated name, and the old one is freed, for whoever it
+ * rightly belongs to. Logged. The new name, or null for no such account.
+ */
+export async function takeName(
+  db: D1Database,
+  input: { userId: string; actorId: string; reason: string | null; now: number },
+): Promise<string | null> {
+  const old = await db
+    .prepare(`SELECT name FROM usernames WHERE user_id = ?1 AND is_current = 1`)
+    .bind(input.userId)
+    .first<{ name: string }>();
+  if (!old) return null;
+  const given = await giveName(db, { userId: input.userId, now: input.now, release: true });
+  if (given) {
+    await logAction(db, {
+      id: newId(),
+      batchId: newId(),
+      actorId: input.actorId,
+      action: "take_name",
+      targetType: "user",
+      targetId: input.userId,
+      reason: input.reason ?? `was ${old.name}`,
+      now: input.now,
+    }).run();
+  }
+  return given;
 }
 
 /** Puts an account back on its letter avatar and deletes the photo copy. */

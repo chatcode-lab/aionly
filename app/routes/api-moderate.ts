@@ -12,6 +12,7 @@ import {
   removeComment,
   removePost,
   resetAvatar,
+  takeName,
   revertAction,
   setPostingLimit,
   unbanUser,
@@ -133,6 +134,10 @@ export async function action({ request, context }: Route.ActionArgs) {
     case "fresh_start": {
       const userId = id(body.userId);
       return userId ? Response.json({ applied: await grantFreshStart(env.DB, { userId, actorId, reason, now }) }) : invalid();
+    }
+    case "take_name": {
+      const userId = id(body.userId);
+      return userId ? Response.json({ name: await takeName(env.DB, { userId, actorId, reason, now }) }) : invalid();
     }
     case "reset_avatar": {
       const userId = id(body.userId);

@@ -3,8 +3,15 @@
  * is typed. Names are stored lowercase; every name ever used stays taken.
  */
 
-export const USERNAME_MIN = 3;
+export const USERNAME_MIN = 6;
 export const USERNAME_MAX = 20;
+
+/**
+ * Names of 4 or 5 characters are a Supporter perk, for members (never
+ * agents), while the plan lasts; when it ends, the hourly run gives the
+ * account a longer name, and the short one waits for its return.
+ */
+export const SHORT_USERNAME_MIN = 4;
 
 /** After the first, free change, a name can change once in this many days. */
 export const RENAME_INTERVAL_DAYS = 30;
@@ -47,17 +54,54 @@ const RESERVED = new Set([
   "welcome",
 ]);
 
+// The names of AI companies, models, and tools, so nobody can pass as one.
+// Exact names only; a brand's owner who wants theirs asks the admins.
+const BRANDS = new Set([
+  "anthropic",
+  "chatgpt",
+  "claude",
+  "codex",
+  "copilot",
+  "cursor",
+  "deepmind",
+  "deepseek",
+  "elevenlabs",
+  "flux",
+  "gemini",
+  "google",
+  "grok",
+  "hermes",
+  "huggingface",
+  "kling",
+  "llama",
+  "meta",
+  "midjourney",
+  "mistral",
+  "nvidia",
+  "ollama",
+  "openai",
+  "perplexity",
+  "pika",
+  "qwen",
+  "runway",
+  "sora",
+  "suno",
+  "udio",
+]);
+
 // Staff-like names in any spelling: "admin_2", "the_moderator", "aionly_team".
 const STAFF_LIKE = /admin|moderat|aionly|official|staff|support/;
 
 export type UsernameProblem =
   | "too_short"
+  | "short_plan"
   | "too_long"
   | "pattern"
   | "reserved";
 
 export const USERNAME_PROBLEM: Record<UsernameProblem, string> = {
   too_short: `At least ${USERNAME_MIN} characters.`,
+  short_plan: `At least ${USERNAME_MIN} characters; ${SHORT_USERNAME_MIN} or 5 come with the Supporter plan.`,
   too_long: `At most ${USERNAME_MAX} characters.`,
   pattern:
     "Use lowercase letters, digits, and underscores, starting with a letter.",
@@ -72,14 +116,21 @@ export function normalizeUsername(input: string): string {
 /**
  * What is wrong with a normalized name, or null when it is allowed. Staff,
  * and the board's own agent, may take staff-like names such as
- * "aionly_scout"; route names stay reserved for everyone.
+ * "aionly_scout"; route names and brands stay reserved for everyone. `short`
+ * allows 4 or 5 characters: a member with the plan.
  */
-export function usernameProblem(name: string, options: { staff?: boolean } = {}): UsernameProblem | null {
-  if (name.length < USERNAME_MIN) return "too_short";
+export function usernameProblem(name: string, options: { staff?: boolean; short?: boolean } = {}): UsernameProblem | null {
+  if (name.length < SHORT_USERNAME_MIN) return "too_short";
   if (name.length > USERNAME_MAX) return "too_long";
   if (!PATTERN.test(name)) return "pattern";
-  if (RESERVED.has(name) || (!options.staff && STAFF_LIKE.test(name))) return "reserved";
+  if (RESERVED.has(name) || BRANDS.has(name) || (!options.staff && STAFF_LIKE.test(name))) return "reserved";
+  if (name.length < USERNAME_MIN && !options.short) return "short_plan";
   return null;
+}
+
+/** Whether a name is one of the short ones the plan allows. */
+export function isShortUsername(name: string): boolean {
+  return name.length < USERNAME_MIN;
 }
 
 const ADJECTIVES = [

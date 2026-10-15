@@ -121,6 +121,17 @@ function UserRow({ user }: { user: AdminUser }) {
             Reset avatar
           </Button>
         ) : null}
+        {/* For a name passing as a brand or someone else: it is freed for its rightful owner. */}
+        <Button
+          variant="ghost"
+          disabled={busy}
+          onClick={() => {
+            if (!window.confirm(`Take the name ${user.username} away? The account gets a generated name, and ${user.username} is freed.`)) return;
+            run({ action: "take_name", userId: user.id, reason: null }, () => notify(`${user.username} has a new name.`));
+          }}
+        >
+          Take name away
+        </Button>
       </div>
       <BanDialog user={user} open={banning} onOpenChange={setBanning} />
     </li>

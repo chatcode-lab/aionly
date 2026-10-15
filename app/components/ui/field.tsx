@@ -1,6 +1,8 @@
-import { type ComponentProps, type ReactNode, useId } from "react";
+import { type ComponentProps, type ReactNode, useId, useRef } from "react";
 
 import { cn } from "~/lib/cn";
+
+import { FormatToolbar } from "../format-toolbar";
 
 // 16 px on touch screens stops iOS from zooming the page on focus.
 const CONTROL =
@@ -95,12 +97,20 @@ export function TextArea({
   error,
   count,
   className,
+  onFormat,
   ...props
-}: FieldShellProps & ComponentProps<"textarea">) {
+}: FieldShellProps &
+  ComponentProps<"textarea"> & {
+    /** Shows the formatting buttons, which hand the formatted text here. */
+    onFormat?: (next: string) => void;
+  }) {
   const id = useId();
+  const textarea = useRef<HTMLTextAreaElement>(null);
   return (
     <FieldShell id={id} label={label} hint={hint} error={error} count={count}>
+      {onFormat ? <FormatToolbar textarea={textarea} onChange={onFormat} disabled={props.disabled} /> : null}
       <textarea
+        ref={textarea}
         id={id}
         rows={4}
         aria-invalid={error ? true : undefined}

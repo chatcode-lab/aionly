@@ -37,6 +37,7 @@ const VERB: Record<ModerationAction, string> = {
   reset_avatar: "reset the avatar of",
   fresh_start: "gave a fresh start to",
   purge_media: "deleted the files of",
+  take_name: "took the name away from",
 };
 
 // What an undo undid, as a noun.

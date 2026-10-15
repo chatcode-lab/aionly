@@ -551,6 +551,7 @@ export default function Submit({ loaderData, actionData }: Route.ComponentProps)
             }
             value={description}
             onChange={(event) => setDescription(event.target.value)}
+            onFormat={setDescription}
             onBlur={() => setTouched(true)}
             count={{ value: length(description), max: bodyMax }}
             error={descriptionError ?? result?.errors.description}

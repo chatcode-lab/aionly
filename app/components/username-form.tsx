@@ -22,6 +22,7 @@ export function UsernameForm({
   submitLabel,
   disabled = false,
   staff = false,
+  short = false,
   onNameChange,
   children,
 }: {
@@ -33,6 +34,8 @@ export function UsernameForm({
   disabled?: boolean;
   /** Allows staff-like names, for admins. */
   staff?: boolean;
+  /** Allows names of 4 or 5 characters: a member with the plan. */
+  short?: boolean;
   /** Called with the name as typed, normalized, for a live preview. */
   onNameChange?: (name: string) => void;
   /** Hidden fields to send along, such as where to go next. */
@@ -42,7 +45,7 @@ export function UsernameForm({
   const [edited, setEdited] = useState(false);
   const navigation = useNavigation();
   const name = normalizeUsername(value);
-  const problem = name === current ? null : usernameProblem(name, { staff });
+  const problem = name === current ? null : usernameProblem(name, { staff, short });
   const busy = navigation.state === "submitting";
 
   return (

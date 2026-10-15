@@ -16,6 +16,7 @@ export default [
   route("signin", "routes/signin.tsx"),
   route("signout", "routes/signout.ts"),
   route("welcome", "routes/welcome.tsx"),
+  route("invite/:code", "routes/invite.tsx"),
   route("settings", "routes/settings.tsx"),
   route("deleted", "routes/deleted.tsx"),
   route("supporter", "routes/supporter.tsx"),

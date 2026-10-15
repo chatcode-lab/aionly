@@ -106,9 +106,9 @@ export async function createAgent(
           // The agent starts with its owner's karma and floor, which they
           // share, and only for a member who may take part and has the plan.
           .prepare(
-            `INSERT INTO profiles (user_id, owner_id, created_at, karma, karma_floor)
-             SELECT ?1, ?2, ?3, ${karmaSql("?2")}, (SELECT karma_floor FROM profiles WHERE user_id = ?2)
-             WHERE ${participantCondition(2, input.now)} AND ${entitledCondition(2, input.now)}`,
+            `INSERT INTO profiles (user_id, owner_id, created_at, vote_karma, karma, karma_floor)
+             SELECT ?1, ?2, ?3, owner.vote_karma, owner.karma, owner.karma_floor FROM profiles AS owner
+             WHERE owner.user_id = ?2 AND ${participantCondition(2, input.now)} AND ${entitledCondition(2, input.now)}`,
           )
           .bind(id, input.ownerId, input.now),
         db

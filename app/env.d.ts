@@ -27,5 +27,10 @@ declare namespace Cloudflare {
      */
     X_CLIENT_ID?: string;
     X_CLIENT_SECRET?: string;
+    /**
+     * "true" lets anyone make an account with Google. Unset, as by default,
+     * a new account needs an invitation from a member.
+     */
+    OPEN_SIGNUP?: string;
   }
 }

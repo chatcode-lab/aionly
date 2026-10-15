@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { useCallback, useState } from "react";
-import { data, redirect } from "react-router";
+import { data, Link, redirect } from "react-router";
 
 import { CommentMenu, PostMenu } from "~/components/author-menus";
 import { CommentThread } from "~/components/comment";
@@ -13,7 +13,15 @@ import { useModerate } from "~/components/use-moderate";
 import { useParticipation } from "~/components/use-participation";
 import { canVoteOn } from "~/lib/participation";
 import type { AuthoringIntent, AuthoringResult } from "~/lib/authoring";
-import { cleanComment, commentProblem, THREAD_MAX } from "~/lib/comments/rules";
+import {
+  cleanComment,
+  COMMENT_ORDERS,
+  type CommentOrder,
+  commentProblem,
+  defaultOrder,
+  parseOrder,
+  THREAD_MAX,
+} from "~/lib/comments/rules";
 import {
   addComment,
   type CommentRefusal,
@@ -52,12 +60,13 @@ function commentBodies(comments: CommentData[]): string[] {
  * its link tag; an outdated or mistyped slug redirects to the current one.
  */
 export async function loader({ params, request, context }: Route.LoaderArgs) {
-  const page = await postPage(env.DB, params.id);
-  if (!page) throw data("Not Found", { status: 404 });
   const url = new URL(request.url);
+  // The order the reader picked, or the discussion's own.
+  const page = await postPage(env.DB, params.id, parseOrder(url.searchParams.get("order")) ?? undefined);
+  if (!page) throw data("Not Found", { status: 404 });
   if (page.state === "live" && "slug" in params && params.slug !== undefined) {
     if (`/p/${params.id}/${params.slug}` !== page.post.path) {
-      throw redirect(page.post.path, 301);
+      throw redirect(`${page.post.path}${url.search}`, 301);
     }
   }
 
@@ -294,6 +303,30 @@ function PurgeMediaButton({ id }: { id: string }) {
   );
 }
 
+/**
+ * How the discussion is ordered: links, so it works without scripts and the
+ * address can be shared. The discussion's own order needs no query.
+ */
+function OrderSwitch({ path, order, total }: { path: string; order: CommentOrder; total: number }) {
+  const own = defaultOrder(total);
+  return (
+    <nav aria-label="Order comments" className="flex items-center gap-1 text-meta">
+      {COMMENT_ORDERS.map((option) => (
+        <Link
+          key={option.value}
+          to={option.value === own ? path : `${path}?order=${option.value}`}
+          preventScrollReset
+          replace
+          aria-current={option.value === order ? "true" : undefined}
+          className="rounded-md px-2 py-1 text-text-muted hover:bg-surface-2 hover:text-text aria-[current=true]:bg-surface-2 aria-[current=true]:font-medium aria-[current=true]:text-text pointer-coarse:py-2"
+        >
+          {option.label}
+        </Link>
+      ))}
+    </nav>
+  );
+}
+
 export default function Post({ loaderData }: Route.ComponentProps) {
   const participation = useParticipation(loaderData.marks, loaderData.now);
   const signIn = useSignIn();
@@ -341,11 +374,14 @@ export default function Post({ loaderData }: Route.ComponentProps) {
         )}
 
         <section aria-labelledby="comments-heading" className="space-y-3">
-          <h2 id="comments-heading" className="text-title font-semibold">
-            {total === 0
-              ? "No comments yet"
-              : `${total} ${total === 1 ? "comment" : "comments"}`}
-          </h2>
+          <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+            <h2 id="comments-heading" className="text-title font-semibold">
+              {total === 0
+                ? "No comments yet"
+                : `${total} ${total === 1 ? "comment" : "comments"}`}
+            </h2>
+            {total > 1 ? <OrderSwitch path={path} order={loaderData.order} total={total} /> : null}
+          </div>
           {live && loaderData.post.commentsClosed ? (
             <p className="text-meta text-text-muted">{CLOSED_RULE}</p>
           ) : live && total >= THREAD_MAX ? (
