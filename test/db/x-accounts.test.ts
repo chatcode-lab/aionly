@@ -21,14 +21,14 @@ const providers = async () =>
   );
 
 /** A sign-in method on the account, as Better Auth records it. */
-async function method(userId: string, provider: "google" | "twitter", accountId = `${provider}-id-of-${userId}`) {
+async function method(userId: string, provider: "google" | "twitter", accountId = `${provider}-id-of-${userId}`, id = `${userId}-${provider}`) {
   await db.batch([
     db
       .prepare(`INSERT OR IGNORE INTO "user" ("id", "name", "email", "emailVerified", "createdAt", "updatedAt") VALUES (?1, ?1, ?2, 1, 0, 0)`)
       .bind(userId, `${userId}@x-accounts.invalid`),
     db
       .prepare(`INSERT INTO "account" ("id", "accountId", "providerId", "userId", "createdAt", "updatedAt") VALUES (?1, ?2, ?3, ?4, 0, 0)`)
-      .bind(`${userId}-${provider}`, accountId, provider, userId),
+      .bind(id, accountId, provider, userId),
   ]);
 }
 
@@ -48,13 +48,13 @@ describe("linked X accounts", () => {
     };
     // Hidden until the member shows it.
     await method("member", "twitter", X.id);
-    await rememberXAccount(db, "member", X, { shown: false });
+    await rememberXAccount(db, { id: "member-twitter", userId: "member" }, X, { shown: false });
     expect(await linkedX(db, "member")).toEqual({ id: X.id, handle: X.handle, photoUrl: "https://pbs.twimg.com/profile_images/1/abc_400x400.jpg", shown: false });
     expect(await author()).toBeUndefined();
     await setXShown(db, "member", true);
     expect(await author()).toBe("otter_makes");
-    // Linking again refreshes the handle and keeps the choice.
-    await rememberXAccount(db, "member", { ...X, handle: "otter_builds" });
+    // Written again for the same link, the handle is refreshed and the choice kept.
+    await rememberXAccount(db, { id: "member-twitter", userId: "member" }, { ...X, handle: "otter_builds" });
     expect(await author()).toBe("otter_builds");
     // Shown only while the plan lasts, as the Supporter mark is.
     await db.prepare(`UPDATE profiles SET plan_until = 1 WHERE user_id = 'member'`).run();
@@ -74,7 +74,7 @@ describe("linked X accounts", () => {
     await method("member", "twitter", X.id);
     // Another tab unlinks before the link's own last step runs.
     expect(await unlinkMethod(db, "member", "twitter")).toBe(true);
-    await rememberXAccount(db, "member", X, { shown: true });
+    await rememberXAccount(db, { id: "member-twitter", userId: "member" }, X, { shown: true });
     expect(await db.prepare(`SELECT x_id, x_shown FROM profiles WHERE user_id = 'member'`).first()).toEqual({ x_id: null, x_shown: 0 });
     // Details left behind from before are not shown, and Settings clears them.
     await db.prepare(`UPDATE profiles SET x_id = ?1, x_handle = 'otter_makes', x_shown = 1 WHERE user_id = 'member'`).bind(X.id).run();
@@ -84,16 +84,35 @@ describe("linked X accounts", () => {
     expect(await db.prepare(`SELECT x_id FROM profiles WHERE user_id = 'member'`).first()).toEqual({ x_id: null });
   });
 
+  it("are not written back, nor shown again, by a late step of an earlier link of the same X account", async () => {
+    const author = async () => {
+      const page = await postPage(db, "p1");
+      return page?.state === "live" ? page.post.author.x : "missing";
+    };
+    await method("member", "google");
+    // The first link's sign-in record is made; its last step is slow.
+    await method("member", "twitter", X.id, "first-link");
+    // Meanwhile the member unlinks, links the same X account again, and hides it.
+    expect(await unlinkMethod(db, "member", "twitter")).toBe(true);
+    await method("member", "twitter", X.id, "second-link");
+    await rememberXAccount(db, { id: "second-link", userId: "member" }, { ...X, handle: "new_handle" }, { shown: true });
+    await setXShown(db, "member", false);
+    // The first link's last step lands now, and changes nothing.
+    await rememberXAccount(db, { id: "first-link", userId: "member" }, { ...X, handle: "old_handle" }, { shown: true });
+    expect(await linkedX(db, "member")).toMatchObject({ id: X.id, handle: "new_handle", shown: false });
+    expect(await author()).toBeUndefined();
+  });
+
   it("are not written for a member made read-only while X was asking", async () => {
     await method("member", "twitter", X.id);
     await db.prepare(`UPDATE profiles SET banned_at = ?1 WHERE user_id = 'member'`).bind(NOW).run();
-    await rememberXAccount(db, "member", X, { shown: true, now: NOW });
+    await rememberXAccount(db, { id: "member-twitter", userId: "member" }, X, { shown: true, now: NOW });
     expect(await db.prepare(`SELECT x_id FROM profiles WHERE user_id = 'member'`).first()).toEqual({ x_id: null });
   });
 
   it("unlink only while another way to sign in remains", async () => {
     await method("member", "twitter");
-    await rememberXAccount(db, "member", X, { shown: true });
+    await rememberXAccount(db, { id: "member-twitter", userId: "member" }, X, { shown: true });
     // X is the only way in: it stays.
     expect(await unlinkMethod(db, "member", "twitter")).toBe(false);
     expect(await linkedX(db, "member")).not.toBeNull();
@@ -127,12 +146,12 @@ describe("linked X accounts", () => {
   });
 
   it("lose the mark when the account is deleted", async () => {
-    await rememberXAccount(db, "member", X);
+    await rememberXAccount(db, { id: "member-twitter", userId: "member" }, X);
     await deleteAccount(db, { userId: "member", content: false, banned: false, identities: [], now: NOW });
     // Free to link to a new account.
     await db.prepare(`UPDATE profiles SET plan_until = ?1 WHERE user_id = 'other'`).bind(NOW + 86400).run();
     await method("other", "twitter", X.id);
-    await rememberXAccount(db, "other", X);
+    await rememberXAccount(db, { id: "other-twitter", userId: "other" }, X);
     expect((await linkedX(db, "other"))?.handle).toBe("otter_makes");
   });
 

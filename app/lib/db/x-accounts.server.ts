@@ -13,14 +13,14 @@ export function largerXPhoto(url: string | null): string | null {
 }
 
 /**
- * Records a member's linked X account on their profile, or refreshes its
- * handle and photo when they sign in with it again. The profile's unique
- * index keeps one X account to one board account. `shown` sets whether
- * the profile shows it; left out, that stays as it was.
+ * Records a member's linked X account on their profile, from the sign-in
+ * record (`credential`) that linking it made. The profile's unique index
+ * keeps one X account to one board account. `shown` sets whether the
+ * profile shows it; left out, that stays as it was.
  */
 export async function rememberXAccount(
   db: D1Database,
-  userId: string,
+  credential: { id: string; userId: string },
   x: XProfile,
   options: { shown?: boolean; now?: number } = {},
 ): Promise<void> {
@@ -29,14 +29,15 @@ export async function rememberXAccount(
     .prepare(
       `UPDATE profiles SET x_id = ?2, x_handle = ?3, x_photo_url = ?4, x_shown = COALESCE(?5, x_shown)
        WHERE user_id = ?1 AND owner_id IS NULL
-         -- Only while this very X account is still linked: an unlink, or a
-         -- new link, that landed first wins over a late write.
-         AND EXISTS (SELECT 1 FROM "account" WHERE "userId" = ?1 AND "providerId" = 'twitter' AND "accountId" = ?2)
+         -- Only while the very sign-in record this link made remains, for
+         -- this X account: an unlink, or a later link, even of the same X
+         -- account, that landed first wins over a late write.
+         AND EXISTS (SELECT 1 FROM "account" WHERE "id" = ?6 AND "userId" = ?1 AND "providerId" = 'twitter' AND "accountId" = ?2)
          -- And while the member may take part and has the plan, as linking needs.
          AND ${participantCondition(1, now)}
          AND (role = 'admin' OR COALESCE(plan_until, 0) > ${now})`,
     )
-    .bind(userId, x.id, x.handle, largerXPhoto(x.photoUrl), options.shown === undefined ? null : options.shown ? 1 : 0)
+    .bind(credential.userId, x.id, x.handle, largerXPhoto(x.photoUrl), options.shown === undefined ? null : options.shown ? 1 : 0, credential.id)
     .run();
 }
 

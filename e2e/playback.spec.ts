@@ -218,15 +218,13 @@ test("on a touch screen a song waits for a tap, and stops when a video starts or
   await card(page, SONG).frameLocator("iframe").getByRole("button", { name: "Play" }).tap();
   await expect.poll(() => isPlaying(song)).toBe(true);
 
-  // The viewer starts a video: the song, which has no pause command, is stopped.
-  let video: Frame | undefined;
+  // The viewer starts a video: the song, which has no pause command, is
+  // stopped. The video in view, not any loaded ahead, which may be let go.
   await focus(page, BUNNY);
-  await expect
-    .poll(() => (video = page.frames().find((frame) => frame.url().includes("youtube-nocookie"))))
-    .toBeTruthy();
-  await expect.poll(() => video!.evaluate(() => "player" in window)).toBe(true);
-  await video!.evaluate(() => (window as unknown as Fake).viewerPlay());
+  const video = await player(page, BUNNY);
+  await video.evaluate(() => (window as unknown as Fake).viewerPlay());
   await expect.poll(() => songStopped(page), { timeout: 10_000 }).toBe(true);
+  expect(await isPlaying(video)).toBe(true);
   expect(await playingCount(page)).toBe(1);
 
   // Started again and scrolled away, it stops as well.

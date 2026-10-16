@@ -135,6 +135,9 @@ export async function applySubscription(
 /** How long a checkout being made holds off another of the member's, at most. */
 const CLAIM_SECONDS = 60;
 
+/** The member's account, bound as ?1, is not deleted: what any checkout needs. */
+const LIVE_ACCOUNT = `EXISTS (SELECT 1 FROM profiles WHERE user_id = ?1 AND deleted_at IS NULL)`;
+
 export type CheckoutKind = "plan" | "fresh_start";
 
 /** A request's hold on a member's checkout: its token proves it is the holder. */
@@ -151,12 +154,16 @@ export interface CheckoutClaim {
  * for a plan or an open checkout to making the new one, so two tabs cannot
  * both find nothing and both make one. Null while another request holds
  * it; a claim a minute old is taken over, should its request have died.
+ * Null once the account is deleted, too: a request begun before its
+ * deletion, which took no claim yet, makes no checkout after it.
  */
 export async function claimCheckout(db: D1Database, userId: string, kind: CheckoutKind, now: number): Promise<CheckoutClaim | null> {
   const token = crypto.randomUUID();
   const claimed = await db
     .prepare(
-      `INSERT INTO checkout_claims (user_id, kind, claimed_at, token, until) VALUES (?1, ?2, ?3, ?4, ?3 + ${CLAIM_SECONDS})
+      `INSERT INTO checkout_claims (user_id, kind, claimed_at, token, until)
+       SELECT ?1, ?2, ?3, ?4, ?3 + ${CLAIM_SECONDS}
+       WHERE ${LIVE_ACCOUNT}
        ON CONFLICT (user_id, kind) DO UPDATE SET claimed_at = excluded.claimed_at, token = excluded.token, until = excluded.until
        WHERE checkout_claims.until <= excluded.claimed_at`,
     )
@@ -201,13 +208,13 @@ export async function releaseDeletionHold(db: D1Database, userId: string, token:
 
 /**
  * Whether the claim is still this request's, with time left to make the
- * checkout: a request slower than the claim's lifetime has lost it, and
- * must make nothing.
+ * checkout, and its account is not deleted: a request slower than the
+ * claim's lifetime has lost it, and must make nothing.
  */
 export async function stillHolding(db: D1Database, claim: CheckoutClaim, now: number): Promise<boolean> {
   if (now - claim.at >= CLAIM_SECONDS - 10) return false;
   const row = await db
-    .prepare(`SELECT 1 FROM checkout_claims WHERE user_id = ?1 AND kind = ?2 AND token = ?3`)
+    .prepare(`SELECT 1 FROM checkout_claims WHERE user_id = ?1 AND kind = ?2 AND token = ?3 AND ${LIVE_ACCOUNT}`)
     .bind(claim.userId, claim.kind, claim.token)
     .first();
   return row !== null;

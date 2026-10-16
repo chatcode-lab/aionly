@@ -222,9 +222,10 @@ function createAuth(origin: string, request?: Request) {
             return { data: withoutTokens(account) };
           },
           after: async (account) => {
-            // Linked on purpose, to be shown, until the member hides it.
+            // Linked on purpose, to be shown, until the member hides it;
+            // written only while this link's own sign-in record remains.
             if (account.providerId === "twitter" && seenX) {
-              await rememberXAccount(env.DB, account.userId, seenX, { shown: true });
+              await rememberXAccount(env.DB, { id: account.id, userId: account.userId }, seenX, { shown: true });
             }
           },
         },

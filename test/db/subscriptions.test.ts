@@ -112,6 +112,11 @@ describe("the Supporter plan from Stripe", () => {
 });
 
 describe("making a checkout", () => {
+  beforeEach(async () => {
+    await user("u1", "first_buyer");
+    await user("u2", "second_buyer");
+  });
+
   it("is held for one request at a time per member and kind, and a dead claim lapses", async () => {
     const first = await claimCheckout(db, "u1", "plan", NOW);
     expect(first).not.toBeNull();

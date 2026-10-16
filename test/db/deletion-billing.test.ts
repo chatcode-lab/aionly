@@ -1,10 +1,12 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { cancelForDeletion } from "../../app/lib/billing/plan.server";
+import { cancelForDeletion, CheckoutBusy, checkoutUrl, freshStartCheckoutUrl } from "../../app/lib/billing/plan.server";
+import { accountRecord } from "../../app/lib/db/accounts.server";
 import { deleteAccount } from "../../app/lib/db/deletion.server";
-import { claimCheckout } from "../../app/lib/db/subscriptions.server";
+import { claimCheckout, stillHolding } from "../../app/lib/db/subscriptions.server";
 import { rememberCustomer } from "../../app/lib/db/subscriptions.server";
+import { FRESH_START_PRICE, PLAN_PRICES } from "../../app/lib/plan";
 import { db, NOW, reset, user } from "./fixtures";
 
 /**
@@ -103,6 +105,54 @@ describe("cancelling billing before an account is deleted", () => {
     expect((await db.prepare(`SELECT COUNT(*) AS n FROM checkout_claims WHERE user_id = 'member'`).first<{ n: number }>())!.n).toBe(2);
     await deleteAccount(db, { userId: "member", content: false, banned: false, identities: [], now: NOW });
     expect(await db.prepare(`SELECT COUNT(*) AS n FROM checkout_claims WHERE user_id = 'member'`).first()).toEqual({ n: 0 });
+  });
+
+  it.each(["plan", "fresh_start"] as const)("makes no %s checkout after the deletion for a request begun before it", async (kind) => {
+    const viewer = (await accountRecord(db, "member"))!;
+    let askedForPrices!: () => void;
+    const asked = new Promise<void>((resolve) => (askedForPrices = resolve));
+    let answerPrices!: () => void;
+    const answered = new Promise<void>((resolve) => (answerPrices = resolve));
+    let deleted = false;
+    const afterDeletion: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = new URL(String(input instanceof Request ? input.url : input));
+      if (deleted) afterDeletion.push(`${init?.method ?? "GET"} ${url.pathname}`);
+      if (url.pathname === "/v1/prices") {
+        // The checkout's first step, slow to answer, before it claims anything.
+        askedForPrices();
+        await answered;
+        const data = [PLAN_PRICES.month.lookupKey, FRESH_START_PRICE.lookupKey].map((key) => ({ id: `price_${key}`, lookup_key: key }));
+        return Response.json({ object: "list", data, has_more: false });
+      }
+      if (url.pathname === "/v1/checkout/sessions" && init?.method === "POST") return Response.json({ id: "cs_late", url: "https://checkout.example/cs_late" });
+      if (url.pathname === "/v1/checkout/sessions" || url.pathname === "/v1/subscriptions") {
+        return Response.json({ object: "list", data: [], has_more: false });
+      }
+      return Response.json({ error: { message: `unexpected ${url.pathname}` } }, { status: 404 });
+    });
+    const now = Math.floor(Date.now() / 1000);
+    const checkout = kind === "plan" ? checkoutUrl(viewer, "month", "https://aion.ly", now) : freshStartCheckoutUrl(viewer, "https://aion.ly", now);
+    const settled = checkout.then(
+      (url) => ({ url }),
+      (error: unknown) => ({ error }),
+    );
+    await asked;
+    // Another tab deletes the account meanwhile, all the way.
+    await cancelForDeletion("member");
+    await deleteAccount(db, { userId: "member", content: false, banned: false, identities: [], now });
+    deleted = true;
+    answerPrices();
+    const outcome = await settled;
+    expect(outcome).toEqual({ error: expect.any(CheckoutBusy) });
+    expect(afterDeletion.filter((call) => call.startsWith("POST"))).toEqual([]);
+  });
+
+  it("does not count a claim as held once its account is deleted", async () => {
+    const claim = (await claimCheckout(db, "member", "plan", Math.floor(Date.now() / 1000)))!;
+    expect(await stillHolding(db, claim, claim.at)).toBe(true);
+    await db.prepare(`UPDATE profiles SET deleted_at = ?1 WHERE user_id = 'member'`).bind(NOW).run();
+    expect(await stillHolding(db, claim, claim.at)).toBe(false);
   });
 
   it("lets go of its hold when Stripe fails, so nothing is left blocked", async () => {
