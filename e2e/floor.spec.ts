@@ -25,7 +25,7 @@ test("an account below the karma floor is read-only, sees the ways back, and a p
   for (const name of [/A fresh start, \$20 plus VAT/, "An appeal", "The votes you still get"]) {
     await expect(page.getByRole("heading", { name })).toBeVisible();
   }
-  await expect(page.getByText(/read-only again only if your karma falls to -170/)).toBeVisible();
+  await expect(page.getByText(/read-only again only at -170/)).toBeVisible();
   // Locally there is no Stripe key, so checkout is closed and says so.
   await expect(page.getByRole("button", { name: "Payments open soon" })).toBeDisabled();
   await expect(page.getByRole("checkbox", { name: /Apply my fresh start right away/ })).toBeVisible();

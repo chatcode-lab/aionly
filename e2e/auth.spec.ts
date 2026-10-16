@@ -17,13 +17,12 @@ test("signed out, the top bar offers Sign in, which opens on New member, then si
   await expect(tabs.getByRole("button").first()).toHaveText("New member");
   await expect(tabs.getByRole("button", { name: "New member" })).toHaveAttribute("aria-pressed", "true");
   await expect(dialog.getByLabel("Your invitation code")).toBeVisible();
-  await expect(dialog).toContainText("by invitation");
+  await expect(dialog).toContainText("Joining takes an invitation.");
   await expect(dialog.getByRole("button", { name: "Continue with Google" })).toHaveCount(0);
 
   await tabs.getByRole("button", { name: "Sign in" }).click();
   await expect(tabs.getByRole("button", { name: "Sign in" })).toHaveAttribute("aria-pressed", "true");
   await expect(dialog.getByRole("button", { name: "Continue with Google" })).toBeVisible();
-  await expect(dialog).toContainText("stay private");
   await expect(dialog.getByLabel("Your invitation code")).toHaveCount(0);
 });
 
@@ -197,7 +196,7 @@ test("after the first change, the next waits 30 days", async ({ page, context, a
   await expect(page.getByRole("status").filter({ hasText: `Your name is now s_${account.id}` })).toBeVisible();
 
   await expect(page.getByLabel("Username")).toBeDisabled();
-  await expect(page.getByText(/You can change it again on \d+ \w+ \d{4}\./)).toBeVisible();
+  await expect(page.getByText(/Next change on \d+ \w+ \d{4}\./)).toBeVisible();
 });
 
 test("a taken name is refused", async ({ page, context, account }) => {
@@ -328,13 +327,15 @@ test("members ask for a sign-in link by email, and the answer never says whether
   await expect(tabs.getByRole("link", { name: "Sign in" })).toHaveAttribute("aria-current", "page");
 });
 
-test("a sign-in link signs in only on the member's own click, and a used one says so", async ({ page }) => {
+test("a sign-in link goes straight on in a browser, uses nothing up when only fetched, and a used one says so", async ({ page, request }) => {
   await open(page, "/signin/email?token=short");
   await expect(page.getByText("This sign-in link is not complete.")).toBeVisible();
-  // Opening it signs nobody in; the click does, once.
-  await open(page, `/signin/email?token=${"A".repeat(32)}&next=%2Fsaved`);
-  await expect(page.getByText("Your sign-in link works once.")).toBeVisible();
-  await page.getByRole("button", { name: "Continue" }).click();
+  // A mail scanner that only fetches the link gets the page, and no session.
+  const fetched = await request.get(`/signin/email?token=${"A".repeat(32)}&next=%2Fsaved`);
+  expect(fetched.status()).toBe(200);
+  expect(fetched.headers()["set-cookie"] ?? "").not.toMatch(/session_token=/);
+  // A browser goes on by itself, to the target or, for a used link, back to sign-in.
+  await page.goto(`/signin/email?token=${"A".repeat(32)}&next=%2Fsaved`);
   await expect(page).toHaveURL(/\/signin\?tab=member&next=%2Fsaved&error=INVALID_TOKEN$/);
   await expect(page.getByText("That sign-in link was used already or has expired.")).toBeVisible();
 });

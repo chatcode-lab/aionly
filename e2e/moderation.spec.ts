@@ -332,7 +332,7 @@ test("an admin names the fund's cause and records a gift, which the fund's page 
   await expect(admin.getByText("The next gift goes to Open Source Example Fund.")).toBeVisible();
 
   await admin.getByLabel("Given on").fill("2026-10-31");
-  await admin.getByLabel("Amount, US dollars").fill("18.50");
+  await admin.getByLabel("Amount, USD").fill("18.50");
   await admin.getByRole("button", { name: "Record the gift" }).click();
   await expect(admin.getByText("Recorded $18.50 to Open Source Example Fund.")).toBeVisible();
 

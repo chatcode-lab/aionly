@@ -124,23 +124,22 @@ export default function AdminPartners({ loaderData, actionData }: Route.Componen
       {actionData && "saved" in actionData ? <Notice>{actionData.saved}</Notice> : null}
       {actionData && "error" in actionData ? <Notice tone="danger">{actionData.error}</Notice> : null}
       <p className="text-body text-text-muted">
-        A partner&apos;s link makes as many accounts as it allows, each invited by the partner, and gives the partner
-        their share of what those members pay for the plan, before VAT and less refunds, for the months after each
-        joins. <a href="/partners" className="underline underline-offset-4">/partners</a> describes the offer.
+        Everyone who joins through a link is invited by its partner, who gets the link&apos;s share of their plan
+        payments, before VAT and refunds. <a href="/partners" className="underline underline-offset-4">The offer</a>
       </p>
 
       <Form method="post" className="space-y-3 rounded-xl border border-border bg-surface p-4 sm:p-5">
         <h2 className="text-title font-semibold">Make a link</h2>
         <input type="hidden" name="intent" value="link" />
         <TextField label="Partner's username" name="partner" required autoComplete="off" />
-        <TextField label="Link name" name="code" hint="aion.ly/join/<name>. Blank uses the username." autoComplete="off" />
-        <div className="flex flex-wrap gap-3">
-          <TextField label="Share, %" name="share_percent" inputMode="numeric" placeholder={String(settings.partner_share_percent)} className="max-w-28" />
-          <TextField label="For, months" name="share_months" inputMode="numeric" placeholder={String(settings.partner_share_months)} className="max-w-28" />
-          <TextField label="Accounts at most" name="max_uses" inputMode="numeric" placeholder="No limit" className="max-w-32" />
+        <TextField label="Link name" name="code" placeholder="The username" autoComplete="off" />
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <TextField label="Share, %" name="share_percent" inputMode="numeric" placeholder={String(settings.partner_share_percent)} />
+          <TextField label="Months" name="share_months" inputMode="numeric" placeholder={String(settings.partner_share_months)} />
+          <TextField label="Accounts" name="max_uses" inputMode="numeric" placeholder="No limit" />
           <TextField label="Ends on" name="ends_on" type="date" />
         </div>
-        <TextField label="Note" name="note" maxLength={280} hint="For admins: what was agreed." />
+        <TextField label="Note for admins" name="note" maxLength={280} placeholder="What was agreed" />
         <Button type="submit" variant="primary" disabled={busy}>
           Make the link
         </Button>
@@ -175,11 +174,11 @@ export default function AdminPartners({ loaderData, actionData }: Route.Componen
               ))}
             </select>
           </label>
-          <div className="flex flex-wrap gap-3">
-            <TextField label="Amount, US dollars" name="amount" inputMode="decimal" required className="max-w-40" />
+          <div className="grid max-w-md grid-cols-2 gap-3">
+            <TextField label="Amount, USD" name="amount" inputMode="decimal" required />
             <TextField label="Paid on" name="paid_on" type="date" required />
           </div>
-          <TextField label="Note" name="note" maxLength={280} hint="How it was paid." />
+          <TextField label="Note" name="note" maxLength={280} placeholder="How it was paid" />
           <Button type="submit" variant="primary" disabled={busy}>
             Record the payout
           </Button>

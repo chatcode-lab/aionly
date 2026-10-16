@@ -172,12 +172,10 @@ export default function Fund({ loaderData }: Route.ComponentProps) {
       ) : null}
 
       <p className="text-meta text-text-muted">
-        A fresh start is a purchase from us, so it has no tax receipt of its own; the gift is ours, made with your
-        payment. Amounts are before VAT. Questions: see the{" "}
+        Amounts are before VAT. A fresh start is a purchase from us, so it carries no tax receipt; the gift is ours.{" "}
         <Link to="/terms#fresh-start" className="underline underline-offset-4">
-          terms
+          Terms
         </Link>
-        .
       </p>
     </main>
   );

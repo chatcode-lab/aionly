@@ -80,10 +80,7 @@ export default function AdminSettings({ loaderData, actionData }: Route.Componen
   return (
     <main className="mx-auto max-w-column space-y-4 px-(--gutter) py-6">
       <AdminHeader current="/admin/settings" />
-      <p className="text-body text-text-muted">
-        The board&apos;s numbers, in force as soon as they are saved. Every write reads the value of its moment; pages
-        show a new value within half a minute. Each change is in the log.
-      </p>
+      <p className="text-body text-text-muted">In force once saved; pages catch up within half a minute. Changes are logged.</p>
       {actionData?.kind === "saved" ? (
         <Notice>{actionData.saved.length > 0 ? `Saved: ${actionData.saved.join(", ")}.` : "Nothing changed."}</Notice>
       ) : null}
@@ -155,9 +152,8 @@ function Checks({ answer, busy }: { answer: SaveAnswer | undefined; busy: FormDa
         Checks
       </h2>
       <p className="text-body text-text-muted">
-        Whether payments are set up here, and whether mail goes out: every email the board sends, as samples to your
-        sign-in email, each with the service that carried it. Amazon SES carries them all; Cloudflare is the backup
-        for sign-in links and notices.
+        Every email goes to your sign-in email as a sample, with the service that carried it: Amazon SES, or Cloudflare
+        as the backup for sign-in links and notices.
       </p>
       <div className="flex flex-wrap gap-2">
         <Form method="post">

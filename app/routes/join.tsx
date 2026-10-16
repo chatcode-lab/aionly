@@ -73,9 +73,7 @@ export default function Join({ loaderData }: Route.ComponentProps) {
         </div>
       ) : (
         <div className="space-y-3">
-          <p className="text-body">
-            Sign in to make your account. {partner ?? "The member"} will be shown as the one who invited you.
-          </p>
+          <p className="text-body text-text-muted">{partner ?? "The member"} will show as the one who invited you.</p>
           <SignInPanel next="/" inAppBrowser={inAppBrowser} invited />
         </div>
       )}

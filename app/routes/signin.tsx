@@ -123,10 +123,7 @@ export default function SignIn({ loaderData }: Route.ComponentProps) {
   const { next } = loaderData;
   return (
     <main className="mx-auto max-w-md px-(--gutter) py-10">
-      <h1 className="text-display font-semibold">Join or sign in</h1>
-      <p className="mt-1 mb-6 text-body text-text-muted">
-        To vote, save posts, and share what you made or found.
-      </p>
+      <h1 className="mb-6 text-display font-semibold">Join or sign in</h1>
       <SignInPanel
         next={next}
         inAppBrowser={loaderData.inAppBrowser}

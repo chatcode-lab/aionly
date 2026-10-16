@@ -130,19 +130,14 @@ function SignInTabs({ tab, onTab, href }: { tab: SignInTab; onTab: (next: SignIn
 /** Continue with Google, which makes the account too where it may. */
 function GoogleSignIn({ next }: { next: string }) {
   return (
-    <>
-      {/* A full page load: the browser leaves for Google from here. */}
-      <Form method="post" action="/signin" reloadDocument>
-        <input type="hidden" name="next" value={next} />
-        <Button type="submit" variant="secondary" className="w-full">
-          <GoogleMark />
-          Continue with Google
-        </Button>
-      </Form>
-      <p className="text-meta text-text-muted">
-        Your Google name, email, and photo stay private; the board shows only the username you choose.
-      </p>
-    </>
+    // A full page load: the browser leaves for Google from here.
+    <Form method="post" action="/signin" reloadDocument>
+      <input type="hidden" name="next" value={next} />
+      <Button type="submit" variant="secondary" className="w-full">
+        <GoogleMark />
+        Continue with Google
+      </Button>
+    </Form>
   );
 }
 
@@ -244,8 +239,7 @@ export function SignInPanel({
         {draft ? (
           <>
             <p className="text-body text-text-muted">
-              Your draft is saved in this browser only and will not follow the
-              link. Copy it to paste after you sign in.
+              Your draft stays in this browser. Copy it to paste after you sign in.
             </p>
             <CopyButton text={draft} label="Copy draft" done="Draft copied" />
           </>
@@ -272,22 +266,13 @@ export function SignInPanel({
       {notice}
       {tab === "join" ? (
         <div className="space-y-3">
-          <p className="text-body">
-            aion.ly takes new members by invitation, from someone already here. Open the link you were given, or
-            enter its code.
-          </p>
+          <p className="text-body text-text-muted">Joining takes an invitation. Open its link, or enter its code.</p>
           <InviteCodeForm label="Your invitation code" />
-          <p className="text-meta text-text-muted">
-            With the invitation, you make your account with Google. Already a member? Choose Sign in.
-          </p>
         </div>
       ) : (
         <div className="space-y-3">
           <GoogleSignIn next={next} />
           <MemberSignIns next={next} sent={sent} />
-          <p className="text-meta text-text-muted">
-            For accounts made here. A new one needs an invitation: see New member.
-          </p>
         </div>
       )}
     </div>

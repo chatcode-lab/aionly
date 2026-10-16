@@ -103,7 +103,7 @@ test("a video the provider cannot play here falls back to a preview of the origi
   await bunny.evaluate(() => (window as unknown as { viewerFail: () => void }).viewerFail());
   const media = card(page, BUNNY);
   await expect(media.locator("iframe")).toHaveCount(0);
-  await expect(media.getByText("It can't play here. Open the original to watch or listen.")).toBeVisible();
+  await expect(media.getByText("It can't play here.")).toBeVisible();
   await expect(media.locator('a[href^="https://www.youtube.com/watch"]').first()).toBeVisible();
   // It stays a preview, even when focused again.
   await focus(page, SINTEL);

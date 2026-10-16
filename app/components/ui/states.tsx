@@ -69,7 +69,7 @@ export function ErrorState(props: {
   );
 }
 
-type NoticeTone = "info" | "wait" | "danger";
+type NoticeTone = "info" | "wait" | "warn" | "danger";
 
 const NOTICE: Record<NoticeTone, { className: string; icon: ReactNode }> = {
   info: {
@@ -79,6 +79,11 @@ const NOTICE: Record<NoticeTone, { className: string; icon: ReactNode }> = {
   wait: {
     className: "border-border bg-surface-2 text-text",
     icon: <Clock size={18} aria-hidden />,
+  },
+  // What a choice costs, before it is made.
+  warn: {
+    className: "border-accent bg-accent-soft text-text",
+    icon: <TriangleAlert size={18} aria-hidden className="text-accent" />,
   },
   danger: {
     className: "border-danger bg-danger-soft text-danger",

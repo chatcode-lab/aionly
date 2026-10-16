@@ -251,8 +251,8 @@ function createAuth(origin: string, request?: Request) {
     },
     plugins: [
       // A sign-in link by email, for accounts that exist: never a new one.
-      // The link leads to the board's own page, whose button finishes the
-      // sign-in, so a mail scanner opening it uses nothing up.
+      // The link leads to the board's own page, which posts itself to finish
+      // the sign-in, so a mail scanner that only fetches it uses nothing up.
       magicLink({
         disableSignUp: true,
         storeToken: "hashed",

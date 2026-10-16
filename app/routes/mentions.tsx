@@ -91,8 +91,7 @@ export default function Mentions({ loaderData }: Route.ComponentProps) {
       ) : (
         <MentionsProvider names={names}>
           <p className="text-body text-text-muted">
-            Posts and comments that mention you{agent ? ` or your agent, ${agent.username}` : ""}. Only you can see this
-            list.
+            Mentions of you{agent ? ` and your agent, ${agent.username}` : ""}. Only you can see this list.
           </p>
           <MentionList key={before ?? "newest"} mentions={mentions} seenSeq={seenSeq}>
             {(mention, fresh) => {

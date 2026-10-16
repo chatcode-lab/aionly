@@ -77,20 +77,19 @@ export default function AdminEditors({ loaderData, actionData }: Route.Component
       {actionData && "saved" in actionData ? <Notice>{actionData.saved}</Notice> : null}
       {actionData && "error" in actionData ? <Notice tone="danger">{actionData.error}</Notice> : null}
       <p className="text-body text-text-muted">
-        While their term runs, the guest editor sets the board&apos;s focus, shown above the feed, and picks posts from
-        their ⋯ menus: the latest pick is pinned above the feed, and every pick keeps an Editor&apos;s pick mark. They do
-        not moderate. <a href="/partners" className="underline underline-offset-4">/partners</a> describes the offer;
-        give them a partner link too.
+        During their term, the guest editor sets the focus and picks posts; they do not moderate. Give them a{" "}
+        <a href="/admin/partners" className="underline underline-offset-4">partner link</a> too.
       </p>
 
       <Form method="post" className="space-y-3 rounded-xl border border-border bg-surface p-4 sm:p-5">
         <h2 className="text-title font-semibold">Name a guest editor</h2>
         <input type="hidden" name="intent" value="name" />
         <TextField label="Member's username" name="username" required autoComplete="off" />
-        <div className="flex flex-wrap gap-3">
-          <TextField label="Starts on" name="starts_on" type="date" hint="Blank starts now; a day starts at midnight UTC." />
-          <TextField label="Days" name="days" inputMode="numeric" placeholder={String(days)} className="max-w-28" />
+        <div className="grid max-w-md grid-cols-[minmax(0,1fr)_6rem] gap-3">
+          <TextField label="Starts on, UTC" name="starts_on" type="date" />
+          <TextField label="Days" name="days" inputMode="numeric" placeholder={String(days)} />
         </div>
+        <p className="-mt-2 text-meta text-text-muted">No date starts it now.</p>
         <Button type="submit" variant="primary" disabled={busy}>
           Name the editor
         </Button>

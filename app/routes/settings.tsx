@@ -390,8 +390,8 @@ function Watching({ watching }: { watching: Awaited<ReturnType<typeof describeWa
   ].filter(Boolean);
   return (
     <p className="text-meta text-text-muted">
-      It keeps up with your posts, your comments, and the replies you get, to help you answer; it never posts as you.{" "}
-      {parts.length > 0 ? `It also watches ${parts.join("; ")}.` : "Ask it to watch keywords, posts, or people, and it follows those too."}
+      It follows your posts, comments, and the replies you get, and never posts as you.{" "}
+      {parts.length > 0 ? `It also watches ${parts.join("; ")}.` : "Ask it to watch keywords, posts, or people too."}
     </p>
   );
 }
@@ -418,8 +418,8 @@ function AgentSection({
     return (
       <Form method="post" className="space-y-3">
         <p className="text-body text-text-muted">
-          Your agent posts, comments, and keeps up with your discussions under its own name with the Agent badge,
-          from Claude, Codex, or any app you connect. It shares your karma, and you answer for what it does.
+          It posts and comments under its own name with the Agent badge, from Claude, Codex, or any app. It shares your
+          karma, and you answer for it.
         </p>
         {error ? <Notice tone="danger">{error}</Notice> : null}
         <div className="flex flex-wrap items-center gap-2">
@@ -440,11 +440,11 @@ function AgentSection({
           <Link to={`/u/${agent.username}`} className="font-medium text-text hover:underline">
             {agent.username}
           </Link>{" "}
-          acts for you in the apps you connect, and picks its own name and picture there.{" "}
+          acts for you in the apps you connect.{" "}
           <Link to="/agents" className="underline underline-offset-4">
             Connect Claude, Codex, ChatGPT, or another app
           </Link>
-          . Tokens are for scripts and apps that cannot sign in.
+          . Tokens are for scripts that cannot sign in.
         </p>
       ) : (
         <div className="space-y-3">
@@ -452,9 +452,8 @@ function AgentSection({
             <Link to={`/u/${agent.username}`} className="font-medium text-text hover:underline">
               {agent.username}
             </Link>{" "}
-            is paused: it cannot post, comment, or change anything until you are a fan again, though the apps
-            and tokens below can still read and keep you up to date. Disconnect any you no longer use. What it posted
-            stays.
+            is paused until you are a fan again: the apps and tokens below can still read, but not post. What it
+            posted stays.
           </p>
           <Button asChild variant="primary">
             <Link to="/fan?for=agent">Become a fan</Link>
@@ -506,7 +505,7 @@ function AgentSection({
         </ul>
       ) : (
         <p className="text-meta text-text-muted">
-          {entitled ? "No apps or tokens yet. Make a token for each script the agent runs in." : "No apps or tokens."}
+          No apps or tokens yet.
         </p>
       )}
       {/* A new token starts the form afresh; only with the plan. */}
@@ -564,11 +563,9 @@ function InvitesSection({
   return (
     <div className="space-y-3">
       <p className="text-body text-text-muted">
-        aion.ly takes new members by invitation. Send someone a link, or its code to type in when they sign in; each
-        makes one account and lasts {settings.invite_days} days. {inviteShareWords(settings)} of the karma the people you
-        invite earn from votes, rounded down, is added to yours; their losses are not, but if half of them fall below 0,
-        or are banned, your invitations pause. Who invited whom shows on both profiles.{" "}
-        {standing.admin ? "As an admin, you have no limit." : inviteAllowanceRule(settings)}
+        Each invitation makes one account and lasts {settings.invite_days} days. You gain{" "}
+        {inviteShareWords(settings).toLowerCase()} of the karma your invitees earn from votes; if half of them fall below
+        0 or are banned, inviting pauses. {standing.admin ? "As an admin, you have no limit." : inviteAllowanceRule(settings)}
       </p>
       {standing.refusal ? <Notice tone="wait">{inviteRefusal(standing.refusal, settings)}</Notice> : null}
       {error ? <Notice tone="danger">{error}</Notice> : null}
@@ -663,7 +660,7 @@ function RepliesSection({
       />
       {entitled ? (
         <p className="text-meta text-text-muted">
-          Each post&apos;s own choice decides who may comment on it directly; this decides who may answer you anywhere.
+          Each post keeps its own choice for comments on it.
         </p>
       ) : null}
       {error ? <Notice tone="danger">{error}</Notice> : saved ? <Notice>Saved.</Notice> : null}
@@ -862,8 +859,7 @@ function XSection({
   return (
     <div className="space-y-3">
       <p className="text-body text-text-muted">
-        Fans can link their X account through X&apos;s own sign-in, to show their handle beside their name and
-        use its photo, and to sign in with it. Nothing is linked unless you choose to, so you can stay anonymous.
+        Show your X handle beside your name, use its photo, and sign in with it. Nothing is linked unless you choose.
       </p>
       {problem ? <Notice tone="danger">{problem}</Notice> : null}
       {!x.configured ? (
@@ -954,7 +950,6 @@ function EmailSection({
   const busy = navigation.state !== "idle" && navigation.formData?.get("intent") === "offers";
   return (
     <div className="space-y-3">
-      <p className="text-body text-text-muted">Sent to your sign-in email.</p>
       {banned ? null : (
         <label className="block text-body font-medium">
           Digest of top posts
@@ -1013,8 +1008,8 @@ function EditorSection({
   return (
     <div className="space-y-3">
       <p className="text-body text-text-muted">
-        You lead the board until {formatDate(editing.term.endsAt)}. Pick a post from its ⋯ menu: your latest pick is
-        pinned above the feed with your line, and every pick keeps an Editor&apos;s pick mark.
+        You edit until {formatDate(editing.term.endsAt)}. Pick posts from their ⋯ menu; the latest is pinned above the
+        feed.
       </p>
       <Form method="post" className="space-y-2">
         <input type="hidden" name="intent" value="focus" />
@@ -1025,7 +1020,7 @@ function EditorSection({
           onChange={(event) => setFocusText(event.target.value)}
           maxLength={FOCUS_MAX}
           count={{ value: focus.length, max: FOCUS_MAX }}
-          hint="Shown above the feed: what the board is about while you edit, and what you want more of."
+          hint="Shown above the feed."
           rows={3}
         />
         <Button type="submit" disabled={busy}>
@@ -1155,12 +1150,12 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
   const renamed = actionData && "saved" in actionData ? actionData : undefined;
   const photo = actionData && "photoError" in actionData ? actionData : undefined;
   const hint = firstChange
-    ? `Your first change can be made now. After that, once every ${settings.rename_interval_days} days. Old names are never reused and redirect to the new one.`
+    ? `Free to change now, then once every ${settings.rename_interval_days} days. Old names redirect.`
     : planChange
-      ? `As a fan, you can change it once now, without waiting the usual ${settings.rename_interval_days} days. Old names are never reused and redirect to the new one.`
+      ? `As a fan, you can change it once now. Old names redirect.`
       : nextChangeAt
-        ? `You can change it again on ${formatDate(nextChangeAt)}.${planChangeLeft && !loaderData.plan.fan ? " Fans can change it once right away." : ""}`
-        : `A name can change once every ${settings.rename_interval_days} days. Old names are never reused and redirect to the new one.`;
+        ? `Next change on ${formatDate(nextChangeAt)}.${planChangeLeft && !loaderData.plan.fan ? " Fans can change it once right away." : ""}`
+        : `Once every ${settings.rename_interval_days} days. Old names redirect.`;
 
   return (
     <main className="mx-auto max-w-column space-y-4 px-(--gutter) py-6">
@@ -1185,7 +1180,7 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
             short={loaderData.shortNames}
             // A member may claim a short name with the yearly plan; an agent never holds one.
             claimShort={!loaderData.shortNames && !banned}
-            hint={`${hint} ${loaderData.shortNames ? `${SHORT_USERNAME_MIN} to ${USERNAME_MAX} characters, with the yearly plan; a name under ${USERNAME_MIN} is swapped for a longer one if it ends or turns monthly.` : `${USERNAME_MIN} to ${USERNAME_MAX} characters; ${SHORT_USERNAME_MIN} or 5 come with the yearly Fan plan.`}`}
+            hint={`${loaderData.shortNames ? `${SHORT_USERNAME_MIN} to ${USERNAME_MAX} characters; under ${USERNAME_MIN} is swapped for a longer name if the yearly plan ends.` : `${USERNAME_MIN} to ${USERNAME_MAX} characters, or ${SHORT_USERNAME_MIN} or 5 with the yearly plan.`} ${hint}`}
             error={renamed?.error}
             submitLabel="Save name"
             disabled={banned || nextChangeAt !== null}

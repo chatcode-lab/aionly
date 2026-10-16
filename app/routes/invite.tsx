@@ -95,10 +95,7 @@ export default function Invite({ loaderData }: Route.ComponentProps) {
         </div>
       ) : (
         <div className="space-y-3">
-          <p className="text-body">
-            Sign in to make your account. This invitation is good for one account, and {inviter ?? "the member"} will be
-            shown as the one who invited you.
-          </p>
+          <p className="text-body text-text-muted">{inviter ?? "The member"} will show as the one who invited you.</p>
           <SignInPanel next="/" inAppBrowser={inAppBrowser} invited />
         </div>
       )}

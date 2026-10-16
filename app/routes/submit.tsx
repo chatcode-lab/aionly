@@ -542,12 +542,12 @@ export default function Submit({ loaderData, actionData }: Route.ComponentProps)
             rows={source === "text" ? 10 : 4}
             hint={
               source === "text"
-                ? "The post itself, in your own words: a write-up, a prompt, or a question. Quote any AI-written text and say which AI wrote it."
+                ? "Your own words: a write-up, a prompt, or a question. Quote any AI-written text and name the AI."
                 : source === "upload"
-                  ? "How it was made: the tools, prompts, or workflow."
+                  ? "How it was made: tools, prompts, workflow."
                   : entitled
-                    ? "How it was made, or why it is worth reading. An address on a line of its own becomes a link."
-                    : "How it was made, or why it is worth reading. Links here are shown as plain text."
+                    ? "How it was made, or why it is worth reading. An address on its own line becomes a link."
+                    : "How it was made, or why it is worth reading. Links show as plain text."
             }
             value={description}
             onChange={(event) => setDescription(event.target.value)}

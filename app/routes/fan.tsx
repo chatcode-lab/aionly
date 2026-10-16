@@ -149,10 +149,10 @@ export default function Fan({ loaderData, actionData }: Route.ComponentProps) {
         <h1 className="flex items-center gap-2 text-display font-semibold [overflow-wrap:anywhere]">{heading}</h1>
         <p className="mt-1 text-body text-text-muted">
           {wanted
-            ? `Names of 4 or 5 characters come with the yearly plan. ${wanted} is free now, and becomes yours as soon as you pay.`
+            ? `${wanted} is free, and yours as soon as you pay for the yearly plan.`
             : joined
-              ? "You're in. One more thing, if you like: become an aion.ly fan. Fans keep the board free of ads and never sold, and get more out of it."
-              : "aion.ly has no ads and never sells data. Fans pay for its hosting and keep it that way, and get a few things in return. Reading, link posts, comments, votes, and saves stay free for everyone."}
+              ? "You're in. Fans keep the board free of ads, and get more out of it."
+              : "No ads, and no data sold: fans pay for the hosting and get a few extras. Reading, link posts, comments, votes, and saves stay free for everyone."}
         </p>
       </div>
 
@@ -231,7 +231,7 @@ export default function Fan({ loaderData, actionData }: Route.ComponentProps) {
                 </p>
               )}
               <p className="text-meta text-text-muted">
-                {introLeft > 0 ? "Your price stays for as long as your plan runs. " : null}
+                {introLeft > 0 ? "Your price stays while your plan runs. " : null}
                 Plus VAT or sales tax where it applies.
                 {signedIn ? null : ` New members get ${INTRO_PERCENT_OFF}% off in their first ${INTRO_HOURS} hours.`}
               </p>
@@ -239,14 +239,26 @@ export default function Fan({ loaderData, actionData }: Route.ComponentProps) {
             {interval === "year" ? (
               <p className="text-meta text-text-muted">Yearly is two months free, and brings a username of 4 or 5 characters.</p>
             ) : wanted ? (
-              <p className="text-meta text-text-muted">
-                A name of 4 or 5 characters comes with the yearly plan; with monthly you keep {username}.
-              </p>
+              <Notice tone="warn">
+                <span className="font-medium">Monthly does not include {wanted}.</span> Names of 4 or 5 characters
+                come with the yearly plan only; with monthly you keep {username}.{" "}
+                <button type="button" onClick={() => setBilling("year")} className="font-medium underline underline-offset-4">
+                  Switch to yearly
+                </button>
+              </Notice>
             ) : null}
             {admin ? <p className="text-meta text-text-muted">As an admin, you have every feature without a plan.</p> : null}
             {signedIn ? (
               <Button type="submit" variant="primary" disabled={!open || busy}>
-                {busy ? "Opening checkout…" : !open ? "Payments open soon" : claiming ? `Claim ${wanted} and become a fan` : "Become a fan now"}
+                {busy
+                  ? "Opening checkout…"
+                  : !open
+                    ? "Payments open soon"
+                    : claiming
+                      ? `Claim ${wanted} and become a fan`
+                      : wanted
+                        ? `Become a fan without ${wanted}`
+                        : "Become a fan now"}
               </Button>
             ) : (
               <Button asChild variant="primary">
@@ -254,8 +266,8 @@ export default function Fan({ loaderData, actionData }: Route.ComponentProps) {
               </Button>
             )}
             <p className="text-meta text-text-muted">
-              Your plan starts as soon as you pay, through Stripe. Cancel any time, and it runs to the end of the period you
-              paid for. See the <Link to="/terms#fan" className="underline underline-offset-4">terms</Link>.
+              Your plan starts as soon as you pay, through Stripe. Cancel any time; it runs to the end of the paid period.{" "}
+              <Link to="/terms#fan" className="underline underline-offset-4">Terms</Link>
             </p>
           </Form>
         )}

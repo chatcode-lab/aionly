@@ -87,13 +87,7 @@ export default function Welcome({ loaderData, actionData }: Route.ComponentProps
   const shown = usernameProblem(typed, { staff, short: true }) ? loaderData.username : typed;
   return (
     <main className="mx-auto max-w-md space-y-6 px-(--gutter) py-10">
-      <div>
-        <h1 className="text-display font-semibold">This is how you&apos;ll appear</h1>
-        <p className="mt-1 text-body text-text-muted">
-          Your posts, comments, and profile show this name and nothing from
-          your Google account.
-        </p>
-      </div>
+      <h1 className="text-display font-semibold">This is how you&apos;ll appear</h1>
       <div className="flex items-center gap-3 rounded-xl border border-border bg-surface p-4">
         <Avatar userId={loaderData.id} username={shown} size={40} />
         <span className="text-title font-semibold [overflow-wrap:anywhere]">{shown}</span>
@@ -102,7 +96,7 @@ export default function Welcome({ loaderData, actionData }: Route.ComponentProps
         <UsernameForm
           current={loaderData.username}
           staff={staff}
-          hint={`Change it now if you like: ${USERNAME_MIN} to ${USERNAME_MAX} of a–z, 0–9, and _, or 4 or 5 with the yearly Fan plan. After that, a name can change once every ${settings.rename_interval_days} days, and old names are never reused.`}
+          hint={`${USERNAME_MIN} to ${USERNAME_MAX} of a–z, 0–9, and _ (4 or 5 with the yearly plan). Free to change now, then once every ${settings.rename_interval_days} days.`}
           error={actionData?.error}
           submitLabel="Continue"
           short={loaderData.shortNames}
@@ -111,11 +105,11 @@ export default function Welcome({ loaderData, actionData }: Route.ComponentProps
           beforeSubmit={
             <p className="text-meta text-text-muted">
               We&apos;ll email you the new-member offer, {INTRO_PERCENT_OFF}% off for {INTRO_HOURS} hours, and now
-              and then news of the Fan plan. Turn it off in{" "}
+              and then Fan plan news. Turn it off in{" "}
               <Link to="/settings#email" className="underline underline-offset-4">
                 Settings
               </Link>{" "}
-              or from any of those emails.
+              or from any email.
             </p>
           }
         >

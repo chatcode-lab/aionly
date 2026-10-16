@@ -34,7 +34,7 @@ async function unsubscribeToken(userId: string): Promise<string> {
 test("the plan page shows what fans get, picks out what was asked for, and its prices", async ({ page, context, account }) => {
   await open(page, "/fan");
   await expect(page.getByRole("heading", { name: "Become an aion.ly fan" })).toBeVisible();
-  await expect(page.getByText("aion.ly has no ads")).toBeVisible();
+  await expect(page.getByText("No ads, and no data sold")).toBeVisible();
   await expect(page.getByRole("button", { name: "Yearly" })).toHaveAttribute("aria-pressed", "true");
   await expect(page.locator("[data-price]")).toContainText("$100 a year");
   await page.getByRole("button", { name: "Monthly" }).click();
@@ -96,7 +96,16 @@ test("a short name typed at the welcome is claimed with the yearly plan", async 
   await expect(page.getByRole("button", { name: "Yearly" })).toHaveAttribute("aria-pressed", "true");
   // Monthly keeps the name it has.
   await page.getByRole("button", { name: "Monthly" }).click();
-  await expect(page.getByText(`with monthly you keep ${account.username}`)).toBeVisible();
+  const warning = page.getByRole("status").filter({ hasText: `Monthly does not include ${short}.` });
+  await expect(warning).toContainText(`with monthly you keep ${account.username}`);
+  // The button says what monthly brings, where payments are open.
+  const pay = page.locator("[data-price]").locator("xpath=..").getByRole("button").last();
+  await expect(pay).toHaveText(new RegExp(`^(Become a fan without ${short}|Payments open soon)$`));
+  // One click back to the plan that brings the name.
+  await warning.getByRole("button", { name: "Switch to yearly" }).click();
+  await expect(page.getByRole("button", { name: "Yearly" })).toHaveAttribute("aria-pressed", "true");
+  await expect(pay).toHaveText(new RegExp(`^(Claim ${short} and become a fan|Payments open soon)$`));
+  await expect(warning).toHaveCount(0);
   await page.getByRole("link", { name: `Not now; keep ${account.username}` }).click();
   await expect(page).toHaveURL(/\/$/);
   await expect(page.getByRole("button", { name: `Account: ${account.username}` })).toBeVisible();
@@ -282,7 +291,7 @@ test("a fan connects an agent, which pauses when the plan ends", async ({ page, 
   await expect(pausedSection.getByText("Reads only")).toBeVisible();
   await expect(pausedSection.getByRole("button", { name: "Allow posting" })).toHaveCount(0);
   await pausedSection.getByRole("button", { name: "Revoke" }).click();
-  await expect(pausedSection.getByText("No apps or tokens.")).toBeVisible();
+  await expect(pausedSection.getByText("No apps or tokens yet.")).toBeVisible();
   expect((await request.get("/api/v1/me", { headers: auth })).status()).toBe(401);
 });
 

@@ -82,7 +82,7 @@ export function UsernameForm({
       />
       {claim ? (
         <p className="text-meta text-text-muted">
-          Names of 4 or 5 characters come with the yearly Fan plan. Claim it, and it is yours as soon as you pay.
+          Names of 4 or 5 characters come with the yearly Fan plan.
         </p>
       ) : null}
       {beforeSubmit}

@@ -115,7 +115,7 @@ function ProviderMedia({
     return (
       <div ref={ref} className="space-y-1">
         <PreviewCard url={post.url} host={post.host ?? ""} thumbUrl={media.thumbUrl} />
-        <p className="text-meta text-text-muted">It can&apos;t play here. Open the original to watch or listen.</p>
+        <p className="text-meta text-text-muted">It can&apos;t play here.</p>
       </div>
     );
   }

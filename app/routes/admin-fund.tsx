@@ -86,9 +86,13 @@ export default function AdminFund({ loaderData, actionData }: Route.ComponentPro
       {actionData && "saved" in actionData ? <Notice>{actionData.saved}</Notice> : null}
       {actionData && "error" in actionData ? <Notice tone="danger">{actionData.error}</Notice> : null}
       <p className="text-body text-text-muted">
-        Fresh starts have brought in {formatMoney(fund.collectedCents)} before VAT and card fees ({fund.freshStarts} in all);{" "}
-        {formatMoney(fund.givenCents)} is given, so {formatMoney(waiting)} waits for the next gift, less what Stripe
-        took. Everything here shows at <a href="/fund" className="underline underline-offset-4">/fund</a>.
+        Collected {formatMoney(fund.collectedCents)} from {fund.freshStarts} fresh{" "}
+        {fund.freshStarts === 1 ? "start" : "starts"}, given {formatMoney(fund.givenCents)}, waiting{" "}
+        {formatMoney(waiting)} before card fees. All of it shows at{" "}
+        <a href="/fund" className="underline underline-offset-4">
+          /fund
+        </a>
+        .
       </p>
 
       <Form method="post" className="space-y-3 rounded-xl border border-border bg-surface p-4 sm:p-5">
@@ -110,11 +114,13 @@ export default function AdminFund({ loaderData, actionData }: Route.ComponentPro
       <Form method="post" className="space-y-3 rounded-xl border border-border bg-surface p-4 sm:p-5">
         <h2 className="text-title font-semibold">Record a gift</h2>
         <input type="hidden" name="intent" value="gift" />
-        <TextField label="Given on" name="given_on" type="date" required />
-        <TextField label="Amount, US dollars" name="amount" inputMode="decimal" required placeholder="120.50" className="max-w-40" />
+        <div className="grid max-w-md grid-cols-2 gap-3">
+          <TextField label="Given on" name="given_on" type="date" required />
+          <TextField label="Amount, USD" name="amount" inputMode="decimal" required placeholder="120.50" />
+        </div>
         <TextField label="Recipient" name="recipient" required maxLength={CAUSE_NAME_MAX} defaultValue={fund.cause?.name} />
         <TextField label="Recipient's address" name="recipient_url" type="url" required maxLength={URL_MAX} defaultValue={fund.cause?.url} />
-        <TextField label="Receipt's address" name="receipt_url" type="url" maxLength={URL_MAX} hint="A public page or file showing the gift." />
+        <TextField label="Receipt's address" name="receipt_url" type="url" maxLength={URL_MAX} placeholder="A public page or file" />
         <TextField label="Note" name="note" maxLength={GIFT_NOTE_MAX} />
         <Button type="submit" variant="primary" disabled={busy}>
           Record the gift
