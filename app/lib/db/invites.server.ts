@@ -1,8 +1,8 @@
 import { createProfile } from "./accounts.server";
-import { INVITE_ALPHABET, INVITE_DAYS, INVITES_TO_START, INVITES_WITH_PLAN, type InviteRefusal, KARMA_PER_INVITE } from "../invites";
+import { INVITE_ALPHABET, type InviteRefusal } from "../invites";
 import type { PublicAuthor } from "../public-types";
-import { KARMA_FLOOR } from "../moderation";
 import { AUTHOR_COLUMNS, AUTHOR_JOINS, toPublicAuthor } from "./rows.server";
+import { settingSql } from "./setting-sql.server";
 import { settleKarma } from "./votes.server";
 
 const DAY = 24 * 3600;
@@ -25,7 +25,7 @@ export function mayInviteSql(account: string, now: number): string {
     WHERE inviter.user_id = ${account} AND inviter.owner_id IS NULL AND inviter.deleted_at IS NULL
       AND NOT ${banned("inviter")}
       AND (inviter.role = 'admin' OR (
-        inviter.karma > COALESCE(inviter.karma_floor, ${KARMA_FLOOR}) AND inviter.karma >= 0
+        inviter.karma > COALESCE(inviter.karma_floor, ${settingSql("karma_floor")}) AND inviter.karma >= 0
         AND 2 * (SELECT COUNT(*) ${invitees} AND (invitee.karma < 0 OR ${banned("invitee")}))
           < MAX(1, (SELECT COUNT(*) ${invitees})))))`;
 }
@@ -35,9 +35,9 @@ export function mayInviteSql(account: string, now: number): string {
  * see inviteAllowance, which this repeats inside writes.
  */
 function allowanceSql(account: string, now: number): string {
-  return `(SELECT ${INVITES_TO_START}
-      + CASE WHEN COALESCE(member.plan_until, 0) > ${Math.floor(now)} THEN ${INVITES_WITH_PLAN} ELSE 0 END
-      + MAX(member.karma, 0) / ${KARMA_PER_INVITE}
+  return `(SELECT ${settingSql("invites_to_start")}
+      + CASE WHEN COALESCE(member.plan_until, 0) > ${Math.floor(now)} THEN ${settingSql("invites_with_plan")} ELSE 0 END
+      + MAX(member.karma, 0) / ${settingSql("karma_per_invite")}
     FROM profiles AS member WHERE member.user_id = ${account})`;
 }
 
@@ -74,7 +74,7 @@ export async function inviteStanding(db: D1Database, userId: string, now: number
         `SELECT profile.owner_id, profile.role, profile.karma, ${mayInviteSql("?1", now)} AS may,
                 ${allowanceSql("?1", now)} AS allowance, ${spentSql("?1", now)} AS spent,
                 (profile.banned_at IS NULL OR profile.banned_until <= ?2)
-                  AND (profile.role = 'admin' OR profile.karma > COALESCE(profile.karma_floor, ${KARMA_FLOOR})) AS participant
+                  AND (profile.role = 'admin' OR profile.karma > COALESCE(profile.karma_floor, ${settingSql("karma_floor")})) AS participant
          FROM profiles AS profile WHERE profile.user_id = ?1`,
       )
       .bind(userId, now),
@@ -132,12 +132,12 @@ export async function createInvite(db: D1Database, input: { inviterId: string; n
       const made = await db
         .prepare(
           `INSERT INTO invites (code, inviter_id, created_at, expires_at)
-           SELECT ?1, ?2, ?3, ?4
+           SELECT ?1, ?2, ?3, ?3 + ${settingSql("invite_days")} * ${DAY}
            WHERE ${mayInviteSql("?2", input.now)}
              AND (EXISTS (SELECT 1 FROM profiles WHERE user_id = ?2 AND role = 'admin')
                OR ${spentSql("?2", input.now)} < ${allowanceSql("?2", input.now)})`,
         )
-        .bind(code, input.inviterId, input.now, input.now + INVITE_DAYS * DAY)
+        .bind(code, input.inviterId, input.now)
         .run();
       return made.meta.changes > 0 ? code : null;
     } catch (error) {
@@ -167,7 +167,7 @@ export async function inviteByCode(
   db: D1Database,
   code: string,
   now: number,
-): Promise<{ state: InviteState; inviter: PublicAuthor } | null> {
+): Promise<{ state: InviteState; inviter: PublicAuthor; expiresAt: number } | null> {
   const row = await db
     .prepare(
       `SELECT invite.expires_at, invite.used_by, invite.claimed_at, invite.revoked_at,
@@ -194,7 +194,7 @@ export async function inviteByCode(
           : row.may
             ? "open"
             : "paused";
-  return { state, inviter: toPublicAuthor(row) };
+  return { state, inviter: toPublicAuthor(row), expiresAt: row.expires_at };
 }
 
 /**

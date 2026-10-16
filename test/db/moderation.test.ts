@@ -14,7 +14,9 @@ import {
 import { announcement, pinAnnouncement, unpinAnnouncement } from "../../app/lib/db/pins.server";
 import { dismissReports, fileReport, openReportCount, reportQueue } from "../../app/lib/db/reports.server";
 import { castVote } from "../../app/lib/db/votes.server";
-import { REPORTS_PER_DAY } from "../../app/lib/reports";
+import { DEFAULT_SETTINGS } from "../../app/lib/settings";
+
+const REPORTS_PER_DAY = DEFAULT_SETTINGS.reports_per_day;
 import { comment, DAY, db, NOW, post, reset, user } from "./fixtures";
 
 beforeEach(async () => {

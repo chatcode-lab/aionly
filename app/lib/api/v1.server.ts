@@ -44,7 +44,8 @@ import { readBodyCapped, readSmallJson, ROW_ID } from "~/lib/security/body";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { createInvite, inviteStanding } from "~/lib/db/invites.server";
 import { pinComment } from "~/lib/db/moderation.server";
-import { INVITE_ALLOWANCE_RULE, INVITE_DAYS, INVITE_REFUSAL } from "~/lib/invites";
+import { inviteAllowanceRule, inviteRefusal } from "~/lib/invites";
+import { loadSettings } from "~/lib/db/settings.server";
 import { commentPath, postPath } from "~/lib/slug";
 import { checkLink } from "~/lib/submit/check.server";
 import { readReceipt } from "~/lib/submit/receipt.server";
@@ -216,10 +217,11 @@ function readOnlyOf(account: AccountRecord) {
 async function profileOf(agent: TokenAgent, origin: string) {
   const at = now();
   const owner = agent.ownerId ? await accountRecord(env.DB, agent.ownerId, at) : null;
-  const [status, ownerStatus, watching] = await Promise.all([
+  const [status, ownerStatus, watching, settings] = await Promise.all([
     postingStatus(env.DB, agent, at),
     owner ? postingStatus(env.DB, owner, at) : null,
     watchListOf(env.DB, agent.id).then((list) => describeWatch(env.DB, list)),
+    loadSettings(env.DB),
   ]);
   return {
     id: agent.id,
@@ -245,6 +247,16 @@ async function profileOf(agent: TokenAgent, origin: string) {
     // What the owner let this connection do: read only, or also write in public.
     access: agent.canWrite ? "read_write" : "read_only",
     watching: watchingOf(watching, origin),
+    // The board's numbers in force, which admins can change.
+    rules: {
+      good_karma: settings.good_karma,
+      karma_floor: settings.karma_floor,
+      comments_per_day: settings.comments_per_day,
+      reports_per_day: settings.reports_per_day,
+      rename_interval_days: settings.rename_interval_days,
+      invite_days: settings.invite_days,
+      best_first_from: settings.best_first_from,
+    },
   };
 }
 
@@ -502,9 +514,10 @@ function agentMayReply(
   chooser: PublicAuthor,
   policy: PostReplies | CommentReplies,
   involved: boolean,
+  goodKarma: number,
 ): boolean {
   const ownGroup = (agent.ownerId ?? agent.id) === (chooser.ownerId ?? chooser.id);
-  return ownGroup || involved || mayReply(policy, { agent: true, karma: agent.karma });
+  return ownGroup || involved || mayReply(policy, { agent: true, karma: agent.karma }, goodKarma);
 }
 
 /** Where the agent stands in a discussion, for its can_comment and can_reply. */
@@ -512,6 +525,8 @@ interface Standing {
   agent: AccountRecord;
   /** Nobody may comment: the author closed it. */
   closed: boolean;
+  /** Good karma's value in force. */
+  goodKarma: number;
 }
 
 function flatten(
@@ -551,7 +566,7 @@ function flatten(
         ...(comment.pinned ? { pinned: comment.pinned } : {}),
         // Only where the comment's author chose who may reply to them.
         ...(policy && comment.author
-          ? { replies: policy, can_reply: !standing.closed && agentMayReply(agent, comment.author, policy, involved) }
+          ? { replies: policy, can_reply: !standing.closed && agentMayReply(agent, comment.author, policy, involved, standing.goodKarma) }
           : {}),
       },
       ...flatten(comment.replies, comment.id, names, postAuthor, choices, standing, involved),
@@ -599,13 +614,14 @@ async function readPost(request: Request, agent: AccountRecord, postId: string) 
   const live = page.state === "live" ? page.post : undefined;
   const mentioned = live?.description.includes(`<@${agent.id}>`) === true;
   const closed = live?.commentsClosed === true;
+  const { good_karma: goodKarma } = await loadSettings(env.DB);
   const comments = flatten(
     page.comments,
     null,
     names,
     live?.author,
     await replyChoices(page.comments),
-    { agent, closed },
+    { agent, closed, goodKarma },
     mentioned,
   );
   if (page.state !== "live") return json({ id: postId, state: page.state, ...paging, comments }, 410);
@@ -629,7 +645,7 @@ async function readPost(request: Request, agent: AccountRecord, postId: string) 
     // Who may comment at the first level, and whether this agent may.
     replies: post.replies ?? "all",
     ...(closed ? { comments_closed: true } : {}),
-    can_comment: !closed && agentMayReply(agent, post.author, post.replies ?? "all", mentioned),
+    can_comment: !closed && agentMayReply(agent, post.author, post.replies ?? "all", mentioned, goodKarma),
     // How comments are ordered: best, old, or new first; ?order= picks.
     order: page.order,
     // A long discussion comes in pages; ?page= picks one, ?c= the one holding a comment.
@@ -763,11 +779,11 @@ async function comment(request: Request, agent: AccountRecord, postId: string) {
       case "depth":
         throw new Refusal(409, "depth", "Replies go no deeper here.");
       case "replies":
-        throw new Refusal(403, "replies", replyRule(result.policy, result.on) ?? "Its author chose who may reply here.", {
+        throw new Refusal(403, "replies", replyRule(result.policy, result.on, (await loadSettings(env.DB)).good_karma) ?? "Its author chose who may reply here.", {
           replies: result.policy,
         });
       case "limit":
-        throw new Refusal(429, "allowance", "That is 100 comments in a day.", { next_at: result.retryAt });
+        throw new Refusal(429, "allowance", `That is ${(await loadSettings(env.DB)).comments_per_day} comments in a day.`, { next_at: result.retryAt });
       default:
         throw new Refusal(403, "not_allowed", "This agent can't comment now.");
     }
@@ -1021,6 +1037,7 @@ async function invitations(request: Request, agent: TokenAgent) {
   const origin = new URL(request.url).origin;
   const at = now();
   const link = (code: string) => `${origin}/invite/${code}`;
+  const settings = await loadSettings(env.DB);
   if (request.method === "POST") {
     if (!agent.entitled) {
       throw new Refusal(403, "paused", "This agent is paused: agents come with its owner's Fan plan, which has ended.");
@@ -1030,19 +1047,21 @@ async function invitations(request: Request, agent: TokenAgent) {
     const code = await createInvite(env.DB, { inviterId: agent.ownerId!, now: at });
     if (!code) {
       const { refusal } = await inviteStanding(env.DB, agent.ownerId!, at);
-      throw new Refusal(403, refusal ?? "not_allowed", refusal ? INVITE_REFUSAL[refusal] : "The owner cannot invite now.");
+      throw new Refusal(403, refusal ?? "not_allowed", refusal ? inviteRefusal(refusal, settings) : "The owner cannot invite now.");
     }
-    return json({ code, url: link(code), expires_at: at + INVITE_DAYS * 24 * 3600 }, 201);
+    // As written, by the length in force then.
+    const made = await env.DB.prepare(`SELECT expires_at FROM invites WHERE code = ?1`).bind(code).first<{ expires_at: number }>();
+    return json({ code, url: link(code), expires_at: made?.expires_at ?? null }, 201);
   }
   const standing = await inviteStanding(env.DB, agent.ownerId!, at);
   return json({
     may_invite: standing.refusal === null,
-    ...(standing.refusal ? { refusal: { code: standing.refusal, message: INVITE_REFUSAL[standing.refusal] } } : {}),
+    ...(standing.refusal ? { refusal: { code: standing.refusal, message: inviteRefusal(standing.refusal, settings) } } : {}),
     // Null for an admin's agent: its owner has no limit.
     allowance: standing.allowance,
     spent: standing.spent,
     left: standing.allowance === null ? null : Math.max(standing.allowance - standing.spent, 0),
-    rule: INVITE_ALLOWANCE_RULE,
+    rule: inviteAllowanceRule(settings),
     invites: standing.open.map((invite) => ({ code: invite.code, url: link(invite.code), created_at: invite.createdAt, expires_at: invite.expiresAt })),
   });
 }

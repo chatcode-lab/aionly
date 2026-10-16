@@ -41,12 +41,14 @@ import { newId } from "~/lib/ids";
 import type { CommentData } from "~/lib/public-types";
 import { mentionIds, replaceMentions } from "~/lib/text/mentions";
 import { readSmallForm, ROW_ID } from "~/lib/security/body";
+import { loadSettings } from "~/lib/db/settings.server";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { viewerOf } from "~/lib/viewer.server";
 import { clip, pageMeta, privatePageMeta } from "~/lib/meta";
 import { postCoverVersion } from "~/lib/og/version";
 import type { PostDetail, ViewerSummary } from "~/lib/public-types";
 import { CLOSED_RULE, mayReply, replyRule } from "~/lib/replies";
+import { useSettings } from "~/lib/use-settings";
 
 import type { Route } from "./+types/post";
 
@@ -160,13 +162,14 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       });
       if (result.ok) return { ok: true, intent, id: commentId } satisfies AuthoringResult;
       if (result.reason === "limit") {
+        const { comments_per_day: perDay } = await loadSettings(env.DB);
         return refuse(
-          `That is 100 comments in a day. Try again in ${formatWait((result.retryAt ?? now) - now)}; your draft is saved.`,
+          `That is ${perDay} comments in a day. Try again in ${formatWait((result.retryAt ?? now) - now)}; your draft is saved.`,
           429,
         );
       }
       if (result.reason === "replies") {
-        return refuse(replyRule(result.policy, result.on) ?? COMMENT_REFUSAL.not_allowed, 403);
+        return refuse(replyRule(result.policy, result.on, (await loadSettings(env.DB)).good_karma) ?? COMMENT_REFUSAL.not_allowed, 403);
       }
       return refuse(COMMENT_REFUSAL[result.reason], 403);
     }
@@ -269,8 +272,12 @@ export function meta({ loaderData, matches, location }: Route.MetaArgs) {
  * this viewer in. People on the site are never agents; the author, their
  * agent or owner, admins, and anyone the post mentions may always comment.
  */
-function commentRule(post: PostDetail, viewer: ViewerSummary | null): { text: string; open: boolean } | undefined {
-  const text = post.replies ? replyRule(post.replies, "post") : null;
+function commentRule(
+  post: PostDetail,
+  viewer: ViewerSummary | null,
+  goodKarma: number,
+): { text: string; open: boolean } | undefined {
+  const text = post.replies ? replyRule(post.replies, "post", goodKarma) : null;
   if (!post.replies || !text) return undefined;
   const exempt =
     viewer !== null &&
@@ -278,7 +285,7 @@ function commentRule(post: PostDetail, viewer: ViewerSummary | null): { text: st
       viewer.id === post.author.id ||
       post.author.ownerId === viewer.id ||
       post.description.includes(`<@${viewer.id}>`));
-  return { text, open: exempt || mayReply(post.replies, { agent: false, karma: viewer?.karma ?? 0 }) };
+  return { text, open: exempt || mayReply(post.replies, { agent: false, karma: viewer?.karma ?? 0 }, goodKarma) };
 }
 
 /** Restores a removed post or comment, for admins; single removals only. */
@@ -324,7 +331,7 @@ function PurgeMediaButton({ id }: { id: string }) {
  * address can be shared. The discussion's own order needs no query.
  */
 function OrderSwitch({ path, order, total }: { path: string; order: CommentOrder; total: number }) {
-  const own = defaultOrder(total);
+  const own = defaultOrder(total, useSettings().best_first_from);
   return (
     <nav aria-label="Order comments" className="flex items-center gap-1 text-meta">
       {COMMENT_ORDERS.map((option) => (
@@ -363,10 +370,11 @@ function usePinning() {
  * chose; each lands at the comments.
  */
 function PageLinks({ path, order, total, page, pages }: { path: string; order: CommentOrder; total: number; page: number; pages: number }) {
+  const own = defaultOrder(total, useSettings().best_first_from);
   if (pages < 2) return null;
   const at = (number: number) => {
     const query = new URLSearchParams();
-    if (order !== defaultOrder(total)) query.set("order", order);
+    if (order !== own) query.set("order", order);
     if (number > 1) query.set("page", String(number));
     const search = query.toString();
     return `${path}${search ? `?${search}` : ""}#comments-heading`;
@@ -425,6 +433,7 @@ export default function Post(props: Route.ComponentProps) {
 }
 
 function PostView({ loaderData }: Route.ComponentProps) {
+  const settings = useSettings();
   const participation = useParticipation(loaderData.marks, loaderData.now, `${loaderData.page}:${loaderData.order}`);
   const signIn = useSignIn();
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
@@ -501,7 +510,7 @@ function PostView({ loaderData }: Route.ComponentProps) {
           ) : live && total >= THREAD_MAX ? (
             <p className="text-meta text-text-muted">{COMMENT_REFUSAL.full}</p>
           ) : live ? (
-            <CommentBox postId={postId} rule={commentRule(loaderData.post, participation.viewer)} />
+            <CommentBox postId={postId} rule={commentRule(loaderData.post, participation.viewer, settings.good_karma)} />
           ) : null}
           {total > 0 ? (
             <div className="rounded-xl border border-border bg-surface p-3 sm:p-4">

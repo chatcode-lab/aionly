@@ -1,8 +1,10 @@
 import { newId } from "../ids";
-import { KARMA_FLOOR, LOW_KARMA } from "../moderation";
+import { LOW_KARMA } from "../moderation";
+import { isSettingKey, settingSpec } from "../settings";
 import { commentPath, postPath } from "../slug";
 import { givenNameStatements, participantCondition, withGivenName } from "./accounts.server";
 import { applyFreshStart } from "./fresh-starts.server";
+import { settingSql } from "./setting-sql.server";
 import { recountKarma, scoreSql } from "./votes.server";
 
 const DAY = 24 * 3600;
@@ -32,7 +34,8 @@ export type ModerationAction =
   | "purge_media"
   | "take_name"
   | "pin_comment"
-  | "unpin_comment";
+  | "unpin_comment"
+  | "set_setting";
 
 export type ModerationResult =
   | { ok: true; batchId: string; actionId: string }
@@ -527,7 +530,7 @@ export async function adminUsers(
          json_extract(profile.limits, '$.postsPerDay') AS posts_per_day,
          json_type(profile.limits, '$.postsPerDay') AS limit_type,
          profile.avatar_key IS NOT NULL AS has_photo,
-         COALESCE(profile.karma_floor, ${KARMA_FLOOR}) AS floor,
+         COALESCE(profile.karma_floor, ${settingSql("karma_floor")}) AS floor,
          COALESCE(owner.role, profile.role) = 'admin' AS exempt
        FROM profiles AS profile
        JOIN usernames AS name ON name.user_id = profile.user_id AND name.is_current = 1
@@ -625,11 +628,14 @@ export async function moderationLog(db: D1Database, input: { before?: number; li
     if (row.target_type === "post" && row.post_id) link = postPath({ id: row.post_id, title: row.label ?? "" });
     if (row.target_type === "comment" && row.post_id) link = commentPath(postPath({ id: row.post_id, title: row.post_title ?? "" }), row.target_id);
     if (row.target_type === "user" && row.label) link = `/u/${row.label}`;
+    // A setting by its name on the settings page, with "old → new" as the reason.
+    const setting = row.target_type === "setting" && isSettingKey(row.target_id) ? settingSpec(row.target_id) : null;
+    if (setting) link = "/admin/settings";
     return {
       id: row.id,
       action: row.action,
       actor: row.actor,
-      target: { type: row.target_type, id: row.target_id, label: row.label ?? row.target_id, link },
+      target: { type: row.target_type, id: row.target_id, label: setting?.label ?? row.label ?? row.target_id, link },
       reason: row.reason,
       at: row.created_at,
       revertedAt: row.reverted_at,

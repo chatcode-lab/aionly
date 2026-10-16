@@ -1,6 +1,5 @@
-import { INVITE_SHARE } from "../invites";
-import { FRESH_START_ROOM, KARMA_FLOOR } from "../moderation";
 import { participantCondition } from "./accounts.server";
+import { settingSql } from "./setting-sql.server";
 
 export type TargetType = "post" | "comment";
 export type VoteValue = -1 | 0 | 1;
@@ -53,8 +52,9 @@ export function karmaSql(user: string): string {
  * bindings), and writes only floors that change.
  */
 export function trailFloors(db: D1Database, holders: string, ...binds: unknown[]): D1PreparedStatement {
-  const next = `CASE WHEN karma - ${FRESH_START_ROOM} >= ${KARMA_FLOOR} THEN NULL
-    ELSE MAX(karma_floor, karma - ${FRESH_START_ROOM}) END`;
+  const room = settingSql("fresh_start_room");
+  const next = `CASE WHEN karma - ${room} >= ${settingSql("karma_floor")} THEN NULL
+    ELSE MAX(karma_floor, karma - ${room}) END`;
   return db
     .prepare(
       `UPDATE profiles SET karma_floor = ${next}
@@ -64,13 +64,13 @@ export function trailFloors(db: D1Database, holders: string, ...binds: unknown[]
 }
 
 /**
- * What a member's invitees add to their karma: a quarter of each one's vote
- * karma, rounded down, from those above zero. `root` is the SQL for the
- * member's ID. Invitees' own shares never pass further up.
+ * What a member's invitees add to their karma: the setting's share of each
+ * one's vote karma, rounded down, from those above zero. `root` is the SQL
+ * for the member's ID. Invitees' own shares never pass further up.
  */
 export function inviteShareSql(root: string): string {
-  return `COALESCE((SELECT SUM(invitee.vote_karma / ${INVITE_SHARE}) FROM profiles AS invitee
-    WHERE invitee.invited_by = ${root} AND invitee.vote_karma >= ${INVITE_SHARE} AND invitee.deleted_at IS NULL), 0)`;
+  return `COALESCE((SELECT SUM(invitee.vote_karma * ${settingSql("invite_share_percent")} / 100) FROM profiles AS invitee
+    WHERE invitee.invited_by = ${root} AND invitee.vote_karma > 0 AND invitee.deleted_at IS NULL), 0)`;
 }
 
 /** An account's karma from its stored vote karma and its group's invitees. */
@@ -92,6 +92,19 @@ export function recountKarma(db: D1Database, holders: string, ...binds: unknown[
     db.prepare(`UPDATE profiles SET karma = ${TOTAL_KARMA} WHERE user_id IN ${inviters}`).bind(...binds),
     trailFloors(db, holders, ...binds),
     trailFloors(db, inviters, ...binds),
+  ];
+}
+
+/**
+ * Recounts what a change of settings moves, for every account: karma from
+ * what is stored, when the invitees' share changed (`karma`), and the
+ * floors of fresh starts, which trail it.
+ */
+export function recountAllKarma(db: D1Database, options: { karma: boolean }): D1PreparedStatement[] {
+  const everyone = `(SELECT user_id FROM profiles WHERE deleted_at IS NULL)`;
+  return [
+    ...(options.karma ? [db.prepare(`UPDATE profiles SET karma = ${TOTAL_KARMA} WHERE user_id IN ${everyone} AND karma IS NOT ${TOTAL_KARMA}`)] : []),
+    trailFloors(db, everyone),
   ];
 }
 

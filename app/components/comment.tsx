@@ -10,9 +10,7 @@ import { AuthorLine } from "./post-card";
 import { RichText } from "./rich-text";
 import { type Vote, VoteControl } from "./vote-control";
 import { commentPath } from "~/lib/slug";
-
-/** At or below this net score a comment's body starts hidden. */
-export const LOW_SCORE_THRESHOLD = -5;
+import { useSettings } from "~/lib/use-settings";
 
 // Indentation is shallower on phones and stops deepening after this many
 // levels, so the vote, reply, and menu controls always fit a 320 px screen.
@@ -155,8 +153,10 @@ function CommentItem({
   const [revealed, setRevealed] = useState(false);
   const vote = votes?.[comment.id] ?? 0;
 
+  // At or below this net score, a setting, a comment's body starts hidden.
+  const hideAt = useSettings().low_score_hide;
   const hiddenByScore =
-    comment.state === "visible" && comment.score <= LOW_SCORE_THRESHOLD;
+    comment.state === "visible" && comment.score <= hideAt;
   const hidden = countReplies(comment) + 1;
   // Null when there is nothing in it for this viewer.
   const menu = comment.state === "visible" ? renderMenu?.(comment) : null;

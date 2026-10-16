@@ -13,8 +13,8 @@ export const MAX_DEPTH = 10;
  */
 export const THREAD_MAX = 10_000;
 
-/** Comments one account may add per rolling 24 hours. Admins are exempt. */
-export const COMMENTS_PER_DAY = 100;
+// Comments one account may add per rolling 24 hours is a setting
+// (comments_per_day; see app/lib/settings.ts). Admins are exempt.
 
 /** A comment as stored, cleaned like a description. */
 export const cleanComment = cleanDescription;
@@ -39,13 +39,11 @@ export const COMMENT_ORDERS: ReadonlyArray<{ value: CommentOrder; label: string 
 ];
 
 /**
- * A discussion with this many comments opens best first, where the votes
- * help most; a smaller one reads in order.
+ * A discussion with `bestFirstFrom` comments or more (a setting) opens
+ * best first, where the votes help most; a smaller one reads in order.
  */
-export const BEST_FIRST_FROM = 30;
-
-export function defaultOrder(comments: number): CommentOrder {
-  return comments >= BEST_FIRST_FROM ? "best" : "old";
+export function defaultOrder(comments: number, bestFirstFrom: number): CommentOrder {
+  return comments >= bestFirstFrom ? "best" : "old";
 }
 
 export function parseOrder(value: unknown): CommentOrder | null {

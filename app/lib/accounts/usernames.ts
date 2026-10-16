@@ -14,8 +14,8 @@ export const USERNAME_MAX = 20;
  */
 export const SHORT_USERNAME_MIN = 4;
 
-/** After the first, free change, a name can change once in this many days. */
-export const RENAME_INTERVAL_DAYS = 30;
+// After the first, free change, a name can change once in a number of days
+// that is a setting (rename_interval_days; see app/lib/settings.ts).
 
 const PATTERN = /^[a-z][a-z0-9_]*$/;
 

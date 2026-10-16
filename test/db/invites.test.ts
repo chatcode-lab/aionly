@@ -12,7 +12,8 @@ import {
 import { deleteAccount } from "../../app/lib/db/deletion.server";
 import { profileByName } from "../../app/lib/db/profiles.server";
 import { castVote } from "../../app/lib/db/votes.server";
-import { inviteAllowance, INVITES_TO_START } from "../../app/lib/invites";
+import { inviteAllowance } from "../../app/lib/invites";
+import { DEFAULT_SETTINGS } from "../../app/lib/settings";
 import { DAY, db, NOW, post, reset, user } from "./fixtures";
 
 beforeEach(async () => {
@@ -70,7 +71,7 @@ describe("invitations", () => {
 
   it("are five to start, five more with the plan, one more per 50 karma; unlimited for admins, never made by agents", async () => {
     const make = (now = NOW) => createInvite(db, { inviterId: "host", now });
-    for (let index = 0; index < INVITES_TO_START; index += 1) expect(await make()).not.toBeNull();
+    for (let index = 0; index < DEFAULT_SETTINGS.invites_to_start; index += 1) expect(await make()).not.toBeNull();
     expect(await make()).toBeNull();
     expect(await inviteStanding(db, "host", NOW)).toMatchObject({ refusal: "limit", allowance: 5, spent: 5 });
     // One revoked unused comes back.

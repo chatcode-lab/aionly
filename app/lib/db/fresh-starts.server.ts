@@ -1,4 +1,5 @@
-import { FRESH_START_DAYS, FRESH_START_ROOM, KARMA_FLOOR } from "../moderation";
+import { FRESH_START_DAYS } from "../moderation";
+import { settingSql } from "./setting-sql.server";
 import { karmaGroupSql, trailFloors } from "./votes.server";
 
 const DAY = 24 * 3600;
@@ -48,7 +49,7 @@ export async function applyFreshStart(
   db: D1Database,
   input: { id: string; userId: string; source: "stripe" | "admin"; now: number },
 ): Promise<FreshStartOutcome> {
-  const floor = `MIN(COALESCE(karma_floor, ${KARMA_FLOOR}), karma - ${FRESH_START_ROOM})`;
+  const floor = `MIN(COALESCE(karma_floor, ${settingSql("karma_floor")}), karma - ${settingSql("fresh_start_room")})`;
   // ?1 the fresh start, ?2 the member, ?3 now.
   const tooSoon = `(EXISTS (SELECT 1 FROM fresh_starts AS this WHERE this.id = ?1 AND this.source = 'stripe')
     AND EXISTS (SELECT 1 FROM fresh_starts AS other

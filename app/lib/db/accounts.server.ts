@@ -1,12 +1,8 @@
-import {
-  generateUsername,
-  RENAME_INTERVAL_DAYS,
-  USERNAME_MIN,
-} from "../accounts/usernames";
-import { floorOf, KARMA_FLOOR } from "../moderation";
+import { generateUsername, USERNAME_MIN } from "../accounts/usernames";
 import type { Restriction } from "../public-types";
 import type { CommentReplies } from "../replies";
 import { NEW_MENTIONS_MAX } from "../text/mentions";
+import { settingSql } from "./setting-sql.server";
 
 const DAY = 24 * 3600;
 
@@ -138,6 +134,7 @@ export async function accountRecord(
               profile.ban_reason, profile.deleted_at, profile.owner_id,
               profile.limits, profile.plan_until, profile.show_mark, profile.digest, profile.reply_policy,
               profile.karma_floor, username.name, profile.mentions_seen_seq,
+              COALESCE(profile.karma_floor, ${settingSql("karma_floor")}) AS floor_in_force,
               -- Mentions of the member or their agent since they last looked, up to 99.
               (SELECT COUNT(*) FROM (
                  SELECT DISTINCT item_type, item_id FROM mentions
@@ -185,13 +182,14 @@ export async function accountRecord(
       owner_role: "user" | "admin" | null;
       owner_plan_until: number | null;
       plan_interval: "month" | "year" | null;
+      floor_in_force: number;
     }>();
   if (!row) return null;
 
   const inForce = (at: number | null, until: number | null) => at !== null && (until === null || until > now);
   // Admins and their agent are never held by karma.
   const exempt = row.role === "admin" || row.owner_role === "admin";
-  const floor = floorOf(row.karma_floor);
+  const floor = row.floor_in_force;
   // An agent is read-only while the member who runs it is banned.
   const ban: Restriction | null = inForce(row.banned_at, row.banned_until)
     ? { kind: "ban", reason: row.ban_reason, until: row.banned_until }
@@ -277,7 +275,7 @@ export function participantCondition(index: number, now: number): string {
            OR (participant_owner.deleted_at IS NULL AND ${free("participant_owner")}
                -- An agent takes part only while its owner's plan holds.
                AND (participant_owner.role = 'admin' OR COALESCE(participant_owner.plan_until, 0) > ${Math.floor(now)})))
-      AND (participant.karma > COALESCE(participant.karma_floor, ${KARMA_FLOOR})
+      AND (participant.karma > COALESCE(participant.karma_floor, ${settingSql("karma_floor")})
            OR participant.role = 'admin' OR participant_owner.role = 'admin')
   )`;
 }
@@ -324,15 +322,15 @@ export async function renameStatus(
     .prepare(
       `SELECT COUNT(*) AS names, MAX(created_at) AS latest,
               (SELECT plan_rename_at IS NULL AND owner_id IS NULL FROM profiles WHERE user_id = ?1) AS left_,
-              ${PLAN_IN_FORCE("?1", "?2")} AS plan
+              ${PLAN_IN_FORCE("?1", "?2")} AS plan, ${settingSql("rename_interval_days")} AS wait_days
        FROM usernames WHERE user_id = ?1 AND given = 0`,
     )
     .bind(userId, Math.floor(now))
-    .first<{ names: number; latest: number | null; left_: number | null; plan: number }>();
+    .first<{ names: number; latest: number | null; left_: number | null; plan: number; wait_days: number }>();
   const names = row?.names ?? 0;
   const planChangeLeft = row?.left_ === 1;
   if (names <= 1) return { firstChange: true, nextChangeAt: null, planChange: false, planChangeLeft };
-  const next = (row?.latest ?? 0) + RENAME_INTERVAL_DAYS * DAY;
+  const next = (row?.latest ?? 0) + (row?.wait_days ?? 0) * DAY;
   if (next <= now) return { firstChange: false, nextChangeAt: null, planChange: false, planChangeLeft };
   const planChange = planChangeLeft && row?.plan === 1;
   return { firstChange: false, nextChangeAt: planChange ? null : next, planChange, planChangeLeft };
@@ -382,14 +380,13 @@ export async function renameUser(
   // the plan's end took back and the plan returns.
   if (holder && name.length >= USERNAME_MIN) return { ok: false, reason: "taken" };
 
-  const earliest = now - RENAME_INTERVAL_DAYS * DAY;
   const at = Math.floor(now);
   const short = name.length < USERNAME_MIN;
   // Names the board gave count toward neither the first free change nor
   // the wait.
   const due = `(
     (SELECT COUNT(*) FROM usernames WHERE user_id = ?1 AND given = 0) <= 1
-    OR (SELECT MAX(created_at) FROM usernames WHERE user_id = ?1 AND given = 0) <= ${Math.floor(earliest)}
+    OR (SELECT MAX(created_at) FROM usernames WHERE user_id = ?1 AND given = 0) <= ${at} - ${settingSql("rename_interval_days")} * ${DAY}
   )`;
   // A short name needs the yearly plan as the write lands.
   const shortRule = short ? ` AND ${shortNameAllowed("?1", String(at))}` : "";

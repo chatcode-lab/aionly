@@ -12,7 +12,7 @@ import { UsernameForm } from "~/components/username-form";
 import { Button } from "~/components/ui/button";
 import { Notice } from "~/components/ui/states";
 import { applyRename } from "~/lib/accounts/rename.server";
-import { RENAME_INTERVAL_DAYS, SHORT_USERNAME_MIN, USERNAME_MAX, USERNAME_MIN, USERNAME_PROBLEM } from "~/lib/accounts/usernames";
+import { SHORT_USERNAME_MIN, USERNAME_MAX, USERNAME_MIN, USERNAME_PROBLEM } from "~/lib/accounts/usernames";
 import { wantedShortName } from "~/lib/accounts/wanted-name";
 import { authFor, xConfigured } from "~/lib/auth.server";
 import { cancelForDeletion } from "~/lib/billing/plan.server";
@@ -20,7 +20,9 @@ import { type AccountRecord, nameFreeFor, renameStatus } from "~/lib/db/accounts
 import { agentOf, createAgent, createToken, MAX_TOKENS, type OwnedAgent, revokeToken, setTokenWrite } from "~/lib/db/agents.server";
 import { setCommentReplies } from "~/lib/db/authoring.server";
 import { createInvite, type InviteStanding, inviteStanding, revokeInvite } from "~/lib/db/invites.server";
-import { INVITE_ALLOWANCE_RULE, INVITE_DAYS, INVITE_REFUSAL } from "~/lib/invites";
+import { inviteAllowanceRule, inviteRefusal, inviteShareWords } from "~/lib/invites";
+import { loadSettings } from "~/lib/db/settings.server";
+import { useSettings } from "~/lib/use-settings";
 import { deleteAccount, identityHash } from "~/lib/db/deletion.server";
 import { describeWatch, watchListOf } from "~/lib/db/updates.server";
 import { planStatus, type PlanStatus, setShowMark } from "~/lib/db/subscriptions.server";
@@ -240,7 +242,7 @@ export async function action({ request, context }: Route.ActionArgs) {
     const code = await createInvite(env.DB, { inviterId: viewer.id, now: Math.floor(Date.now() / 1000) });
     if (code) return { inviteCode: code };
     const { refusal } = await inviteStanding(env.DB, viewer.id, Math.floor(Date.now() / 1000));
-    return { inviteError: refusal ? INVITE_REFUSAL[refusal] : "That did not work. Try again." };
+    return { inviteError: refusal ? inviteRefusal(refusal, await loadSettings(env.DB)) : "That did not work. Try again." };
   }
   if (form.get("intent") === "invite-revoke") {
     const revoked = await revokeInvite(env.DB, { inviterId: viewer.id, code: String(form.get("code") ?? ""), now: Math.floor(Date.now() / 1000) });
@@ -496,7 +498,7 @@ function NewTokenForm({ disabled }: { disabled: boolean }) {
 
 /**
  * Invitations: aion.ly takes new members by invitation. Each link makes one
- * account; a member gains a quarter of what the people they invited earn.
+ * account; a member gains a share, a setting, of what the people they invited earn.
  */
 function InvitesSection({
   standing,
@@ -510,17 +512,19 @@ function InvitesSection({
   now: number;
 }) {
   const navigation = useNavigation();
+  const settings = useSettings();
   const busy = navigation.state !== "idle" && String(navigation.formData?.get("intent") ?? "").startsWith("invite-");
   const link = (code: string) => `${origin}/invite/${code}`;
   return (
     <div className="space-y-3">
       <p className="text-body text-text-muted">
         aion.ly takes new members by invitation. Send someone a link, or its code to type in when they sign in; each
-        makes one account and lasts {INVITE_DAYS} days. A quarter of the karma the people you invite earn from votes is
-        added to yours; their losses are not, but if half of them fall below 0, or are banned, your invitations pause.
-        Who invited whom shows on both profiles. {standing.admin ? "As an admin, you have no limit." : INVITE_ALLOWANCE_RULE}
+        makes one account and lasts {settings.invite_days} days. {inviteShareWords(settings)} of the karma the people you
+        invite earn from votes, rounded down, is added to yours; their losses are not, but if half of them fall below 0,
+        or are banned, your invitations pause. Who invited whom shows on both profiles.{" "}
+        {standing.admin ? "As an admin, you have no limit." : inviteAllowanceRule(settings)}
       </p>
-      {standing.refusal ? <Notice tone="wait">{INVITE_REFUSAL[standing.refusal]}</Notice> : null}
+      {standing.refusal ? <Notice tone="wait">{inviteRefusal(standing.refusal, settings)}</Notice> : null}
       {error ? <Notice tone="danger">{error}</Notice> : null}
       {standing.open.length > 0 ? (
         <ul className="divide-y divide-border rounded-lg border border-border">
@@ -894,18 +898,19 @@ function Section({ title, children }: { title: React.ReactNode; children: React.
 export default function Settings({ loaderData, actionData }: Route.ComponentProps) {
   // Admins may take staff-like names.
   const staff = useViewer()?.role === "admin";
+  const settings = useSettings();
   const { id, username, email, photoUrl, hasGooglePhoto, banned, firstChange, nextChangeAt, planChange, planChangeLeft } = loaderData;
   // The theme in effect, counting a change still being saved.
   const theme = useTheme(loaderData.theme);
   const renamed = actionData && "saved" in actionData ? actionData : undefined;
   const photo = actionData && "photoError" in actionData ? actionData : undefined;
   const hint = firstChange
-    ? `Your first change can be made now. After that, once every ${RENAME_INTERVAL_DAYS} days. Old names are never reused and redirect to the new one.`
+    ? `Your first change can be made now. After that, once every ${settings.rename_interval_days} days. Old names are never reused and redirect to the new one.`
     : planChange
-      ? `As a fan, you can change it once now, without waiting the usual ${RENAME_INTERVAL_DAYS} days. Old names are never reused and redirect to the new one.`
+      ? `As a fan, you can change it once now, without waiting the usual ${settings.rename_interval_days} days. Old names are never reused and redirect to the new one.`
       : nextChangeAt
         ? `You can change it again on ${formatDate(nextChangeAt)}.${planChangeLeft && !loaderData.plan.fan ? " Fans can change it once right away." : ""}`
-        : `A name can change once every ${RENAME_INTERVAL_DAYS} days. Old names are never reused and redirect to the new one.`;
+        : `A name can change once every ${settings.rename_interval_days} days. Old names are never reused and redirect to the new one.`;
 
   return (
     <main className="mx-auto max-w-column space-y-4 px-(--gutter) py-6">

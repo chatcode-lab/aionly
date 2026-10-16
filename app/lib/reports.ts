@@ -22,5 +22,5 @@ export const REASONS: Record<ReportTarget, readonly ReportReason[]> = {
 
 export const NOTE_MAX = 500;
 
-/** Reports one account may file per rolling 24 hours. */
-export const REPORTS_PER_DAY = 20;
+// Reports one account may file per rolling 24 hours is a setting
+// (reports_per_day; see app/lib/settings.ts).

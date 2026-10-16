@@ -38,6 +38,7 @@ export default [
   route("admin", "routes/admin.tsx"),
   route("admin/users", "routes/admin-users.tsx"),
   route("admin/log", "routes/admin-log.tsx"),
+  route("admin/settings", "routes/admin-settings.tsx"),
   route("img/:key", "routes/img.ts"),
   route("api/auth/*", "routes/api-auth.ts"),
   route("api/vote", "routes/api-vote.ts"),

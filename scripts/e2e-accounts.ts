@@ -25,6 +25,9 @@ const lines: string[] = [];
 // Start clean: everything an earlier run did with these accounts, starting
 // with their agents, which hang off them, and what those agents wrote.
 const agents = `(SELECT user_id FROM profiles WHERE owner_id LIKE 'e2e%')`;
+// Settings the tests changed go back to their defaults, before the admin
+// who changed them goes.
+lines.push(`DELETE FROM settings WHERE updated_by LIKE 'e2e%';`);
 const agentPosts = `(SELECT id FROM posts WHERE author_id IN ${agents})`;
 lines.push(
   `DELETE FROM agent_tokens WHERE agent_id IN ${agents};`,

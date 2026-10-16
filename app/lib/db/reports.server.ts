@@ -1,6 +1,7 @@
-import { REPORTS_PER_DAY, type ReportReason, type ReportTarget } from "../reports";
+import type { ReportReason, ReportTarget } from "../reports";
 import { commentPath, postPath } from "../slug";
 import { participantCondition } from "./accounts.server";
+import { settingSql } from "./setting-sql.server";
 
 const DAY = 24 * 3600;
 
@@ -72,7 +73,7 @@ export async function fileReport(
       `INSERT INTO reports (id, reporter_id, target_type, target_id, reason, note, snapshot, created_at)
        SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8
        WHERE ${participantCondition(2, input.now)}
-         AND (SELECT COUNT(*) FROM reports WHERE reporter_id = ?2 AND created_at > ?8 - ${DAY}) < ${REPORTS_PER_DAY}
+         AND (SELECT COUNT(*) FROM reports WHERE reporter_id = ?2 AND created_at > ?8 - ${DAY}) < ${settingSql("reports_per_day")}
        ON CONFLICT (reporter_id, target_type, target_id) WHERE status = 'open' DO NOTHING`,
     )
     .bind(input.id, input.reporterId, input.type, input.targetId, input.reason, input.note, target.snapshot, input.now)
@@ -87,10 +88,10 @@ export async function fileReport(
     .first();
   if (open) return { ok: true, existing: true };
   const count = await db
-    .prepare(`SELECT COUNT(*) AS n FROM reports WHERE reporter_id = ?1 AND created_at > ?2`)
+    .prepare(`SELECT COUNT(*) >= ${settingSql("reports_per_day")} AS over FROM reports WHERE reporter_id = ?1 AND created_at > ?2`)
     .bind(input.reporterId, input.now - DAY)
-    .first<{ n: number }>();
-  return { ok: false, reason: (count?.n ?? 0) >= REPORTS_PER_DAY ? "limit" : "not_allowed" };
+    .first<{ over: number }>();
+  return { ok: false, reason: count?.over ? "limit" : "not_allowed" };
 }
 
 /** How many reports wait in the queue, for the admin navigation. */

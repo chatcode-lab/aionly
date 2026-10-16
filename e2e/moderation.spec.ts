@@ -198,3 +198,41 @@ test("an admin pins a comment to the top of a discussion, and takes it down", as
   await admin.getByRole("menuitem", { name: "Unpin" }).click({ timeout: 10_000 });
   await expect(admin.getByText("Unpinned.", { exact: true })).toBeVisible();
 });
+
+test("an admin tunes the board's numbers, checked before saving and logged", async ({ browser, account, adminAccount }, testInfo) => {
+  // Each project its own value, since both run at once; the default comes back at the end.
+  const value = testInfo.project.name.includes("narrow") ? "22" : "21";
+  const member = await as(browser, account);
+  const refused = await member.goto("/admin/settings");
+  expect(refused?.status()).toBe(404);
+
+  const admin = await as(browser, adminAccount);
+  await open(admin, "/admin/settings");
+  await expect(admin.getByRole("navigation", { name: "Moderation" }).getByRole("link", { name: "Settings" })).toHaveAttribute("aria-current", "page");
+  for (const group of ["Karma", "Invitations", "Limits", "Discussions"]) {
+    await expect(admin.getByRole("heading", { name: group, level: 2 })).toBeVisible();
+  }
+  const field = admin.getByLabel("Reports a day");
+  await expect(admin.getByLabel("Karma floor (karma)")).toHaveValue(/^-\d+$/);
+
+  // Nothing is saved while any value is wrong.
+  await field.fill("many");
+  await admin.getByRole("button", { name: "Save changes" }).click();
+  await expect(admin.getByText("Nothing was saved. Fix the marked values, then save again.")).toBeVisible();
+  await expect(admin.getByText("A whole number.")).toBeVisible();
+  await expect(field).toHaveValue("many");
+
+  await field.fill(value);
+  await admin.getByRole("button", { name: "Save changes" }).click();
+  await expect(admin.getByText("Saved: Reports a day.")).toBeVisible();
+  await expect(field).toHaveValue(value);
+  await expect(admin.getByRole("region", { name: "Recent changes" })).toContainText(`changed reports a day:`);
+  await expect(admin.getByRole("region", { name: "Recent changes" })).toContainText(`→ ${value}`);
+  await open(admin, "/admin/log");
+  await expect(admin.getByText("changed the setting").first()).toBeVisible();
+
+  await open(admin, "/admin/settings");
+  await admin.getByLabel("Reports a day").fill("20");
+  await admin.getByRole("button", { name: "Save changes" }).click();
+  await expect(admin.getByText(/Saved: Reports a day\.|Nothing changed\./)).toBeVisible();
+});

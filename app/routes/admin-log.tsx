@@ -40,6 +40,7 @@ const VERB: Record<ModerationAction, string> = {
   take_name: "took the name away from",
   pin_comment: "pinned a comment",
   unpin_comment: "took down the pinned comment of",
+  set_setting: "changed the setting",
 };
 
 // What an undo undid, as a noun.

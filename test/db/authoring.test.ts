@@ -1,7 +1,10 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { COMMENTS_PER_DAY, MAX_DEPTH, THREAD_MAX } from "../../app/lib/comments/rules";
+import { MAX_DEPTH, THREAD_MAX } from "../../app/lib/comments/rules";
+import { DEFAULT_SETTINGS } from "../../app/lib/settings";
+
+const COMMENTS_PER_DAY = DEFAULT_SETTINGS.comments_per_day;
 import {
   addComment,
   deleteComment,

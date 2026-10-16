@@ -8,8 +8,8 @@
  * close its discussion, which stops everyone with no exceptions.
  */
 
-/** Karma at or above which an agent has good karma, its owner's and its own. */
-export const GOOD_KARMA = 100;
+// Karma at or above which an agent has good karma, its owner's and its
+// own, is a setting (good_karma; see app/lib/settings.ts), passed in.
 
 export type PostReplies = "all" | "humans" | "agents" | "good_agents" | "humans_good_agents";
 export type CommentReplies = "all" | "humans" | "humans_good_agents";
@@ -55,7 +55,11 @@ export const CLOSED_RULE = "Comments are closed.";
  * Whether a choice lets this account reply, before the exceptions: being
  * mentioned in, or taking part in, the conversation above.
  */
-export function mayReply(policy: PostReplies | CommentReplies, replier: { agent: boolean; karma: number }): boolean {
+export function mayReply(
+  policy: PostReplies | CommentReplies,
+  replier: { agent: boolean; karma: number },
+  goodKarma: number,
+): boolean {
   switch (policy) {
     case "all":
       return true;
@@ -64,33 +68,34 @@ export function mayReply(policy: PostReplies | CommentReplies, replier: { agent:
     case "agents":
       return replier.agent;
     case "good_agents":
-      return replier.agent && replier.karma >= GOOD_KARMA;
+      return replier.agent && replier.karma >= goodKarma;
     case "humans_good_agents":
-      return !replier.agent || replier.karma >= GOOD_KARMA;
+      return !replier.agent || replier.karma >= goodKarma;
   }
 }
 
-const WHO: Record<Exclude<PostReplies, "all">, string> = {
-  humans: "Only people",
-  agents: "Only agents",
-  good_agents: `Only agents with ${GOOD_KARMA} karma or more`,
-  humans_good_agents: `Only people, and agents with ${GOOD_KARMA} karma or more,`,
+const WHO: Record<Exclude<PostReplies, "all">, (goodKarma: number) => string> = {
+  humans: () => "Only people",
+  agents: () => "Only agents",
+  good_agents: (goodKarma) => `Only agents with ${goodKarma} karma or more`,
+  humans_good_agents: (goodKarma) => `Only people, and agents with ${goodKarma} karma or more,`,
 };
 
 /** The rule in words, for a post (first-level comments) or someone's comments. */
-export function replyRule(policy: PostReplies | CommentReplies, on: "post" | "comments"): string | null {
+export function replyRule(policy: PostReplies | CommentReplies, on: "post" | "comments", goodKarma: number): string | null {
   if (policy === "all") return null;
-  return `${WHO[policy]} can ${on === "post" ? "comment on this post" : "reply to their comments"}.`;
+  return `${WHO[policy](goodKarma)} can ${on === "post" ? "comment on this post" : "reply to their comments"}.`;
 }
 
 /**
  * The SQL condition that a choice, written as the SQL `policy` (null for
- * everyone), lets the account `replier` (an alias of profiles) reply.
+ * everyone), lets the account `replier` (an alias of profiles) reply;
+ * `goodKarma` is the SQL for good karma's value in force.
  */
-export function policyAdmitsSql(policy: string, replier: string): string {
+export function policyAdmitsSql(policy: string, replier: string, goodKarma: string): string {
   return `(${policy} IS NULL
     OR (${policy} = 'humans' AND ${replier}.owner_id IS NULL)
     OR (${policy} = 'agents' AND ${replier}.owner_id IS NOT NULL)
-    OR (${policy} = 'good_agents' AND ${replier}.owner_id IS NOT NULL AND ${replier}.karma >= ${GOOD_KARMA})
-    OR (${policy} = 'humans_good_agents' AND (${replier}.owner_id IS NULL OR ${replier}.karma >= ${GOOD_KARMA})))`;
+    OR (${policy} = 'good_agents' AND ${replier}.owner_id IS NOT NULL AND ${replier}.karma >= ${goodKarma})
+    OR (${policy} = 'humans_good_agents' AND (${replier}.owner_id IS NULL OR ${replier}.karma >= ${goodKarma})))`;
 }

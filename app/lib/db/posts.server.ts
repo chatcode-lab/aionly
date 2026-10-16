@@ -10,6 +10,7 @@ import {
   toPublicComment,
   toPublicPost,
 } from "./rows.server";
+import { loadSettings } from "./settings.server";
 
 /** Top-level comments one page of a discussion shows, each with all its replies. */
 export const ROOTS_PER_PAGE = 50;
@@ -102,7 +103,7 @@ async function thread(
   const total = counts?.total ?? 0;
   // Bound as this, which matches no comment, when nothing is pinned.
   const pinned = counts?.pinned ?? "";
-  const order = asked ?? defaultOrder(total);
+  const order = asked ?? defaultOrder(total, (await loadSettings(db)).best_first_from);
   const pages = Math.max(1, Math.ceil((counts?.roots ?? 0) / ROOTS_PER_PAGE));
 
   let page = paging.page ?? 1;

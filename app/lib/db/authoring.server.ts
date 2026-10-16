@@ -1,9 +1,10 @@
-import { COMMENTS_PER_DAY, MAX_DEPTH, THREAD_MAX } from "../comments/rules";
+import { MAX_DEPTH, THREAD_MAX } from "../comments/rules";
 import { type CommentReplies, policyAdmitsSql, type PostReplies } from "../replies";
 import { type Origin, TITLE_EDIT_SECONDS } from "../submit/rules";
 import { entitledCondition, participantCondition } from "./accounts.server";
 import { mentionStatements } from "./mentions.server";
 import { LIVE } from "./rows.server";
+import { settingSql } from "./setting-sql.server";
 
 const DAY = 24 * 3600;
 
@@ -55,6 +56,7 @@ function replyAllowed(post: number, parent: number, replier: number, now: number
         OR ${policyAdmitsSql(
           `(CASE WHEN ?${parent} IS NULL THEN (SELECT reply_policy FROM posts WHERE id = ?${post}) ELSE chooser.reply_policy END)`,
           "replier",
+          settingSql("good_karma"),
         )}
         OR EXISTS (SELECT 1 FROM posts AS above WHERE above.id = ?${post}
           AND instr(above.description, '<@' || ?${replier} || '>') > 0)
@@ -93,7 +95,7 @@ export async function addComment(
     AND ${replyAllowed(2, 3, 4, now)}
     AND (EXISTS (SELECT 1 FROM profiles WHERE user_id = ?4 AND role = 'admin')
       OR (SELECT COUNT(*) FROM comments
-          WHERE author_id = ?4 AND created_at > ?6 - ${DAY}) < ${COMMENTS_PER_DAY})`;
+          WHERE author_id = ?4 AND created_at > ?6 - ${DAY}) < ${settingSql("comments_per_day")})`;
 
   const [inserted] = await db.batch([
     db
@@ -121,7 +123,7 @@ export async function addComment(
           FROM comments WHERE id = ?2) AS parent_depth,
          (SELECT created_at FROM comments
           WHERE author_id = ?3 AND created_at > ?4 - ${DAY}
-          ORDER BY created_at DESC LIMIT 1 OFFSET ${COMMENTS_PER_DAY - 1}) AS oldest_counted,
+          ORDER BY created_at DESC LIMIT 1 OFFSET ${settingSql("comments_per_day")} - 1) AS oldest_counted,
          ${replyAllowed(1, 2, 3, now)} AS may_reply,
          CASE WHEN ?2 IS NULL THEN (SELECT reply_policy FROM posts WHERE id = ?1)
            ELSE (SELECT chooser.reply_policy FROM comments AS parent

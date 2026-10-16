@@ -6,7 +6,7 @@ import { Button } from "~/components/ui/button";
 import { Notice } from "~/components/ui/states";
 import { inviteByCode, type InviteState } from "~/lib/db/invites.server";
 import { detectInAppBrowser } from "~/lib/in-app-browser";
-import { INVITE_COOKIE, INVITE_DAYS, normalizeInviteCode } from "~/lib/invites";
+import { INVITE_COOKIE, normalizeInviteCode } from "~/lib/invites";
 import { privatePageMeta } from "~/lib/meta";
 import { withinLimits } from "~/lib/security/rate-limit.server";
 import { TAGLINE } from "~/lib/site";
@@ -46,14 +46,16 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
   const body = { ...base, state: (found?.state ?? "missing") as InviteState | "missing", inviter: found?.inviter.username ?? null };
   if (found?.state !== "open" || viewer) return data(body, { status: found ? 200 : 404 });
   const secure = url.protocol === "https:";
-  const cookie = `${INVITE_COOKIE}=${code}; Path=/; Max-Age=${INVITE_DAYS * 24 * 3600}; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`;
+  // Kept for as long as the invitation works.
+  const left = Math.max(found.expiresAt - Math.floor(Date.now() / 1000), 60);
+  const cookie = `${INVITE_COOKIE}=${code}; Path=/; Max-Age=${left}; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`;
   return data(body, { headers: { "Set-Cookie": cookie } });
 }
 
 const CLOSED: Record<Exclude<InviteState, "open"> | "missing" | "limited", string> = {
   used: "This invitation has been used. Each one makes one account.",
   revoked: "This invitation was revoked by the member who made it.",
-  expired: `This invitation has expired. They last ${INVITE_DAYS} days.`,
+  expired: "This invitation has expired. Ask the member who sent it for a new one.",
   paused: "This invitation cannot be used now: the member who made it cannot invite at the moment.",
   missing: "There is no invitation with this code. Check the code or link you were given.",
   limited: "Too many codes tried from this network just now. Wait a minute, then try again.",

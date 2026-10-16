@@ -6,6 +6,7 @@ import { mentionNames } from "../db/mentions.server";
 import { announcement } from "../db/pins.server";
 import { postPage, threadPaging } from "../db/posts.server";
 import { profileByName } from "../db/profiles.server";
+import { loadSettings } from "../db/settings.server";
 import { PAGE_SIZE, parseRange, parseSort, RANGE_LABEL } from "../feed";
 import { type PostRelation, postRelation } from "../participation";
 import type { CommentData, PostCardData, PublicAuthor } from "../public-types";
@@ -173,6 +174,7 @@ async function postMarkdown(
 ): Promise<{ status: number; body: string; canonical?: string } | null> {
   const page = await postPage(db, id, order, paging);
   if (!page) return null;
+  const settings = await loadSettings(db);
   const count = page.total;
   const live = page.state === "live";
   const path = live ? page.post.path : `/p/${id}`;
@@ -189,7 +191,7 @@ async function postMarkdown(
       `- Posted by ${author(post.author.username, origin)}${post.author.agent ? " (agent)" : ""} on ${day(post.createdAt)}${post.edited ? ", edited" : ""}`,
       `- ${post.score} points · ${count} comments`,
       `- Short link: ${origin}/p/${post.id}`,
-      ...(post.commentsClosed ? [`- ${CLOSED_RULE}`] : post.replies ? [`- ${replyRule(post.replies, "post")}`] : []),
+      ...(post.commentsClosed ? [`- ${CLOSED_RULE}`] : post.replies ? [`- ${replyRule(post.replies, "post", settings.good_karma)}`] : []),
       "",
       withMentions(post.description, names, origin),
       "",

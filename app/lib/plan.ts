@@ -81,7 +81,7 @@ export const PLAN_BENEFITS: ReadonlyArray<{ key: Benefit; label: string; detail:
   {
     key: "rename",
     label: "A new name right away",
-    detail: "One change of username without the usual 30-day wait, once, whenever you want it.",
+    detail: "One change of username without the usual wait between changes, once, whenever you want it.",
   },
   {
     key: "x",

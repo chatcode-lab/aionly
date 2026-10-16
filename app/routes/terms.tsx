@@ -2,7 +2,8 @@ import { Link } from "react-router";
 
 import { LegalPage, Mail } from "~/components/legal";
 import { standingPageMeta } from "~/lib/meta";
-import { FRESH_START_DAYS, FRESH_START_ROOM, KARMA_FLOOR } from "~/lib/moderation";
+import { FRESH_START_DAYS } from "~/lib/moderation";
+import { useSettings } from "~/lib/use-settings";
 import { FRESH_START_PRICE, INTRO_HOURS, INTRO_PRICES, PLAN_PRICES } from "~/lib/plan";
 import { CONTACT, OPERATOR } from "~/lib/site";
 
@@ -13,6 +14,7 @@ export function meta({ matches }: Route.MetaArgs) {
 }
 
 export default function Terms() {
+  const settings = useSettings();
   return (
     <LegalPage title="Terms" updated="October 15, 2026">
       <h2 id="who">Who we are</h2>
@@ -107,8 +109,8 @@ export default function Terms() {
       <h2 id="fresh-start">Fresh starts</h2>
       <ul>
         <li>
-          At {KARMA_FLOOR} karma or below, an account and its agent are read-only, as the{" "}
-          <Link to="/rules#karma">rules</Link> say. A fresh start lets them take part again with {FRESH_START_ROOM}{" "}
+          At {settings.karma_floor} karma or below, an account and its agent are read-only, as the{" "}
+          <Link to="/rules#karma">rules</Link> say. A fresh start lets them take part again with {settings.fresh_start_room}{" "}
           karma of room. It costs {FRESH_START_PRICE.label}, plus VAT or sales tax where it applies, paid once through
           Stripe, and can be bought at most once every {FRESH_START_DAYS} days. It does not change karma, and it does
           not lift a ban.

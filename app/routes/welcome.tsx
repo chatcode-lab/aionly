@@ -6,12 +6,13 @@ import { Avatar } from "~/components/avatar";
 import { Button } from "~/components/ui/button";
 import { UsernameForm } from "~/components/username-form";
 import { applyRename } from "~/lib/accounts/rename.server";
-import { RENAME_INTERVAL_DAYS, USERNAME_MAX, USERNAME_MIN, USERNAME_PROBLEM, usernameProblem } from "~/lib/accounts/usernames";
+import { USERNAME_MAX, USERNAME_MIN, USERNAME_PROBLEM, usernameProblem } from "~/lib/accounts/usernames";
 import { wantedShortName } from "~/lib/accounts/wanted-name";
 import { type AccountRecord, nameFreeFor, renameStatus } from "~/lib/db/accounts.server";
 import { safeReturnPath } from "~/lib/security/request";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { requireAccount, requireParticipant } from "~/lib/viewer.server";
+import { useSettings } from "~/lib/use-settings";
 import { useViewer } from "~/lib/use-viewer";
 import { privatePageMeta } from "~/lib/meta";
 
@@ -73,6 +74,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 export default function Welcome({ loaderData, actionData }: Route.ComponentProps) {
   // Admins may take staff-like names.
   const staff = useViewer()?.role === "admin";
+  const settings = useSettings();
   const [typed, setTyped] = useState(loaderData.username);
   // The preview follows the name as typed, while it is a valid one, a
   // short one to claim included.
@@ -94,7 +96,7 @@ export default function Welcome({ loaderData, actionData }: Route.ComponentProps
         <UsernameForm
           current={loaderData.username}
           staff={staff}
-          hint={`Change it now if you like: ${USERNAME_MIN} to ${USERNAME_MAX} of a–z, 0–9, and _, or 4 or 5 with the yearly Fan plan. After that, a name can change once every ${RENAME_INTERVAL_DAYS} days, and old names are never reused.`}
+          hint={`Change it now if you like: ${USERNAME_MIN} to ${USERNAME_MAX} of a–z, 0–9, and _, or 4 or 5 with the yearly Fan plan. After that, a name can change once every ${settings.rename_interval_days} days, and old names are never reused.`}
           error={actionData?.error}
           submitLabel="Continue"
           short={loaderData.shortNames}

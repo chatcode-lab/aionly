@@ -1,10 +1,13 @@
 import { env } from "cloudflare:workers";
 
+import { forgetSettings } from "../../app/lib/db/settings.server";
+
 export const db = env.DB;
 export const NOW = 1_800_000_000;
 export const DAY = 24 * 3600;
 
 const TABLES = [
+  "settings",
   "comment_bookmarks",
   "invites",
   "checkout_claims",
@@ -28,6 +31,8 @@ const TABLES = [
 
 export async function reset(): Promise<void> {
   await db.batch(TABLES.map((table) => db.prepare(`DELETE FROM ${table}`)));
+  // Every setting back to its default, in this instance's copy too.
+  forgetSettings();
 }
 
 export async function user(
