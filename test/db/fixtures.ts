@@ -33,7 +33,7 @@ export async function reset(): Promise<void> {
 export async function user(
   id: string,
   name: string,
-  fields: { karma?: number; deletedAt?: number; banReason?: string; role?: string; plan?: boolean } = {},
+  fields: { karma?: number; deletedAt?: number; banReason?: string; role?: string; plan?: boolean | "year" } = {},
 ): Promise<void> {
   await db.batch([
     db
@@ -49,7 +49,7 @@ export async function user(
         fields.banReason ? NOW : null,
         NOW - 100 * DAY,
         fields.deletedAt ?? null,
-        // The Supporter plan, which an agent needs from its owner to take part.
+        // The Fan plan, which an agent needs from its owner to take part.
         fields.plan ? NOW + 30 * DAY : null,
       ),
     db
@@ -57,6 +57,14 @@ export async function user(
         `INSERT INTO usernames (name, user_id, is_current, created_at) VALUES (?1, ?2, 1, ?3)`,
       )
       .bind(name, id, NOW - 100 * DAY),
+    // A yearly plan is billed through a subscription the board records.
+    ...(fields.plan === "year"
+      ? [
+          db
+            .prepare(`INSERT INTO subscriptions (user_id, customer_id, status, interval, updated_at) VALUES (?1, ?2, 'active', 'year', ?3)`)
+            .bind(id, `cus_fixture_${id}`, NOW),
+        ]
+      : []),
   ]);
 }
 

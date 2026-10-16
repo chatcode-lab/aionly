@@ -4,7 +4,7 @@ import { MAX_IMAGE_BYTES } from "./images.server";
 import { type MediaType, sniffMedia, stripJpegMetadata, UPLOAD_LIMITS } from "./uploads";
 
 /**
- * Uploads: pictures, video, and audio that supporters post, which the board
+ * Uploads: pictures, video, and audio that fans post, which the board
  * hosts in the same bucket as its snapshots. A file's type is read from its
  * first bytes (see `sniffMedia`), never taken from the browser's word for
  * it. Nothing is transcoded.

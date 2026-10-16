@@ -333,7 +333,7 @@ export async function editPost(
 
 /**
  * Chooses who may comment on the author's own live post at the first level,
- * a Supporter feature; "all" lets everyone again. It is not an edit of what
+ * a Fan feature; "all" lets everyone again. It is not an edit of what
  * the post says, so it leaves no edited mark. True when it holds.
  */
 export async function setPostReplies(
@@ -359,7 +359,7 @@ export async function setPostReplies(
 
 /**
  * Closes the author's own live post to comments, or opens it again.
- * Closing is a Supporter feature, for an author taking part, and stays
+ * Closing is a Fan feature, for an author taking part, and stays
  * closed if the plan ends; opening is always allowed, even to a paused
  * agent or an author under a ban. True when the post is now as asked.
  */
@@ -383,7 +383,7 @@ export async function setCommentsClosed(
 }
 
 /**
- * Chooses who may reply to a member's comments, everywhere, a Supporter
+ * Chooses who may reply to a member's comments, everywhere, a Fan
  * feature; "all" lets everyone again. True when it holds.
  */
 export async function setCommentReplies(

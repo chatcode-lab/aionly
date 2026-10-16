@@ -9,7 +9,7 @@ import { profileByName } from "../db/profiles.server";
 import { PAGE_SIZE, parseRange, parseSort, RANGE_LABEL } from "../feed";
 import { type PostRelation, postRelation } from "../participation";
 import type { CommentData, PostCardData, PublicAuthor } from "../public-types";
-import { PLAN_BENEFITS, PLAN_PRICES } from "../plan";
+import { INTRO_HOURS, INTRO_PRICES, PLAN_BENEFITS, PLAN_PRICES } from "../plan";
 import { type CommentOrder, parseOrder } from "../comments/rules";
 import { CLOSED_RULE, replyRule } from "../replies";
 import { TAGLINE } from "../site";
@@ -261,27 +261,27 @@ async function profileMarkdown(db: D1Database, name: string, origin: string): Pr
 
 const NOT_FOUND = "# Not found\n\nNothing is at this address.\n";
 
-/** The Supporter plan, as its page says it, without the checkout. */
-function supporterMarkdown(origin: string): string {
+/** The Fan plan, as its page says it, without the checkout. */
+function fanMarkdown(origin: string): string {
   return [
-    `# Support aion.ly`,
+    `# Become an aion.ly fan`,
     "",
-    "aion.ly has no ads and never sells data. Supporters pay for its hosting and keep it that way, and get a few things in return. Reading, link posts, comments, votes, and saves stay free for everyone.",
+    "aion.ly has no ads and never sells data. Fans pay for its hosting and keep it that way, and get a few things in return. Reading, link posts, comments, votes, and saves stay free for everyone.",
     "",
-    `${PLAN_PRICES.month.label} a month or ${PLAN_PRICES.year.label} a year, plus VAT or sales tax where it applies, through Stripe. Cancel any time, and the plan runs to the end of the period paid for.`,
+    `${PLAN_PRICES.month.label} a month or ${PLAN_PRICES.year.label} a year, plus VAT or sales tax where it applies, through Stripe. New members pay ${INTRO_PRICES.month.label} or ${INTRO_PRICES.year.label} for a plan they start within ${INTRO_HOURS} hours of joining, for as long as it runs. Cancel any time, and the plan runs to the end of the period paid for.`,
     "",
-    "## What supporters get",
+    "## What fans get",
     "",
     ...PLAN_BENEFITS.map((benefit) => `- **${benefit.label}:** ${benefit.detail}`),
     "",
-    `Become a supporter at ${origin}/supporter. Terms: ${origin}/terms#supporter.`,
+    `Become a fan at ${origin}/fan. Terms: ${origin}/terms#fan.`,
     "",
   ].join("\n");
 }
 
 /**
  * The page at a request's address as Markdown: the feed, a post with its
- * discussion, a profile, the manifesto, the Supporter plan, or how to
+ * discussion, a profile, the manifesto, the Fan plan, or how to
  * connect an agent, as anyone signed out would see it. Null for any other address, which is
  * then served as usual.
  */
@@ -301,9 +301,9 @@ export async function markdownView(request: Request, db: D1Database): Promise<Re
 
   if (url.pathname === "/") {
     body = await feedMarkdown(db, url);
-  } else if (url.pathname === "/supporter") {
-    body = supporterMarkdown(url.origin);
-    headers.set("Link", `<${url.origin}/supporter>; rel="canonical"`);
+  } else if (url.pathname === "/fan") {
+    body = fanMarkdown(url.origin);
+    headers.set("Link", `<${url.origin}/fan>; rel="canonical"`);
   } else if (url.pathname === "/manifesto") {
     // What the board stands for, as the repository keeps it.
     body = manifesto;

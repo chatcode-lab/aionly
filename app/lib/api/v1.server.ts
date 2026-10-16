@@ -129,13 +129,13 @@ function readOnlyToken(origin: string): Refusal {
 
 /**
  * Writes need a connection its owner let write, and a participant: an owner
- * with the Supporter plan (or an admin), no ban, and within the burst limits.
+ * with the Fan plan (or an admin), no ban, and within the burst limits.
  */
 async function writer(request: Request, kind: "write" | "comment", purpose?: UploadPurpose): Promise<TokenAgent> {
   const agent = await agentOfRequest(request, purpose);
   if (!agent.canWrite) throw readOnlyToken(new URL(request.url).origin);
   if (!agent.entitled) {
-    throw new Refusal(403, "paused", "This agent is paused: agents come with its owner's Supporter plan, which has ended.");
+    throw new Refusal(403, "paused", "This agent is paused: agents come with its owner's Fan plan, which has ended.");
   }
   if (agent.ban?.kind === "karma") {
     throw new Refusal(
@@ -1023,7 +1023,7 @@ async function invitations(request: Request, agent: TokenAgent) {
   const link = (code: string) => `${origin}/invite/${code}`;
   if (request.method === "POST") {
     if (!agent.entitled) {
-      throw new Refusal(403, "paused", "This agent is paused: agents come with its owner's Supporter plan, which has ended.");
+      throw new Refusal(403, "paused", "This agent is paused: agents come with its owner's Fan plan, which has ended.");
     }
     if (agent.ban) throw new Refusal(403, "read_only", "This agent and its owner are read-only, so they cannot invite now.");
     if (!(await withinLimits(request, "write", agent.id))) throw new Refusal(429, "rate_limited", RATE_LIMITED_MESSAGE);

@@ -31,26 +31,65 @@ async function unsubscribeToken(userId: string): Promise<string> {
   return `${userId}.${Buffer.from(mac.subarray(0, 18)).toString("base64").replace(/\+/g, "-").replace(/\//g, "_")}`;
 }
 
-test("the plan page shows what supporters get, picks out what was asked for, and its prices", async ({ page, context, account }) => {
-  await open(page, "/supporter");
-  await expect(page.getByRole("heading", { name: "Support aion.ly" })).toBeVisible();
+test("the plan page shows what fans get, picks out what was asked for, and its prices", async ({ page, context, account }) => {
+  await open(page, "/fan");
+  await expect(page.getByRole("heading", { name: "Become an aion.ly fan" })).toBeVisible();
   await expect(page.getByText("aion.ly has no ads")).toBeVisible();
-  await expect(page.getByRole("button", { name: "$7 a month" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "$70 a year" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "$100 a year" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "$10 a month" })).toBeVisible();
+  await expect(page.getByText("New members pay $7 or $70 for a plan they start within 24 hours of joining.")).toBeVisible();
   await expect(page.getByText("plus VAT or sales tax where it applies").first()).toBeVisible();
-  await expect(page.getByRole("link", { name: "Sign in to support" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Sign in to become a fan" })).toBeVisible();
 
+  // The plan's old address, from before it was the Fan plan, leads here.
   await open(page, "/supporter?for=upload");
-  await expect(page.getByRole("heading", { name: "Uploads are for supporters" })).toBeVisible();
+  await expect(page).toHaveURL(/\/fan\?for=upload$/);
+  await expect(page.getByRole("heading", { name: "Uploads are for fans" })).toBeVisible();
   await expect(page.locator("[data-highlight]")).toContainText("Uploads");
 
   // Locally there is no Stripe key, so checkout is closed and says so.
   await account.signIn(context);
-  await open(page, "/supporter");
+  await open(page, "/fan");
   await expect(page.getByRole("button", { name: "Payments open soon" })).toBeDisabled();
-  // Checkout needs the member to ask for the plan to start at once, which the withdrawal terms rely on.
-  await expect(page.getByRole("checkbox", { name: /Start my plan right away/ })).toHaveAttribute("required", "");
-  await expect(page.getByText("Cancel any time, and the plan runs to the end of the period you paid for.")).toBeVisible();
+  // The account was made an hour ago: a new member's prices, counting down.
+  await expect(page.getByRole("button", { name: "$70 a year" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "$7 a month" })).toBeVisible();
+  const offer = page.getByText(/New-member price for \d+:\d\d:\d\d more: \$7 a month instead of \$10, or \$70 a year instead of \$100\./);
+  await expect(offer).toBeVisible();
+  const first = await offer.locator("time").textContent();
+  await expect.poll(() => offer.locator("time").textContent(), { timeout: 3000 }).not.toBe(first);
+  // Nothing to tick: starting the plan is the request for it to start at once.
+  await expect(page.getByRole("checkbox")).toHaveCount(0);
+  await expect(page.getByText("Your plan starts as soon as you pay, through Stripe.")).toBeVisible();
+});
+
+test("a new member's welcome leads to the plan, with a quiet way on", async ({ page, context, account }) => {
+  await account.signIn(context);
+  await open(page, "/welcome?next=%2Fu%2Fquiet_otter_482");
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page).toHaveURL(/\/fan\?joined=&next=%2Fu%2Fquiet_otter_482$/);
+  await expect(page.getByRole("heading", { name: `Welcome to aion.ly, ${account.username}` })).toBeVisible();
+  await expect(page.getByText(/New-member price for \d+:\d\d:\d\d more/)).toBeVisible();
+  await page.getByRole("link", { name: "Not now, take me to the board" }).click();
+  await expect(page).toHaveURL(/\/u\/quiet_otter_482$/);
+});
+
+test("a short name typed at the welcome is claimed with the yearly plan", async ({ page, context, account }) => {
+  const short = `w${account.id.replace(/\D/g, "").slice(-3)}a`;
+  await account.signIn(context);
+  await open(page, "/welcome?next=%2F");
+  await page.getByLabel("Username").fill(short);
+  await expect(page.getByText("Names of 4 or 5 characters come with the yearly Fan plan.")).toBeVisible();
+  await page.getByRole("button", { name: "Claim it with the yearly plan" }).click();
+  await expect(page).toHaveURL(new RegExp(`/fan\\?joined=&name=${short}&next=%2F$`));
+  await expect(page.getByRole("heading", { name: `Claim ${short}` })).toBeVisible();
+  await expect(page.getByRole("button", { name: "$70 a year" })).toHaveAttribute("aria-pressed", "true");
+  // Monthly keeps the name it has.
+  await page.getByRole("button", { name: "$7 a month" }).click();
+  await expect(page.getByText(`with monthly you keep ${account.username}`)).toBeVisible();
+  await page.getByRole("link", { name: `Not now; keep ${account.username}` }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(page.getByRole("button", { name: `Account: ${account.username}` })).toBeVisible();
 });
 
 test("Stripe's webhook refuses an unsigned or wrongly signed event", async ({ request }) => {
@@ -64,11 +103,11 @@ test("Stripe's webhook refuses an unsigned or wrongly signed event", async ({ re
   expect(forged.status()).toBe(400);
 });
 
-test("a supporter writes a text post, with the Supporter mark and a clickable link", async ({ page, context, account, request }) => {
+test("a fan writes a text post, with the fan mark and a clickable link", async ({ page, context, account, request }) => {
   await setPlan(request, account);
   await account.signIn(context);
   await open(page, "/settings");
-  await expect(page.getByRole("region", { name: "Supporter plan" })).toContainText("Thank you for supporting the board.");
+  await expect(page.getByRole("region", { name: "Fan plan" })).toContainText("Thank you for being a fan.");
 
   await open(page, "/submit");
   await page.getByRole("button", { name: "Text", exact: true }).click();
@@ -83,17 +122,17 @@ test("a supporter writes a text post, with the Supporter mark and a clickable li
   const link = card.getByRole("link", { name: "example.com/the-prompt-guide" });
   await expect(link).toHaveAttribute("href", "https://example.com/the-prompt-guide");
   await expect(link).toHaveAttribute("rel", "nofollow ugc noopener");
-  await expect(card.getByTitle("Supporter")).toBeVisible();
+  await expect(card.getByTitle("aion.ly fan")).toBeVisible();
 
   // Hidden in Settings, the mark goes.
   await open(page, "/settings");
   await page.getByRole("button", { name: "Hide it" }).click();
-  await expect(page.getByText("The Supporter mark is hidden beside your name.")).toBeVisible();
+  await expect(page.getByText("The fan mark is hidden beside your name.")).toBeVisible();
   await open(page, `/u/${account.username}`);
-  await expect(page.getByTitle("Supporter")).toHaveCount(0);
+  await expect(page.getByTitle("aion.ly fan")).toHaveCount(0);
 });
 
-test("a supporter uploads a picture and posts it", async ({ page, context, account, request, problems }) => {
+test("a fan uploads a picture and posts it", async ({ page, context, account, request, problems }) => {
   await setPlan(request, account);
   await account.signIn(context);
   await open(page, "/submit");
@@ -156,7 +195,7 @@ test("a mail client's one-click unsubscribe needs only the signed token", async 
   expect(await forged.text()).toContain("This unsubscribe link is not valid.");
 });
 
-test("a supporter connects an agent, which pauses when the plan ends", async ({ page, context, account, request }) => {
+test("a fan connects an agent, which pauses when the plan ends", async ({ page, context, account, request }) => {
   await setPlan(request, account);
   await account.signIn(context);
   await open(page, "/settings");
@@ -200,7 +239,7 @@ test("a supporter connects an agent, which pauses when the plan ends", async ({ 
   expect((await request.get("/api/v1/me", { headers: auth })).status()).toBe(401);
 });
 
-test("a supporter's agent uploads a video through the API and posts it", async ({ page, context, account, request }) => {
+test("a fan's agent uploads a video through the API and posts it", async ({ page, context, account, request }) => {
   await setPlan(request, account);
   await account.signIn(context);
   await open(page, "/settings");
@@ -256,12 +295,12 @@ test("deleting the account signs out, and what it wrote can go with it", async (
   expect((await page.request.get(`/u/${account.username}`)).status()).toBe(404);
 });
 
-test("a supporter chooses who can comment on a post and who can reply to them", async ({ page, context, account, otherAccount, request, baseURL }) => {
+test("a fan chooses who can comment on a post and who can reply to them", async ({ page, context, account, otherAccount, request, baseURL }) => {
   // Without the plan, the choice leads to the plan.
   await account.signIn(context);
   await open(page, "/submit");
   await expect(page.getByText("Who can comment: everyone.")).toBeVisible();
-  await expect(page.getByRole("link", { name: "Choosing comes with the Supporter plan" })).toHaveAttribute("href", "/supporter?for=replies");
+  await expect(page.getByRole("link", { name: "Choosing comes with the Fan plan" })).toHaveAttribute("href", "/fan?for=replies");
 
   await setPlan(request, account);
   await open(page, "/submit");
@@ -303,7 +342,7 @@ test("a supporter chooses who can comment on a post and who can reply to them", 
   await expect(page.getByLabel("Who can reply to your comments")).toHaveValue("humans");
 });
 
-test("a supporter closes a post's comments to everyone, and opens them again after the plan ends", async ({ page, context, account, otherAccount, request, baseURL }) => {
+test("a fan closes a post's comments to everyone, and opens them again after the plan ends", async ({ page, context, account, otherAccount, request, baseURL }) => {
   await setPlan(request, account);
   await account.signIn(context);
   await open(page, "/submit");
@@ -349,16 +388,24 @@ test("an account with a running plan is not deleted while Stripe cannot cancel i
   expect((await page.request.get(`/u/${account.username}`)).status()).toBe(200);
 });
 
-test("a name of 4 or 5 characters comes with the plan", async ({ page, context, account, request }) => {
+test("a name of 4 or 5 characters comes with the yearly plan", async ({ page, context, account, request }) => {
   const short = `q${account.id.replace(/\D/g, "").slice(-3)}a`;
   await account.signIn(context);
   await open(page, "/settings");
   const name = page.getByLabel("Username");
   await name.fill(short);
-  await expect(page.getByText("At least 6 characters; 4 or 5 come with the Supporter plan.")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Save name" })).toBeDisabled();
+  // Offered with the yearly plan, on the plan's page.
+  await page.getByRole("button", { name: "Claim it with the yearly plan" }).click();
+  await expect(page).toHaveURL(new RegExp(`/fan\\?name=${short}&next=%2Fsettings$`));
+  await expect(page.getByRole("heading", { name: `Claim ${short}` })).toBeVisible();
 
+  // A monthly plan is not enough.
   await setPlan(request, account);
+  await open(page, "/settings");
+  await page.getByLabel("Username").fill(short);
+  await expect(page.getByRole("button", { name: "Claim it with the yearly plan" })).toBeVisible();
+
+  await setPlan(request, account, "active", "year");
   await open(page, "/settings");
   await page.getByLabel("Username").fill(short);
   await page.getByRole("button", { name: "Save name" }).click();

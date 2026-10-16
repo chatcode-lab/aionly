@@ -27,7 +27,7 @@ describe("usernameProblem", () => {
     expect(usernameProblem("abc", { short: true })).toBe("too_short");
   });
 
-  it("reserves AI brands for everyone, staff and supporters too", () => {
+  it("reserves AI brands for everyone, staff and fans too", () => {
     for (const name of ["openai", "claude", "gemini", "codex", "hermes", "kling", "suno", "meta", "anthropic"]) {
       expect(usernameProblem(name, { staff: true, short: true }), name).toBe("reserved");
     }

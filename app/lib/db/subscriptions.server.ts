@@ -9,11 +9,13 @@ export const PLAN_GRACE_SECONDS = 3 * 24 * 3600;
 /** Stripe statuses under which the plan is in force. */
 const IN_FORCE = new Set(["active", "trialing", "past_due"]);
 
-/** An account's plan as Settings and the Supporter page show it. */
+/** An account's plan as Settings and the Fan plan page show it. */
 export interface PlanStatus {
   customerId: string | null;
   status: string | null;
   interval: "month" | "year" | null;
+  /** The lookup key of the price billed, a new member's or the plan's own. */
+  priceKey: string | null;
   periodEnd: number | null;
   cancelAtPeriodEnd: boolean;
 }
@@ -21,13 +23,14 @@ export interface PlanStatus {
 export async function planStatus(db: D1Database, userId: string): Promise<PlanStatus> {
   const row = await db
     .prepare(
-      `SELECT customer_id, status, interval, period_end, cancel_at_period_end FROM subscriptions WHERE user_id = ?1`,
+      `SELECT customer_id, status, interval, price_key, period_end, cancel_at_period_end FROM subscriptions WHERE user_id = ?1`,
     )
     .bind(userId)
     .first<{
       customer_id: string;
       status: string | null;
       interval: "month" | "year" | null;
+      price_key: string | null;
       period_end: number | null;
       cancel_at_period_end: number;
     }>();
@@ -35,6 +38,7 @@ export async function planStatus(db: D1Database, userId: string): Promise<PlanSt
     customerId: row?.customer_id ?? null,
     status: row?.status ?? null,
     interval: row?.interval ?? null,
+    priceKey: row?.price_key ?? null,
     periodEnd: row?.period_end ?? null,
     cancelAtPeriodEnd: row?.cancel_at_period_end === 1,
   };
@@ -89,11 +93,12 @@ export async function applySubscription(
     db
       .prepare(
         `INSERT INTO subscriptions (user_id, customer_id, subscription_id, status, interval, period_end,
-           cancel_at_period_end, event_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+           cancel_at_period_end, event_at, updated_at, price_key)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
          ON CONFLICT (user_id) DO UPDATE SET
            customer_id = excluded.customer_id, subscription_id = excluded.subscription_id,
            status = excluded.status, interval = excluded.interval, period_end = excluded.period_end,
+           price_key = excluded.price_key,
            cancel_at_period_end = excluded.cancel_at_period_end, event_at = excluded.event_at,
            updated_at = excluded.updated_at
          WHERE (subscriptions.event_at IS NULL OR subscriptions.event_at <= excluded.event_at)
@@ -117,6 +122,7 @@ export async function applySubscription(
         subscription.cancel_at_period_end ? 1 : 0,
         input.eventAt,
         input.now,
+        subscription.items.data[0]?.price.lookup_key ?? null,
       ),
     // Follows the row just written, so a stale event changes neither. An
     // ended plan's end only moves earlier, so hearing of it again never
@@ -241,7 +247,7 @@ export async function runningSubscription(db: D1Database, userId: string): Promi
   return row?.subscription_id ?? null;
 }
 
-/** Shows or hides the Supporter mark beside the account's name. */
+/** Shows or hides the fan mark beside the account's name. */
 export async function setShowMark(db: D1Database, userId: string, show: boolean): Promise<void> {
   await db.prepare(`UPDATE profiles SET show_mark = ?2 WHERE user_id = ?1`).bind(userId, show ? 1 : 0).run();
 }

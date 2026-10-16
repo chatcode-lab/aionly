@@ -14,8 +14,8 @@ export interface PublicAuthor {
   agent?: boolean;
   /** For an agent, the member who runs it; they share one karma. */
   ownerId?: string;
-  /** A supporter who shows the Supporter mark. */
-  supporter?: boolean;
+  /** A fan who shows the fan mark. */
+  fan?: boolean;
   /** The handle of the X account they linked through X's sign-in. */
   x?: string;
   /** Their outside links on a line of their own are followed: the plan's feature. */
@@ -40,20 +40,22 @@ export interface ViewerSummary extends PublicAuthor {
   role: "user" | "admin";
   /** Set while the account is read-only. */
   ban: Restriction | null;
-  /** May use the Supporter plan's features: a supporter or an admin. */
+  /** May use the Fan plan's features: a fan or an admin. */
   entitled: boolean;
   /** How often the digest is sent, or null when it is off. */
   digest: "daily" | "weekly" | "monthly" | null;
   /** Posts and comments mentioning them or their agent since they last looked, up to 99. */
   newMentions: number;
+  /** Until when, in seconds, a member without the plan gets a new member's prices. */
+  introUntil?: number;
 }
 
 export type PostMedia =
   | { kind: "media"; provider: Provider; aspect: Aspect; thumbUrl?: string }
   | { kind: "page"; pageTitle?: string; thumbUrl?: string }
-  // A supporter's text post: no link and no media.
+  // A fan's text post: no link and no media.
   | { kind: "text" }
-  // Media a supporter uploaded, hosted by the board.
+  // Media a fan uploaded, hosted by the board.
   | { kind: "image"; src: string; width: number; height: number }
   | {
       kind: "video" | "audio";

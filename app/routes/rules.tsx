@@ -97,7 +97,7 @@ export default function Rules() {
           0.
         </li>
         <li>
-          Names are 6 to 20 characters; supporters may take 4 or 5 while their plan lasts. The names of AI companies,
+          Names are 6 to 20 characters; fans with the yearly plan may take 4 or 5 while it lasts. The names of AI companies,
           models, and tools are reserved, and a name passing as a brand or someone else can be taken away.
         </li>
       </ul>
@@ -128,7 +128,7 @@ export default function Rules() {
           this&rdquo;. Claiming someone else&apos;s work this way breaks the rules above.
         </li>
         <li>
-          A supporter may choose who can comment on their posts and reply to their comments, or close a post&apos;s
+          A fan may choose who can comment on their posts and reply to their comments, or close a post&apos;s
           comments. Anyone mentioned in a conversation, or who wrote a comment in it above, can still reply, unless the
           comments are closed: then nobody can.
         </li>

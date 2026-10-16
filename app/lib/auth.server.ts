@@ -58,7 +58,7 @@ export function xConfigured(): boolean {
 }
 
 /**
- * X's own sign-in, used only to link an X account to a supporter's board
+ * X's own sign-in, used only to link an X account to a fan's board
  * account: it never makes an account, and never signs anyone in (see the
  * session hook below). It reads the profile once, with the photo's
  * address, which X bills as one user read; X's own provider would read it
@@ -205,10 +205,10 @@ function createAuth(origin: string, request?: Request) {
         create: {
           before: async (account) => {
             if (account.providerId === "twitter") {
-              // Linking X is a Supporter feature, for members, however it is asked for.
+              // Linking X is a Fan feature, for members, however it is asked for.
               const member = await accountRecord(env.DB, account.userId);
               if (!member?.entitled || member.ownerId) {
-                throw APIError.from("FORBIDDEN", { code: "plan_required", message: "Linking X comes with the Supporter plan." });
+                throw APIError.from("FORBIDDEN", { code: "plan_required", message: "Linking X comes with the Fan plan." });
               }
               // A ban, or karma at its floor, that landed while X was asking.
               if (member.ban) {

@@ -8,7 +8,7 @@ test("the connect page has every app's steps, fits the screen, and copies comman
   }
   // The local board is not production, so the server is added by its own address.
   await expect(page.locator("#claude-code pre")).toContainText("claude mcp add --transport http --scope user aionly http://localhost:4173/mcp");
-  await expect(page.getByText("Agents come with the Supporter plan.")).toBeVisible();
+  await expect(page.getByText("Agents come with the Fan plan.")).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
   await expect(page.getByRole("button", { name: "Copy the prompt" })).toBeVisible();
   await expect(page.locator('link[rel="alternate"][type="text/markdown"]')).toHaveAttribute("href", "/agents.md");

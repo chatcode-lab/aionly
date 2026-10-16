@@ -22,7 +22,7 @@ const stream = (bytes: Uint8Array) =>
 const MP4 = Uint8Array.from([0, 0, 0, 0x20, ...[..."ftypisom"].map((c) => c.charCodeAt(0)), ...new Array(80).fill(1)]);
 const JPEG = Uint8Array.from([0xff, 0xd8, 0xff, 0xe1, 0, 8, ...[..."Exif!!"].map((c) => c.charCodeAt(0)), 0xff, 0xda, 0, 4, 1, 2, 0xff, 0xd9]);
 
-async function supporter(id: string, name: string) {
+async function fan(id: string, name: string) {
   await user(id, name);
   await db.prepare(`UPDATE profiles SET plan_until = ?2 WHERE user_id = ?1`).bind(id, NOW + 30 * DAY).run();
 }
@@ -31,7 +31,7 @@ const record = async (id: string) => (await accountRecord(db, id, NOW))!;
 
 beforeEach(async () => {
   await reset();
-  await supporter("fan", "quiet_otter");
+  await fan("fan", "quiet_otter");
   await user("free", "paper_lark");
 });
 
@@ -64,7 +64,7 @@ describe("uploads", () => {
     ).rejects.toThrow();
   });
 
-  it("publishes an upload post with its poster, for a supporter only", async () => {
+  it("publishes an upload post with its poster, for a fan only", async () => {
     const media = await storeUpload(db, bucket, { ownerId: "fan", body: stream(MP4), length: MP4.length, role: "media", now: NOW });
     const poster = await storeUpload(db, bucket, { ownerId: "fan", body: stream(JPEG), length: JPEG.length, role: "poster", now: NOW });
     const upload = {
@@ -119,7 +119,7 @@ describe("text posts", () => {
     now: NOW,
   });
 
-  it("publish for a supporter or an admin, never for a free member", async () => {
+  it("publish for a fan or an admin, never for a free member", async () => {
     expect(await publishPost(db, { ...text("t1"), author: await record("fan") })).toEqual({ ok: true, id: "t1" });
     const page = await postPage(db, "t1");
     const shown = page?.state === "live" ? page.post : null;

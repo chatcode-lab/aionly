@@ -56,7 +56,7 @@ describe("linked X accounts", () => {
     // Written again for the same link, the handle is refreshed and the choice kept.
     await rememberXAccount(db, { id: "member-twitter", userId: "member" }, { ...X, handle: "otter_builds" });
     expect(await author()).toBe("otter_builds");
-    // Shown only while the plan lasts, as the Supporter mark is.
+    // Shown only while the plan lasts, as the fan mark is.
     await db.prepare(`UPDATE profiles SET plan_until = 1 WHERE user_id = 'member'`).run();
     expect(await author()).toBeUndefined();
     await db.prepare(`UPDATE profiles SET plan_until = ?1 WHERE user_id = 'member'`).bind(NOW + 86400).run();

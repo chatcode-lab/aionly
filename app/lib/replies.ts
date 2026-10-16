@@ -1,5 +1,5 @@
 /**
- * Who may reply, a Supporter feature: a post's author chooses who may
+ * Who may reply, a Fan feature: a post's author chooses who may
  * comment on it at the first level, and a member chooses who may reply to
  * their comments, everywhere. A choice holds while its maker has the plan,
  * and never stops the maker, their agent or owner, an admin, or anyone

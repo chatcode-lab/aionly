@@ -55,7 +55,7 @@ describe("renameUser", () => {
   });
 
   it("allows the first change at once, and keeps the old name reserved", async () => {
-    expect(await renameStatus(db, "u1", NOW)).toEqual({ firstChange: true, nextChangeAt: null });
+    expect(await renameStatus(db, "u1", NOW)).toEqual({ firstChange: true, nextChangeAt: null, planChange: false, planChangeLeft: true });
     expect(await renameUser(db, "u1", "otter_prime", NOW)).toEqual({ ok: true });
     expect(await currentName("u1")).toBe("otter_prime");
     expect(await renameUser(db, "u2", "quiet_otter_482", NOW)).toEqual({ ok: false, reason: "taken" });
@@ -66,6 +66,8 @@ describe("renameUser", () => {
     expect(await renameStatus(db, "u1", NOW + DAY)).toEqual({
       firstChange: false,
       nextChangeAt: NOW + 30 * DAY,
+      planChange: false,
+      planChangeLeft: true,
     });
     expect(await renameUser(db, "u1", "otter_again", NOW + DAY)).toEqual({ ok: false, reason: "too_soon" });
     expect(await currentName("u1")).toBe("otter_prime");
@@ -94,28 +96,63 @@ describe("renameUser", () => {
     expect(await renameUser(db, "u1", "otter_prime", NOW)).toEqual({ ok: false, reason: "too_soon" });
     expect(await currentName("u1")).toBe("quiet_otter_482");
   });
+  it("gives a member with the plan one change before the wait is over, once ever", async () => {
+    const used = async () => db.prepare(`SELECT plan_rename_at, plan_rename FROM profiles WHERE user_id = 'u1'`).first();
+    await renameUser(db, "u1", "otter_prime", NOW);
+    expect(await renameUser(db, "u1", "otter_again", NOW + DAY)).toEqual({ ok: false, reason: "too_soon" });
+    // The plan starts: one change at once.
+    await db.prepare(`UPDATE profiles SET plan_until = ?1 WHERE user_id = 'u1'`).bind(NOW + 40 * DAY).run();
+    expect(await renameStatus(db, "u1", NOW + DAY)).toEqual({ firstChange: false, nextChangeAt: null, planChange: true, planChangeLeft: true });
+    expect(await renameUser(db, "u1", "otter_again", NOW + DAY)).toEqual({ ok: true });
+    expect(await used()).toEqual({ plan_rename_at: NOW + DAY, plan_rename: "otter_again" });
+    // Used: the usual wait again, from this change.
+    expect(await renameStatus(db, "u1", NOW + 2 * DAY)).toEqual({
+      firstChange: false,
+      nextChangeAt: NOW + 31 * DAY,
+      planChange: false,
+      planChangeLeft: false,
+    });
+    expect(await renameUser(db, "u1", "otter_third", NOW + 2 * DAY)).toEqual({ ok: false, reason: "too_soon" });
+    expect(await renameUser(db, "u1", "otter_third", NOW + 31 * DAY)).toEqual({ ok: true });
+  });
+
+  it("keeps the plan's early change for when it is needed", async () => {
+    await db.prepare(`UPDATE profiles SET plan_until = ?1 WHERE user_id = 'u1'`).bind(NOW + 40 * DAY).run();
+    // The first change is free anyway, and so is one after the wait.
+    expect(await renameUser(db, "u1", "otter_prime", NOW)).toEqual({ ok: true });
+    expect(await renameUser(db, "u1", "otter_again", NOW + 30 * DAY)).toEqual({ ok: true });
+    expect(await db.prepare(`SELECT plan_rename_at FROM profiles WHERE user_id = 'u1'`).first()).toEqual({ plan_rename_at: null });
+    // A short name refused for want of the yearly plan does not use it either.
+    expect(await renameUser(db, "u1", "nova", NOW + 31 * DAY)).toEqual({ ok: false, reason: "plan" });
+    expect(await db.prepare(`SELECT plan_rename_at FROM profiles WHERE user_id = 'u1'`).first()).toEqual({ plan_rename_at: null });
+  });
 });
 
 describe("short names and given names", () => {
   beforeEach(async () => {
-    await user("fan", "neon", { plan: true });
+    await user("fan", "neon", { plan: "year" });
+    await user("monthly", "pulse", { plan: true });
     await user("past", "pixel");
     await db.prepare(`UPDATE profiles SET plan_until = ?1 WHERE user_id = 'past'`).bind(NOW - 1).run();
     await user("admin", "boss", { role: "admin" });
   });
 
-  it("takes back a short name when the plan ends, giving a longer one that counts as no change", async () => {
-    expect(await revokeShortNames(db, NOW)).toBe(1);
+  it("takes back a short name when the yearly plan ends or turns monthly, giving a longer one that counts as no change", async () => {
+    expect(await revokeShortNames(db, NOW)).toBe(2);
     expect(await currentName("fan")).toBe("neon");
+    expect((await currentName("monthly"))!.length).toBeGreaterThanOrEqual(6);
     expect(await currentName("admin")).toBe("boss");
     const given = (await currentName("past"))!;
     expect(given.length).toBeGreaterThanOrEqual(6);
     // The given name is not the member's change: the first one is still free.
-    expect(await renameStatus(db, "past", NOW)).toEqual({ firstChange: true, nextChangeAt: null });
+    expect(await renameStatus(db, "past", NOW)).toEqual({ firstChange: true, nextChangeAt: null, planChange: false, planChangeLeft: true });
     // The short name stays the account's: its old address leads to the new one.
     expect(await renameUser(db, "fan", "pixel", NOW)).toEqual({ ok: false, reason: "taken" });
-    // With the plan again, it can be taken back.
-    await db.prepare(`UPDATE profiles SET plan_until = ?1 WHERE user_id = 'past'`).bind(NOW + 30 * DAY).run();
+    // With the plan again, yearly, it can be taken back.
+    await db.batch([
+      db.prepare(`UPDATE profiles SET plan_until = ?1 WHERE user_id = 'past'`).bind(NOW + 30 * DAY),
+      db.prepare(`INSERT INTO subscriptions (user_id, customer_id, interval, updated_at) VALUES ('past', 'cus_past', 'year', ?1)`).bind(NOW),
+    ]);
     expect(await renameUser(db, "past", "pixel", NOW + 60)).toEqual({ ok: true });
     expect(await currentName("past")).toBe("pixel");
     expect(await revokeShortNames(db, NOW + 120)).toBe(0);
@@ -150,6 +187,8 @@ describe("short names and given names", () => {
     await user("bot", "fan_agent");
     await db.prepare(`UPDATE profiles SET owner_id = 'fan' WHERE user_id = 'bot'`).run();
     expect(await renameUser(db, "bot", "beam", NOW)).toEqual({ ok: false, reason: "plan" });
+    // A monthly plan is not enough.
+    expect(await renameUser(db, "monthly", "nova", NOW)).toEqual({ ok: false, reason: "plan" });
     // A long name needs no plan.
     expect(await renameUser(db, "past", "pixel_long", NOW)).toEqual({ ok: true });
   });

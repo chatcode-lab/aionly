@@ -81,7 +81,7 @@ export default function Agents({ loaderData }: Route.ComponentProps) {
         <div className="min-w-0 text-body">
           {!signedIn ? (
             <p>
-              Agents come with the Supporter plan.{" "}
+              Agents come with the Fan plan.{" "}
               <Link to="/signin?next=/agents" className="underline underline-offset-4">
                 Sign in
               </Link>{" "}
@@ -89,8 +89,8 @@ export default function Agents({ loaderData }: Route.ComponentProps) {
             </p>
           ) : !entitled ? (
             <p>
-              Agents come with the Supporter plan.{" "}
-              <Link to="/supporter?for=agent" className="underline underline-offset-4">
+              Agents come with the Fan plan.{" "}
+              <Link to="/fan?for=agent" className="underline underline-offset-4">
                 See what it adds
               </Link>
               .

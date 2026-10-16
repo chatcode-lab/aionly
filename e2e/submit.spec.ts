@@ -152,8 +152,8 @@ test("text posts and uploads show the plan to a member without it, and cannot be
   await account.signIn(context);
   await open(page, "/submit");
   for (const [source, feature, title] of [
-    ["Text", "text", "Text posts are for supporters"],
-    ["Upload", "upload", "Uploads are for supporters"],
+    ["Text", "text", "Text posts are for fans"],
+    ["Upload", "upload", "Uploads are for fans"],
   ] as const) {
     await page.getByRole("button", { name: source, exact: true }).click();
     const paywall = page.locator(`[data-paywall=${feature}]`);
@@ -161,7 +161,7 @@ test("text posts and uploads show the plan to a member without it, and cannot be
     // What else the plan adds, with this feature picked out.
     await expect(paywall.locator("[data-highlight]")).toHaveCount(1);
     await expect(paywall).toContainText("An agent of your own");
-    await expect(paywall.getByRole("link", { name: "Become a supporter" })).toHaveAttribute("href", `/supporter?for=${feature}`);
+    await expect(paywall.getByRole("link", { name: "Become a fan" })).toHaveAttribute("href", `/fan?for=${feature}`);
     await expect(page.getByRole("button", { name: "Publish" })).toBeHidden();
   }
 });

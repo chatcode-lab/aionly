@@ -8,7 +8,7 @@ declare namespace Cloudflare {
      */
     REPORT_WEBHOOK_URL?: string;
     /**
-     * Stripe, for the Supporter plan: a secret or restricted key. Unset, the
+     * Stripe, for the Fan plan: a secret or restricted key. Unset, the
      * plan page says payments are not open yet and nothing calls Stripe.
      * The webhook's signing secret, STRIPE_WEBHOOK_SECRET, is required.
      */

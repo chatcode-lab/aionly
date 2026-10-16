@@ -6,8 +6,9 @@ import { Avatar } from "~/components/avatar";
 import { Button } from "~/components/ui/button";
 import { UsernameForm } from "~/components/username-form";
 import { applyRename } from "~/lib/accounts/rename.server";
-import { RENAME_INTERVAL_DAYS, USERNAME_MAX, USERNAME_MIN, usernameProblem } from "~/lib/accounts/usernames";
-import { renameStatus } from "~/lib/db/accounts.server";
+import { RENAME_INTERVAL_DAYS, USERNAME_MAX, USERNAME_MIN, USERNAME_PROBLEM, usernameProblem } from "~/lib/accounts/usernames";
+import { wantedShortName } from "~/lib/accounts/wanted-name";
+import { type AccountRecord, nameFreeFor, renameStatus } from "~/lib/db/accounts.server";
 import { safeReturnPath } from "~/lib/security/request";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { requireAccount, requireParticipant } from "~/lib/viewer.server";
@@ -20,15 +21,26 @@ export function meta({ matches, location }: Route.MetaArgs) {
   return privatePageMeta(matches, "Welcome", location.pathname);
 }
 
+/**
+ * Where the welcome leads: the plan's page, for a new member without it,
+ * with a quiet way on to `next`; else `next` itself.
+ */
+function onward(viewer: AccountRecord, next: string): string {
+  return viewer.entitled || viewer.ownerId ? next : `/fan?${new URLSearchParams({ joined: "", next })}`;
+}
+
 export async function loader({ request, context }: Route.LoaderArgs) {
   const viewer = await requireAccount(request, context);
   const url = new URL(request.url);
   const status = await renameStatus(env.DB, viewer.id);
+  const next = safeReturnPath(url.searchParams.get("next"), url.origin);
   return {
     id: viewer.id,
     username: viewer.username,
     canRename: status.nextChangeAt === null && !viewer.ban,
-    next: safeReturnPath(url.searchParams.get("next"), url.origin),
+    shortNames: viewer.shortNames,
+    next,
+    onward: onward(viewer, next),
   };
 }
 
@@ -39,12 +51,19 @@ export async function action({ request, context }: Route.ActionArgs) {
   const next = safeReturnPath(String(form.get("next") ?? ""), url.origin);
   if (!(await withinLimits(request, "write", viewer.id))) return { error: RATE_LIMITED_MESSAGE };
 
+  // A name of 4 or 5 characters: claimed with the yearly plan, on its page.
+  if (form.get("intent") === "claim") {
+    const wanted = wantedShortName(form.get("username"), { staff: viewer.role === "admin" });
+    if (!wanted) return { error: USERNAME_PROBLEM.pattern };
+    if (!(await nameFreeFor(env.DB, wanted, viewer.id))) return { error: "That name is taken. Names are never reused, so try another." };
+    throw redirect(`/fan?${new URLSearchParams({ joined: "", name: wanted, next })}`);
+  }
   const error = await applyRename(viewer.id, String(form.get("username") ?? ""), {
     staff: viewer.role === "admin",
-    short: viewer.entitled && !viewer.ownerId,
+    short: viewer.shortNames,
   });
   if (error) return { error };
-  throw redirect(next);
+  throw redirect(onward(viewer, next));
 }
 
 /**
@@ -55,8 +74,9 @@ export default function Welcome({ loaderData, actionData }: Route.ComponentProps
   // Admins may take staff-like names.
   const staff = useViewer()?.role === "admin";
   const [typed, setTyped] = useState(loaderData.username);
-  // The preview follows the name as typed, while it is a valid one.
-  const shown = usernameProblem(typed) ? loaderData.username : typed;
+  // The preview follows the name as typed, while it is a valid one, a
+  // short one to claim included.
+  const shown = usernameProblem(typed, { staff, short: true }) ? loaderData.username : typed;
   return (
     <main className="mx-auto max-w-md space-y-6 px-(--gutter) py-10">
       <div>
@@ -74,16 +94,18 @@ export default function Welcome({ loaderData, actionData }: Route.ComponentProps
         <UsernameForm
           current={loaderData.username}
           staff={staff}
-          hint={`Change it now if you like: ${USERNAME_MIN} to ${USERNAME_MAX} of a–z, 0–9, and _. After that, a name can change once every ${RENAME_INTERVAL_DAYS} days, and old names are never reused.`}
+          hint={`Change it now if you like: ${USERNAME_MIN} to ${USERNAME_MAX} of a–z, 0–9, and _, or 4 or 5 with the yearly Fan plan. After that, a name can change once every ${RENAME_INTERVAL_DAYS} days, and old names are never reused.`}
           error={actionData?.error}
           submitLabel="Continue"
+          short={loaderData.shortNames}
+          claimShort={!loaderData.shortNames}
           onNameChange={setTyped}
         >
           <input type="hidden" name="next" value={loaderData.next} />
         </UsernameForm>
       ) : (
         <Button asChild variant="primary">
-          <Link to={loaderData.next}>Continue</Link>
+          <Link to={loaderData.onward}>Continue</Link>
         </Button>
       )}
     </main>

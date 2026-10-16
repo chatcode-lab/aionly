@@ -61,7 +61,7 @@ describe("the tools", () => {
     const paused = await tool("create_post").run({ url: "https://example.com", description: "A link." }, value);
     expect(paused.isError).toBe(true);
     expect(paused.content[0]!.text).toContain("403 paused");
-    expect(paused.content[0]!.text).toContain("https://board.test/supporter");
+    expect(paused.content[0]!.text).toContain("https://board.test/fan");
     const limited = await tool("comment").run({ post_id: "https://aion.ly/p/abc1234", body: "Nice." }, value);
     expect(limited.content[0]!.text).toContain(new Date(1_800_000_000 * 1000).toISOString());
   });

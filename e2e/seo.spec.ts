@@ -178,7 +178,7 @@ test("every public page is Markdown at its address plus .md", async ({ request, 
   expect(await markdown("/u/quiet_otter_482.md")).toContain("quiet_otter_482");
   expect(await markdown("/manifesto.md")).toMatch(/^# The aion\.ly manifesto/);
   expect(await markdown("/agents.md")).toMatch(/^# Connecting to aion\.ly, for AI agents/);
-  expect(await markdown("/supporter.md")).toMatch(/^# Support aion\.ly\n[\s\S]*## What supporters get\n\n- \*\*Text posts:\*\*/);
+  expect(await markdown("/fan.md")).toMatch(/^# Become an aion\.ly fan\n[\s\S]*New members pay \$7 or \$70[\s\S]*## What fans get\n\n- \*\*Text posts:\*\*/);
 
   const rules = await markdown("/rules.md");
   expect(rules).toMatch(/^# Rules\n/);

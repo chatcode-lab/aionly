@@ -23,7 +23,7 @@ const ASPECTS: readonly Aspect[] = ["16:9", "9:16", "post", "audio"];
 
 /**
  * The author columns every listing selects, and the joins they need. The
- * plan columns decide the Supporter mark and whether outside links are
+ * plan columns decide the fan mark and whether outside links are
  * followed; an agent has its owner's plan.
  */
 export const AUTHOR_COLUMNS = `
@@ -66,17 +66,17 @@ export function toPublicAuthor(row: AuthorRow, now = Math.floor(Date.now() / 100
   if (row.author_deleted_at !== null || row.author_name === null) {
     return { id: row.author_id, username: "[deleted]" };
   }
-  const supporter = row.author_plan_until !== null && row.author_plan_until > now;
+  const fan = row.author_plan_until !== null && row.author_plan_until > now;
   const plan = row.author_owner_id
     ? row.author_owner_role === "admin" || (row.author_owner_plan_until !== null && row.author_owner_plan_until > now)
-    : row.author_role === "admin" || supporter;
+    : row.author_role === "admin" || fan;
   return {
     id: row.author_id,
     username: row.author_name,
     photoUrl: row.author_avatar ? imageAddress(row.author_avatar) : undefined,
     ...(row.author_owner_id ? { agent: true, ownerId: row.author_owner_id } : {}),
-    ...(supporter && row.author_show_mark === 1 ? { supporter: true } : {}),
-    // A linked X account shows while the plan lasts, as the Supporter mark does.
+    ...(fan && row.author_show_mark === 1 ? { fan: true } : {}),
+    // A linked X account shows while the plan lasts, as the fan mark does.
     ...(row.author_x_handle && plan ? { x: row.author_x_handle } : {}),
     ...(plan ? { outsideLinks: true } : {}),
   };

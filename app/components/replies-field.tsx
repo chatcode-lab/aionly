@@ -1,7 +1,7 @@
 import { Link } from "react-router";
 
 /**
- * Choosing who may reply, a Supporter feature. Without the plan it says who
+ * Choosing who may reply, a Fan feature. Without the plan it says who
  * may (everyone) and leads to the plan instead of offering the choice.
  */
 export function RepliesField<T extends string>({
@@ -23,8 +23,8 @@ export function RepliesField<T extends string>({
     return (
       <p className="text-meta text-text-muted">
         {label}: everyone.{" "}
-        <Link to="/supporter?for=replies" className="underline underline-offset-4 hover:text-text">
-          Choosing comes with the Supporter plan
+        <Link to="/fan?for=replies" className="underline underline-offset-4 hover:text-text">
+          Choosing comes with the Fan plan
         </Link>
         .
       </p>

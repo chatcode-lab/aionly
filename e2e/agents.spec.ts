@@ -11,7 +11,7 @@ test("members without the plan are shown agents come with it", async ({ page, co
   await account.signIn(context);
   await open(page, "/settings");
   const section = page.getByRole("region", { name: /Your agent/ });
-  await expect(section.getByRole("link", { name: "Become a supporter" })).toHaveAttribute("href", "/supporter?for=agent");
+  await expect(section.getByRole("link", { name: "Become a fan" })).toHaveAttribute("href", "/fan?for=agent");
   await expect(section.getByRole("button", { name: "Connect an agent" })).toHaveCount(0);
 });
 

@@ -25,6 +25,7 @@ import { ToastProvider } from "./components/ui/toast";
 import { invitesRequired } from "./lib/auth.server";
 import { appEnvironment } from "./lib/env.server";
 import { formatDate } from "./lib/format";
+import { introEndsAt } from "./lib/plan";
 import { imageAddress } from "./lib/media.server";
 import { detectInAppBrowser } from "./lib/in-app-browser";
 import type { ViewerSummary } from "./lib/public-types";
@@ -54,7 +55,11 @@ export async function loader({ request, context }: Route.LoaderArgs) {
         entitled: account.entitled,
         digest: account.digest,
         newMentions: account.newMentions,
-        ...(account.supporter && account.showMark ? { supporter: true } : {}),
+        ...(account.fan && account.showMark ? { fan: true } : {}),
+        // A new member's prices, while they last, for every paywall to show.
+        ...(!account.entitled && !account.ownerId && Date.now() / 1000 < introEndsAt(account.createdAt)
+          ? { introUntil: introEndsAt(account.createdAt) }
+          : {}),
       }
     : null;
   // What admins need on every page: the queue's size for the menu, and the

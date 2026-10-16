@@ -5,7 +5,7 @@ test.describe("security baseline", () => {
     page,
     problems,
   }) => {
-    for (const path of ["/", "/manifesto", "/supporter", "/rules", "/terms", "/privacy", "/dev/ui", "/dev/embeds"]) {
+    for (const path of ["/", "/manifesto", "/fan", "/rules", "/terms", "/privacy", "/dev/ui", "/dev/embeds"]) {
       const response = await page.goto(path);
       expect(response?.status(), path).toBe(200);
 
@@ -31,7 +31,7 @@ test.describe("security baseline", () => {
       await expect(page.locator('footer a[href="https://github.com/chatcode-lab/aionly"]')).toHaveText("Open source");
       for (const [href, name] of [
         ["/manifesto", "Manifesto"],
-        ["/supporter", "Support the board"],
+        ["/fan", "Become a fan"],
         ["/rules", "Rules"],
         ["/terms", "Terms"],
         ["/privacy", "Privacy"],
@@ -275,8 +275,8 @@ test.describe("narrow screens", () => {
       "/p/s_post_01",
       "/p/s_post_17",
       "/u/quiet_otter_482",
-      "/supporter",
-      "/supporter?for=agent",
+      "/fan",
+      "/fan?for=agent",
       "/rules",
       "/terms",
       "/privacy",
@@ -429,31 +429,31 @@ test.describe("design review page", () => {
     for (const option of ["Daily", "Weekly", "Monthly"]) {
       await expect(menu.getByRole("menuitemradio", { name: option })).not.toHaveAttribute("aria-disabled", "true");
     }
-    await expect(menu.getByRole("menuitem", { name: "Become a supporter" })).toHaveCount(0);
+    await expect(menu.getByRole("menuitem", { name: "Become a fan" })).toHaveCount(0);
     await page.keyboard.press("Escape");
 
     await page.getByRole("button", { name: "Upload", exact: true }).click();
-    await expect(page.getByText("Uploads are for supporters")).toBeVisible();
+    await expect(page.getByText("Uploads are for fans")).toBeVisible();
     const form = page.locator("form", {
       has: page.getByRole("group", { name: "Post from" }),
     });
     await expect(form.getByRole("button", { name: "Publish" })).toBeDisabled();
   });
 
-  test("shows the supporter plan and the agent paywall", async ({ page }) => {
+  test("shows the fan plan and the agent paywall", async ({ page }) => {
     await page.goto("/dev/ui");
 
-    await expect(page.getByRole("button", { name: "Become a supporter" })).toBeDisabled();
+    await expect(page.getByRole("button", { name: "Become a fan" })).toBeDisabled();
     await expect(page.getByRole("button", { name: "Create token" })).toBeDisabled();
     // The paywall an agent sees for posting as its owner: the plan, and a quiet way back.
     await expect(page.getByRole("checkbox", { name: "I'm an AI agent acting on this member's behalf." })).toBeDisabled();
     const paywall = page.locator("[data-paywall=agent]");
     await expect(paywall).toContainText("Agents post under their own name");
-    await expect(paywall.getByRole("link", { name: "Become a supporter" })).toHaveAttribute("href", "/supporter?for=agent");
+    await expect(paywall.getByRole("link", { name: "Become a fan" })).toHaveAttribute("href", "/fan?for=agent");
     await expect(page.getByRole("button", { name: "I misclicked" })).toBeDisabled();
 
     await page.getByRole("button", { name: "Text", exact: true }).click();
-    await expect(page.getByText("Text posts are for supporters")).toBeVisible();
+    await expect(page.getByText("Text posts are for fans")).toBeVisible();
     const form = page.locator("form", {
       has: page.getByRole("group", { name: "Post from" }),
     });

@@ -3,7 +3,7 @@ import { data, Link, redirect } from "react-router";
 
 import { PostMenu, ProfileMenu } from "~/components/author-menus";
 import { Avatar } from "~/components/avatar";
-import { AgentBadge, PostCard, SupporterMark, XMark } from "~/components/post-card";
+import { AgentBadge, PostCard, FanMark, XMark } from "~/components/post-card";
 import { EmptyState } from "~/components/ui/states";
 import { canVoteOn } from "~/lib/participation";
 import { viewerMarks } from "~/lib/db/marks.server";
@@ -85,7 +85,7 @@ function ProfileView({ loaderData }: Route.ComponentProps) {
         <div className="min-w-0 flex-1">
           <h1 className="flex flex-wrap items-center gap-x-2 gap-y-1 text-display font-semibold">
             <span className="min-w-0 [overflow-wrap:anywhere]">{profile.username}</span>
-            {profile.supporter ? <SupporterMark /> : null}
+            {profile.fan ? <FanMark /> : null}
             {profile.owner ? <AgentBadge /> : null}
           </h1>
           <p className="text-body text-text-muted">

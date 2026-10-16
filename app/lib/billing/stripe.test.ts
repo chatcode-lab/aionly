@@ -83,6 +83,27 @@ describe("checkout", () => {
     expect(sent!.get("metadata[start_now_requested_at]")).toBe("1800000000");
     expect(sent!.get("subscription_data[metadata][start_now_requested_at]")).toBe("1800000000");
     expect(sent!.get("subscription_data[metadata][user_id]")).toBe("u1");
+    expect(sent!.has("metadata[wanted_name]")).toBe(false);
+  });
+
+  it("carries a new member's short name and where they were going, on the session only", async () => {
+    let sent: URLSearchParams | null = null;
+    const fetcher = (async (_url: string, init?: RequestInit) => {
+      sent = new URLSearchParams(String(init?.body));
+      return Response.json({ url: "https://checkout.stripe.com/c/pay/cs_test" });
+    }) as typeof fetch;
+    await createCheckout(stripeClient("sk_test_unit", fetcher), {
+      customerId: "cus_1",
+      priceId: "price_1",
+      userId: "u1",
+      origin: "https://aion.ly",
+      startNowAt: 1_800_000_000,
+      wantedName: "nova",
+      then: "/p/abc1234",
+    });
+    expect(sent!.get("metadata[wanted_name]")).toBe("nova");
+    expect(sent!.get("metadata[then]")).toBe("/p/abc1234");
+    expect(sent!.has("subscription_data[metadata][wanted_name]")).toBe(false);
   });
 });
 

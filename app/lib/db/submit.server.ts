@@ -104,9 +104,9 @@ interface PostBase {
   origin: "made" | "found";
   title: string;
   description: string;
-  /** Who may comment at the first level, a Supporter feature; everyone when left out. */
+  /** Who may comment at the first level, a Fan feature; everyone when left out. */
   replies?: PostReplies;
-  /** Published with its discussion closed, a Supporter feature. */
+  /** Published with its discussion closed, a Fan feature. */
   closed?: boolean;
   now: number;
 }
@@ -121,12 +121,12 @@ export interface LinkPost extends PostBase {
   thumbKey: string | null;
 }
 
-/** A supporter's post with no link: a title and a body. */
+/** A fan's post with no link: a title and a body. */
 export interface TextPost extends PostBase {
   kind: "text";
 }
 
-/** A supporter's uploaded picture, video, or audio, with a video's poster frame. */
+/** A fan's uploaded picture, video, or audio, with a video's poster frame. */
 export interface UploadPost extends PostBase {
   kind: "upload";
   mediaKey: string;

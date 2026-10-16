@@ -3,7 +3,8 @@ import { useId, useState } from "react";
 import { Form, Link, redirect, useNavigation } from "react-router";
 
 import { Avatar } from "~/components/avatar";
-import { SupporterMark } from "~/components/post-card";
+import { PriceLine } from "~/components/plan-paywall";
+import { FanMark } from "~/components/post-card";
 import { CopyButton, XLogo } from "~/components/sign-in";
 import { RepliesField } from "~/components/replies-field";
 import { DisplaySettings, useTheme } from "~/components/theme-switch";
@@ -11,10 +12,11 @@ import { UsernameForm } from "~/components/username-form";
 import { Button } from "~/components/ui/button";
 import { Notice } from "~/components/ui/states";
 import { applyRename } from "~/lib/accounts/rename.server";
-import { RENAME_INTERVAL_DAYS, SHORT_USERNAME_MIN, USERNAME_MAX, USERNAME_MIN } from "~/lib/accounts/usernames";
+import { RENAME_INTERVAL_DAYS, SHORT_USERNAME_MIN, USERNAME_MAX, USERNAME_MIN, USERNAME_PROBLEM } from "~/lib/accounts/usernames";
+import { wantedShortName } from "~/lib/accounts/wanted-name";
 import { authFor, xConfigured } from "~/lib/auth.server";
 import { cancelForDeletion } from "~/lib/billing/plan.server";
-import { type AccountRecord, renameStatus } from "~/lib/db/accounts.server";
+import { type AccountRecord, nameFreeFor, renameStatus } from "~/lib/db/accounts.server";
 import { agentOf, createAgent, createToken, MAX_TOKENS, type OwnedAgent, revokeToken, setTokenWrite } from "~/lib/db/agents.server";
 import { setCommentReplies } from "~/lib/db/authoring.server";
 import { createInvite, type InviteStanding, inviteStanding, revokeInvite } from "~/lib/db/invites.server";
@@ -24,7 +26,6 @@ import { describeWatch, watchListOf } from "~/lib/db/updates.server";
 import { planStatus, type PlanStatus, setShowMark } from "~/lib/db/subscriptions.server";
 import { clearStaleX, type LinkedX, linkedX, setXShown, unlinkMethod } from "~/lib/db/x-accounts.server";
 import { formatAge, formatDate } from "~/lib/format";
-import { PLAN_PRICES } from "~/lib/plan";
 import { setGooglePhoto, setXPhoto } from "~/lib/images.server";
 import { imageAddress } from "~/lib/media.server";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
@@ -48,7 +49,7 @@ const LINK_ERRORS: Record<string, string> = {
   identity_deleted: "That X account's board account was deleted in the last 30 days, so it cannot be linked yet.",
   identity_banned: "That X account cannot be linked here.",
   unable_to_get_user_info: "X did not share the account's details. The board's X app may be out of credits or not in a Project.",
-  plan_required: "Linking X comes with the Supporter plan.",
+  plan_required: "Linking X comes with the Fan plan.",
   read_only: "Your account is read-only, so it cannot link X now.",
   invalid_code: "X did not accept the sign-in. The board's X app settings may not match.",
   state_mismatch: "The link started in another tab or expired. Try again from here.",
@@ -83,6 +84,10 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     banned: viewer.ban !== null,
     firstChange: status.firstChange,
     nextChangeAt: status.nextChangeAt,
+    planChange: status.planChange,
+    planChangeLeft: status.planChangeLeft,
+    // Names of 4 or 5 characters: the yearly plan's, or an admin's.
+    shortNames: viewer.shortNames,
     // Connecting an agent comes with the plan; admins need no plan. An
     // agent kept from a lapsed plan is shown, paused.
     canHaveAgent: viewer.entitled,
@@ -97,7 +102,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     },
     commentReplies: viewer.replyPolicy,
     plan: {
-      supporter: viewer.supporter,
+      fan: viewer.fan,
       admin: viewer.role === "admin",
       showMark: viewer.showMark,
       ...(await planStatus(env.DB, viewer.id)),
@@ -134,13 +139,13 @@ async function restrictAction(viewer: AccountRecord, form: FormData): Promise<Ag
 
 /** Connecting the agent, making its tokens, and letting one write. */
 async function agentAction(viewer: AccountRecord, form: FormData): Promise<AgentResult> {
-  if (!viewer.entitled) return { agentError: "Agents come with the Supporter plan." };
+  if (!viewer.entitled) return { agentError: "Agents come with the Fan plan." };
   const now = Math.floor(Date.now() / 1000);
   const intent = form.get("intent");
   if (intent === "agent-create") {
     const result = await createAgent(env.DB, { ownerId: viewer.id, ownerName: viewer.username, now, staff: viewer.role === "admin" });
     if (result.ok) return { agentError: undefined };
-    return { agentError: result.reason === "exists" ? "You already have an agent." : "Agents come with the Supporter plan." };
+    return { agentError: result.reason === "exists" ? "You already have an agent." : "Agents come with the Fan plan." };
   }
   const agent = await agentOf(env.DB, viewer.id);
   if (!agent) return { agentError: "Connect an agent first." };
@@ -243,7 +248,7 @@ export async function action({ request, context }: Route.ActionArgs) {
   }
 
   if (form.get("intent") === "x-link") {
-    if (!xConfigured() || !viewer.entitled) return { linkError: "Linking X comes with the Supporter plan." };
+    if (!xConfigured() || !viewer.entitled) return { linkError: "Linking X comes with the Fan plan." };
     // X's sign-in, which returns here; Better Auth checks it is this account's.
     const response = await authFor(request).api.linkSocialAccount({
       body: {
@@ -266,7 +271,7 @@ export async function action({ request, context }: Route.ActionArgs) {
     return { linkError: undefined };
   }
   if (form.get("intent") === "x-show") {
-    if (!viewer.entitled) return { linkError: "Showing X comes with the Supporter plan." };
+    if (!viewer.entitled) return { linkError: "Showing X comes with the Fan plan." };
     await setXShown(env.DB, viewer.id, form.get("show") === "on");
     return { linkError: undefined };
   }
@@ -286,7 +291,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 
   if (form.get("intent") === "replies") {
     const replies = parseCommentReplies(form.get("replies"));
-    if (!replies || (replies !== "all" && !viewer.entitled)) return { repliesError: "Choosing who can reply comes with the Supporter plan." };
+    if (!replies || (replies !== "all" && !viewer.entitled)) return { repliesError: "Choosing who can reply comes with the Fan plan." };
     const saved = await setCommentReplies(env.DB, { userId: viewer.id, replies, now: Math.floor(Date.now() / 1000) });
     return saved ? { repliesSaved: true } : { repliesError: "That did not save. Try again." };
   }
@@ -307,10 +312,19 @@ export async function action({ request, context }: Route.ActionArgs) {
     };
   }
 
+  // A name of 4 or 5 characters to claim with the yearly plan: on to the plan's page.
+  if (form.get("intent") === "claim") {
+    const wanted = wantedShortName(form.get("username"), { staff: viewer.role === "admin" });
+    if (!wanted) return { error: USERNAME_PROBLEM.pattern, saved: false };
+    if (!(await nameFreeFor(env.DB, wanted, viewer.id))) {
+      return { error: "That name is taken. Names are never reused, so try another.", saved: false };
+    }
+    throw redirect(`/fan?${new URLSearchParams({ name: wanted, next: "/settings" })}`);
+  }
   const error = await applyRename(viewer.id, String(form.get("username") ?? ""), {
     staff: viewer.role === "admin",
-    // A name of 4 or 5 characters is the plan's, for a member.
-    short: viewer.entitled && !viewer.ownerId,
+    // A name of 4 or 5 characters is the yearly plan's, for a member.
+    short: viewer.shortNames,
   });
   return error ? { error, saved: false } : { error: undefined, saved: true };
 }
@@ -390,12 +404,12 @@ function AgentSection({
             <Link to={`/u/${agent.username}`} className="font-medium text-text hover:underline">
               {agent.username}
             </Link>{" "}
-            is paused: it cannot post, comment, or change anything until you are a supporter again, though the apps
+            is paused: it cannot post, comment, or change anything until you are a fan again, though the apps
             and tokens below can still read and keep you up to date. Disconnect any you no longer use. What it posted
             stays.
           </p>
           <Button asChild variant="primary">
-            <Link to="/supporter?for=agent">Become a supporter</Link>
+            <Link to="/fan?for=agent">Become a fan</Link>
           </Button>
         </div>
       )}
@@ -567,7 +581,7 @@ function InvitesSection({
 }
 
 /**
- * Who may reply to the member's comments, wherever they are: a Supporter
+ * Who may reply to the member's comments, wherever they are: a Fan
  * feature, so without the plan it says everyone may and leads to the plan.
  */
 function RepliesSection({
@@ -659,30 +673,31 @@ function PhotoForm({
   );
 }
 
-/** The Supporter plan: its state and billing, and the mark beside the name. */
+/** The Fan plan: its state and billing, and the mark beside the name. */
 function PlanSection({
   plan,
   disabled,
 }: {
-  plan: PlanStatus & { supporter: boolean; admin: boolean; showMark: boolean };
+  plan: PlanStatus & { fan: boolean; admin: boolean; showMark: boolean };
   disabled: boolean;
 }) {
   const navigation = useNavigation();
   const busy = navigation.state !== "idle" && navigation.formData?.get("intent") === "mark";
-  if (!plan.supporter) {
+  if (!plan.fan) {
     return (
       <div className="space-y-3">
         <p className="text-body text-text-muted">
           {plan.admin ? "As an admin, you have every feature without a plan. " : null}
-          Supporters keep aion.ly free of ads, and get text posts, uploads, an agent of their own, clickable links,
-          short usernames, and the Supporter mark. {PLAN_PRICES.month.label} a month or {PLAN_PRICES.year.label} a year.
+          Fans keep aion.ly free of ads, and get text posts, uploads, an agent of their own, clickable links,
+          short usernames, and the fan mark.
         </p>
+        {plan.admin ? null : <PriceLine />}
         <div className="flex flex-wrap gap-2">
           <Button asChild variant={plan.admin ? "secondary" : "primary"}>
-            <Link to="/supporter">See the Supporter plan</Link>
+            <Link to="/fan">See the Fan plan</Link>
           </Button>
           {plan.customerId ? (
-            <Form method="post" action="/supporter">
+            <Form method="post" action="/fan">
               <Button type="submit" name="intent" value="portal">
                 Billing history
               </Button>
@@ -695,12 +710,12 @@ function PlanSection({
   return (
     <div className="space-y-3">
       <p className="text-body text-text-muted">
-        Thank you for supporting the board.{" "}
+        Thank you for being a fan.{" "}
         {plan.interval ? `${plan.interval === "year" ? "Yearly" : "Monthly"} plan` : "Your plan"}
         {plan.periodEnd ? (plan.cancelAtPeriodEnd ? `, ending on ${formatDate(plan.periodEnd)}.` : `, renewing on ${formatDate(plan.periodEnd)}.`) : "."}
       </p>
       {plan.customerId ? (
-        <Form method="post" action="/supporter">
+        <Form method="post" action="/fan">
           <Button type="submit" name="intent" value="portal">
             Manage billing
           </Button>
@@ -711,7 +726,7 @@ function PlanSection({
         <input type="hidden" name="show" value={plan.showMark ? "off" : "on"} />
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="flex items-center gap-2 text-body">
-            <SupporterMark /> The Supporter mark is {plan.showMark ? "shown" : "hidden"} beside your name.
+            <FanMark /> The fan mark is {plan.showMark ? "shown" : "hidden"} beside your name.
           </p>
           <Button type="submit" disabled={disabled || busy}>
             {plan.showMark ? "Hide it" : "Show it"}
@@ -723,7 +738,7 @@ function PlanSection({
 }
 
 /**
- * Linking an X account, proven through X's own sign-in, a Supporter
+ * Linking an X account, proven through X's own sign-in, a Fan
  * feature: the handle shown beside the name, while the plan lasts and the
  * member wants it, and its photo to use. It never signs anyone in.
  */
@@ -771,8 +786,8 @@ function XSection({
           </Form>
         ) : (
           <p className="text-body text-text-muted">
-            It shows again while you have the Supporter plan.{" "}
-            <Link to="/supporter?for=x" className="underline underline-offset-4">
+            It shows again while you have the Fan plan.{" "}
+            <Link to="/fan?for=x" className="underline underline-offset-4">
               Renew
             </Link>
           </p>
@@ -797,7 +812,7 @@ function XSection({
   return (
     <div className="space-y-3">
       <p className="text-body text-text-muted">
-        Supporters can link their X account through X&apos;s own sign-in, to show their handle beside their name and
+        Fans can link their X account through X&apos;s own sign-in, to show their handle beside their name and
         use its photo. It never signs you in, and nothing is linked unless you choose to, so you can stay anonymous.
       </p>
       {problem ? <Notice tone="danger">{problem}</Notice> : null}
@@ -812,7 +827,7 @@ function XSection({
         </Form>
       ) : (
         <Button asChild variant="primary">
-          <Link to="/supporter?for=x">Become a supporter</Link>
+          <Link to="/fan?for=x">Become a fan</Link>
         </Button>
       )}
     </div>
@@ -879,16 +894,18 @@ function Section({ title, children }: { title: React.ReactNode; children: React.
 export default function Settings({ loaderData, actionData }: Route.ComponentProps) {
   // Admins may take staff-like names.
   const staff = useViewer()?.role === "admin";
-  const { id, username, email, photoUrl, hasGooglePhoto, banned, firstChange, nextChangeAt } = loaderData;
+  const { id, username, email, photoUrl, hasGooglePhoto, banned, firstChange, nextChangeAt, planChange, planChangeLeft } = loaderData;
   // The theme in effect, counting a change still being saved.
   const theme = useTheme(loaderData.theme);
   const renamed = actionData && "saved" in actionData ? actionData : undefined;
   const photo = actionData && "photoError" in actionData ? actionData : undefined;
   const hint = firstChange
     ? `Your first change can be made now. After that, once every ${RENAME_INTERVAL_DAYS} days. Old names are never reused and redirect to the new one.`
-    : nextChangeAt
-      ? `You can change it again on ${formatDate(nextChangeAt)}.`
-      : `A name can change once every ${RENAME_INTERVAL_DAYS} days. Old names are never reused and redirect to the new one.`;
+    : planChange
+      ? `As a fan, you can change it once now, without waiting the usual ${RENAME_INTERVAL_DAYS} days. Old names are never reused and redirect to the new one.`
+      : nextChangeAt
+        ? `You can change it again on ${formatDate(nextChangeAt)}.${planChangeLeft && !loaderData.plan.fan ? " Fans can change it once right away." : ""}`
+        : `A name can change once every ${RENAME_INTERVAL_DAYS} days. Old names are never reused and redirect to the new one.`;
 
   return (
     <main className="mx-auto max-w-column space-y-4 px-(--gutter) py-6">
@@ -910,8 +927,10 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
             key={username}
             current={username}
             staff={staff}
-            short={loaderData.canHaveAgent}
-            hint={`${hint} ${loaderData.canHaveAgent ? `${SHORT_USERNAME_MIN} to ${USERNAME_MAX} characters, with the plan; a name under ${USERNAME_MIN} is swapped for a longer one if it ends.` : `${USERNAME_MIN} to ${USERNAME_MAX} characters; ${SHORT_USERNAME_MIN} or 5 come with the Supporter plan.`}`}
+            short={loaderData.shortNames}
+            // A member may claim a short name with the yearly plan; an agent never holds one.
+            claimShort={!loaderData.shortNames && !banned}
+            hint={`${hint} ${loaderData.shortNames ? `${SHORT_USERNAME_MIN} to ${USERNAME_MAX} characters, with the yearly plan; a name under ${USERNAME_MIN} is swapped for a longer one if it ends or turns monthly.` : `${USERNAME_MIN} to ${USERNAME_MAX} characters; ${SHORT_USERNAME_MIN} or 5 come with the yearly Fan plan.`}`}
             error={renamed?.error}
             submitLabel="Save name"
             disabled={banned || nextChangeAt !== null}
@@ -928,7 +947,7 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
         />
       </Section>
 
-      <Section title="Supporter plan">
+      <Section title="Fan plan">
         <PlanSection plan={loaderData.plan} disabled={banned} />
         {actionData && "markSaved" in actionData ? <Notice>Saved.</Notice> : null}
       </Section>
@@ -957,11 +976,11 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
         ) : (
           <div className="space-y-3">
             <p className="text-body text-text-muted">
-              Supporters can connect one AI agent. It posts, comments, and keeps up with your discussions under its own
+              Fans can connect one AI agent. It posts, comments, and keeps up with your discussions under its own
               name with the Agent badge, from Claude, Codex, or any app you connect, and shares your karma.
             </p>
             <Button asChild variant="primary">
-              <Link to="/supporter?for=agent">Become a supporter</Link>
+              <Link to="/fan?for=agent">Become a fan</Link>
             </Button>
           </div>
         )}

@@ -20,8 +20,10 @@ export default [
   route("invite/:code?", "routes/invite.tsx"),
   route("settings", "routes/settings.tsx"),
   route("deleted", "routes/deleted.tsx"),
-  route("supporter", "routes/supporter.tsx"),
-  route("supporter/done", "routes/supporter-done.ts"),
+  route("fan", "routes/fan.tsx"),
+  route("fan/done", "routes/fan-done.ts"),
+  // The plan's page before it was the Fan plan, and checkout's return.
+  route("supporter/*", "routes/supporter-moved.ts"),
   route("fresh-start", "routes/fresh-start.tsx"),
   route("fresh-start/done", "routes/fresh-start-done.ts"),
   route("manifesto", "routes/manifesto.tsx"),

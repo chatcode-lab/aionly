@@ -15,7 +15,7 @@ import {
   stillHolding,
   runningSubscription,
 } from "../db/subscriptions.server";
-import { FRESH_START_PRICE, PLAN_PRICES, type PlanInterval } from "../plan";
+import { FRESH_START_PRICE, INTRO_PRICES, introEndsAt, PLAN_PRICES, type PlanInterval } from "../plan";
 import {
   cancelSubscription,
   checkoutSubscription,
@@ -28,6 +28,7 @@ import {
   getSubscription,
   isRunning,
   paidFreshStart,
+  portalConfigurationFor,
   pricesByLookupKey,
   refundPayment,
   runningSubscriptions,
@@ -96,8 +97,15 @@ async function holdingCheckout<T>(
 }
 
 /**
+ * Past the end of a new member's prices, how long a checkout still gets
+ * them, for someone who opened the plan's page in time.
+ */
+const INTRO_GRACE_SECONDS = 10 * 60;
+
+/**
  * Stripe's checkout page for the plan, billed monthly or yearly, for a member
- * who asked for it to start at once. One plan per member: a subscription
+ * who asked for it to start at once, at a new member's price within
+ * INTRO_HOURS of joining. One plan per member: a subscription
  * Stripe already has is applied instead, and any checkout left open is
  * closed first, so two tabs cannot buy two plans.
  */
@@ -106,8 +114,9 @@ export async function checkoutUrl(
   interval: PlanInterval,
   origin: string,
   startNowAt: number,
+  onReturn: { wantedName?: string | null; then?: string | null } = {},
 ): Promise<string> {
-  const lookupKey = PLAN_PRICES[interval].lookupKey;
+  const lookupKey = (now() < introEndsAt(viewer.createdAt) + INTRO_GRACE_SECONDS ? INTRO_PRICES : PLAN_PRICES)[interval].lookupKey;
   const prices = await pricesByLookupKey(client(), [lookupKey]);
   const priceId = prices.get(lookupKey);
   if (!priceId) throw new Error(`no active Stripe price has the lookup key ${lookupKey}`);
@@ -120,7 +129,7 @@ export async function checkoutUrl(
     }
     await expireOpenCheckouts(client(), customerId);
     await attempt.holding();
-    return createCheckout(client(), { customerId, priceId, userId: viewer.id, origin, startNowAt, attempt: attempt.id });
+    return createCheckout(client(), { customerId, priceId, userId: viewer.id, origin, startNowAt, attempt: attempt.id, ...onReturn });
   });
 }
 
@@ -162,26 +171,32 @@ export async function finishFreshStart(viewer: AccountRecord, sessionId: string)
   return settleFreshStart(session, viewer.id);
 }
 
-/** Stripe's customer portal, where a supporter changes or cancels the plan. */
+/** Stripe's customer portal, where a fan changes or cancels the plan. */
 export async function portalUrl(viewer: AccountRecord, origin: string): Promise<string | null> {
-  const { customerId } = await planStatus(env.DB, viewer.id);
+  const { customerId, priceKey } = await planStatus(env.DB, viewer.id);
   if (!customerId) return null;
-  return createPortal(client(), {
-    customerId,
-    returnUrl: `${origin}/settings`,
-    configuration: env.STRIPE_PORTAL_CONFIGURATION,
-  });
+  // A plan at a new member's price switches only between those prices, in
+  // the portal configuration marked for them; the default one switches
+  // between the plan's own, so nobody moves onto a price not theirs.
+  const intro = priceKey !== null && Object.values(INTRO_PRICES).some((price) => price.lookupKey === priceKey);
+  const configuration = intro ? await portalConfigurationFor(client(), "intro") : env.STRIPE_PORTAL_CONFIGURATION;
+  if (intro && !configuration) throw new Error("no billing portal configuration has the metadata aionly_prices=intro");
+  return createPortal(client(), { customerId, returnUrl: `${origin}/settings`, configuration: configuration ?? undefined });
 }
 
 /**
  * Applies the subscription a finished checkout made, so the plan is on when
- * the supporter lands back here, whether or not Stripe's webhook came first.
- * Only the account that started the checkout can finish it.
+ * the fan lands back here, whether or not Stripe's webhook came first.
+ * Only the account that started the checkout can finish it. With it come
+ * what the checkout carried for the return: a short name and where to go.
  */
-export async function finishCheckout(viewer: AccountRecord, sessionId: string): Promise<boolean> {
-  const { userId, subscription } = await checkoutSubscription(client(), sessionId);
-  if (userId !== viewer.id || !subscription) return false;
-  return applySubscription(env.DB, subscription, { eventAt: now(), now: now() });
+export async function finishCheckout(
+  viewer: AccountRecord,
+  sessionId: string,
+): Promise<{ applied: boolean; wantedName: string | null; then: string | null }> {
+  const { userId, subscription, wantedName, then } = await checkoutSubscription(client(), sessionId);
+  if (userId !== viewer.id || !subscription) return { applied: false, wantedName: null, then: null };
+  return { applied: await applySubscription(env.DB, subscription, { eventAt: now(), now: now() }), wantedName, then };
 }
 
 /**

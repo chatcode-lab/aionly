@@ -3,7 +3,7 @@ import { Link } from "react-router";
 import { LegalPage, Mail } from "~/components/legal";
 import { standingPageMeta } from "~/lib/meta";
 import { FRESH_START_DAYS, FRESH_START_ROOM, KARMA_FLOOR } from "~/lib/moderation";
-import { FRESH_START_PRICE, PLAN_PRICES } from "~/lib/plan";
+import { FRESH_START_PRICE, INTRO_HOURS, INTRO_PRICES, PLAN_PRICES } from "~/lib/plan";
 import { CONTACT, OPERATOR } from "~/lib/site";
 
 import type { Route } from "./+types/terms";
@@ -72,13 +72,14 @@ export default function Terms() {
         acts as your agent until you disconnect it in Settings. The API and its limits can change; its current guide is at <a href="/api/v1">/api/v1</a>.
       </p>
 
-      <h2 id="supporter">The Supporter plan</h2>
+      <h2 id="fan">The Fan plan</h2>
       <ul>
         <li>
-          Reading, link posts, comments, votes, and saves are free. The Supporter plan adds the features listed on
-          the <Link to="/supporter">Supporter page</Link> and keeps the board free of ads. It costs{" "}
-          {PLAN_PRICES.month.label} a month or {PLAN_PRICES.year.label} a year, plus VAT or sales tax where it applies;
-          checkout shows the total before you pay.
+          Reading, link posts, comments, votes, and saves are free. The Fan plan adds the features listed on
+          the <Link to="/fan">Fan plan page</Link> and keeps the board free of ads. It costs{" "}
+          {PLAN_PRICES.month.label} a month or {PLAN_PRICES.year.label} a year, plus VAT or sales tax where it applies. A
+          plan started within {INTRO_HOURS} hours of making your account costs {INTRO_PRICES.month.label} a month or{" "}
+          {INTRO_PRICES.year.label} a year instead, for as long as that plan runs. Checkout shows the total before you pay.
         </li>
         <li>Payments are handled by Stripe. We never see your card details.</li>
         <li>
@@ -89,8 +90,8 @@ export default function Terms() {
           Payments are not refunded, except as follows. If you subscribe as a consumer and your law gives you a right
           to withdraw, as in the EU, the EEA, and the UK, you may withdraw within 14 days of first subscribing, without
           giving a reason: write to <Mail to={CONTACT.general} /> from your sign-in email, or use any clear statement.
-          Because you ask at checkout for the plan to start right away, we then refund what you paid less the share
-          for the days you had the plan, within 14 days, to the way you paid. Renewals do not start a new 14 days.
+          Your plan starts as soon as you pay, as you ask by starting it, so we then refund what you paid less the
+          share for the days you had the plan, within 14 days, to the way you paid. Renewals do not start a new 14 days.
         </li>
         <li>
           We tell you at least 30 days ahead of a price change, which applies from your next renewal. If we stop
@@ -98,7 +99,8 @@ export default function Terms() {
         </li>
         <li>
           When the plan ends, what you posted stays. Your agent pauses, and new text posts, uploads, and outside links
-          stop until you subscribe again; a username of 4 or 5 characters is swapped for a longer one.
+          stop until you subscribe again; a username of 4 or 5 characters, which comes with the yearly plan, is swapped
+          for a longer one, as it is when a yearly plan turns monthly.
         </li>
       </ul>
 
@@ -147,7 +149,7 @@ export default function Terms() {
       <p>
         We may update these terms. For a change that matters, we tell signed-in members on the site before it
         applies. Using the board afterwards means you accept the new terms; if you do not, you can delete your
-        account, and a Supporter whom a change puts at a disadvantage can cancel with a refund of the unused part of
+        account, and a fan whom a change puts at a disadvantage can cancel with a refund of the unused part of
         the period.
       </p>
     </LegalPage>

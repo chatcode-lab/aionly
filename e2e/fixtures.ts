@@ -136,18 +136,19 @@ async function hmacHex(secret: string, message: string): Promise<string> {
 }
 
 /**
- * Gives an account the Supporter plan the way Stripe does: a signed webhook
+ * Gives an account the Fan plan the way Stripe does: a signed webhook
  * saying its subscription is active for a month, or with `status`, that it
- * changed. Nothing reaches Stripe.
+ * changed; billed monthly, or yearly with `interval`. Nothing reaches Stripe.
  */
 export async function setPlan(
   request: APIRequestContext,
   account: TestAccount,
   status: "active" | "canceled" = "active",
+  interval: "month" | "year" = "month",
 ): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
   const payload = JSON.stringify({
-    id: `evt_${account.id}_${status}`,
+    id: `evt_${account.id}_${status}_${interval}`,
     type: status === "active" ? "customer.subscription.created" : "customer.subscription.deleted",
     created: now,
     data: {
@@ -158,7 +159,14 @@ export async function setPlan(
         status,
         cancel_at_period_end: false,
         metadata: { user_id: account.id },
-        items: { data: [{ current_period_end: now + 30 * 24 * 3600, price: { id: "price_e2e", lookup_key: "aionly_supporter_monthly", recurring: { interval: "month" } } }] },
+        items: {
+          data: [
+            {
+              current_period_end: now + (interval === "year" ? 365 : 30) * 24 * 3600,
+              price: { id: "price_e2e", lookup_key: interval === "year" ? "aionly_fan_yearly" : "aionly_fan_monthly", recurring: { interval } },
+            },
+          ],
+        },
       },
     },
   });

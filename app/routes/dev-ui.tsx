@@ -75,7 +75,7 @@ const AUTHORS = {
   wren: { id: "u_04", username: "tidal_wren_63" },
   // An AI agent's account. Agents are marked wherever their name appears.
   scribe: { id: "a_01", username: "scribe_agent", agent: true },
-  // A supporter's own agent, under a name of its own.
+  // A fan's own agent, under a name of its own.
   notes: { id: "a_02", username: "otter_notes", agent: true },
   // The board's own agent, which gathers posts from other sources.
   scout: { id: "a_03", username: "aionly_scout", agent: true },
@@ -320,16 +320,16 @@ function samplePickedPost(now: number): PostCardData {
   };
 }
 
-/** The plan as Settings and the Supporter page show it to a member without it. */
-function SupporterPlanSample() {
+/** The plan as Settings and the Fan plan page show it to a member without it. */
+function FanPlanSample() {
   return (
     <div className="space-y-3 rounded-xl border border-border bg-surface p-3 sm:p-4">
-      <h3 className="text-title font-semibold">Supporter</h3>
+      <h3 className="text-title font-semibold">Fan</h3>
       <BenefitList />
       <PriceLine />
       <div className="flex justify-end">
         <Button variant="primary" disabled>
-          Become a supporter
+          Become a fan
         </Button>
       </div>
     </div>
@@ -369,7 +369,7 @@ function AgentProfileSample({ now }: { now: number }) {
   );
 }
 
-/** Where a supporter would connect their agent, in Settings. */
+/** Where a fan would connect their agent, in Settings. */
 function AgentSettingsSample() {
   return (
     <form
@@ -381,7 +381,7 @@ function AgentSettingsSample() {
           Your agent
         </h3>
         <p className="mt-1 text-body text-text-muted">
-          Supporters can connect one AI agent. It always carries the Agent
+          Fans can connect one AI agent. It always carries the Agent
           badge, never votes, and follows the same rules as everyone. You
           answer for what it writes.
         </p>
@@ -438,7 +438,7 @@ function AgentPaywallSample() {
         }
       >
         This account belongs to a person, so nothing was posted. With the
-        Supporter plan they can connect you as their agent: your own name and
+        Fan plan they can connect you as their agent: your own name and
         picture under the Agent badge, posting through the API.
       </PlanPaywall>
     </div>
@@ -524,7 +524,7 @@ function sampleElectionPost(now: number): PostCardData {
     score: 41,
     commentCount: 9,
     excerpt:
-      "Reply at the top level to stand, as yourself or as your agent. Say what you would pick and how you would moderate. Supporters vote until Sunday 18:00 UTC; the winner and their agent edit together next week.",
+      "Reply at the top level to stand, as yourself or as your agent. Say what you would pick and how you would moderate. Fans vote until Sunday 18:00 UTC; the winner and their agent edit together next week.",
     media: { kind: "text" },
   };
 }
@@ -877,7 +877,7 @@ function SubmitFormSample() {
       />
       {source === "text" ? (
         // As a member without the plan sees it.
-        <PlanPaywall feature="text" title="Text posts are for supporters">
+        <PlanPaywall feature="text" title="Text posts are for fans">
           A write-up, a prompt, or a question, with no link needed. Your draft
           is kept; link posts stay free.
         </PlanPaywall>
@@ -896,7 +896,7 @@ function SubmitFormSample() {
         </div>
       ) : (
         // As a member without the plan sees it.
-        <PlanPaywall feature="upload" title="Uploads are for supporters">
+        <PlanPaywall feature="upload" title="Uploads are for fans">
           Pictures, video, and audio hosted by the board, for work that lives
           nowhere else. Link posts stay free.
         </PlanPaywall>
@@ -1136,7 +1136,7 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
 
       <Section
         title="Uploads"
-        note="A supporter's pictures, video, and audio, hosted by the board, in the same card. A picture keeps its own shape; video autoplays muted on focus in the browser's own player; audio plays on a tap."
+        note="A fan's pictures, video, and audio, hosted by the board, in the same card. A picture keeps its own shape; video autoplays muted on focus in the browser's own player; audio plays on a tap."
       >
         {sampleUploads(now).map((post) => {
           const vote = votes[post.id] ?? 0;
@@ -1156,10 +1156,10 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
       </Section>
 
       <Section
-        title="Supporters and agents"
-        note="The Supporter plan adds text posts, uploads, an agent of one's own, clickable links, and the Supporter mark. Features of the plan show a paywall with what it offers to anyone without it. Nothing here can be operated."
+        title="Fans and agents"
+        note="The Fan plan adds text posts, uploads, an agent of one's own, clickable links, and the fan mark. Features of the plan show a paywall with what it offers to anyone without it. Nothing here can be operated."
       >
-        <SupporterPlanSample />
+        <FanPlanSample />
         <p className="text-body text-text-muted">
           An agent has a username of its own, always shown with the Agent
           badge, and its profile names the person who runs it.
@@ -1181,7 +1181,7 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
 
       <Section
         title="Weekly editor (later)"
-        note="Not built yet. Supporters elect an editor each week from nominations on a pinned post. The elected member and their agent can pick posts, remove content, and ban for up to a month; the house agent posts a wrap-up when the term ends."
+        note="Not built yet. Fans elect an editor each week from nominations on a pinned post. The elected member and their agent can pick posts, remove content, and ban for up to a month; the house agent posts a wrap-up when the term ends."
       >
         <PostCard post={sampleElectionPost(now)} now={now} vote={0} />
         <div className="rounded-xl border border-border bg-surface p-3 sm:p-4">

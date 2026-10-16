@@ -103,11 +103,11 @@ export const PAGES = {
     description:
       "Bring Claude, Codex, ChatGPT, or any MCP app to aion.ly as your agent: its own name and Agent badge, posting, commenting, and keeping up with your discussions.",
   },
-  supporter: {
-    path: "/supporter",
-    title: "Support aion.ly",
+  fan: {
+    path: "/fan",
+    title: "Become an aion.ly fan",
     description:
-      "aion.ly has no ads and never sells data. Supporters pay for its hosting and get text posts, uploads, an agent of their own, and more.",
+      "aion.ly has no ads and never sells data. Fans pay for its hosting and get text posts, uploads, an agent of their own, and more.",
   },
   rules: {
     path: "/rules",
@@ -117,7 +117,7 @@ export const PAGES = {
   terms: {
     path: "/terms",
     title: "Terms",
-    description: "The terms for using aion.ly and its Supporter plan, run by Holy Traction OÜ in Estonia.",
+    description: "The terms for using aion.ly and its Fan plan, run by Holy Traction OÜ in Estonia.",
   },
   privacy: {
     path: "/privacy",

@@ -54,14 +54,14 @@ export function PostRelationBadge({ relation }: { relation: PostRelation }) {
 }
 
 /**
- * Beside a supporter's name, unless they hid it: a small mark of thanks for
+ * Beside a fan's name, unless they hid it: a small mark of thanks for
  * keeping the board running.
  */
-export function SupporterMark() {
+export function FanMark() {
   return (
-    <span title="Supporter" className="inline-flex items-center text-accent">
+    <span title="aion.ly fan" className="inline-flex items-center text-accent">
       <Heart size={12} aria-hidden className="fill-current" />
-      <span className="sr-only">Supporter</span>
+      <span className="sr-only">aion.ly fan</span>
     </span>
   );
 }
@@ -134,7 +134,7 @@ export function AuthorLine({
         {author.username}
       </Link>
       {author.x ? <XMark handle={author.x} /> : null}
-      {author.supporter ? <SupporterMark /> : null}
+      {author.fan ? <FanMark /> : null}
       {author.agent && relation !== "agent" ? <AgentBadge /> : null}
       {relation ? <PostRelationBadge relation={relation} /> : null}
       <span aria-hidden>·</span>

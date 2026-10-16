@@ -7,9 +7,10 @@ export const USERNAME_MIN = 6;
 export const USERNAME_MAX = 20;
 
 /**
- * Names of 4 or 5 characters are a Supporter perk, for members (never
- * agents), while the plan lasts; when it ends, the hourly run gives the
- * account a longer name, and the short one waits for its return.
+ * Names of 4 or 5 characters come with the yearly Fan plan, for members
+ * (never agents), while it lasts; when it ends or turns monthly, the hourly
+ * run gives the account a longer name, and the short one waits for its
+ * return.
  */
 export const SHORT_USERNAME_MIN = 4;
 
@@ -101,7 +102,7 @@ export type UsernameProblem =
 
 export const USERNAME_PROBLEM: Record<UsernameProblem, string> = {
   too_short: `At least ${USERNAME_MIN} characters.`,
-  short_plan: `At least ${USERNAME_MIN} characters; ${SHORT_USERNAME_MIN} or 5 come with the Supporter plan.`,
+  short_plan: `At least ${USERNAME_MIN} characters; ${SHORT_USERNAME_MIN} or 5 come with the yearly Fan plan.`,
   too_long: `At most ${USERNAME_MAX} characters.`,
   pattern:
     "Use lowercase letters, digits, and underscores, starting with a letter.",

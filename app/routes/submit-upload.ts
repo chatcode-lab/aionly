@@ -13,11 +13,11 @@ const refuse = (status: number, error: string) => Response.json({ ok: false, err
 /**
  * Takes an upload for the submit form: the file itself as the body, or with
  * `?role=poster`, a video's poster frame. It is kept pending, as the
- * account's one upload, until a post is published with it. Supporters only.
+ * account's one upload, until a post is published with it. Fans only.
  */
 export async function action({ request, context }: Route.ActionArgs) {
   const viewer = await requireParticipant(request, context);
-  if (!viewer.entitled) return refuse(403, "Uploads come with the Supporter plan.");
+  if (!viewer.entitled) return refuse(403, "Uploads come with the Fan plan.");
   if (!(await withinLimits(request, "write", viewer.id))) return rateLimited();
   const length = Number(request.headers.get("Content-Length"));
   if (!request.body || !Number.isInteger(length) || length <= 0) return refuse(411, "Send the file as the request body.");
@@ -30,7 +30,7 @@ export async function action({ request, context }: Route.ActionArgs) {
     now: Math.floor(Date.now() / 1000),
   });
   if (!result.ok) {
-    if (result.reason === "not_allowed") return refuse(403, "Uploads come with the Supporter plan, for an account that can take part.");
+    if (result.reason === "not_allowed") return refuse(403, "Uploads come with the Fan plan, for an account that can take part.");
     if (result.reason === "too_large") {
       return refuse(
         413,

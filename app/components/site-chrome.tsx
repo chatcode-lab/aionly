@@ -63,8 +63,8 @@ export function SiteFooter({ reviewPages = false }: { reviewPages?: boolean }) {
           Privacy
         </Link>
         <span aria-hidden>·</span>
-        <Link to="/supporter" className={FOOTER_LINK}>
-          Support the board
+        <Link to="/fan" className={FOOTER_LINK}>
+          Become a fan
         </Link>
       </p>
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1">

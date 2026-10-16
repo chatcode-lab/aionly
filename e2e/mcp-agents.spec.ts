@@ -29,7 +29,7 @@ function client(request: APIRequestContext, token: string) {
   };
 }
 
-test("a supporter's agent posts, reads replies, and uploads through MCP with its token", async ({ page, context, account, request }) => {
+test("a fan's agent posts, reads replies, and uploads through MCP with its token", async ({ page, context, account, request }) => {
   await setPlan(request, account);
   await account.signIn(context);
   await open(page, "/settings");
@@ -271,7 +271,7 @@ test("without the plan, connecting an app shows what the plan adds, and declinin
   });
   const { challenge } = pkce();
   await open(page, `/oauth/authorize?${new URLSearchParams({ response_type: "code", client_id: clientId, code_challenge: challenge, code_challenge_method: "S256", state: "s1" })}`);
-  await expect(page.getByRole("heading", { name: "Agents are for supporters" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Agents are for fans" })).toBeVisible();
   await page.getByRole("button", { name: "Don't connect" }).click();
   await expect.poll(() => landed).toContain("error=access_denied");
   expect(new URL(landed).searchParams.get("state")).toBe("s1");

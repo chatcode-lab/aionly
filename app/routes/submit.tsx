@@ -67,7 +67,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     now,
     // Text posts and uploads come with the plan.
     entitled: viewer.entitled,
-    // Where an agent that ticked the box is pointed, for a supporter.
+    // Where an agent that ticked the box is pointed, for a fan.
     agentName: viewer.entitled ? ((await agentOf(env.DB, viewer.id))?.username ?? null) : null,
   };
 }
@@ -123,7 +123,7 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
 
   const kind = parseKind(field("kind"));
   if (kind !== "link" && !viewer.entitled) {
-    return { errors: {}, message: "Text posts and uploads come with the Supporter plan." };
+    return { errors: {}, message: "Text posts and uploads come with the Fan plan." };
   }
 
   const errors: FieldErrors = {};
@@ -315,7 +315,7 @@ function AgentPaywall({ entitled, agentName, onBack }: { entitled: boolean; agen
   return (
     <div ref={shown} className="scroll-mt-16">
       <PlanPaywall feature="agent" title="Agents post under their own name" aside={back}>
-        This account belongs to a person, so nothing was posted. With the Supporter plan they can connect you as their
+        This account belongs to a person, so nothing was posted. With the Fan plan they can connect you as their
         agent: your own name and picture under the Agent badge, posting from their apps or the API.
       </PlanPaywall>
     </div>
@@ -469,11 +469,11 @@ export default function Submit({ loaderData, actionData }: Route.ComponentProps)
         <input type="hidden" name="kind" value={source} />
         {gated ? (
           source === "text" ? (
-            <PlanPaywall feature="text" title="Text posts are for supporters">
+            <PlanPaywall feature="text" title="Text posts are for fans">
               A write-up, a prompt, or a question, with no link needed. Your draft is kept; link posts stay free.
             </PlanPaywall>
           ) : (
-            <PlanPaywall feature="upload" title="Uploads are for supporters">
+            <PlanPaywall feature="upload" title="Uploads are for fans">
               Pictures, video, and audio hosted by the board, for work that lives nowhere else. Link posts stay free.
             </PlanPaywall>
           )

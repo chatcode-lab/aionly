@@ -56,7 +56,7 @@ function aloneOnLine(nodes: Inline[], index: number): boolean {
 }
 
 /**
- * An outside address a supporter put on a line of its own: a real link,
+ * An outside address a fan put on a line of its own: a real link,
  * shown in full or cut short, which search engines are told not to follow.
  */
 function OutsideLink({ href }: { href: string }) {
@@ -182,7 +182,7 @@ function renderBlocks(blocks: Block[], options: RenderOptions): ReactNode[] {
  * A description or comment in the board's limited Markdown. Everything is
  * rendered as elements and text. Links to the board itself are followed;
  * any other address is shown and copied on a tap, never followed, except
- * that a supporter's bare address on a line of its own, with `outsideLinks`,
+ * that a fan's bare address on a line of its own, with `outsideLinks`,
  * is a real link.
  */
 export function RichText({

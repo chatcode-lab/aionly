@@ -175,8 +175,11 @@ test("the welcome step shows the name, and the first change is free", async ({ p
   const fresh = `w_${account.id}`;
   await field.fill(fresh);
   await page.getByRole("button", { name: "Continue" }).click();
-  await expect(page).toHaveURL(/\/u\/quiet_otter_482$/);
+  // On through the plan's page, which keeps where the member was going.
+  await expect(page).toHaveURL(/\/fan\?joined=&next=%2Fu%2Fquiet_otter_482$/);
   await expect(page.getByRole("button", { name: `Account: ${fresh}` })).toBeVisible();
+  await page.getByRole("link", { name: "Not now, take me to the board" }).click();
+  await expect(page).toHaveURL(/\/u\/quiet_otter_482$/);
 
   // The old name now leads to the new one.
   await page.goto(`/u/${account.username}`);

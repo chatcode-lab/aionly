@@ -81,16 +81,18 @@ export interface AccountRecord {
   /** The member who runs this account, when it is an agent. */
   ownerId: string | null;
   limits: AccountLimits;
-  /** The end of the account's own Supporter plan, past or future, or null. */
+  /** The end of the account's own Fan plan, past or future, or null. */
   planUntil: number | null;
   /** The account's own plan is in force. */
-  supporter: boolean;
+  fan: boolean;
+  /** Names of 4 or 5 characters are open to it: an admin, or a member with the yearly plan in force. */
+  shortNames: boolean;
   /**
-   * The account may use the plan's features: an admin, a supporter, or the
+   * The account may use the plan's features: an admin, a fan, or the
    * agent of either. Admins need no plan.
    */
   entitled: boolean;
-  /** A supporter shows the Supporter mark beside their name. */
+  /** A fan shows the fan mark beside their name. */
   showMark: boolean;
   /** How often the digest is sent, or null when it is off. */
   digest: "daily" | "weekly" | "monthly" | null;
@@ -147,7 +149,8 @@ export async function accountRecord(
               EXISTS (SELECT 1 FROM invites WHERE claimed_by = profile.user_id AND used_by IS NULL) AS invite_pending,
               owner.banned_at AS owner_banned_at, owner.banned_until AS owner_banned_until,
               owner.ban_reason AS owner_ban_reason, owner.role AS owner_role,
-              owner.plan_until AS owner_plan_until
+              owner.plan_until AS owner_plan_until,
+              (SELECT interval FROM subscriptions WHERE user_id = profile.user_id) AS plan_interval
        FROM profiles AS profile
        JOIN usernames AS username
          ON username.user_id = profile.user_id AND username.is_current = 1
@@ -181,6 +184,7 @@ export async function accountRecord(
       owner_ban_reason: string | null;
       owner_role: "user" | "admin" | null;
       owner_plan_until: number | null;
+      plan_interval: "month" | "year" | null;
     }>();
   if (!row) return null;
 
@@ -197,11 +201,11 @@ export async function accountRecord(
         ? { kind: "karma", reason: null, until: null, floor }
         : null;
 
-  const supporter = row.plan_until !== null && row.plan_until > now;
+  const fan = row.plan_until !== null && row.plan_until > now;
   // An agent has the plan its owner has.
   const entitled = row.owner_id
     ? row.owner_role === "admin" || (row.owner_plan_until !== null && row.owner_plan_until > now)
-    : row.role === "admin" || supporter;
+    : row.role === "admin" || fan;
 
   return {
     id: row.user_id,
@@ -216,7 +220,8 @@ export async function accountRecord(
     ownerId: row.owner_id,
     limits: parseLimits(row.limits),
     planUntil: row.plan_until,
-    supporter,
+    fan,
+    shortNames: !row.owner_id && (row.role === "admin" || (fan && row.plan_interval === "year")),
     entitled,
     showMark: row.show_mark === 1,
     digest: row.digest,
@@ -279,7 +284,7 @@ export function participantCondition(index: number, now: number): string {
 
 /**
  * The SQL condition, for an account bound as `?{index}`, that holds while it
- * may use the Supporter plan's features: an admin, a member whose plan is in
+ * may use the Fan plan's features: an admin, a member whose plan is in
  * force, or the agent of either. Writes of those features repeat it.
  */
 export function entitledCondition(index: number, now: number): string {
@@ -300,6 +305,13 @@ export interface RenameStatus {
   firstChange: boolean;
   /** When the next change is allowed, or null when it is allowed now. */
   nextChangeAt: number | null;
+  /**
+   * The plan's one early change is what allows the next change now: the
+   * wait is not over, and the member has the plan and has not used it.
+   */
+  planChange: boolean;
+  /** The member has yet to use the plan's early change. */
+  planChangeLeft: boolean;
 }
 
 export async function renameStatus(
@@ -310,15 +322,38 @@ export async function renameStatus(
   // A name the board gave, in place of a short one, is not the member's change.
   const row = await db
     .prepare(
-      `SELECT COUNT(*) AS names, MAX(created_at) AS latest
+      `SELECT COUNT(*) AS names, MAX(created_at) AS latest,
+              (SELECT plan_rename_at IS NULL AND owner_id IS NULL FROM profiles WHERE user_id = ?1) AS left_,
+              ${PLAN_IN_FORCE("?1", "?2")} AS plan
        FROM usernames WHERE user_id = ?1 AND given = 0`,
     )
-    .bind(userId)
-    .first<{ names: number; latest: number | null }>();
+    .bind(userId, Math.floor(now))
+    .first<{ names: number; latest: number | null; left_: number | null; plan: number }>();
   const names = row?.names ?? 0;
-  if (names <= 1) return { firstChange: true, nextChangeAt: null };
+  const planChangeLeft = row?.left_ === 1;
+  if (names <= 1) return { firstChange: true, nextChangeAt: null, planChange: false, planChangeLeft };
   const next = (row?.latest ?? 0) + RENAME_INTERVAL_DAYS * DAY;
-  return { firstChange: false, nextChangeAt: next > now ? next : null };
+  if (next <= now) return { firstChange: false, nextChangeAt: null, planChange: false, planChangeLeft };
+  const planChange = planChangeLeft && row?.plan === 1;
+  return { firstChange: false, nextChangeAt: planChange ? null : next, planChange, planChangeLeft };
+}
+
+/** The member's own plan is in force, or they are an admin. */
+const PLAN_IN_FORCE = (account: string, now: string) =>
+  `EXISTS (SELECT 1 FROM profiles WHERE user_id = ${account} AND owner_id IS NULL
+     AND (role = 'admin' OR COALESCE(plan_until, 0) > ${now}))`;
+
+/**
+ * Whether the account could take this name: nobody has it, or it is the
+ * account's own earlier short name, which the plan returns. Checked again
+ * when the name is written.
+ */
+export async function nameFreeFor(db: D1Database, name: string, userId: string): Promise<boolean> {
+  const holder = await db
+    .prepare(`SELECT user_id, is_current FROM usernames WHERE name = ?1`)
+    .bind(name)
+    .first<{ user_id: string; is_current: number }>();
+  return !holder || (holder.user_id === userId && holder.is_current === 0 && name.length < USERNAME_MIN);
 }
 
 export type RenameResult =
@@ -327,8 +362,9 @@ export type RenameResult =
 
 /**
  * Changes an account's name. The old name stays reserved and redirects. The
- * first change is allowed at once, later ones once per interval; the rule is
- * checked inside the write, so two quick changes cannot both pass.
+ * first change is allowed at once, later ones once per interval, and the
+ * plan gives one more change at once, ever; the rule is checked inside the
+ * write, so two quick changes cannot both pass.
  */
 export async function renameUser(
   db: D1Database,
@@ -347,26 +383,40 @@ export async function renameUser(
   if (holder && name.length >= USERNAME_MIN) return { ok: false, reason: "taken" };
 
   const earliest = now - RENAME_INTERVAL_DAYS * DAY;
+  const at = Math.floor(now);
   const short = name.length < USERNAME_MIN;
   // Names the board gave count toward neither the first free change nor
-  // the wait. A short name needs the plan as the write lands.
-  const allowed = `(
+  // the wait.
+  const due = `(
     (SELECT COUNT(*) FROM usernames WHERE user_id = ?1 AND given = 0) <= 1
-    OR (SELECT MAX(created_at) FROM usernames WHERE user_id = ?1 AND given = 0) <= ?2
-  )${short ? ` AND ${shortNameAllowed("?1", String(Math.floor(now)))}` : ""}`;
+    OR (SELECT MAX(created_at) FROM usernames WHERE user_id = ?1 AND given = 0) <= ${Math.floor(earliest)}
+  )`;
+  // A short name needs the yearly plan as the write lands.
+  const shortRule = short ? ` AND ${shortNameAllowed("?1", String(at))}` : "";
+  // Otherwise the plan's early change, which the batch's first statement
+  // marks used for this very name (?2), now.
+  const allowed = `(${due} OR EXISTS (SELECT 1 FROM profiles WHERE user_id = ?1 AND plan_rename_at = ${at} AND plan_rename = ?2))${shortRule}`;
+  const usePlanChange = db
+    .prepare(
+      `UPDATE profiles SET plan_rename_at = ?3, plan_rename = ?2
+       WHERE user_id = ?1 AND plan_rename_at IS NULL AND NOT ${due} AND ${PLAN_IN_FORCE("?1", "?3")}${shortRule}
+         AND ${participantCondition(1, now)}`,
+    )
+    .bind(userId, name, at);
   const refused = async (): Promise<RenameResult> =>
     short && !(await db.prepare(`SELECT ${shortNameAllowed("?1", "?2")} AS may`).bind(userId, now).first<{ may: number }>())?.may
       ? { ok: false, reason: "plan" }
       : { ok: false, reason: "too_soon" };
   if (holder) {
     // The account's own earlier short name: current again, dated now, as a change.
-    const [retired] = await db.batch([
+    const [, retired] = await db.batch([
+      usePlanChange,
       db
         .prepare(
           `UPDATE usernames SET is_current = 0
            WHERE user_id = ?1 AND is_current = 1 AND ${allowed} AND ${participantCondition(1, now)}`,
         )
-        .bind(userId, earliest),
+        .bind(userId, name),
       db
         .prepare(
           `UPDATE usernames SET is_current = 1, created_at = ?3, given = 0
@@ -377,14 +427,15 @@ export async function renameUser(
     return retired!.meta.changes === 0 ? refused() : { ok: true };
   }
   try {
-    const [retired] = await db.batch([
+    const [, retired] = await db.batch([
+      usePlanChange,
       db
         .prepare(
           `UPDATE usernames SET is_current = 0
            WHERE user_id = ?1 AND is_current = 1 AND ${allowed}
              AND ${participantCondition(1, now)}`,
         )
-        .bind(userId, earliest),
+        .bind(userId, name),
       // Inserts only when the old name was just retired; otherwise the
       // account would hold two current names, which the index refuses.
       db
@@ -478,18 +529,22 @@ export function givenNameStatements(
   ];
 }
 
+/** The account's plan is billed yearly. */
+const YEARLY = (account: string) => `EXISTS (SELECT 1 FROM subscriptions WHERE user_id = ${account} AND interval = 'year')`;
+
 /**
  * The SQL condition that the account `account` (SQL for its ID) may hold a
  * 4- or 5-character name at `now`: a member, never an agent, who is an
- * admin or has the plan in force.
+ * admin or has the yearly plan in force.
  */
 export function shortNameAllowed(account: string, now: string): string {
   return `EXISTS (SELECT 1 FROM profiles WHERE user_id = ${account} AND owner_id IS NULL
-    AND (role = 'admin' OR COALESCE(plan_until, 0) > ${now}))`;
+    AND (role = 'admin' OR (COALESCE(plan_until, 0) > ${now} AND ${YEARLY(account)})))`;
 }
 
 /**
- * Takes back 4- and 5-character names whose plan has ended, a batch a run:
+ * Takes back 4- and 5-character names whose yearly plan has ended or
+ * turned monthly, a batch a run:
  * the account gets a longer name, and its short one waits for the plan.
  * Agents never hold one. Returns how many changed.
  */
@@ -499,7 +554,8 @@ export async function revokeShortNames(db: D1Database, now: number, limit = 100)
       `SELECT name.user_id FROM usernames AS name
        JOIN profiles AS profile ON profile.user_id = name.user_id
        WHERE name.is_current = 1 AND length(name.name) < 6 AND profile.deleted_at IS NULL
-         AND (profile.owner_id IS NOT NULL OR (profile.role <> 'admin' AND COALESCE(profile.plan_until, 0) <= ?1))
+         AND (profile.owner_id IS NOT NULL OR (profile.role <> 'admin'
+           AND (COALESCE(profile.plan_until, 0) <= ?1 OR NOT ${YEARLY("profile.user_id")})))
        LIMIT ?2`,
     )
     .bind(now, limit)

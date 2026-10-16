@@ -1,5 +1,5 @@
 /**
- * The few Stripe calls the Supporter plan needs, over Stripe's REST API with
+ * The few Stripe calls the Fan plan needs, over Stripe's REST API with
  * `fetch`, so the Worker carries no SDK. Requests are form-encoded, answers
  * are JSON, and the API version is pinned so answers keep their shape.
  */
@@ -114,16 +114,31 @@ export async function createCustomer(client: StripeClient, input: { email: strin
 
 /**
  * A hosted checkout for the plan. Stripe works out VAT or sales tax from the
- * address it collects, and a business can add its tax ID.
+ * address it collects, and a business can add its tax ID. A new member's
+ * checkout from the welcome step carries the short name they asked for
+ * (`wantedName`) and where they were going (`then`), for the return.
  */
 export async function createCheckout(
   client: StripeClient,
-  input: { customerId: string; priceId: string; userId: string; origin: string; startNowAt: number; attempt?: string },
+  input: {
+    customerId: string;
+    priceId: string;
+    userId: string;
+    origin: string;
+    startNowAt: number;
+    attempt?: string;
+    wantedName?: string | null;
+    then?: string | null;
+  },
 ): Promise<string> {
-  // The member asked for the plan to start at once, which consumer law needs
-  // before a withdrawal can be refunded less the days used. Kept with the
-  // subscription, as the record of it.
+  // The member asked for the plan to start at once, by starting it, which
+  // consumer law needs before a withdrawal can be refunded less the days
+  // used. Kept with the subscription, as the record of it.
   const metadata = { user_id: input.userId, start_now_requested_at: String(input.startNowAt) };
+  const onReturn = {
+    ...(input.wantedName ? { wanted_name: input.wantedName } : {}),
+    ...(input.then ? { then: input.then } : {}),
+  };
   const session = await client.request<{ url: string }>("POST", "/checkout/sessions", {
     mode: "subscription",
     customer: input.customerId,
@@ -134,10 +149,10 @@ export async function createCheckout(
     tax_id_collection: { enabled: true },
     billing_address_collection: "auto",
     allow_promotion_codes: true,
-    metadata,
+    metadata: { ...metadata, ...onReturn },
     subscription_data: { metadata },
-    success_url: `${input.origin}/supporter/done?session={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${input.origin}/supporter`,
+    success_url: `${input.origin}/fan/done?session={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${input.origin}/fan`,
   }, input.attempt ? `checkout-${input.attempt}` : undefined);
   return session.url;
 }
@@ -193,6 +208,19 @@ export function paidFreshStart(session: StripeCheckoutSession): string | null {
 }
 
 /** Stripe's page for changing the card, switching yearly, or cancelling. */
+/**
+ * The active billing portal configuration whose metadata names the prices
+ * it switches between (`aionly_prices`), or null when none does.
+ */
+export async function portalConfigurationFor(client: StripeClient, prices: "intro" | "standard"): Promise<string | null> {
+  const { data } = await client.request<{ data: Array<{ id: string; metadata?: Record<string, string> | null }> }>(
+    "GET",
+    "/billing_portal/configurations",
+    { active: true, limit: 100 },
+  );
+  return data.find((configuration) => configuration.metadata?.aionly_prices === prices)?.id ?? null;
+}
+
 export async function createPortal(
   client: StripeClient,
   input: { customerId: string; returnUrl: string; configuration?: string },
@@ -208,13 +236,27 @@ export async function createPortal(
 export async function checkoutSubscription(
   client: StripeClient,
   sessionId: string,
-): Promise<{ userId: string | null; customerId: string | null; subscription: StripeSubscription | null }> {
+): Promise<{
+  userId: string | null;
+  customerId: string | null;
+  subscription: StripeSubscription | null;
+  /** What the checkout carried for the return: a short name asked for, and where to go. */
+  wantedName: string | null;
+  then: string | null;
+}> {
   const session = await client.request<{
     client_reference_id: string | null;
     customer: string | null;
     subscription: StripeSubscription | null;
+    metadata?: Record<string, string> | null;
   }>("GET", `/checkout/sessions/${encodeURIComponent(sessionId)}`, { expand: ["subscription"] });
-  return { userId: session.client_reference_id, customerId: session.customer, subscription: session.subscription };
+  return {
+    userId: session.client_reference_id,
+    customerId: session.customer,
+    subscription: session.subscription,
+    wantedName: session.metadata?.wanted_name ?? null,
+    then: session.metadata?.then ?? null,
+  };
 }
 
 export function getSubscription(client: StripeClient, id: string): Promise<StripeSubscription> {

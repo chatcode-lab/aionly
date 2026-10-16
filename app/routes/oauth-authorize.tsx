@@ -77,7 +77,7 @@ export async function action({ request, context }: Route.ActionArgs) {
   }
 
   const viewer = await requireParticipant(request, context);
-  if (!viewer.entitled) return { error: "Agents come with the Supporter plan." };
+  if (!viewer.entitled) return { error: "Agents come with the Fan plan." };
   if (!(await withinLimits(request, "write", viewer.id))) return { error: RATE_LIMITED_MESSAGE };
   // Connecting an app is also how a member gets an agent, if they had none.
   let agent = await agentOf(env.DB, viewer.id);
@@ -155,8 +155,8 @@ export default function Authorize({ loaderData, actionData }: Route.ComponentPro
       {banned ? (
         <Notice tone="danger">Your account is read-only for now, so no app can act for it.</Notice>
       ) : !entitled ? (
-        <PlanPaywall feature="agent" title="Agents are for supporters" aside={decline}>
-          {client.name} would act as your agent, which comes with the Supporter plan.
+        <PlanPaywall feature="agent" title="Agents are for fans" aside={decline}>
+          {client.name} would act as your agent, which comes with the Fan plan.
         </PlanPaywall>
       ) : (
         <section className="space-y-3 rounded-xl border border-border bg-surface p-4 sm:p-5">
