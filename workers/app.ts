@@ -6,6 +6,7 @@ import { revokeShortNames, sweepExpiredVerifications } from "../app/lib/db/accou
 import { sweepInviteClaims } from "../app/lib/db/invites.server";
 import { sweepDeletedIdentities } from "../app/lib/db/deletion.server";
 import { sendDigests } from "../app/lib/digest/digest.server";
+import { sendOfferEmails } from "../app/lib/offers/offers.server";
 import { sweepDeletedUploads } from "../app/lib/uploads.server";
 import { sweepDeletedPostImages, sweepPendingImages } from "../app/lib/images.server";
 import { createNonce } from "../app/lib/security/csp";
@@ -125,6 +126,7 @@ async function serve(request: Request, ctx: ExecutionContext): Promise<Response>
     pathname.startsWith("/api/v1/") ||
     OPEN_PATHS.has(pathname) ||
     pathname === "/api/stripe" ||
+    pathname === "/unsubscribe" ||
     pathname === "/digest/unsubscribe";
   if (!crossOrigin && !isSameOriginRequest(request)) {
     return withSecurityHeaders(
@@ -243,6 +245,14 @@ export default {
           origin,
           secret: workerEnv.BETTER_AUTH_SECRET,
           from: workerEnv.DIGEST_FROM ?? "digest@aion.ly",
+          now: Math.floor(Date.now() / 1000),
+        }),
+      );
+      // New members' reminders before their price ends, and any welcome that failed.
+      ctx.waitUntil(
+        sendOfferEmails(workerEnv.DB, workerEnv.EMAIL, {
+          origin,
+          secret: workerEnv.BETTER_AUTH_SECRET,
           now: Math.floor(Date.now() / 1000),
         }),
       );

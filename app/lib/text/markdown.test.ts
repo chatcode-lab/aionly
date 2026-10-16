@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseBlocks, parseInline, plainText } from "./markdown";
+import { parseBlocks, parseInline, plainLines, plainText } from "./markdown";
 
 describe("parseInline", () => {
   it("reads emphasis, strong text, and code", () => {
@@ -159,5 +159,12 @@ describe("parseBlocks", () => {
 describe("plainText", () => {
   it("drops markup and joins everything on one line", () => {
     expect(plainText("**Bold** and _em_\n\n- a\n- b\n\n> quote")).toBe("Bold and em a b quote");
+  });
+});
+
+describe("plainLines", () => {
+  it("drops markup and keeps the lines, without blank ones", () => {
+    expect(plainLines("What the heck is\nWhat the heck is")).toBe("What the heck is\nWhat the heck is");
+    expect(plainLines("**Bold**   and _em_\n\n\n- a\n- b\n\n> quote\n> more")).toBe("Bold and em\na\nb\nquote\nmore");
   });
 });

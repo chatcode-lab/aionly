@@ -3,7 +3,16 @@ import { type ReactNode, useEffect, useState } from "react";
 import { Link } from "react-router";
 
 import { cn } from "~/lib/cn";
-import { type Benefit, INTRO_HOURS, INTRO_PRICES, PLAN_BENEFITS, PLAN_PRICES } from "~/lib/plan";
+import {
+  type Benefit,
+  INTRO_HOURS,
+  INTRO_PERCENT_OFF,
+  INTRO_PRICES,
+  PLAN_BENEFITS,
+  PLAN_PRICES,
+  type PlanInterval,
+  timeLeftWords,
+} from "~/lib/plan";
 import { useViewer } from "~/lib/use-viewer";
 
 import { Button } from "./ui/button";
@@ -44,21 +53,49 @@ export function BenefitList({ highlight, className }: { highlight?: Benefit; cla
   );
 }
 
-/** Seconds left until `until`, ticking each second, or 0 without one. */
+/**
+ * Seconds left until `until`, or 0 without one. It is read again twice a
+ * minute, enough for "23 hours left" and to end the offer on time, with
+ * no clock ticking on screen.
+ */
 export function useSecondsLeft(until: number | null | undefined): number {
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
   useEffect(() => {
     if (!until) return;
-    const timer = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 1000);
+    setNow(Math.floor(Date.now() / 1000));
+    const timer = setInterval(() => setNow(Math.floor(Date.now() / 1000)), 30_000);
     return () => clearInterval(timer);
   }, [until]);
   return until ? Math.max(0, until - now) : 0;
 }
 
-/** 23:04:09 */
-function clock(seconds: number): string {
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${Math.floor(seconds / 3600)}:${pad(Math.floor((seconds % 3600) / 60))}:${pad(seconds % 60)}`;
+/** "30% off · 23 hours left": a new member's offer at a glance. */
+export function OfferBadge({ left, className }: { left: number; className?: string }) {
+  return (
+    <p className={cn("flex flex-wrap items-center gap-x-2 gap-y-1 text-body", className)} data-offer>
+      <span className="rounded-full bg-accent-solid px-2 py-0.5 text-meta font-semibold text-on-accent">
+        {INTRO_PERCENT_OFF}% off
+      </span>{" "}
+      {/* Worked out in the browser, which may be a minute off the server. */}
+      <span className="text-text-muted" suppressHydrationWarning>
+        {timeLeftWords(left)}
+      </span>
+    </p>
+  );
+}
+
+/** "$100 $70 a year", the plan's own price struck through. */
+export function OfferPrice({ interval, className }: { interval: PlanInterval; className?: string }) {
+  return (
+    <span className={cn("whitespace-nowrap", className)}>
+      <s className="text-text-muted">
+        <span className="sr-only">Usually </span>
+        {PLAN_PRICES[interval].label}
+      </s>
+      <span className="sr-only">, now</span>{" "}
+      <strong className="font-semibold text-text">{INTRO_PRICES[interval].label}</strong> a {interval}
+    </span>
+  );
 }
 
 /**
@@ -67,40 +104,35 @@ function clock(seconds: number): string {
  */
 export function IntroOffer({ left, className }: { left: number; className?: string }) {
   return (
-    <div className={cn("rounded-lg bg-accent-soft px-3 py-2 text-body text-text", className)}>
-      <p>
-        <strong className="font-semibold">New-member price</strong> for{" "}
-        {/* The clock runs in the browser, a second or so off the server's. */}
-        <time className="font-mono tabular-nums" suppressHydrationWarning>
-          {clock(left)}
-        </time>{" "}
-        more: {INTRO_PRICES.month.label} a month instead of {PLAN_PRICES.month.label}, or {INTRO_PRICES.year.label} a
-        year instead of {PLAN_PRICES.year.label}.
+    <div className={cn("space-y-1.5 rounded-lg bg-accent-soft px-3 py-2.5", className)}>
+      <OfferBadge left={left} />
+      <p className="flex flex-wrap gap-x-4 gap-y-0.5 text-title">
+        <OfferPrice interval="year" />
+        <OfferPrice interval="month" />
       </p>
-      <p className="text-meta text-text-muted">The price you start at stays for as long as your plan runs.</p>
+      <p className="text-meta text-text-muted">Your price stays for as long as your plan runs.</p>
     </div>
   );
 }
 
 /**
  * The plan's prices for whoever is looking: a new member's while they last,
- * counting down, or the plan's own. Signed out, it says what new members
- * get. `introUntil` overrides the viewer's own, where a page loaded it.
+ * or the plan's own. Signed out, it says what new members get.
+ * `introUntil` overrides the viewer's own, where a page loaded it.
  */
 export function PriceLine({ className, introUntil }: { className?: string; introUntil?: number | null }) {
   const viewer = useViewer();
   const until = introUntil === undefined ? viewer?.introUntil : introUntil;
   const left = useSecondsLeft(until);
-  const prices = left > 0 ? INTRO_PRICES : PLAN_PRICES;
   return (
     <div className={cn("space-y-2", className)}>
       {left > 0 ? <IntroOffer left={left} /> : null}
       <p className="text-meta text-text-muted">
-        {prices.month.label} a month or {prices.year.label} a year, plus VAT or sales tax where it applies.
-        {viewer
-          ? null
-          : ` New members pay ${INTRO_PRICES.month.label} or ${INTRO_PRICES.year.label} for a plan they start within ${INTRO_HOURS} hours of joining.`}{" "}
-        Fans keep aion.ly running with no ads for anyone.
+        {left > 0
+          ? "Plus VAT or sales tax where it applies."
+          : `${PLAN_PRICES.month.label} a month or ${PLAN_PRICES.year.label} a year, plus VAT or sales tax where it applies.`}
+        {viewer ? null : ` New members get ${INTRO_PERCENT_OFF}% off in their first ${INTRO_HOURS} hours.`} Fans keep
+        aion.ly free of ads for everyone.
       </p>
     </div>
   );

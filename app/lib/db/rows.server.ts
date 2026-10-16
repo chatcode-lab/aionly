@@ -2,7 +2,7 @@ import { type Aspect, PROVIDERS, type Provider } from "../links/types";
 import { displayHost } from "../links/url";
 import { imageAddress } from "../media.server";
 import { postPath } from "../slug";
-import { plainText } from "../text/markdown";
+import { plainLines } from "../text/markdown";
 import type {
   CommentData,
   PostDetail,
@@ -112,11 +112,12 @@ export interface PostRow extends AuthorRow {
 }
 
 function excerptOf(description: string): string {
-  const flat = plainText(description);
+  // Its lines kept, so the feed reads it as it was written.
+  const text = plainLines(description);
   // A cut never splits a mention token, which is written in as a name later.
-  return flat.length > EXCERPT_LENGTH
-    ? `${flat.slice(0, EXCERPT_LENGTH - 1).replace(/<@[A-Za-z0-9_-]*$/, "").trimEnd()}…`
-    : flat;
+  return text.length > EXCERPT_LENGTH
+    ? `${text.slice(0, EXCERPT_LENGTH - 1).replace(/<@[A-Za-z0-9_-]*$/, "").trimEnd()}…`
+    : text;
 }
 
 /** What a post shows above its description. */

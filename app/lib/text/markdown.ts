@@ -276,7 +276,7 @@ function findClose(source: string, from: number, delimiter: string): number {
   return -1;
 }
 
-function inlineText(nodes: Inline[]): string {
+function inlineText(nodes: Inline[], lineBreak = " "): string {
   return nodes
     .map((node) => {
       switch (node.type) {
@@ -284,37 +284,54 @@ function inlineText(nodes: Inline[]): string {
         case "code":
           return node.text;
         case "break":
-          return " ";
+          return lineBreak;
         // Kept as a token; listings write in the current name.
         case "mention":
           return `<@${node.id}>`;
         case "url":
           return node.href;
         case "link": {
-          const label = inlineText(node.children);
+          const label = inlineText(node.children, lineBreak);
           return label && label !== node.href ? `${label} (${node.href})` : node.href;
         }
         default:
-          return inlineText(node.children);
+          return inlineText(node.children, lineBreak);
       }
     })
     .join("");
 }
 
-/** The text without its markup, on one line, for excerpts and summaries. */
+/** Each block's text without its markup, its line breaks kept as `lineBreak`. */
+function blockTexts(blocks: Block[], lineBreak: string): string[] {
+  return blocks.flatMap((block) => {
+    switch (block.type) {
+      case "paragraph":
+        return [inlineText(block.children, lineBreak)];
+      case "code":
+        return [block.text];
+      case "quote":
+        return blockTexts(block.children, lineBreak);
+      case "list":
+        return block.items.map((item) => inlineText(item, lineBreak));
+    }
+  });
+}
+
+/** The text without its markup, on one line, for summaries and previews. */
 export function plainText(source: string): string {
-  const flatten = (blocks: Block[]): string[] =>
-    blocks.flatMap((block) => {
-      switch (block.type) {
-        case "paragraph":
-          return [inlineText(block.children)];
-        case "code":
-          return [block.text];
-        case "quote":
-          return flatten(block.children);
-        case "list":
-          return block.items.map(inlineText);
-      }
-    });
-  return flatten(parseBlocks(source)).join(" ").replace(/\s+/g, " ").trim();
+  return blockTexts(parseBlocks(source), " ").join(" ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * The text without its markup, keeping its lines: each paragraph, list
+ * item, and line break starts a new line, and blank lines go. For the
+ * feed's excerpts, which read as the post was written.
+ */
+export function plainLines(source: string): string {
+  return blockTexts(parseBlocks(source), "\n")
+    .join("\n")
+    .split("\n")
+    .map((line) => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .join("\n");
 }

@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { useState } from "react";
 import { Form, Link, redirect, useNavigation } from "react-router";
 
-import { BenefitList, PriceLine, useSecondsLeft } from "~/components/plan-paywall";
+import { BenefitList, OfferBadge, OfferPrice, useSecondsLeft } from "~/components/plan-paywall";
 import { FanMark } from "~/components/post-card";
 import { Button } from "~/components/ui/button";
 import { Segmented } from "~/components/ui/segmented";
@@ -12,7 +12,15 @@ import { AlreadySubscribed, billingOpen, BUSY, CheckoutBusy, checkoutUrl, portal
 import { nameFreeFor } from "~/lib/db/accounts.server";
 import { planStatus } from "~/lib/db/subscriptions.server";
 import { formatDate } from "~/lib/format";
-import { type Benefit, INTRO_PRICES, introEndsAt, PLAN_BENEFITS, PLAN_PRICES, type PlanInterval } from "~/lib/plan";
+import {
+  type Benefit,
+  INTRO_HOURS,
+  INTRO_PERCENT_OFF,
+  introEndsAt,
+  PLAN_BENEFITS,
+  PLAN_PRICES,
+  type PlanInterval,
+} from "~/lib/plan";
 import { safeReturnPath } from "~/lib/security/request";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { requireAccount, requireParticipant, viewerOf } from "~/lib/viewer.server";
@@ -126,7 +134,6 @@ export default function Fan({ loaderData, actionData }: Route.ComponentProps) {
   const busy = navigation.state !== "idle" && navigation.formAction?.startsWith("/fan") === true;
   const error = actionData && "error" in actionData ? actionData.error : undefined;
   const introLeft = useSecondsLeft(loaderData.introUntil);
-  const prices = introLeft > 0 ? INTRO_PRICES : PLAN_PRICES;
   const claiming = wanted !== null && interval === "year";
 
   const heading = wanted
@@ -203,14 +210,32 @@ export default function Fan({ loaderData, actionData }: Route.ComponentProps) {
               value={interval}
               onChange={setBilling}
               options={[
-                { value: "year", label: `${prices.year.label} a year` },
-                { value: "month", label: `${prices.month.label} a month` },
+                { value: "year", label: "Yearly" },
+                { value: "month", label: "Monthly" },
               ]}
             />
             <input type="hidden" name="interval" value={interval} />
             {wanted ? <input type="hidden" name="name" value={wanted} /> : null}
             {next ? <input type="hidden" name="next" value={next} /> : null}
-            <PriceLine introUntil={loaderData.introUntil} />
+            <div className="space-y-1.5" data-price>
+              {introLeft > 0 ? (
+                <>
+                  <p className="text-display">
+                    <OfferPrice interval={interval} />
+                  </p>
+                  <OfferBadge left={introLeft} />
+                </>
+              ) : (
+                <p className="text-display font-semibold">
+                  {PLAN_PRICES[interval].label} <span className="text-body font-normal text-text-muted">a {interval}</span>
+                </p>
+              )}
+              <p className="text-meta text-text-muted">
+                {introLeft > 0 ? "Your price stays for as long as your plan runs. " : null}
+                Plus VAT or sales tax where it applies.
+                {signedIn ? null : ` New members get ${INTRO_PERCENT_OFF}% off in their first ${INTRO_HOURS} hours.`}
+              </p>
+            </div>
             {interval === "year" ? (
               <p className="text-meta text-text-muted">Yearly is two months free, and brings a username of 4 or 5 characters.</p>
             ) : wanted ? (

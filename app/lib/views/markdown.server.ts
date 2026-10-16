@@ -76,7 +76,8 @@ function cardLines(post: PostCardData, origin: string, names: MentionNames): str
     `[${linkText(post.title)}](${origin}${post.path})`,
     meta.join(" · "),
     ...sourceLine(post, origin),
-    ...(post.excerpt ? [replaceMentions(post.excerpt, names)] : []),
+    // On one line, so a line of the excerpt never reads as Markdown of its own.
+    ...(post.excerpt ? [replaceMentions(post.excerpt, names).replace(/\s+/g, " ")] : []),
   ];
 }
 

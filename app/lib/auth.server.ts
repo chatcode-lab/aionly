@@ -1,4 +1,4 @@
-import { env } from "cloudflare:workers";
+import { env, waitUntil } from "cloudflare:workers";
 import { betterAuth } from "better-auth";
 import type { TwitterProfile } from "@better-auth/core/social-providers";
 import { APIError } from "better-auth/api";
@@ -9,6 +9,7 @@ import { attachInvite, claimInvite } from "./db/invites.server";
 import { INVITE_COOKIE, normalizeInviteCode } from "./invites";
 import { rememberXAccount, type XProfile } from "./db/x-accounts.server";
 import { newId } from "./ids";
+import { sendOfferEmails } from "./offers/offers.server";
 
 // A session lasts 30 days and is extended once a day while in use.
 const SESSION_SECONDS = 30 * 24 * 3600;
@@ -198,6 +199,13 @@ function createAuth(origin: string, request?: Request) {
           after: async (user) => {
             await createProfile(env.DB, user.id);
             await attachInvite(env.DB, { userId: user.id });
+            // The welcome, with a new member's offer, once the response is
+            // on its way. Mail goes out only where the site's address is
+            // set; one that fails is sent by the hourly run.
+            if (env.SITE_ORIGIN) {
+              const welcome = { origin: env.SITE_ORIGIN, secret: env.BETTER_AUTH_SECRET, now: Math.floor(Date.now() / 1000), userId: user.id };
+              waitUntil(sendOfferEmails(env.DB, env.EMAIL, welcome).catch((error) => console.error("welcome email", error)));
+            }
           },
         },
       },

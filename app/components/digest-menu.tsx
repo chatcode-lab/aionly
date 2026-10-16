@@ -10,7 +10,7 @@ export const DIGESTS = ["off", "daily", "weekly", "monthly"] as const;
 
 export type Digest = (typeof DIGESTS)[number];
 
-const LABEL: Record<Digest, string> = {
+export const DIGEST_LABELS: Record<Digest, string> = {
   off: "Off",
   daily: "Daily",
   weekly: "Weekly",
@@ -31,7 +31,7 @@ export function DigestMenu({ value }: { value: Digest }) {
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild {...focus.trigger}>
-        <IconButton aria-label={`Email digest: ${LABEL[current]}`}>
+        <IconButton aria-label={`Email digest: ${DIGEST_LABELS[current]}`}>
           <Newspaper size={18} aria-hidden />
         </IconButton>
       </DropdownMenu.Trigger>
@@ -44,7 +44,7 @@ export function DigestMenu({ value }: { value: Digest }) {
           <DropdownMenu.RadioGroup value={current} onValueChange={(next) => choose(next as Digest)}>
             {DIGESTS.map((option) => (
               <DropdownMenu.RadioItem key={option} value={option} className={MENU_RADIO_ITEM}>
-                {LABEL[option]}
+                {DIGEST_LABELS[option]}
                 <DropdownMenu.ItemIndicator className="ml-auto">
                   <Check size={16} aria-hidden />
                 </DropdownMenu.ItemIndicator>

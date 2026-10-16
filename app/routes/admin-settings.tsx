@@ -5,9 +5,11 @@ import { AdminHeader } from "~/components/admin-nav";
 import { Button } from "~/components/ui/button";
 import { TextField } from "~/components/ui/field";
 import { Notice } from "~/components/ui/states";
+import { type Check, paymentChecks } from "~/lib/billing/check.server";
 import { saveSettings, settingHistory, settingsInForce } from "~/lib/db/settings.server";
 import { formatAge } from "~/lib/format";
 import { privatePageMeta } from "~/lib/meta";
+import { sendTestOfferEmails } from "~/lib/offers/offers.server";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { SETTINGS, type SettingGroup, type SettingKey, type Settings, settingSpec } from "~/lib/settings";
 import { requireAdmin } from "~/lib/viewer.server";
@@ -31,12 +33,24 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 type SaveAnswer =
   | { kind: "saved"; saved: string[] }
   | { kind: "problems"; problems: Partial<Record<SettingKey, string>>; typed: Partial<Record<SettingKey, string>> }
-  | { kind: "error"; error: string };
+  | { kind: "error"; error: string }
+  | { kind: "payments"; checks: Check[] }
+  | { kind: "mail"; error: string | null };
 
 export async function action({ request, context }: Route.ActionArgs): Promise<SaveAnswer> {
   const viewer = await requireAdmin(request, context);
   if (!(await withinLimits(request, "write", viewer.id))) return { kind: "error", error: RATE_LIMITED_MESSAGE };
   const form = await request.formData();
+  // The checks: whether payments can work here, and whether mail goes out.
+  if (form.get("intent") === "check-payments") return { kind: "payments", checks: await paymentChecks() };
+  if (form.get("intent") === "test-emails") {
+    const error = await sendTestOfferEmails(env.DB, env.EMAIL, {
+      userId: viewer.id,
+      origin: new URL(request.url).origin,
+      secret: env.BETTER_AUTH_SECRET,
+    });
+    return { kind: "mail", error };
+  }
   const values: Partial<Settings> = {};
   const typed: Partial<Record<SettingKey, string>> = {};
   for (const spec of SETTINGS) {
@@ -103,9 +117,11 @@ export default function AdminSettings({ loaderData, actionData }: Route.Componen
           </section>
         ))}
         <Button type="submit" variant="primary" disabled={busy}>
-          {busy ? "Saving…" : "Save changes"}
+          {busy && !navigation.formData?.get("intent") ? "Saving…" : "Save changes"}
         </Button>
       </Form>
+
+      <Checks answer={actionData} busy={busy ? navigation.formData?.get("intent") : undefined} />
 
       <section aria-labelledby="changes" className="rounded-xl border border-border bg-surface p-4 sm:p-5">
         <h2 id="changes" className="mb-2 text-title font-semibold">
@@ -128,6 +144,60 @@ export default function AdminSettings({ loaderData, actionData }: Route.Componen
         )}
       </section>
     </main>
+  );
+}
+
+/**
+ * What an admin can try from here without touching anyone's account:
+ * whether payments are set up right in this environment, and both offer
+ * emails sent to their own sign-in email.
+ */
+function Checks({ answer, busy }: { answer: SaveAnswer | undefined; busy: FormDataEntryValue | null | undefined }) {
+  return (
+    <section aria-labelledby="checks" className="space-y-3 rounded-xl border border-border bg-surface p-4 sm:p-5">
+      <h2 id="checks" className="text-title font-semibold">
+        Checks
+      </h2>
+      <p className="text-body text-text-muted">
+        Whether payments are set up here, and whether mail goes out: the welcome and the reminder a new member gets,
+        sent to your sign-in email.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Form method="post">
+          <Button type="submit" name="intent" value="check-payments" disabled={busy !== undefined}>
+            {busy === "check-payments" ? "Checking…" : "Check payments"}
+          </Button>
+        </Form>
+        <Form method="post">
+          <Button type="submit" name="intent" value="test-emails" disabled={busy !== undefined}>
+            {busy === "test-emails" ? "Sending…" : "Send me the offer emails"}
+          </Button>
+        </Form>
+      </div>
+      {answer?.kind === "payments" ? (
+        <ul className="divide-y divide-border" aria-label="Payment checks">
+          {answer.checks.map((check) => (
+            <li key={check.label} className="flex flex-wrap items-baseline gap-x-2 py-1.5 text-body">
+              <span aria-hidden className={check.ok ? "text-text" : "text-danger"}>
+                {check.ok ? "✓" : "✗"}
+              </span>
+              <span className="font-medium">{check.label}</span>
+              <span className="text-text-muted [overflow-wrap:anywhere]">
+                <span className="sr-only">{check.ok ? "fine: " : "problem: "}</span>
+                {check.detail}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {answer?.kind === "mail" ? (
+        answer.error ? (
+          <Notice tone="danger">Mail did not go out: {answer.error}</Notice>
+        ) : (
+          <Notice>Sent both to your sign-in email. Look in spam too if they do not arrive within a few minutes.</Notice>
+        )
+      ) : null}
+    </section>
   );
 }
 

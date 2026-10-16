@@ -35,6 +35,19 @@ export const INTRO_PRICES: Record<PlanInterval, PlanPrice> = {
 
 export const INTRO_HOURS = 24;
 
+/** How much less a new member pays, in percent, the same for both prices. */
+export const INTRO_PERCENT_OFF = Math.round(100 - (INTRO_PRICES.year.cents * 100) / PLAN_PRICES.year.cents);
+
+/** "23 hours left", or "40 minutes left" in the last hour: no ticking clock. */
+export function timeLeftWords(seconds: number): string {
+  if (seconds >= 3600) {
+    const hours = Math.floor(seconds / 3600);
+    return `${hours} ${hours === 1 ? "hour" : "hours"} left`;
+  }
+  const minutes = Math.max(1, Math.ceil(seconds / 60));
+  return `${minutes} ${minutes === 1 ? "minute" : "minutes"} left`;
+}
+
 /** When an account's new-member prices end, in seconds. */
 export function introEndsAt(joinedAt: number): number {
   return joinedAt + INTRO_HOURS * 3600;

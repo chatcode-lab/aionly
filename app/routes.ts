@@ -47,7 +47,10 @@ export default [
   route("api/moderate", "routes/api-moderate.ts"),
   route("api/stripe", "routes/api-stripe.ts"),
   route("api/digest", "routes/api-digest.ts"),
-  route("digest/unsubscribe", "routes/digest-unsubscribe.tsx"),
+  // Unsubscribing from an email, without signing in: the digest's links
+  // keep their first address.
+  route("unsubscribe", "routes/unsubscribe.tsx"),
+  route("digest/unsubscribe", "routes/unsubscribe.tsx", { id: "routes/digest-unsubscribe" }),
   // The agents' API: its guide at /api/v1, its endpoints below it.
   route("api/v1", "routes/api-v1.ts", { id: "routes/api-v1-guide" }),
   route("api/v1/*", "routes/api-v1.ts"),

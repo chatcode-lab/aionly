@@ -35,9 +35,11 @@ test("the plan page shows what fans get, picks out what was asked for, and its p
   await open(page, "/fan");
   await expect(page.getByRole("heading", { name: "Become an aion.ly fan" })).toBeVisible();
   await expect(page.getByText("aion.ly has no ads")).toBeVisible();
-  await expect(page.getByRole("button", { name: "$100 a year" })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("button", { name: "$10 a month" })).toBeVisible();
-  await expect(page.getByText("New members pay $7 or $70 for a plan they start within 24 hours of joining.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Yearly" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("[data-price]")).toContainText("$100 a year");
+  await page.getByRole("button", { name: "Monthly" }).click();
+  await expect(page.locator("[data-price]")).toContainText("$10 a month");
+  await expect(page.getByText("New members get 30% off in their first 24 hours.")).toBeVisible();
   await expect(page.getByText("plus VAT or sales tax where it applies").first()).toBeVisible();
   await expect(page.getByRole("link", { name: "Sign in to become a fan" })).toBeVisible();
 
@@ -51,13 +53,16 @@ test("the plan page shows what fans get, picks out what was asked for, and its p
   await account.signIn(context);
   await open(page, "/fan");
   await expect(page.getByRole("button", { name: "Payments open soon" })).toBeDisabled();
-  // The account was made an hour ago: a new member's prices, counting down.
-  await expect(page.getByRole("button", { name: "$70 a year" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "$7 a month" })).toBeVisible();
-  const offer = page.getByText(/New-member price for \d+:\d\d:\d\d more: \$7 a month instead of \$10, or \$70 a year instead of \$100\./);
-  await expect(offer).toBeVisible();
-  const first = await offer.locator("time").textContent();
-  await expect.poll(() => offer.locator("time").textContent(), { timeout: 3000 }).not.toBe(first);
+  // The account was made an hour ago: a new member's prices, 30% off, the
+  // plan's own struck through, with the hours left and no ticking clock.
+  const price = page.locator("[data-price]");
+  await expect(price.locator("s")).toHaveText("Usually $100");
+  await expect(price).toContainText("$70 a year");
+  await expect(price.locator("[data-offer]")).toHaveText(/^30% off\s*2\d hours left$/);
+  await page.getByRole("button", { name: "Monthly" }).click();
+  await expect(price.locator("s")).toHaveText("Usually $10");
+  await expect(price).toContainText("$7 a month");
+  await expect(page.getByText(/\d+:\d\d:\d\d/)).toHaveCount(0);
   // Nothing to tick: starting the plan is the request for it to start at once.
   await expect(page.getByRole("checkbox")).toHaveCount(0);
   await expect(page.getByText("Your plan starts as soon as you pay, through Stripe.")).toBeVisible();
@@ -69,7 +74,7 @@ test("a new member's welcome leads to the plan, with a quiet way on", async ({ p
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page).toHaveURL(/\/fan\?joined=&next=%2Fu%2Fquiet_otter_482$/);
   await expect(page.getByRole("heading", { name: `Welcome to aion.ly, ${account.username}` })).toBeVisible();
-  await expect(page.getByText(/New-member price for \d+:\d\d:\d\d more/)).toBeVisible();
+  await expect(page.locator("[data-offer]")).toHaveText(/^30% off\s*2\d hours left$/);
   await page.getByRole("link", { name: "Not now, take me to the board" }).click();
   await expect(page).toHaveURL(/\/u\/quiet_otter_482$/);
 });
@@ -83,9 +88,9 @@ test("a short name typed at the welcome is claimed with the yearly plan", async 
   await page.getByRole("button", { name: "Claim it with the yearly plan" }).click();
   await expect(page).toHaveURL(new RegExp(`/fan\\?joined=&name=${short}&next=%2F$`));
   await expect(page.getByRole("heading", { name: `Claim ${short}` })).toBeVisible();
-  await expect(page.getByRole("button", { name: "$70 a year" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Yearly" })).toHaveAttribute("aria-pressed", "true");
   // Monthly keeps the name it has.
-  await page.getByRole("button", { name: "$7 a month" }).click();
+  await page.getByRole("button", { name: "Monthly" }).click();
   await expect(page.getByText(`with monthly you keep ${account.username}`)).toBeVisible();
   await page.getByRole("link", { name: `Not now; keep ${account.username}` }).click();
   await expect(page).toHaveURL(/\/$/);
@@ -123,6 +128,13 @@ test("a fan writes a text post, with the fan mark and a clickable link", async (
   await expect(link).toHaveAttribute("href", "https://example.com/the-prompt-guide");
   await expect(link).toHaveAttribute("rel", "nofollow ugc noopener");
   await expect(card.getByTitle("aion.ly fan")).toBeVisible();
+
+  // In the feed, the excerpt keeps the post's lines.
+  await open(page, "/?sort=new&range=all");
+  const inFeed = page.locator("article").filter({ has: page.getByRole("link", { name: title }) });
+  expect(await inFeed.locator("p.whitespace-pre-line").innerText()).toBe(
+    "Here is the prompt I use, and the page it came from:\nhttps://example.com/the-prompt-guide\nIt works well.",
+  );
 
   // Hidden in Settings, the mark goes.
   await open(page, "/settings");
@@ -193,6 +205,33 @@ test("a mail client's one-click unsubscribe needs only the signed token", async 
   expect(oneClick.status()).toBe(200);
   const forged = await request.get(`/digest/unsubscribe?token=${encodeURIComponent(`${account.id}.forged`)}`);
   expect(await forged.text()).toContain("This unsubscribe link is not valid.");
+});
+
+test("Settings chooses the emails, and an offer's one-click link turns offers off", async ({ page, context, account, request }) => {
+  await account.signIn(context);
+  await open(page, "/settings#email");
+  const email = page.getByRole("region", { name: "Email" });
+  // The digest, free, from here as from the top bar.
+  await Promise.all([
+    page.waitForResponse((response) => new URL(response.url()).pathname.startsWith("/api/digest")),
+    email.getByLabel("Digest of top posts").selectOption("weekly"),
+  ]);
+  await expect(page.getByRole("button", { name: "Email digest: Weekly" })).toBeVisible();
+  // Offers are on until turned off.
+  await expect(email).toContainText("On: now and then, an offer on the Fan plan.");
+  await email.getByRole("button", { name: "Turn off" }).click();
+  await expect(email).toContainText("Off: no offers by email.");
+  await email.getByRole("button", { name: "Turn on" }).click();
+  await expect(email).toContainText("On: now and then, an offer on the Fan plan.");
+
+  // A mail client's one click, with the signed token alone.
+  const token = encodeURIComponent(await unsubscribeToken(account.id));
+  const oneClick = await request.post(`/unsubscribe?list=offers&token=${token}`, { form: { "List-Unsubscribe": "One-Click" } });
+  expect(oneClick.status()).toBe(200);
+  await open(page, "/settings");
+  await expect(email).toContainText("Off: no offers by email.");
+  // The digest stays as it was.
+  await expect(email.getByLabel("Digest of top posts")).toHaveValue("weekly");
 });
 
 test("a fan connects an agent, which pauses when the plan ends", async ({ page, context, account, request }) => {

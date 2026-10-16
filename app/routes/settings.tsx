@@ -1,8 +1,9 @@
 import { env } from "cloudflare:workers";
 import { useId, useState } from "react";
-import { Form, Link, redirect, useNavigation } from "react-router";
+import { Form, Link, redirect, useFetcher, useNavigation } from "react-router";
 
 import { Avatar } from "~/components/avatar";
+import { DIGEST_LABELS, DIGESTS, type Digest } from "~/components/digest-menu";
 import { PriceLine } from "~/components/plan-paywall";
 import { FanMark } from "~/components/post-card";
 import { CopyButton, XLogo } from "~/components/sign-in";
@@ -34,6 +35,7 @@ import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.se
 import { requireAccount, requireParticipant } from "~/lib/viewer.server";
 import { useViewer } from "~/lib/use-viewer";
 import { privatePageMeta } from "~/lib/meta";
+import { setOffersEmail } from "~/lib/offers/offers.server";
 import { readTheme } from "~/lib/theme";
 import { COMMENT_REPLIES, type CommentReplies, parseCommentReplies } from "~/lib/replies";
 
@@ -70,10 +72,12 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const linkError = url.searchParams.get("link") === "error" ? (url.searchParams.get("error") ?? "") : null;
   // The one page that shows the account's email, and only to its owner.
   const google = await env.DB.prepare(
-    `SELECT "email", "image" IS NOT NULL AS has_photo FROM "user" WHERE "id" = ?1`,
+    `SELECT "email", "image" IS NOT NULL AS has_photo,
+       (SELECT offers_email FROM profiles WHERE user_id = "user"."id") AS offers_email
+     FROM "user" WHERE "id" = ?1`,
   )
     .bind(viewer.id)
-    .first<{ email: string; has_photo: number }>();
+    .first<{ email: string; has_photo: number; offers_email: number | null }>();
   return {
     id: viewer.id,
     username: viewer.username,
@@ -83,6 +87,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     origin: url.origin,
     photoUrl: viewer.avatarKey ? imageAddress(viewer.avatarKey) : undefined,
     hasGooglePhoto: google?.has_photo === 1,
+    offersEmail: google?.offers_email === 1,
     banned: viewer.ban !== null,
     firstChange: status.firstChange,
     nextChangeAt: status.nextChangeAt,
@@ -221,6 +226,13 @@ export async function action({ request, context }: Route.ActionArgs) {
     const account = await requireAccount(request, context);
     if (!(await withinLimits(request, "write", account.id))) return { deleteError: RATE_LIMITED_MESSAGE };
     return deleteAccountAction(request, account, form);
+  }
+  // Emails about offers can always be turned off, and on again.
+  if (form.get("intent") === "offers") {
+    const account = await requireAccount(request, context);
+    if (!(await withinLimits(request, "write", account.id))) return { offersError: RATE_LIMITED_MESSAGE };
+    await setOffersEmail(env.DB, account.id, form.get("offers") === "on");
+    return { offersSaved: true };
   }
   if (form.get("intent") === "token-revoke" || form.get("intent") === "token-read") {
     const account = await requireAccount(request, context);
@@ -885,10 +897,69 @@ function DeleteAccountForm({ username, error }: { username: string; error?: stri
   );
 }
 
-function Section({ title, children }: { title: React.ReactNode; children: React.ReactNode }) {
+/**
+ * The emails the account gets: the digest of top posts, free and off until
+ * chosen, and offers about the Fan plan, on until turned off.
+ */
+function EmailSection({
+  offers,
+  banned,
+  error,
+}: {
+  offers: boolean;
+  banned: boolean;
+  error: string | undefined;
+}) {
+  const viewer = useViewer();
+  const digestFetcher = useFetcher();
+  const pending = digestFetcher.formData?.get("digest");
+  const digest = (typeof pending === "string" ? pending : (viewer?.digest ?? "off")) as Digest;
+  const navigation = useNavigation();
+  const busy = navigation.state !== "idle" && navigation.formData?.get("intent") === "offers";
+  return (
+    <div className="space-y-3">
+      <p className="text-body text-text-muted">Sent to your sign-in email.</p>
+      {banned ? null : (
+        <label className="block text-body font-medium">
+          Digest of top posts
+          <select
+            name="digest"
+            value={digest}
+            onChange={(event) => digestFetcher.submit({ digest: event.target.value }, { method: "post", action: "/api/digest" })}
+            className="mt-1 block h-9 w-full max-w-sm rounded-lg border border-border-strong bg-surface px-2 text-body font-normal text-text pointer-coarse:h-(--touch)"
+          >
+            {DIGESTS.map((option) => (
+              <option key={option} value={option}>
+                {DIGEST_LABELS[option]}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      <Form method="post" className="border-t border-border pt-3">
+        <input type="hidden" name="intent" value="offers" />
+        <input type="hidden" name="offers" value={offers ? "off" : "on"} />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p className="text-body font-medium">Offers</p>
+            <p className="text-meta text-text-muted">
+              {offers ? "On: now and then, an offer on the Fan plan." : "Off: no offers by email."}
+            </p>
+          </div>
+          <Button type="submit" disabled={busy}>
+            {offers ? "Turn off" : "Turn on"}
+          </Button>
+        </div>
+      </Form>
+      {error ? <Notice tone="danger">{error}</Notice> : null}
+    </div>
+  );
+}
+
+function Section({ title, id, children }: { title: React.ReactNode; id?: string; children: React.ReactNode }) {
   const heading = useId();
   return (
-    <section aria-labelledby={heading} className="space-y-3 rounded-xl border border-border bg-surface p-4">
+    <section id={id} aria-labelledby={heading} className="scroll-mt-20 space-y-3 rounded-xl border border-border bg-surface p-4">
       <h2 id={heading} className="flex items-center gap-2 text-title font-semibold">{title}</h2>
       {children}
     </section>
@@ -1002,6 +1073,14 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
 
       <Section title="Display">
         <DisplaySettings theme={theme} />
+      </Section>
+
+      <Section title="Email" id="email">
+        <EmailSection
+          offers={loaderData.offersEmail}
+          banned={banned}
+          error={actionData && "offersError" in actionData ? actionData.offersError : undefined}
+        />
       </Section>
 
       <Section title="Account">

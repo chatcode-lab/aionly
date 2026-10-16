@@ -285,7 +285,8 @@ export function PostCard({
         {description === undefined ? (
           <p
             className={cn(
-              "mt-3 text-body text-text-muted [overflow-wrap:anywhere]",
+              // The excerpt keeps the post's lines.
+              "mt-3 text-body whitespace-pre-line text-text-muted [overflow-wrap:anywhere]",
               // A text post has nothing else to show, so more of it is.
               post.media.kind === "text" ? "line-clamp-4" : "line-clamp-2",
             )}

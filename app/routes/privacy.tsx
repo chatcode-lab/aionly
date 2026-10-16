@@ -49,7 +49,8 @@ export default function Privacy() {
           your card.
         </li>
         <li>
-          <strong>The digest:</strong> if you turn it on, how often you get it.
+          <strong>Email:</strong> how often you get the digest, if you turn it on; whether you take offers; and which
+          of a new member&apos;s two offer emails went out.
         </li>
         <li>
           <strong>Invitations:</strong> who invited you, and whom you invited, which your profile shows to everyone;
@@ -73,13 +74,19 @@ export default function Privacy() {
         </li>
         <li>To keep payment and tax records as the law requires.</li>
         <li>To send the digest, only while you have it turned on.</li>
+        <li>
+          To tell you about the Fan plan: a welcome with a new member&apos;s offer when you join, one reminder before it
+          ends, and an offer now and then, until you turn offers off in Settings or by the link in any of them (our
+          legitimate interest in telling members about our own plan).
+        </li>
       </ul>
       <p>There is no advertising, no tracking across sites, and no selling of data.</p>
 
       <h2 id="others">Who else is involved</h2>
       <ul>
         <li>
-          <strong>Cloudflare</strong> hosts the board, its database, and its files, sends the digest, and runs the
+          <strong>Cloudflare</strong> hosts the board, its database, and its files, sends the digest and our other
+          emails, and runs the
           human check on the submit form.
         </li>
         <li>

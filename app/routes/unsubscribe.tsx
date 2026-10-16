@@ -4,11 +4,32 @@ import { Form, Link } from "react-router";
 import { Button } from "~/components/ui/button";
 import { readUnsubscribeToken, setDigest } from "~/lib/digest/digest.server";
 import { privatePageMeta } from "~/lib/meta";
+import { setOffersEmail } from "~/lib/offers/offers.server";
 
-import type { Route } from "./+types/digest-unsubscribe";
+import type { Route } from "./+types/unsubscribe";
 
 export function meta({ matches, location }: Route.MetaArgs) {
   return privatePageMeta(matches, "Unsubscribe", location.pathname);
+}
+
+/** The emails one can leave: the digest, or offers (`?list=offers`). */
+type List = "digest" | "offers";
+
+const WORDS: Record<List, { title: string; ask: string; done: string }> = {
+  digest: {
+    title: "Email digest",
+    ask: "Stop sending the digest of top posts to this address?",
+    done: "You are unsubscribed. No more digests will be sent.",
+  },
+  offers: {
+    title: "Offer emails",
+    ask: "Stop sending emails about offers and the Fan plan to this address?",
+    done: "You are unsubscribed. No more offers will be sent.",
+  },
+};
+
+function listOf(request: Request, form?: FormData): List {
+  return (form?.get("list") ?? new URL(request.url).searchParams.get("list")) === "offers" ? "offers" : "digest";
 }
 
 async function tokenOwner(request: Request, form?: FormData): Promise<string | null> {
@@ -18,7 +39,7 @@ async function tokenOwner(request: Request, form?: FormData): Promise<string | n
 
 export async function loader({ request }: Route.LoaderArgs) {
   const token = new URL(request.url).searchParams.get("token") ?? "";
-  return { token, valid: (await tokenOwner(request)) !== null };
+  return { token, list: listOf(request), valid: (await tokenOwner(request)) !== null };
 }
 
 /**
@@ -30,29 +51,33 @@ export async function loader({ request }: Route.LoaderArgs) {
 export async function action({ request }: Route.ActionArgs) {
   const form = await request.formData().catch(() => undefined);
   const userId = await tokenOwner(request, form);
-  if (!userId) return { done: false };
-  await setDigest(env.DB, userId, null, Math.floor(Date.now() / 1000));
-  return { done: true };
+  const list = listOf(request, form);
+  if (!userId) return { done: false, list };
+  if (list === "offers") await setOffersEmail(env.DB, userId, false);
+  else await setDigest(env.DB, userId, null, Math.floor(Date.now() / 1000));
+  return { done: true, list };
 }
 
 export default function Unsubscribe({ loaderData, actionData }: Route.ComponentProps) {
+  const words = WORDS[actionData?.list ?? loaderData.list];
   return (
     <main className="mx-auto max-w-column space-y-3 px-(--gutter) py-10">
-      <h1 className="text-display font-semibold">Email digest</h1>
+      <h1 className="text-display font-semibold">{words.title}</h1>
       {actionData?.done ? (
-        <p className="text-body text-text-muted">You are unsubscribed. No more digests will be sent.</p>
+        <p className="text-body text-text-muted">{words.done}</p>
       ) : loaderData.valid ? (
         <Form method="post" className="space-y-3">
-          <p className="text-body text-text-muted">Stop sending the digest of top posts to this address?</p>
+          <p className="text-body text-text-muted">{words.ask}</p>
           <input type="hidden" name="token" value={loaderData.token} />
+          <input type="hidden" name="list" value={loaderData.list} />
           <Button type="submit" variant="primary">
             Unsubscribe
           </Button>
         </Form>
       ) : (
         <p className="text-body text-text-muted">
-          This unsubscribe link is not valid. Turn the digest off from the menu in the top bar, or in{" "}
-          <Link to="/settings" className="underline underline-offset-4">
+          This unsubscribe link is not valid. Choose your emails in{" "}
+          <Link to="/settings#email" className="underline underline-offset-4">
             Settings
           </Link>
           .
