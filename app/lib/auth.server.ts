@@ -293,7 +293,7 @@ function createAuth(origin: string, request?: Request) {
         sendMagicLink: async ({ email, url, token }) => {
           const next = new URL(url).searchParams.get("callbackURL") ?? "/";
           const link = `${origin}/signin/email?${new URLSearchParams({ token, next })}`;
-          const send = { email, url: link, origin, now: Math.floor(Date.now() / 1000) };
+          const send = { email, url: link, origin, now: Math.floor(Date.now() / 1000), secret: env.BETTER_AUTH_SECRET };
           waitUntil(sendSignInLink(env.DB, transactionalMailer(), send).catch((error) => console.error("sign-in link", error)));
         },
       }),

@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { useState } from "react";
+import { useRef } from "react";
 import { Form, Link, redirect, useNavigation } from "react-router";
 
 import { Mail } from "~/components/legal";
@@ -57,7 +57,9 @@ export async function action({ request, context }: Route.ActionArgs) {
   if (status.nextAt) return { error: `The next fresh start is possible from ${formatDate(status.nextAt)}.` };
   const form = await request.formData();
   if (form.get("start_now") !== "yes") return { error: "Tick the box to apply the fresh start right away, then try again." };
-  const amount = freshStartAmount(String(form.get("amount") ?? ""));
+  // A preset's dollars, or "other" with the typed amount beside it.
+  const choice = String(form.get("amount") ?? "");
+  const amount = freshStartAmount(choice === "other" ? String(form.get("amount_other") ?? "") : choice);
   if (amount === null) {
     return { error: `Choose a whole number of dollars from ${FRESH_START_PRICE.label} to ${formatMoney(FRESH_START_MAX_CENTS)}.` };
   }
@@ -207,42 +209,35 @@ export default function FreshStart({ loaderData, actionData }: Route.ComponentPr
 
 /**
  * The amount of a fresh start: its price or more, at a click or typed, in
- * whole dollars. Sent as `amount`.
+ * whole dollars. Native fields, so it works before scripts load or without
+ * them: `amount` is a preset's dollars or "other", and `amount_other` the
+ * typed amount, which picks "other" when typed into.
  */
 function AmountPicker() {
-  const [choice, setChoice] = useState<string>(String(FRESH_START_AMOUNTS[0]));
-  const [other, setOther] = useState("");
-  const amount = choice === "other" ? other : String(Number(choice) / 100);
-  const option = "flex h-9 cursor-pointer items-center rounded-lg border px-3 text-body has-[:checked]:border-accent has-[:checked]:bg-accent-soft has-[:checked]:font-medium has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent pointer-coarse:h-(--touch)";
+  const other = useRef<HTMLInputElement>(null);
+  const option =
+    "flex h-9 cursor-pointer items-center rounded-lg border border-border-strong px-3 text-body has-[:checked]:border-accent has-[:checked]:bg-accent-soft has-[:checked]:font-medium has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent pointer-coarse:h-(--touch)";
   return (
     <fieldset className="space-y-2">
       <legend className="text-body font-medium">Amount, before VAT</legend>
-      <input type="hidden" name="amount" value={amount} />
       <div className="flex flex-wrap items-center gap-2">
-        {FRESH_START_AMOUNTS.map((cents) => (
-          <label key={cents} className={`${option} border-border-strong`}>
-            <input
-              type="radio"
-              name="amount_choice"
-              value={cents}
-              checked={choice === String(cents)}
-              onChange={() => setChoice(String(cents))}
-              className="sr-only"
-            />
+        {FRESH_START_AMOUNTS.map((cents, index) => (
+          <label key={cents} className={option}>
+            <input type="radio" name="amount" value={cents / 100} defaultChecked={index === 0} className="sr-only" />
             {formatMoney(cents)}
           </label>
         ))}
-        <label className={`${option} gap-1 border-border-strong`}>
-          <input type="radio" name="amount_choice" value="other" checked={choice === "other"} onChange={() => setChoice("other")} className="sr-only" />
+        <label className={`${option} gap-1`}>
+          <input ref={other} type="radio" name="amount" value="other" className="sr-only" />
           <span aria-hidden>$</span>
           <input
+            name="amount_other"
             aria-label="Another amount, in dollars"
             inputMode="numeric"
-            value={other}
-            onFocus={() => setChoice("other")}
-            onChange={(event) => {
-              setChoice("other");
-              setOther(event.target.value.replace(/[^\d]/g, "").slice(0, 4));
+            pattern="[0-9]*"
+            maxLength={4}
+            onFocus={() => {
+              if (other.current) other.current.checked = true;
             }}
             placeholder="Other"
             className="w-16 bg-transparent text-body outline-none placeholder:text-text-faint"

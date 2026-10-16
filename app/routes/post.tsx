@@ -102,6 +102,7 @@ export async function loader({ params, request, context }: Route.LoaderArgs) {
 const COMMENT_REFUSAL: Record<Exclude<CommentRefusal, "limit" | "replies">, string> = {
   closed: "This discussion is closed.",
   comments_closed: CLOSED_RULE,
+  nominations_closed: "Nominations for this fund vote have closed. You can still reply to a nomination.",
   full: `This discussion has reached ${THREAD_MAX.toLocaleString("en-US")} comments, the most one holds.`,
   parent: "That comment is no longer here to reply to.",
   depth: "Replies go no deeper here. Reply further up the thread.",

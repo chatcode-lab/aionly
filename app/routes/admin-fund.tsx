@@ -5,7 +5,7 @@ import { AdminHeader } from "~/components/admin-nav";
 import { Button } from "~/components/ui/button";
 import { TextField } from "~/components/ui/field";
 import { Notice } from "~/components/ui/states";
-import { chooseCause, fundSummary, httpsUrl, nominations, postIdOf, recordGift, removeGift, startVote } from "~/lib/db/fund.server";
+import { chooseCause, closeVote, fundSummary, httpsUrl, nominations, postIdOf, recordGift, removeGift, startVote } from "~/lib/db/fund.server";
 import { loadSettings } from "~/lib/db/settings.server";
 import { CopyButton } from "~/components/sign-in";
 import { CAUSE_NAME_MAX, CAUSE_WHY_MAX, GIFT_NOTE_MAX, URL_MAX } from "~/lib/fund";
@@ -67,6 +67,9 @@ export async function action({ request, context }: Route.ActionArgs) {
     if (!result.ok) return { error: result.reason === "open_already" ? "A vote is open already." : "There is no live post at that address." };
     return { saved: "The vote is open, and the fund's page points to it." };
   }
+  if (intent === "close-vote") {
+    return (await closeVote(env.DB, now)) ? { saved: "The vote is closed; open a new one when ready." } : { error: "No vote is open." };
+  }
   if (intent === "gift") {
     const givenOn = text(form, "given_on");
     const amount = cents(text(form, "amount"));
@@ -118,13 +121,19 @@ export default function AdminFund({ loaderData, actionData }: Route.ComponentPro
         <h2 className="text-title font-semibold">Where the next gift goes</h2>
         {fund.vote ? (
           <>
-            <p className="text-body text-text-muted">
-              Members are choosing in{" "}
-              <a href={fund.vote.path} className="underline underline-offset-4">
-                {fund.vote.title}
-              </a>{" "}
-              until {formatDate(fund.vote.closesAt)}. The most voted so far:
-            </p>
+            {fund.vote.post ? (
+              <p className="text-body text-text-muted">
+                Members {fund.vote.closed ? "chose" : "are choosing"} in{" "}
+                <a href={fund.vote.post.path} className="underline underline-offset-4">
+                  {fund.vote.post.title}
+                </a>
+                {fund.vote.closed
+                  ? `; nominations closed on ${formatDate(fund.vote.closesAt)}. The result as it closed:`
+                  : ` until ${formatDate(fund.vote.closesAt)}. The most voted so far:`}
+              </p>
+            ) : (
+              <Notice tone="warn">The vote&apos;s post is no longer live. Close the vote, then open a new one.</Notice>
+            )}
             {loaderData.nominations.length === 0 ? (
               <p className="text-meta text-text-muted">No nominations yet.</p>
             ) : (
@@ -136,6 +145,12 @@ export default function AdminFund({ loaderData, actionData }: Route.ComponentPro
                 ))}
               </ol>
             )}
+            <Form method="post">
+              <input type="hidden" name="intent" value="close-vote" />
+              <Button type="submit" variant="ghost" disabled={busy}>
+                Close the vote without a cause
+              </Button>
+            </Form>
           </>
         ) : (
           <>

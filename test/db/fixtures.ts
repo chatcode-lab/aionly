@@ -16,6 +16,8 @@ const TABLES = [
   "fund_causes",
   "fund_votes",
   "payments",
+  "refunds",
+  "sign_in_link_sends",
   "settings",
   "comment_bookmarks",
   "invites",

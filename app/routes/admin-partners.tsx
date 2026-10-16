@@ -118,7 +118,8 @@ export async function action({ request, context }: Route.ActionArgs) {
  * partner's share, which their own Settings show them too.
  */
 export default function AdminPartners({ loaderData, actionData }: Route.ComponentProps) {
-  const { links, owed, settings, origin, joined } = loaderData;
+  const { links, owed, settings, origin } = loaderData;
+  const joined = new Map(loaderData.joined);
   const navigation = useNavigation();
   const busy = navigation.state === "submitting";
   return (
@@ -224,11 +225,11 @@ export default function AdminPartners({ loaderData, actionData }: Route.Componen
                     {link.endsAt !== null ? ` · ends ${formatDate(link.endsAt)}` : ""}
                     {link.note ? ` · ${link.note}` : ""}
                   </p>
-                  {joined[link.code]?.length ? (
+                  {joined.get(link.code)?.length ? (
                     <details className="text-meta">
                       <summary className="cursor-pointer text-text-muted">Who joined</summary>
                       <p className="mt-1 text-text-muted">
-                        {joined[link.code]!.map((member, index) => (
+                        {joined.get(link.code)!.map((member, index) => (
                           <span key={member.username}>
                             {index > 0 ? ", " : null}
                             <a href={`/u/${member.username}`} className="font-medium text-text hover:underline">

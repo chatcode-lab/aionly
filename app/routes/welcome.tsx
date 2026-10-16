@@ -15,6 +15,7 @@ import { requireAccount, requireParticipant } from "~/lib/viewer.server";
 import { useSettings } from "~/lib/use-settings";
 import { useViewer } from "~/lib/use-viewer";
 import { privatePageMeta } from "~/lib/meta";
+import { markWelcomed } from "~/lib/offers/offers.server";
 import { sendOffersSoon } from "~/lib/offers/send.server";
 import { INTRO_HOURS, INTRO_PERCENT_OFF } from "~/lib/plan";
 
@@ -53,15 +54,18 @@ export async function action({ request, context }: Route.ActionArgs) {
   const form = await request.formData();
   const next = safeReturnPath(String(form.get("next") ?? ""), url.origin);
   if (!(await withinLimits(request, "write", viewer.id))) return { error: RATE_LIMITED_MESSAGE };
-  // The new member's offer by email, unless they turned offers off.
-  const welcomed = () => sendOffersSoon(viewer.id, url.origin);
+  // The welcome is done: offers may follow, unless turned down right here.
+  const welcomed = async () => {
+    await markWelcomed(env.DB, viewer.id, { offersOff: form.get("offers") === "off", now: Math.floor(Date.now() / 1000) });
+    sendOffersSoon(viewer.id, url.origin);
+  };
 
   // A name of 4 or 5 characters: claimed with the yearly plan, on its page.
   if (form.get("intent") === "claim") {
     const wanted = wantedShortName(form.get("username"), { staff: viewer.role === "admin" });
     if (!wanted) return { error: USERNAME_PROBLEM.pattern };
     if (!(await nameFreeFor(env.DB, wanted, viewer.id))) return { error: "That name is taken. Names are never reused, so try another." };
-    welcomed();
+    await welcomed();
     throw redirect(`/fan?${new URLSearchParams({ joined: "", name: wanted, next })}`);
   }
   const error = await applyRename(viewer.id, String(form.get("username") ?? ""), {
@@ -69,7 +73,7 @@ export async function action({ request, context }: Route.ActionArgs) {
     short: viewer.shortNames,
   });
   if (error) return { error };
-  welcomed();
+  await welcomed();
   throw redirect(onward(viewer, next));
 }
 
@@ -105,11 +109,11 @@ export default function Welcome({ loaderData, actionData }: Route.ComponentProps
           beforeSubmit={
             <p className="text-meta text-text-muted">
               We&apos;ll email you the new-member offer, {INTRO_PERCENT_OFF}% off for {INTRO_HOURS} hours, and now
-              and then Fan plan news. Turn it off in{" "}
-              <Link to="/settings#email" className="underline underline-offset-4">
-                Settings
-              </Link>{" "}
-              or from any email.
+              and then Fan plan news, until you turn it off in Settings or from any email.{" "}
+              {/* Turned down here, as the address is collected: one click, no box. */}
+              <button type="submit" name="offers" value="off" className="font-medium text-text underline underline-offset-4">
+                Continue without them
+              </button>
             </p>
           }
         >

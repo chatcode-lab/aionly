@@ -1,4 +1,5 @@
 import { newId } from "../ids";
+import { participantCondition } from "./accounts.server";
 import type { PostCardData } from "../public-types";
 import { withPlainMentions } from "./mentions.server";
 import { AUTHOR_JOINS, POST_COLUMNS, type PostRow, toPublicPost } from "./rows.server";
@@ -102,18 +103,48 @@ export async function editorPick(db: D1Database, now: number): Promise<EditorPic
 export type PickResult = { ok: true } | { ok: false; reason: "not_editor" | "not_found" | "already" };
 
 /**
+ * The SQL condition, inside a write, that the account `editor` (a parameter)
+ * edits now in the term `term`: the term runs at `now` and is theirs, and
+ * they may take part (live, not banned, above the karma floor).
+ */
+function editsSql(term: string, editor: number, now: number): string {
+  return `EXISTS (SELECT 1 FROM editor_terms AS term WHERE term.id = ${term} AND term.user_id = ?${editor}
+      AND term.starts_at <= ${Math.floor(now)} AND term.ends_at > ${Math.floor(now)})
+    AND ${participantCondition(editor, now)}`;
+}
+
+const LIVE = (post: string) => `EXISTS (SELECT 1 FROM posts WHERE id = ${post} AND deleted_at IS NULL AND removed_batch_id IS NULL)`;
+
+/** The term's latest pick whose post is live, as SQL selecting `columns` from `pick`. */
+const latestLivePick = (columns: string, term: string) =>
+  `SELECT ${columns} FROM picks AS pick JOIN posts AS post ON post.id = pick.post_id
+   WHERE pick.term_id = ${term} AND post.deleted_at IS NULL AND post.removed_batch_id IS NULL
+   ORDER BY pick.picked_at DESC LIMIT 1`;
+
+/** Why an editor's write changed nothing: no longer editing, or the post. */
+async function refusal(db: D1Database, editorId: string, now: number, otherwise: PickResult): Promise<PickResult> {
+  const still = await db
+    .prepare(`SELECT 1 AS yes FROM editor_terms AS term WHERE term.user_id = ?1 AND term.starts_at <= ?2 AND term.ends_at > ?2 AND ${participantCondition(1, now)}`)
+    .bind(editorId, now)
+    .first();
+  return still ? otherwise : { ok: false, reason: "not_editor" };
+}
+
+/**
  * Picks a live post, by the editor of the running term, with their note:
  * it is marked an Editor's pick and pinned above the feed, replacing the
- * last pick there. Picking it again changes the note.
+ * last pick there. Picking it again changes the note. The writes check
+ * again that the term runs and its editor may take part.
  */
 export async function pickPost(db: D1Database, input: { editorId: string; postId: string; note: string | null; now: number }): Promise<PickResult> {
   const term = await runningTerm(db, input.now);
   if (!term || term.userId !== input.editorId) return { ok: false, reason: "not_editor" };
-  const live = `EXISTS (SELECT 1 FROM posts WHERE id = ?1 AND deleted_at IS NULL AND removed_batch_id IS NULL)`;
+  // ?1 the post, ?2 the editor, ?3 the term, ?4 the note, ?5 now.
   const [picked] = await db.batch([
     db
       .prepare(
-        `INSERT INTO picks (post_id, editor_id, term_id, note, picked_at) SELECT ?1, ?2, ?3, ?4, ?5 WHERE ${live}
+        `INSERT INTO picks (post_id, editor_id, term_id, note, picked_at)
+         SELECT ?1, ?2, ?3, ?4, ?5 WHERE ${LIVE("?1")} AND ${editsSql("?3", 2, input.now)}
          ON CONFLICT (post_id) DO UPDATE SET note = excluded.note, picked_at = excluded.picked_at
          WHERE picks.term_id = excluded.term_id`,
       )
@@ -121,45 +152,52 @@ export async function pickPost(db: D1Database, input: { editorId: string; postId
     db
       .prepare(
         `INSERT INTO pins (slot, post_id, note, pinned_by, pinned_at)
-         SELECT 'pick', ?1, ?3, ?2, ?4 WHERE ${live} AND EXISTS (SELECT 1 FROM picks WHERE post_id = ?1 AND term_id = ?5)
+         SELECT 'pick', ?1, ?4, ?2, ?5
+         WHERE ${LIVE("?1")} AND EXISTS (SELECT 1 FROM picks WHERE post_id = ?1 AND term_id = ?3) AND ${editsSql("?3", 2, input.now)}
          ON CONFLICT (slot) DO UPDATE SET post_id = excluded.post_id, note = excluded.note,
            pinned_by = excluded.pinned_by, pinned_at = excluded.pinned_at`,
       )
-      .bind(input.postId, input.editorId, input.note, input.now, term.id),
+      .bind(input.postId, input.editorId, term.id, input.note, input.now),
   ]);
   if (picked!.meta.changes > 0) return { ok: true };
   // Picked in an earlier term: it keeps that editor's mark and note.
-  const earlier = await db.prepare(`SELECT 1 FROM picks WHERE post_id = ?1`).bind(input.postId).first();
-  return { ok: false, reason: earlier ? "already" : "not_found" };
+  const earlier = await db.prepare(`SELECT 1 FROM picks WHERE post_id = ?1 AND term_id <> ?2`).bind(input.postId, term.id).first();
+  return refusal(db, input.editorId, input.now, { ok: false, reason: earlier ? "already" : "not_found" });
 }
 
 /**
- * Takes back a pick of the running term, by its editor: the mark goes, and
- * if it was pinned, the editor's previous pick of the term takes its place.
+ * Takes back a pick of the running term, by its editor, checked again in
+ * the write: the mark goes, and if it was pinned, the term's latest pick
+ * still live takes its place, or the pin goes.
  */
 export async function unpickPost(db: D1Database, input: { editorId: string; postId: string; now: number }): Promise<PickResult> {
   const term = await runningTerm(db, input.now);
   if (!term || term.userId !== input.editorId) return { ok: false, reason: "not_editor" };
+  // ?1 the post, ?2 the term, ?3 the editor.
   const [removed] = await db.batch([
-    db.prepare(`DELETE FROM picks WHERE post_id = ?1 AND term_id = ?2`).bind(input.postId, term.id),
+    db.prepare(`DELETE FROM picks WHERE post_id = ?1 AND term_id = ?2 AND ${editsSql("?2", 3, input.now)}`).bind(input.postId, term.id, input.editorId),
     db
       .prepare(
-        `UPDATE pins SET (post_id, note, pinned_at) = (
-           SELECT pick.post_id, pick.note, pick.picked_at FROM picks AS pick WHERE pick.term_id = ?2 ORDER BY pick.picked_at DESC LIMIT 1)
-         WHERE slot = 'pick' AND post_id = ?1 AND EXISTS (SELECT 1 FROM picks WHERE term_id = ?2)`,
+        `UPDATE pins SET (post_id, note, pinned_at) = (${latestLivePick("pick.post_id, pick.note, pick.picked_at", "?2")})
+         WHERE slot = 'pick' AND post_id = ?1 AND NOT EXISTS (SELECT 1 FROM picks WHERE post_id = ?1)
+           AND EXISTS (${latestLivePick("1", "?2")})`,
       )
       .bind(input.postId, term.id),
     db
       .prepare(`DELETE FROM pins WHERE slot = 'pick' AND post_id = ?1 AND NOT EXISTS (SELECT 1 FROM picks WHERE post_id = ?1)`)
       .bind(input.postId),
   ]);
-  return removed!.meta.changes > 0 ? { ok: true } : { ok: false, reason: "not_found" };
+  if (removed!.meta.changes > 0) return { ok: true };
+  return refusal(db, input.editorId, input.now, { ok: false, reason: "not_found" });
 }
 
-/** Sets the running term's focus, by its editor. */
+/** Sets the running term's focus, by its editor, while they may take part. */
 export async function setFocus(db: D1Database, input: { editorId: string; focus: string | null; now: number }): Promise<boolean> {
   const updated = await db
-    .prepare(`UPDATE editor_terms AS term SET focus = ?2 WHERE term.user_id = ?1 AND ${runningSql("term", "?3")}`)
+    .prepare(
+      `UPDATE editor_terms AS term SET focus = ?2
+       WHERE term.user_id = ?1 AND ${runningSql("term", "?3")} AND ${participantCondition(1, input.now)}`,
+    )
     .bind(input.editorId, input.focus, input.now)
     .run();
   return updated.meta.changes > 0;
@@ -234,7 +272,8 @@ export async function picksOfTerm(db: D1Database, termId: string): Promise<Array
   const { results } = await db
     .prepare(
       `SELECT pick.post_id, post.title, pick.note, pick.picked_at FROM picks AS pick JOIN posts AS post ON post.id = pick.post_id
-       WHERE pick.term_id = ?1 ORDER BY pick.picked_at DESC LIMIT 100`,
+       WHERE pick.term_id = ?1 AND post.deleted_at IS NULL AND post.removed_batch_id IS NULL
+       ORDER BY pick.picked_at DESC LIMIT 100`,
     )
     .bind(termId)
     .all<{ post_id: string; title: string; note: string | null; picked_at: number }>();

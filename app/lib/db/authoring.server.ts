@@ -17,6 +17,8 @@ function livePost(index: number): string {
 export type CommentRefusal =
   | "closed"
   | "comments_closed"
+  /** A new top-level comment, a nomination, on a fund vote whose nominations closed. */
+  | "nominations_closed"
   | "full"
   | "parent"
   | "depth"
@@ -86,6 +88,8 @@ export async function addComment(
   const allowed = `${livePost(2)}
     -- A discussion its author closed takes nothing, from anyone.
     AND NOT EXISTS (SELECT 1 FROM posts WHERE id = ?2 AND comments_closed_at IS NOT NULL)
+    -- A fund vote's post takes no new nomination once its nominations close.
+    AND NOT (?3 IS NULL AND EXISTS (SELECT 1 FROM fund_votes WHERE post_id = ?2 AND closes_at <= ?6))
     AND (SELECT comment_count FROM posts WHERE id = ?2) < ${THREAD_MAX}
     AND (?3 IS NULL OR EXISTS (
       SELECT 1 FROM comments AS parent
@@ -117,6 +121,7 @@ export async function addComment(
     .prepare(
       `SELECT ${livePost(1)} AS open,
          (SELECT comments_closed_at FROM posts WHERE id = ?1) AS comments_closed_at,
+         (SELECT COUNT(*) FROM fund_votes WHERE post_id = ?1 AND closes_at <= ?4) AS nominations_closed,
          (SELECT comment_count FROM posts WHERE id = ?1) AS count,
          (SELECT CASE WHEN post_id = ?1 AND deleted_at IS NULL AND removed_batch_id IS NULL
                       THEN depth ELSE -1 END
@@ -133,6 +138,7 @@ export async function addComment(
     .first<{
       open: number;
       comments_closed_at: number | null;
+      nominations_closed: number;
       count: number | null;
       parent_depth: number | null;
       oldest_counted: number | null;
@@ -141,6 +147,7 @@ export async function addComment(
     }>();
   if (!why?.open) return { ok: false, reason: "closed" };
   if (why.comments_closed_at !== null) return { ok: false, reason: "comments_closed" };
+  if (parentId === null && why.nominations_closed > 0) return { ok: false, reason: "nominations_closed" };
   if ((why.count ?? 0) >= THREAD_MAX) return { ok: false, reason: "full" };
   if (parentId !== null && (why.parent_depth === null || why.parent_depth < 0)) {
     return { ok: false, reason: "parent" };

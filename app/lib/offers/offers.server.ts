@@ -38,13 +38,28 @@ export async function setOffers(db: D1Database, userId: string, on: boolean, now
 }
 
 /**
+ * Marks the welcome step done, where a new member is told about offers by
+ * email and can turn them down at once (`offersOff`). Offers wait for it.
+ */
+export async function markWelcomed(db: D1Database, userId: string, input: { offersOff: boolean; now: number }): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE profiles SET welcomed_at = COALESCE(welcomed_at, ?2),
+         offers_off_at = CASE WHEN ?3 THEN COALESCE(offers_off_at, ?2) ELSE offers_off_at END
+       WHERE user_id = ?1`,
+    )
+    .bind(userId, input.now, input.offersOff ? 1 : 0)
+    .run();
+}
+
+/**
  * Who an offer may go to, as SQL on `profiles` (`as`, its alias, with a
  * dot), with the time as ?1: a member's own account, not an admin's or an
- * agent's, with offers on, live and not banned, with a sign-in email, and
- * no plan.
+ * agent's, past the welcome step (which tells them, and lets them refuse),
+ * with offers on, live and not banned, with a sign-in email, and no plan.
  */
 function mayGetOffers(as: string): string {
-  return `${as}offers_off_at IS NULL AND ${as}deleted_at IS NULL AND ${as}owner_id IS NULL
+  return `${as}offers_off_at IS NULL AND ${as}welcomed_at IS NOT NULL AND ${as}deleted_at IS NULL AND ${as}owner_id IS NULL
     AND ${as}role = 'user' AND ${as}banned_at IS NULL AND COALESCE(${as}plan_until, 0) <= ?1
     AND EXISTS (SELECT 1 FROM "user" WHERE "user"."id" = ${as}user_id)`;
 }

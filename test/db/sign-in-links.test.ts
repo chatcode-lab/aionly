@@ -51,17 +51,18 @@ describe("sign-in links", () => {
   it("go only to a live member's own sign-in email, a few an hour at most", async () => {
     await member("m1", "link_member", "member@aion.ly");
     await member("m2", "gone_member", "gone@aion.ly", { deletedAt: now });
-    const link = { url: "https://aion.ly/signin/email?token=t", origin: "https://aion.ly", now };
+    const link = { url: "https://aion.ly/signin/email?token=t", origin: "https://aion.ly", now, secret: "s" };
     expect(await sendSignInLink(db, mailer, { ...link, email: " Member@Aion.ly " })).toBe(true);
     expect(sent[0]).toMatchObject({ to: "member@aion.ly", subject: "Your aion.ly sign-in link", from: { email: "noreply@aion.ly" } });
     // Technical mail: a reply goes nowhere a person reads.
     expect(sent[0]).not.toHaveProperty("replyTo");
     expect(await sendSignInLink(db, mailer, { ...link, email: "nobody@aion.ly" })).toBe(false);
     expect(await sendSignInLink(db, mailer, { ...link, email: "gone@aion.ly" })).toBe(false);
-    // Four links asked for this hour: no more mail to that address.
-    for (const token of ["a", "b", "c", "d"]) await plantLink(`token${token}`.padEnd(32, "x"), "member@aion.ly", 60);
+    // Three links sent this hour: no more mail to that address.
+    expect(await sendSignInLink(db, mailer, { ...link, email: "member@aion.ly" })).toBe(true);
+    expect(await sendSignInLink(db, mailer, { ...link, email: "member@aion.ly" })).toBe(true);
     expect(await sendSignInLink(db, mailer, { ...link, email: "member@aion.ly" })).toBe(false);
-    expect(sent).toHaveLength(1);
+    expect(sent).toHaveLength(3);
   });
 
   it("sign a member in once, and never make an account", async () => {

@@ -53,7 +53,10 @@ describe("a new member's offer emails", () => {
   async function member(id: string, name: string, ago: number, fields: Parameters<typeof user>[2] & { offers?: boolean } = {}) {
     await user(id, name, fields);
     await db.batch([
-      db.prepare(`UPDATE profiles SET created_at = ?2, offers_off_at = ?3 WHERE user_id = ?1`).bind(id, NOW - ago, fields.offers === false ? NOW - ago : null),
+      // Past the welcome step, where offers are told and can be turned down.
+      db
+        .prepare(`UPDATE profiles SET created_at = ?2, welcomed_at = ?2, offers_off_at = ?3 WHERE user_id = ?1`)
+        .bind(id, NOW - ago, fields.offers === false ? NOW - ago : null),
       db
         .prepare(`INSERT INTO "user" ("id", "name", "email", "emailVerified", "createdAt", "updatedAt") VALUES (?1, 'n', ?2, 1, ?3, ?3)`)
         .bind(id, `${id}@example.invalid`, new Date(NOW * 1000).toISOString()),

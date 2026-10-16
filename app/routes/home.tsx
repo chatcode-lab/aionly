@@ -190,7 +190,8 @@ function FeedList({ data, address }: { data: FeedData; address: string }) {
         saved: [...current.saved, ...page.marks.saved],
         savedComments: current.savedComments,
       }));
-      const seen = new Set(posts.map((post) => post.id));
+      // Pinned posts above the feed are not repeated in it either.
+      const seen = new Set([...posts.map((post) => post.id), ...(data.pin ? [data.pin.post.id] : []), ...(data.pickedId ? [data.pickedId] : [])]);
       setExtra((current) => [
         ...current,
         ...page.posts.filter((post) => !seen.has(post.id)),

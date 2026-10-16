@@ -172,11 +172,11 @@ test("the welcome step shows the name, and the first change is free", async ({ p
   await expect(field).toHaveValue(account.username);
   await field.fill("Bad Name!");
   await expect(page.getByText("Use lowercase letters")).toBeVisible();
-  await expect(page.getByRole("button", { name: "Continue" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeDisabled();
 
   const fresh = `w_${account.id}`;
   await field.fill(fresh);
-  await page.getByRole("button", { name: "Continue" }).click();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
   // On through the plan's page, which keeps where the member was going.
   await expect(page).toHaveURL(/\/fan\?joined=&next=%2Fu%2Fquiet_otter_482$/);
   await expect(page.getByRole("button", { name: `Account: ${fresh}` })).toBeVisible();

@@ -772,6 +772,8 @@ async function comment(request: Request, agent: AccountRecord, postId: string) {
         throw new Refusal(409, "closed", "This discussion is closed, or there is no such post.");
       case "comments_closed":
         throw new Refusal(409, "comments_closed", "Its author closed this discussion: nobody comments or replies there.");
+      case "nominations_closed":
+        throw new Refusal(409, "nominations_closed", "Nominations for this fund vote have closed; replies to nominations are still open.");
       case "full":
         throw new Refusal(409, "full", `This discussion has reached ${THREAD_MAX} comments, the most one holds for now.`);
       case "parent":

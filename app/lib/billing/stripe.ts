@@ -237,6 +237,15 @@ export interface StripeInvoice {
   total_excluding_tax?: number | null;
   subtotal: number;
   status_transitions?: { paid_at?: number | null } | null;
+  /** The subscription it bills, since API version 2025-03-31. */
+  parent?: { subscription_details?: { subscription?: string | null } | null } | null;
+  /** The same, before that version. */
+  subscription?: string | null;
+}
+
+/** The subscription an invoice bills, or null for a one-time invoice such as a fresh start's. */
+export function invoiceSubscription(invoice: StripeInvoice): string | null {
+  return invoice.parent?.subscription_details?.subscription ?? invoice.subscription ?? null;
 }
 
 /** A charge, as a refund reports it: the whole refunded so far, tax included. */

@@ -23,10 +23,15 @@ export interface FundCause {
 export interface FundVote {
   id: string;
   postId: string;
-  path: string;
-  title: string;
+  /** Its post, while live; a removed or deleted post shows nowhere. */
+  post: { path: string; title: string } | null;
   closesAt: number;
+  /** Nominations and their votes have closed; an admin names the result. */
+  closed: boolean;
 }
+
+/** A post as a fund page may show it: only while it is live. */
+const LIVE_POST = `post.deleted_at IS NULL AND post.removed_batch_id IS NULL`;
 
 export interface FundGift {
   id: string;
@@ -71,7 +76,7 @@ export function httpsUrl(text: string): string | null {
 const COLLECTED = `SELECT COUNT(*) AS fresh_starts, COALESCE(SUM(amount_cents - refunded_cents), 0) AS collected
   FROM payments WHERE kind = 'fresh_start'`;
 
-export async function fundSummary(db: D1Database): Promise<FundSummary> {
+export async function fundSummary(db: D1Database, now = Math.floor(Date.now() / 1000)): Promise<FundSummary> {
   const [totals, months, gifts, cause, givers] = await db.batch([
     db.prepare(`SELECT collected.*, (SELECT COALESCE(SUM(amount_cents), 0) FROM fund_gifts) AS given FROM (${COLLECTED}) AS collected`),
     db.prepare(
@@ -88,7 +93,7 @@ export async function fundSummary(db: D1Database): Promise<FundSummary> {
       `SELECT cause.name, cause.url, cause.why, cause.chosen_at, post.id AS post_id, post.title AS post_title
        FROM fund_causes AS cause
        LEFT JOIN fund_votes AS vote ON vote.id = cause.vote_id
-       LEFT JOIN posts AS post ON post.id = vote.post_id
+       LEFT JOIN posts AS post ON post.id = vote.post_id AND ${LIVE_POST}
        ORDER BY cause.chosen_at DESC LIMIT 1`,
     ),
     db.prepare(
@@ -104,7 +109,7 @@ export async function fundSummary(db: D1Database): Promise<FundSummary> {
   const current = cause!.results[0] as
     | { name: string; url: string; why: string | null; chosen_at: number; post_id: string | null; post_title: string | null }
     | undefined;
-  const vote = await openVote(db);
+  const vote = await openVote(db, now);
   return {
     collectedCents: total.collected,
     freshStarts: total.fresh_starts,
@@ -231,17 +236,29 @@ export async function removeGift(db: D1Database, id: string): Promise<boolean> {
   return removed.meta.changes > 0;
 }
 
-/** The vote still open, with its post, if any. */
-export async function openVote(db: D1Database): Promise<FundVote | null> {
+/** The vote still open, with its post while live, if any. */
+export async function openVote(db: D1Database, now = Math.floor(Date.now() / 1000)): Promise<FundVote | null> {
   const row = await db
     .prepare(
-      `SELECT vote.id, vote.post_id, vote.closes_at, post.title FROM fund_votes AS vote
-       JOIN posts AS post ON post.id = vote.post_id
+      `SELECT vote.id, vote.post_id, vote.closes_at, CASE WHEN ${LIVE_POST} THEN post.title END AS title
+       FROM fund_votes AS vote JOIN posts AS post ON post.id = vote.post_id
        WHERE vote.decided_at IS NULL ORDER BY vote.opened_at DESC LIMIT 1`,
     )
-    .first<{ id: string; post_id: string; closes_at: number; title: string }>();
+    .first<{ id: string; post_id: string; closes_at: number; title: string | null }>();
   if (!row) return null;
-  return { id: row.id, postId: row.post_id, path: postPath({ id: row.post_id, title: row.title }), title: row.title, closesAt: row.closes_at };
+  return {
+    id: row.id,
+    postId: row.post_id,
+    post: row.title === null ? null : { path: postPath({ id: row.post_id, title: row.title }), title: row.title },
+    closesAt: row.closes_at,
+    closed: row.closes_at <= now,
+  };
+}
+
+/** Closes the open vote without naming a cause, by an admin: when its post is gone, or it is to start again. */
+export async function closeVote(db: D1Database, now: number): Promise<boolean> {
+  const closed = await db.prepare(`UPDATE fund_votes SET decided_at = ?1 WHERE decided_at IS NULL`).bind(now).run();
+  return closed.meta.changes > 0;
 }
 
 /** A post's ID from its address or the ID itself, as an admin pastes it. */

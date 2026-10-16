@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers";
 import { type AccountRecord } from "../db/accounts.server";
 import { readBodyCapped } from "../security/body";
 import { applyFreshStart, type FreshStartOutcome } from "../db/fresh-starts.server";
-import { recordPayment, recordRefund } from "../db/payments.server";
+import { paymentWithIntent, recordPayment, recordRefund } from "../db/payments.server";
 import {
   applySubscription,
   type CheckoutKind,
@@ -28,6 +28,7 @@ import {
   getCheckoutSession,
   getSubscription,
   invoiceOfPaymentIntent,
+  invoiceSubscription,
   isRunning,
   priceByLookupKey,
   paidFreshStart,
@@ -292,9 +293,14 @@ const SUBSCRIPTION_EVENTS = new Set([
   "customer.subscription.resumed",
 ]);
 
-/** Records a paid invoice of a member's plan, before tax; one that paid nothing is left out. */
+/**
+ * Records a paid invoice of a member's plan, before tax. Only a
+ * subscription's invoice is the plan's: a fresh start's checkout makes a
+ * one-time invoice too, which the fund counts by its checkout, never as
+ * plan revenue a partner shares. One that paid nothing is left out.
+ */
 async function recordInvoice(invoice: StripeInvoice): Promise<void> {
-  if (invoice.amount_paid <= 0) return;
+  if (invoice.amount_paid <= 0 || !invoiceSubscription(invoice)) return;
   const member = await env.DB.prepare(`SELECT user_id FROM subscriptions WHERE customer_id = ?1`)
     .bind(invoice.customer)
     .first<{ user_id: string }>();
@@ -314,15 +320,21 @@ async function recordInvoice(invoice: StripeInvoice): Promise<void> {
 
 /**
  * Records a refund against the payment it refunds: a fresh start, by its
- * payment intent, or a plan's invoice, which Stripe names when asked.
+ * payment intent, or a plan's invoice, which Stripe names when asked. It is
+ * kept either way, so a payment recorded later takes it.
  */
 async function recordChargeRefund(charge: StripeCharge): Promise<void> {
   if (!charge.payment_intent) return;
-  const refund = { paymentIntent: charge.payment_intent, refunded: charge.amount_refunded, paid: charge.amount };
-  if (await recordRefund(env.DB, refund)) return;
-  if (!env.STRIPE_SECRET_KEY) return;
-  const invoice = await invoiceOfPaymentIntent(client(), charge.payment_intent);
-  if (invoice) await recordRefund(env.DB, { ...refund, id: invoice });
+  const known = await paymentWithIntent(env.DB, charge.payment_intent);
+  const invoiceId = !known && env.STRIPE_SECRET_KEY ? await invoiceOfPaymentIntent(client(), charge.payment_intent) : null;
+  await recordRefund(env.DB, {
+    chargeId: charge.id,
+    paymentIntent: charge.payment_intent,
+    invoiceId,
+    refunded: charge.amount_refunded,
+    paid: charge.amount,
+    now: now(),
+  });
 }
 
 /**

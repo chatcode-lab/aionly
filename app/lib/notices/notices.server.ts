@@ -75,18 +75,27 @@ export async function sendReadOnlyNotices(db: D1Database, mailer: Mailer, input:
 /** Sign-in links one address gets in an hour at most, so nobody can flood it. */
 const LINKS_PER_HOUR = 3;
 
+const encoder = new TextEncoder();
+
+/** The address as the hourly count keeps it: a keyed hash, never the address. */
+async function addressHash(secret: string, address: string): Promise<string> {
+  const key = await crypto.subtle.importKey("raw", encoder.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const mac = await crypto.subtle.sign("HMAC", key, encoder.encode(`sign-in-link:${address}`));
+  return [...new Uint8Array(mac)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
 /**
  * Sends a sign-in link, only to an address that is a member's own sign-in
  * email: a live account, not an agent. No account is ever made from one.
  * Nothing tells the asker whether one went, and the mail goes once the
- * answer is on its way, so the answer's timing does not tell either.
- * `url` is the link to send; the address's own link count comes from the
- * links Better Auth keeps until they expire.
+ * answer is on its way, so the answer's timing does not tell either. Each
+ * send is reserved in its own hourly count, inside the insert, so the limit
+ * holds however the links themselves are used or expire.
  */
 export async function sendSignInLink(
   db: D1Database,
   mailer: Mailer,
-  input: { email: string; url: string; origin: string; now: number },
+  input: { email: string; url: string; origin: string; now: number; secret: string },
 ): Promise<boolean> {
   const address = input.email.trim().toLowerCase();
   const account = await db
@@ -97,14 +106,19 @@ export async function sendSignInLink(
     .bind(address)
     .first();
   if (!account) return false;
-  const recent = await db
+  const reserved = await db
     .prepare(
-      `SELECT COUNT(*) AS links FROM "verification"
-       WHERE "identifier" LIKE 'magic-link:%' AND json_extract("value", '$.email') = ?1 AND "createdAt" > ?2`,
+      `INSERT INTO sign_in_link_sends (address_hash, sent_at)
+       SELECT ?1, ?2 WHERE (SELECT COUNT(*) FROM sign_in_link_sends WHERE address_hash = ?1 AND sent_at > ?2 - 3600) < ${LINKS_PER_HOUR}`,
     )
-    .bind(address, new Date((input.now - 3600) * 1000).toISOString())
-    .first<{ links: number }>();
-  if ((recent?.links ?? 0) > LINKS_PER_HOUR) return false;
+    .bind(await addressHash(input.secret, address), input.now)
+    .run();
+  if (reserved.meta.changes === 0) return false;
   await mailer.send({ ...SENDERS.signIn, to: address, ...composeSignInLink({ url: input.url, origin: input.origin }) });
   return true;
+}
+
+/** Forgets sign-in link sends older than the hour they count for. */
+export async function sweepSignInLinkSends(db: D1Database, now: number): Promise<void> {
+  await db.prepare(`DELETE FROM sign_in_link_sends WHERE sent_at <= ?1`).bind(now - 3600).run();
 }

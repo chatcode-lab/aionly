@@ -119,18 +119,21 @@ export function karmaHoldersSql(type: TargetType, item: string): string {
   return karmaGroupSql(`(SELECT author_id FROM ${TABLE[type]} WHERE id = ${item})`);
 }
 
-/** The SQL condition that the item bound as `?{index}` takes votes. */
-function openForVotes(type: TargetType, index: number): string {
+/** The SQL condition that the item bound as `?{index}` takes votes at `now`. */
+function openForVotes(type: TargetType, index: number, now: number): string {
   if (type === "post") {
     return `EXISTS (SELECT 1 FROM posts WHERE id = ?${index}
       AND deleted_at IS NULL AND removed_batch_id IS NULL)`;
   }
-  // A comment takes votes while both it and its post are live.
+  // A comment takes votes while both it and its post are live; a fund
+  // vote's nomination, until its nominations close, so the result stands.
   return `EXISTS (SELECT 1 FROM comments AS comment
     JOIN posts AS post ON post.id = comment.post_id
     WHERE comment.id = ?${index}
       AND comment.deleted_at IS NULL AND comment.removed_batch_id IS NULL
-      AND post.deleted_at IS NULL AND post.removed_batch_id IS NULL)`;
+      AND post.deleted_at IS NULL AND post.removed_batch_id IS NULL
+      AND NOT (comment.parent_id IS NULL AND EXISTS (
+        SELECT 1 FROM fund_votes WHERE fund_votes.post_id = comment.post_id AND fund_votes.closes_at <= ${Math.floor(now)})))`;
 }
 
 export type VoteResult =
@@ -159,7 +162,7 @@ export async function castVote(
 
   // Nobody votes on what their own karma group wrote: their own items, or
   // their agent's.
-  const allowed = `${openForVotes(type, 2)}
+  const allowed = `${openForVotes(type, 2, now)}
     AND ?1 NOT IN ${karmaHoldersSql(type, "?2")}
     AND NOT EXISTS (SELECT 1 FROM profiles WHERE user_id = ?1 AND owner_id IS NOT NULL)
     AND ${participantCondition(1, now)}`;
@@ -191,7 +194,7 @@ export async function castVote(
   const state = await db
     .prepare(
       `SELECT item.score, ?2 IN ${karmaHoldersSql(type, "?1")} AS own,
-              ${openForVotes(type, 1)} AS open,
+              ${openForVotes(type, 1, now)} AS open,
               (SELECT value FROM votes
                WHERE voter_id = ?2 AND target_type = '${type}' AND target_id = ?1) AS vote
        FROM ${table} AS item WHERE item.id = ?1`,

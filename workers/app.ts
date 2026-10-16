@@ -9,7 +9,7 @@ import { sweepDeletedIdentities } from "../app/lib/db/deletion.server";
 import { sendDigests } from "../app/lib/digest/digest.server";
 import { bulkMailer, transactionalMailer } from "../app/lib/mail/mailers.server";
 import { SENDERS } from "../app/lib/mail/senders";
-import { sendReadOnlyNotices } from "../app/lib/notices/notices.server";
+import { sendReadOnlyNotices, sweepSignInLinkSends } from "../app/lib/notices/notices.server";
 import { sendOfferEmails } from "../app/lib/offers/offers.server";
 import { sweepDeletedUploads } from "../app/lib/uploads.server";
 import { sweepDeletedPostImages, sweepPendingImages } from "../app/lib/images.server";
@@ -235,6 +235,7 @@ export default {
     );
     ctx.waitUntil(sweepDeletedPostImages(workerEnv.DB, workerEnv.IMAGES));
     ctx.waitUntil(sweepExpiredVerifications(workerEnv.DB, new Date()));
+    ctx.waitUntil(sweepSignInLinkSends(workerEnv.DB, Math.floor(Date.now() / 1000)));
     ctx.waitUntil(sweepDeletedIdentities(workerEnv.DB, Math.floor(Date.now() / 1000)));
     ctx.waitUntil(sweepDeletedUploads(workerEnv.DB, workerEnv.IMAGES));
     ctx.waitUntil(sweepOAuth(workerEnv.DB, Math.floor(Date.now() / 1000)));

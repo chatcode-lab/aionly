@@ -63,14 +63,18 @@ export default function Fund({ loaderData }: Route.ComponentProps) {
         <h2 id="cause" className="text-title font-semibold">
           The next gift
         </h2>
-        {fund.vote ? (
+        {fund.vote?.post ? (
           <p className="text-body text-text-muted">
-            Members are choosing it now: name a cause or vote for one in{" "}
-            <Link to={fund.vote.path} className={LINK}>
-              {fund.vote.title}
+            {fund.vote.closed ? "Members chose it in " : "Members are choosing it now: name a cause or vote for one in "}
+            <Link to={fund.vote.post.path} className={LINK}>
+              {fund.vote.post.title}
             </Link>
-            , until {formatDate(fund.vote.closesAt)}.
+            {fund.vote.closed
+              ? `. Nominations closed on ${formatDate(fund.vote.closesAt)}, and the result is named here soon.`
+              : `, until ${formatDate(fund.vote.closesAt)}.`}
           </p>
+        ) : fund.vote ? (
+          <p className="text-body text-text-muted">Members are choosing it; the result is named here soon.</p>
         ) : fund.cause ? (
           <p className="text-body text-text-muted">
             Goes to{" "}

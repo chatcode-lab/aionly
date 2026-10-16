@@ -68,8 +68,11 @@ describe("payments and the fund", () => {
       total_excluding_tax: 7000,
       subtotal: 7000,
       status_transitions: { paid_at: NOW },
+      parent: { subscription_details: { subscription: "sub_fan" } },
     };
     await deliver("invoice.paid", invoice);
+    // A one-time invoice, as a fresh start's checkout makes, is never the plan's (F65).
+    await deliver("invoice.paid", { ...invoice, id: "in_fresh", parent: null, amount_paid: 2400, total_excluding_tax: 2000, subtotal: 2000 });
     // Nothing paid, nothing recorded; an unknown customer is left out.
     await deliver("invoice.paid", { ...invoice, id: "in_2", amount_paid: 0 });
     await deliver("invoice.paid", { ...invoice, id: "in_3", customer: "cus_nobody" });
@@ -80,14 +83,30 @@ describe("payments and the fund", () => {
     await recordPayment(db, { id: "in_1", userId: "fan", kind: "plan", amountCents: 7000, currency: "usd", paidAt: NOW, paymentIntent: "pi_plan" });
     await deliver("charge.refunded", { id: "ch_1", object: "charge", amount: 8470, amount_refunded: 4235, payment_intent: "pi_plan" });
     expect(await db.prepare(`SELECT refunded_cents FROM payments WHERE id = 'in_1'`).first()).toEqual({ refunded_cents: 3500 });
-    expect(await recordRefund(db, { paymentIntent: "pi_unknown", refunded: 1, paid: 2 })).toBe(false);
+    // An older snapshot of the same charge, arriving late, lowers nothing (F66).
+    await deliver("charge.refunded", { id: "ch_1", object: "charge", amount: 8470, amount_refunded: 1000, payment_intent: "pi_plan" });
+    expect(await db.prepare(`SELECT refunded_cents FROM payments WHERE id = 'in_1'`).first()).toEqual({ refunded_cents: 3500 });
+  });
+
+  it("keeps a refund that comes before its payment, and applies it when the payment comes (F66)", async () => {
+    // A full refund of a fresh start, reported before its checkout is recorded.
+    await recordRefund(db, { chargeId: "ch_early", paymentIntent: "pi_early", refunded: 2400, paid: 2400, now: NOW });
+    await recordPayment(db, { id: "cs_early", userId: "low", kind: "fresh_start", amountCents: 2000, currency: "usd", paidAt: NOW, paymentIntent: "pi_early" });
+    expect(await db.prepare(`SELECT refunded_cents FROM payments WHERE id = 'cs_early'`).first()).toEqual({ refunded_cents: 2000 });
+    // An invoice's refund, which Stripe names by invoice, before the invoice is recorded.
+    await recordRefund(db, { chargeId: "ch_inv", paymentIntent: "pi_inv", invoiceId: "in_late", refunded: 4235, paid: 8470, now: NOW });
+    await recordPayment(db, { id: "in_late", userId: "fan", kind: "plan", amountCents: 7000, currency: "usd", paidAt: NOW });
+    expect(await db.prepare(`SELECT refunded_cents, payment_intent FROM payments WHERE id = 'in_late'`).first()).toEqual({
+      refunded_cents: 3500,
+      payment_intent: null,
+    });
   });
 
   it("is empty until a fresh start is paid, and counts neither an admin's grant nor a refunded one", async () => {
     expect(await fundStarted(db)).toBe(false);
     await applyFreshStart(db, { id: "act_1", userId: "low", source: "admin", now: NOW });
     await recordPayment(db, { id: "cs_2", userId: "low", kind: "fresh_start", amountCents: 2000, currency: "usd", paidAt: NOW });
-    await recordRefund(db, { id: "cs_2", paymentIntent: "pi_2", refunded: 2400, paid: 2400 });
+    await recordRefund(db, { chargeId: "ch_2", invoiceId: "cs_2", paymentIntent: "pi_2", refunded: 2400, paid: 2400, now: NOW });
     forgetFundStarted();
     expect(await fundStarted(db)).toBe(false);
     expect(await fundSummary(db)).toMatchObject({ collectedCents: 0 });

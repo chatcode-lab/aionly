@@ -75,6 +75,6 @@ describe("who joined through a partner link", () => {
       await claimPartnerJoin(db, { code: "mine", userId: id, now: NOW });
       await user(id, name);
     }
-    expect((await joinedThrough(db, ["mine"])).mine?.map((member) => member.username).sort()).toEqual(["first_joiner", "second_joiner"]);
+    expect(new Map(await joinedThrough(db, ["mine"])).get("mine")?.map((member) => member.username).sort()).toEqual(["first_joiner", "second_joiner"]);
   });
 });

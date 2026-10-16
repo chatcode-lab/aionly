@@ -101,7 +101,9 @@ const CLAIM_GRACE_SECONDS = 600;
 /**
  * Settles partner claims whose sign-up did not finish: one whose account
  * was made gets its partner; one whose account never came is dropped, so
- * it no longer counts toward the link's limit.
+ * it no longer counts toward the link's limit. A finished join stays for
+ * good, its account deleted or not: the partner's share of what it paid
+ * hangs on it, and the account it made used its place.
  */
 export async function sweepPartnerJoins(db: D1Database, now: number): Promise<number> {
   const { results } = await db
@@ -113,11 +115,24 @@ export async function sweepPartnerJoins(db: D1Database, now: number): Promise<nu
     .all<{ user_id: string }>();
   for (const { user_id: userId } of results) await attachPartner(db, { userId });
   const dropped = await db
-    .prepare(`DELETE FROM partner_joins WHERE joined_at < ?1 AND NOT EXISTS (SELECT 1 FROM "user" WHERE "id" = partner_joins.user_id)`)
+    .prepare(
+      `DELETE FROM partner_joins WHERE joined_at < ?1
+         AND NOT EXISTS (SELECT 1 FROM "user" WHERE "id" = partner_joins.user_id)
+         AND NOT EXISTS (SELECT 1 FROM profiles WHERE user_id = partner_joins.user_id)`,
+    )
     .bind(now - CLAIM_GRACE_SECONDS)
     .run();
   return results.length + dropped.meta.changes;
 }
+
+/**
+ * What the members who joined through the link `link` paid for the plan in
+ * their shared months, before tax, less refunds (SQL).
+ */
+const REVENUE = `(SELECT COALESCE(SUM(payment.amount_cents - payment.refunded_cents), 0)
+  FROM partner_joins AS joined JOIN payments AS payment ON payment.user_id = joined.user_id AND payment.kind = 'plan'
+  WHERE joined.code = link.code AND payment.paid_at >= joined.joined_at
+    AND payment.paid_at < unixepoch(joined.joined_at, 'unixepoch', '+' || link.share_months || ' months'))`;
 
 export interface PartnerLinkStats {
   code: string;
@@ -164,10 +179,7 @@ export async function partnerLinks(db: D1Database, input: { partnerId?: string; 
                 WHERE joined.code = link.code AND member.deleted_at IS NULL) AS joined,
               (SELECT COUNT(*) FROM partner_joins AS joined JOIN profiles AS member ON member.user_id = joined.user_id
                 WHERE joined.code = link.code AND member.deleted_at IS NULL AND COALESCE(member.plan_until, 0) > ?2) AS fans,
-              (SELECT COALESCE(SUM(payment.amount_cents - payment.refunded_cents), 0)
-                FROM partner_joins AS joined JOIN payments AS payment ON payment.user_id = joined.user_id AND payment.kind = 'plan'
-                WHERE joined.code = link.code AND payment.paid_at >= joined.joined_at
-                  AND payment.paid_at < unixepoch(joined.joined_at, 'unixepoch', '+' || link.share_months || ' months')) AS revenue
+              ${REVENUE} AS revenue
        FROM partner_links AS link
        JOIN usernames AS name ON name.user_id = link.partner_id AND name.is_current = 1
        WHERE ?1 IS NULL OR link.partner_id = ?1
@@ -209,6 +221,31 @@ export async function partnerLinks(db: D1Database, input: { partnerId?: string; 
   }));
 }
 
+/**
+ * Each partner's share earned over all their links and paid over all their
+ * payouts, never limited the way the lists are (SQL rows: partner_id,
+ * earned, paid). With `partnerId`, only theirs.
+ */
+async function ledger(db: D1Database, partnerId: string | null): Promise<Map<string, { earned: number; paid: number }>> {
+  const [earned, paid] = await db.batch([
+    db
+      .prepare(
+        `SELECT link.partner_id, SUM(${REVENUE} * link.share_percent / 100) AS earned
+         FROM partner_links AS link WHERE ?1 IS NULL OR link.partner_id = ?1 GROUP BY link.partner_id`,
+      )
+      .bind(partnerId),
+    db
+      .prepare(`SELECT partner_id, SUM(amount_cents) AS paid FROM partner_payouts WHERE ?1 IS NULL OR partner_id = ?1 GROUP BY partner_id`)
+      .bind(partnerId),
+  ]);
+  const totals = new Map<string, { earned: number; paid: number }>();
+  for (const row of earned!.results as Array<{ partner_id: string; earned: number }>) totals.set(row.partner_id, { earned: row.earned, paid: 0 });
+  for (const row of paid!.results as Array<{ partner_id: string; paid: number }>) {
+    totals.set(row.partner_id, { earned: totals.get(row.partner_id)?.earned ?? 0, paid: row.paid });
+  }
+  return totals;
+}
+
 /** A partner's links, their share earned, and what was paid out to them. */
 export async function partnerStanding(db: D1Database, partnerId: string, now: number): Promise<PartnerStanding> {
   const links = await partnerLinks(db, { partnerId, now });
@@ -216,12 +253,12 @@ export async function partnerStanding(db: D1Database, partnerId: string, now: nu
     .prepare(`SELECT id, paid_on, amount_cents, note FROM partner_payouts WHERE partner_id = ?1 ORDER BY paid_on DESC LIMIT 200`)
     .bind(partnerId)
     .all<{ id: string; paid_on: string; amount_cents: number; note: string | null }>();
-  const payouts = results.map((row) => ({ id: row.id, paidOn: row.paid_on, amountCents: row.amount_cents, note: row.note }));
+  const totals = (await ledger(db, partnerId)).get(partnerId) ?? { earned: 0, paid: 0 };
   return {
     links,
-    earnedCents: links.reduce((sum, link) => sum + link.earnedCents, 0),
-    paidCents: payouts.reduce((sum, payout) => sum + payout.amountCents, 0),
-    payouts,
+    earnedCents: totals.earned,
+    paidCents: totals.paid,
+    payouts: results.map((row) => ({ id: row.id, paidOn: row.paid_on, amountCents: row.amount_cents, note: row.note })),
   };
 }
 
@@ -291,25 +328,32 @@ export async function recordPayout(
     .run();
 }
 
-/** Every partner's share earned and paid out, for admins. */
-export async function partnersOwed(db: D1Database, now: number): Promise<Array<{ partnerId: string; partner: string; earnedCents: number; paidCents: number }>> {
-  const links = await partnerLinks(db, { now });
+/** Every partner's share earned and paid out, over the whole ledger, for admins. */
+export async function partnersOwed(
+  db: D1Database,
+  _now: number,
+): Promise<Array<{ partnerId: string; partner: string; earnedCents: number; paidCents: number }>> {
+  const totals = await ledger(db, null);
+  if (totals.size === 0) return [];
   const { results } = await db
-    .prepare(`SELECT partner_id, SUM(amount_cents) AS paid FROM partner_payouts GROUP BY partner_id`)
-    .all<{ partner_id: string; paid: number }>();
-  const paid = new Map(results.map((row) => [row.partner_id, row.paid]));
-  const partners = new Map<string, { partnerId: string; partner: string; earnedCents: number; paidCents: number }>();
-  for (const link of links) {
-    const entry = partners.get(link.partnerId) ?? { partnerId: link.partnerId, partner: link.partner, earnedCents: 0, paidCents: paid.get(link.partnerId) ?? 0 };
-    entry.earnedCents += link.earnedCents;
-    partners.set(link.partnerId, entry);
-  }
-  return [...partners.values()];
+    .prepare(`SELECT user_id, name FROM usernames WHERE is_current = 1 AND user_id IN (SELECT value FROM json_each(?1))`)
+    .bind(JSON.stringify([...totals.keys()]))
+    .all<{ user_id: string; name: string }>();
+  const names = new Map(results.map((row) => [row.user_id, row.name]));
+  return [...totals].map(([partnerId, total]) => ({
+    partnerId,
+    partner: names.get(partnerId) ?? "[deleted]",
+    earnedCents: total.earned,
+    paidCents: total.paid,
+  }));
 }
 
-/** Who joined through each link, newest first, a few hundred at most per link, for admins. */
-export async function joinedThrough(db: D1Database, codes: string[]): Promise<Record<string, Array<{ username: string; joinedAt: number; fan: boolean }>>> {
-  if (codes.length === 0) return {};
+/** Who joined through each link, newest first, a few thousand at most, for admins: [code, members] pairs. */
+export async function joinedThrough(
+  db: D1Database,
+  codes: string[],
+): Promise<Array<[string, Array<{ username: string; joinedAt: number; fan: boolean }>]>> {
+  if (codes.length === 0) return [];
   const { results } = await db
     .prepare(
       `SELECT joined.code, name.name AS username, joined.joined_at, COALESCE(member.plan_until, 0) > ?2 AS fan
@@ -322,7 +366,12 @@ export async function joinedThrough(db: D1Database, codes: string[]): Promise<Re
     )
     .bind(JSON.stringify(codes), Math.floor(Date.now() / 1000))
     .all<{ code: string; username: string; joined_at: number; fan: number }>();
-  const byCode: Record<string, Array<{ username: string; joinedAt: number; fan: boolean }>> = {};
-  for (const row of results) (byCode[row.code] ??= []).push({ username: row.username, joinedAt: row.joined_at, fan: row.fan === 1 });
-  return byCode;
+  // A Map, since any code is a valid name, `constructor` included.
+  const byCode = new Map<string, Array<{ username: string; joinedAt: number; fan: boolean }>>();
+  for (const row of results) {
+    const members = byCode.get(row.code) ?? [];
+    members.push({ username: row.username, joinedAt: row.joined_at, fan: row.fan === 1 });
+    byCode.set(row.code, members);
+  }
+  return [...byCode];
 }

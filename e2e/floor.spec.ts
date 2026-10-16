@@ -8,6 +8,7 @@ test("an account below the karma floor is read-only, sees the ways back, and a p
   lowKarmaAccount,
   request,
   baseURL,
+  browser,
 }) => {
   await lowKarmaAccount.signIn(context);
   await open(page, POST);
@@ -33,6 +34,32 @@ test("an account below the karma floor is read-only, sees the ways back, and a p
   for (const choice of ["$20", "$50", "$100"]) await expect(amount.getByText(choice, { exact: true })).toBeVisible();
   await expect(amount.getByLabel("Another amount, in dollars")).toBeVisible();
   await expect(page.getByRole("checkbox", { name: /Apply my fresh start right away/ })).toBeVisible();
+  // The choice is in the form's own fields, with or without scripts (F77).
+  const fields = async (target: typeof page) =>
+    // What the form submits, read without callbacks, which a page without scripts cannot run.
+    target.locator("form", { has: target.getByRole("group", { name: "Amount, before VAT" }) }).evaluate((form) => {
+      const chosen: Record<string, string> = {};
+      const fields = (form as HTMLFormElement).elements;
+      for (let index = 0; index < fields.length; index += 1) {
+        const field = fields[index] as HTMLInputElement;
+        if (!field.name.startsWith("amount") || (field.type === "radio" && !field.checked)) continue;
+        chosen[field.name] = field.value;
+      }
+      return chosen;
+    });
+  const plain = await browser.newContext({ javaScriptEnabled: false });
+  await lowKarmaAccount.signIn(plain);
+  const scriptless = await plain.newPage();
+  await scriptless.goto("/fresh-start");
+  await scriptless.getByText("$50", { exact: true }).click();
+  expect(await fields(scriptless)).toEqual({ amount: "50", amount_other: "" });
+  await scriptless.locator("label", { has: scriptless.getByLabel("Another amount, in dollars") }).click({ position: { x: 4, y: 4 } });
+  await scriptless.getByLabel("Another amount, in dollars").fill("75");
+  expect(await fields(scriptless)).toEqual({ amount: "other", amount_other: "75" });
+  await plain.close();
+  // With scripts, typing an amount picks it.
+  await amount.getByLabel("Another amount, in dollars").fill("35");
+  expect(await fields(page)).toEqual({ amount: "other", amount_other: "35" });
 
   // Stripe reports the payment; the account takes part again, its karma unchanged.
   await payFreshStart(request, lowKarmaAccount);

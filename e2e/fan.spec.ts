@@ -74,7 +74,9 @@ test("a new member's welcome leads to the plan, with a quiet way on", async ({ p
   // Offers by email are on, with the way to turn them off; nothing to tick.
   await expect(page.getByText(/We.ll email you the new-member offer, 30% off for 24 hours/)).toBeVisible();
   await expect(page.getByRole("checkbox")).toHaveCount(0);
-  await page.getByRole("button", { name: "Continue" }).click();
+  // Turned down at once, in one click, as the address is collected.
+  await expect(page.getByRole("button", { name: "Continue without them" })).toBeVisible();
+  await page.getByRole("button", { name: "Continue", exact: true }).click();
   await expect(page).toHaveURL(/\/fan\?joined=&next=%2Fu%2Fquiet_otter_482$/);
   await expect(page.getByRole("heading", { name: `Welcome to aion.ly, ${account.username}` })).toBeVisible();
   await expect(page.locator("[data-offer]")).toHaveText(/^30% off\s*2\d hours left$/);
