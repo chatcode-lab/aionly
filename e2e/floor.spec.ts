@@ -17,7 +17,9 @@ test("an account below the karma floor is read-only, sees the ways back, and a p
   const refused = await page.request.post(POST, { form: { intent: "comment", body: "Should not land" }, headers: { Origin: baseURL! } });
   expect(refused.status()).toBe(403);
 
-  await page.getByRole("link", { name: "How to take part again" }).click();
+  // The way back, in the notice on every page and where the comment box would be.
+  await expect(page.getByRole("link", { name: "How to take part again" })).toHaveCount(2);
+  await page.getByRole("link", { name: "How to take part again" }).last().click();
   await expect(page).toHaveURL(/\/fresh-start$/);
   await expect(page.getByRole("heading", { name: "Take part again" })).toBeVisible();
   for (const name of [/A fresh start, \$20 plus VAT/, "An appeal", "The votes you still get"]) {

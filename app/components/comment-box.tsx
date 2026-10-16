@@ -175,7 +175,18 @@ export function CommentBox({
   }
   if (viewer.ban) {
     return reply ? null : (
-      <p className="text-meta text-text-muted">Commenting is paused while your account is read-only.</p>
+      <p className="text-meta text-text-muted">
+        Commenting is paused while your account is read-only.
+        {/* The way back, where it is missed: a fresh start, an appeal, or votes. */}
+        {viewer.ban.kind === "karma" ? (
+          <>
+            {" "}
+            <Link to="/fresh-start" className="font-medium text-text underline underline-offset-4">
+              How to take part again
+            </Link>
+          </>
+        ) : null}
+      </p>
     );
   }
 

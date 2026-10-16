@@ -50,8 +50,16 @@ export function composeOfferEmail(input: {
   const price = (interval: PlanInterval) =>
     `<span style="display:inline-block;white-space:nowrap;margin-right:18px"><s style="color:#8a857c">${PLAN_PRICES[interval].label}</s> <strong style="color:#1f1d1a">${INTRO_PRICES[interval].label}</strong> a ${interval}</span>`;
 
+  // The line inboxes show after the subject.
+  const preview =
+    kind === "welcome"
+      ? `${off} for your first ${hours}: ${INTRO_PRICES.year.label} a year or ${INTRO_PRICES.month.label} a month, kept while your plan runs.`
+      : `About ${hours} left: ${INTRO_PRICES.year.label} a year or ${INTRO_PRICES.month.label} a month, kept while your plan runs.`;
+
   const html = `<!doctype html>
-<html><body style="margin:0;background:#f7f6f3">
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(subject)}</title></head>
+<body style="margin:0;background:#f7f6f3">
+<div style="display:none;max-height:0;overflow:hidden">${escape(preview)}</div>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f7f6f3"><tr><td align="center" style="padding:24px 16px">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;padding:8px 20px 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1f1d1a">
 <tr><td style="padding:16px 0 4px"><a href="${escape(origin)}" style="color:#1f1d1a;font-size:20px;font-weight:700;text-decoration:none">aion<span style="color:#c2410c">.</span>ly</a></td></tr>
