@@ -147,6 +147,55 @@ function GoogleSignIn({ next }: { next: string }) {
 }
 
 /**
+ * The other ways in, for accounts made here: X, where the member linked it
+ * in Settings (shown once the board's X app is set up), and a link sent to
+ * the account's email. Neither makes an account.
+ */
+function MemberSignIns({ next, sent }: { next: string; sent?: boolean }) {
+  const root = useRouteLoaderData("root") as { xSignIn?: boolean } | undefined;
+  const id = useId();
+  return (
+    <>
+      {root?.xSignIn ? (
+        // A full page load: the browser leaves for X from here.
+        <Form method="post" action="/signin" reloadDocument>
+          <input type="hidden" name="intent" value="x" />
+          <input type="hidden" name="next" value={next} />
+          <Button type="submit" variant="secondary" className="w-full">
+            <XLogo size={16} />
+            Continue with X
+          </Button>
+        </Form>
+      ) : null}
+      {sent ? (
+        <Notice>If an account here uses that email, a sign-in link is on its way. It works once, within 15 minutes.</Notice>
+      ) : null}
+      <Form method="post" action="/signin" className="space-y-1.5">
+        <input type="hidden" name="intent" value="email" />
+        <input type="hidden" name="next" value={next} />
+        <label htmlFor={id} className="block text-meta text-text-muted">
+          Or get a sign-in link by email
+        </label>
+        <div className="flex gap-2">
+          <input
+            id={id}
+            name="email"
+            type="email"
+            required
+            autoComplete="email"
+            spellCheck={false}
+            maxLength={254}
+            placeholder="Your account's email"
+            className="h-9 min-w-0 flex-1 rounded-lg border border-border-strong bg-surface px-3 text-body text-text placeholder:text-text-faint pointer-coarse:h-(--touch) pointer-coarse:text-[1rem]"
+          />
+          <Button type="submit">Send link</Button>
+        </div>
+      </Form>
+    </>
+  );
+}
+
+/**
  * Google sign-in, or, inside an app's own browser where Google refuses to
  * sign anyone in, how to continue in a real browser. `next` is where the
  * visitor returns afterwards. While new accounts need an invitation, it is
@@ -159,6 +208,7 @@ export function SignInPanel({
   next,
   inAppBrowser,
   error,
+  sent,
   invited = false,
   tab: shown,
   tabHref,
@@ -167,6 +217,8 @@ export function SignInPanel({
   /** The app whose browser this is, or null in a regular browser. */
   inAppBrowser: string | null;
   error?: string;
+  /** A sign-in link was asked for. */
+  sent?: boolean;
   /** Shown on an invitation's own page, which needs no code. */
   invited?: boolean;
   tab?: SignInTab;
@@ -208,6 +260,8 @@ export function SignInPanel({
       <div className="space-y-3">
         {notice}
         <GoogleSignIn next={next} />
+        {/* Open to all, members also sign in the other ways here. */}
+        {invited ? null : <MemberSignIns next={next} sent={sent} />}
       </div>
     );
   }
@@ -230,6 +284,7 @@ export function SignInPanel({
       ) : (
         <div className="space-y-3">
           <GoogleSignIn next={next} />
+          <MemberSignIns next={next} sent={sent} />
           <p className="text-meta text-text-muted">
             For accounts made here. A new one needs an invitation: see New member.
           </p>

@@ -22,7 +22,7 @@ import { SiteFooter, SiteHeader } from "./components/site-chrome";
 import { useTheme } from "./components/theme-switch";
 import { ErrorState, Notice } from "./components/ui/states";
 import { ToastProvider } from "./components/ui/toast";
-import { invitesRequired } from "./lib/auth.server";
+import { invitesRequired, xConfigured } from "./lib/auth.server";
 import { appEnvironment } from "./lib/env.server";
 import { formatDate } from "./lib/format";
 import { introEndsAt } from "./lib/plan";
@@ -85,6 +85,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     settings: await loadSettings(env.DB),
     // Whether a new account needs an invitation, for the sign-in screen.
     openSignup: !invitesRequired(),
+    // Whether members may sign in with a linked X account.
+    xSignIn: xConfigured(),
     viewer,
   };
 }

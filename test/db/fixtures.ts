@@ -11,6 +11,7 @@ const TABLES = [
   "comment_bookmarks",
   "invites",
   "checkout_claims",
+  "checkout_returns",
   "mentions",
   "fresh_starts",
   "oauth_codes",

@@ -28,6 +28,7 @@ export function UsernameForm({
   claimShort = false,
   onNameChange,
   children,
+  beforeSubmit,
 }: {
   current: string;
   hint: string;
@@ -45,6 +46,8 @@ export function UsernameForm({
   onNameChange?: (name: string) => void;
   /** Hidden fields to send along, such as where to go next. */
   children?: React.ReactNode;
+  /** Shown just above the button, such as a choice sent along with the name. */
+  beforeSubmit?: React.ReactNode;
 }) {
   const [value, setValue] = useState(current);
   const [edited, setEdited] = useState(false);
@@ -82,6 +85,7 @@ export function UsernameForm({
           Names of 4 or 5 characters come with the yearly Fan plan. Claim it, and it is yours as soon as you pay.
         </p>
       ) : null}
+      {beforeSubmit}
       <Button
         type="submit"
         variant="primary"

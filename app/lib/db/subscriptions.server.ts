@@ -234,6 +234,24 @@ export async function releaseCheckout(db: D1Database, claim: CheckoutClaim): Pro
     .run();
 }
 
+/**
+ * Marks a checkout's return as having applied what it carried for the
+ * member, such as a short name: true the first time only, so opening the
+ * return address again changes nothing.
+ */
+export async function claimCheckoutReturn(db: D1Database, sessionId: string, userId: string, now: number): Promise<boolean> {
+  const result = await db
+    .prepare(`INSERT INTO checkout_returns (session_id, user_id, done_at) VALUES (?1, ?2, ?3) ON CONFLICT (session_id) DO NOTHING`)
+    .bind(sessionId, userId, now)
+    .run();
+  return result.meta.changes > 0;
+}
+
+/** Undoes a claim whose work failed, so the return can be tried again. */
+export async function releaseCheckoutReturn(db: D1Database, sessionId: string): Promise<void> {
+  await db.prepare(`DELETE FROM checkout_returns WHERE session_id = ?1`).bind(sessionId).run();
+}
+
 /** The subscription to cancel when an account is deleted, if one is running. */
 export async function runningSubscription(db: D1Database, userId: string): Promise<string | null> {
   const row = await db

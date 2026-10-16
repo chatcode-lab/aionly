@@ -35,7 +35,8 @@ import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.se
 import { requireAccount, requireParticipant } from "~/lib/viewer.server";
 import { useViewer } from "~/lib/use-viewer";
 import { privatePageMeta } from "~/lib/meta";
-import { setOffersEmail } from "~/lib/offers/offers.server";
+import { setOffersConsent } from "~/lib/offers/offers.server";
+import { sendOffersSoon } from "~/lib/offers/send.server";
 import { readTheme } from "~/lib/theme";
 import { COMMENT_REPLIES, type CommentReplies, parseCommentReplies } from "~/lib/replies";
 
@@ -73,11 +74,11 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   // The one page that shows the account's email, and only to its owner.
   const google = await env.DB.prepare(
     `SELECT "email", "image" IS NOT NULL AS has_photo,
-       (SELECT offers_email FROM profiles WHERE user_id = "user"."id") AS offers_email
+       (SELECT offers_consent_at FROM profiles WHERE user_id = "user"."id") AS offers_consent_at
      FROM "user" WHERE "id" = ?1`,
   )
     .bind(viewer.id)
-    .first<{ email: string; has_photo: number; offers_email: number | null }>();
+    .first<{ email: string; has_photo: number; offers_consent_at: number | null }>();
   return {
     id: viewer.id,
     username: viewer.username,
@@ -87,7 +88,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     origin: url.origin,
     photoUrl: viewer.avatarKey ? imageAddress(viewer.avatarKey) : undefined,
     hasGooglePhoto: google?.has_photo === 1,
-    offersEmail: google?.offers_email === 1,
+    // When the member said yes to offers by email, or null.
+    offersSince: google?.offers_consent_at ?? null,
     banned: viewer.ban !== null,
     firstChange: status.firstChange,
     nextChangeAt: status.nextChangeAt,
@@ -227,11 +229,14 @@ export async function action({ request, context }: Route.ActionArgs) {
     if (!(await withinLimits(request, "write", account.id))) return { deleteError: RATE_LIMITED_MESSAGE };
     return deleteAccountAction(request, account, form);
   }
-  // Emails about offers can always be turned off, and on again.
+  // Offers by email: on only by the member's own yes, off whenever they say.
   if (form.get("intent") === "offers") {
     const account = await requireAccount(request, context);
     if (!(await withinLimits(request, "write", account.id))) return { offersError: RATE_LIMITED_MESSAGE };
-    await setOffersEmail(env.DB, account.id, form.get("offers") === "on");
+    const on = form.get("offers") === "on";
+    await setOffersConsent(env.DB, account.id, on, Math.floor(Date.now() / 1000));
+    // A new member's offer, if their day is not over.
+    if (on) sendOffersSoon(account.id, new URL(request.url).origin);
     return { offersSaved: true };
   }
   if (form.get("intent") === "token-revoke" || form.get("intent") === "token-read") {
@@ -756,7 +761,7 @@ function PlanSection({
 /**
  * Linking an X account, proven through X's own sign-in, a Fan
  * feature: the handle shown beside the name, while the plan lasts and the
- * member wants it, and its photo to use. It never signs anyone in.
+ * member wants it, and its photo to use. Linked, it also signs the member in.
  */
 function XSection({
   x,
@@ -829,7 +834,7 @@ function XSection({
     <div className="space-y-3">
       <p className="text-body text-text-muted">
         Fans can link their X account through X&apos;s own sign-in, to show their handle beside their name and
-        use its photo. It never signs you in, and nothing is linked unless you choose to, so you can stay anonymous.
+        use its photo, and to sign in with it. Nothing is linked unless you choose to, so you can stay anonymous.
       </p>
       {problem ? <Notice tone="danger">{problem}</Notice> : null}
       {!x.configured ? (
@@ -898,18 +903,20 @@ function DeleteAccountForm({ username, error }: { username: string; error?: stri
 }
 
 /**
- * The emails the account gets: the digest of top posts, free and off until
- * chosen, and offers about the Fan plan, on until turned off.
+ * The emails the account gets, besides the notices it needs: the digest of
+ * top posts, free and off until chosen, and offers about the Fan plan, off
+ * until the member says yes.
  */
 function EmailSection({
-  offers,
+  offersSince,
   banned,
   error,
 }: {
-  offers: boolean;
+  offersSince: number | null;
   banned: boolean;
   error: string | undefined;
 }) {
+  const offers = offersSince !== null;
   const viewer = useViewer();
   const digestFetcher = useFetcher();
   const pending = digestFetcher.formData?.get("digest");
@@ -943,7 +950,9 @@ function EmailSection({
           <div>
             <p className="text-body font-medium">Offers</p>
             <p className="text-meta text-text-muted">
-              {offers ? "On: now and then, an offer on the Fan plan." : "Off: no offers by email."}
+              {offers
+                ? `On since ${formatDate(offersSince)}: a new member's offer, and now and then news of the Fan plan.`
+                : "Off. Turn it on for a new member's offer, and now and then news of the Fan plan."}
             </p>
           </div>
           <Button type="submit" disabled={busy}>
@@ -1077,7 +1086,7 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
 
       <Section title="Email" id="email">
         <EmailSection
-          offers={loaderData.offersEmail}
+          offersSince={loaderData.offersSince}
           banned={banned}
           error={actionData && "offersError" in actionData ? actionData.offersError : undefined}
         />

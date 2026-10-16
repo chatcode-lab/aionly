@@ -337,14 +337,15 @@ describe("sign-up", async () => {
     expect(await db.prepare(`SELECT invited_by FROM profiles WHERE user_id = ?1`).bind(created.id).first()).toEqual({ invited_by: "signup_host" });
   });
 
-  it("never signs anyone in with X, which is only linked", async () => {
+  it("signs a member in with the X account linked to theirs, as with Google", async () => {
     const created = await (await invited()).createUser({ name: "Member", email: "member@signup.invalid", emailVerified: true }, google);
     const context = await authFor(new Request("http://localhost/")).$context;
     const session = (provider: string) =>
       runWithEndpointContext({ context, params: { id: provider } } as unknown as Parameters<typeof runWithEndpointContext>[0], () =>
         context.internalAdapter.createSession(created.id),
       );
-    await expect(session("twitter")).rejects.toMatchObject({ body: { code: "x_sign_in" } });
+    // X's provider has sign-up off, so this is only ever an account it was linked to.
+    expect((await session("twitter"))?.userId).toBe(created.id);
     expect((await session("google"))?.userId).toBe(created.id);
   });
 

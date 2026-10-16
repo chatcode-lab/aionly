@@ -22,6 +22,7 @@ export function robotsTxt(origin: string, indexable: boolean): string {
     "Disallow: /fan/done",
     "Disallow: /fresh-start",
     "Disallow: /digest/",
+    "Disallow: /unsubscribe",
     "Disallow: /welcome",
     "Disallow: /p/*/edit",
     "",

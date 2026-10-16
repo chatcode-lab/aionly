@@ -6,6 +6,8 @@ import { revokeShortNames, sweepExpiredVerifications } from "../app/lib/db/accou
 import { sweepInviteClaims } from "../app/lib/db/invites.server";
 import { sweepDeletedIdentities } from "../app/lib/db/deletion.server";
 import { sendDigests } from "../app/lib/digest/digest.server";
+import { accountMailer, offersMailer } from "../app/lib/mail/mailers.server";
+import { sendReadOnlyNotices } from "../app/lib/notices/notices.server";
 import { sendOfferEmails } from "../app/lib/offers/offers.server";
 import { sweepDeletedUploads } from "../app/lib/uploads.server";
 import { sweepDeletedPostImages, sweepPendingImages } from "../app/lib/images.server";
@@ -241,21 +243,27 @@ export default {
     const origin = workerEnv.SITE_ORIGIN;
     if (origin) {
       ctx.waitUntil(
-        sendDigests(workerEnv.DB, workerEnv.EMAIL, {
+        sendDigests(workerEnv.DB, accountMailer(workerEnv.EMAIL), {
           origin,
           secret: workerEnv.BETTER_AUTH_SECRET,
           from: workerEnv.DIGEST_FROM ?? "digest@aion.ly",
           now: Math.floor(Date.now() / 1000),
         }),
       );
-      // New members' reminders before their price ends, and any welcome that failed.
-      ctx.waitUntil(
-        sendOfferEmails(workerEnv.DB, workerEnv.EMAIL, {
-          origin,
-          secret: workerEnv.BETTER_AUTH_SECRET,
-          now: Math.floor(Date.now() / 1000),
-        }),
-      );
+      // Members whose karma reached the floor: that they are read-only, and the ways back.
+      ctx.waitUntil(sendReadOnlyNotices(workerEnv.DB, accountMailer(workerEnv.EMAIL), { origin, now: Math.floor(Date.now() / 1000) }));
+      // Reminders before a new member's price ends, and any welcome offer
+      // that failed, to members who said yes: through Amazon SES, where set.
+      const offers = offersMailer();
+      if (offers) {
+        ctx.waitUntil(
+          sendOfferEmails(workerEnv.DB, offers, {
+            origin,
+            secret: workerEnv.BETTER_AUTH_SECRET,
+            now: Math.floor(Date.now() / 1000),
+          }),
+        );
+      }
     }
   },
 } satisfies ExportedHandler<Env>;

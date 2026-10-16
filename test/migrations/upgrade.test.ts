@@ -69,4 +69,24 @@ describe("upgrading a database with data in it", () => {
     expect(db.prepare(`SELECT mentions_seen_seq FROM profiles`).get()).toEqual({ mentions_seen_seq: 1 });
     expect(db.prepare(`SELECT value FROM counters WHERE name = 'mentions'`).get()).toEqual({ value: 2 });
   });
+
+  it("asks everyone again for offers, and counts accounts at their floor as told, at 0023", () => {
+    const db = new DatabaseSync(":memory:");
+    migrate(db, "", "0022_offer_emails.sql");
+    db.exec(`
+      INSERT INTO profiles (user_id, created_at, karma, vote_karma) VALUES ('low', 0, -120, -120), ('fresh', 0, -120, -120), ('fine', 0, 5, 5);
+      UPDATE profiles SET karma_floor = -170 WHERE user_id = 'fresh';
+    `);
+    migrate(db, "0022_offer_emails.sql", MIGRATIONS[MIGRATIONS.length - 1]!);
+    const rows = db.prepare(`SELECT user_id, offers_consent_at, floor_emailed_at IS NOT NULL AS told FROM profiles ORDER BY user_id`).all();
+    expect(rows).toEqual([
+      { user_id: "fine", offers_consent_at: null, told: 0 },
+      // Above a fresh start's own floor: not read-only, so not told.
+      { user_id: "fresh", offers_consent_at: null, told: 0 },
+      { user_id: "low", offers_consent_at: null, told: 1 },
+    ]);
+    const columns = db.prepare(`SELECT name FROM pragma_table_info('profiles')`).all().map((row) => (row as { name: string }).name);
+    expect(columns).not.toContain("offers_email");
+  });
 });
+

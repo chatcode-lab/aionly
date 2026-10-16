@@ -1,4 +1,5 @@
 import { participantCondition } from "../db/accounts.server";
+import type { Mailer } from "../mail/mailers.server";
 import { postsByIds, topSnapshot } from "../db/feed.server";
 import type { Range } from "../feed";
 import { plainText } from "../text/markdown";
@@ -106,7 +107,7 @@ export async function digestPosts(db: D1Database, frequency: Frequency, origin: 
  */
 export async function sendDigests(
   db: D1Database,
-  mailer: SendEmail,
+  mailer: Mailer,
   input: { origin: string; secret: string; from: string; now: number },
 ): Promise<number> {
   let sent = 0;

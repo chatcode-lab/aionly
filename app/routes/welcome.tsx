@@ -15,6 +15,9 @@ import { requireAccount, requireParticipant } from "~/lib/viewer.server";
 import { useSettings } from "~/lib/use-settings";
 import { useViewer } from "~/lib/use-viewer";
 import { privatePageMeta } from "~/lib/meta";
+import { setOffersConsent } from "~/lib/offers/offers.server";
+import { sendOffersSoon } from "~/lib/offers/send.server";
+import { INTRO_HOURS, INTRO_PERCENT_OFF } from "~/lib/plan";
 
 import type { Route } from "./+types/welcome";
 
@@ -51,12 +54,20 @@ export async function action({ request, context }: Route.ActionArgs) {
   const form = await request.formData();
   const next = safeReturnPath(String(form.get("next") ?? ""), url.origin);
   if (!(await withinLimits(request, "write", viewer.id))) return { error: RATE_LIMITED_MESSAGE };
+  // Offers by email only with the member's own yes, given here.
+  const offers = form.get("offers") === "yes";
+  const consent = async () => {
+    if (!offers) return;
+    await setOffersConsent(env.DB, viewer.id, true, Math.floor(Date.now() / 1000));
+    sendOffersSoon(viewer.id, url.origin);
+  };
 
   // A name of 4 or 5 characters: claimed with the yearly plan, on its page.
   if (form.get("intent") === "claim") {
     const wanted = wantedShortName(form.get("username"), { staff: viewer.role === "admin" });
     if (!wanted) return { error: USERNAME_PROBLEM.pattern };
     if (!(await nameFreeFor(env.DB, wanted, viewer.id))) return { error: "That name is taken. Names are never reused, so try another." };
+    await consent();
     throw redirect(`/fan?${new URLSearchParams({ joined: "", name: wanted, next })}`);
   }
   const error = await applyRename(viewer.id, String(form.get("username") ?? ""), {
@@ -64,6 +75,7 @@ export async function action({ request, context }: Route.ActionArgs) {
     short: viewer.shortNames,
   });
   if (error) return { error };
+  await consent();
   throw redirect(onward(viewer, next));
 }
 
@@ -102,6 +114,16 @@ export default function Welcome({ loaderData, actionData }: Route.ComponentProps
           short={loaderData.shortNames}
           claimShort={!loaderData.shortNames}
           onNameChange={setTyped}
+          beforeSubmit={
+            // Unticked: offers by email need the member's own yes.
+            <label className="flex items-start gap-2 text-meta text-text-muted">
+              <input type="checkbox" name="offers" value="yes" className="mt-0.5 size-4 shrink-0 accent-(--accent)" />
+              <span>
+                Email me the new-member offer, {INTRO_PERCENT_OFF}% off for {INTRO_HOURS} hours, and now and then news
+                of the Fan plan. Turn it off any time in Settings.
+              </span>
+            </label>
+          }
         >
           <input type="hidden" name="next" value={loaderData.next} />
         </UsernameForm>

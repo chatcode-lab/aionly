@@ -32,5 +32,14 @@ declare namespace Cloudflare {
      * a new account needs an invitation from a member.
      */
     OPEN_SIGNUP?: string;
+    /**
+     * Amazon SES, for offers to members who said yes to them (Cloudflare's
+     * Email Sending takes transactional mail only): an access key allowed
+     * `ses:SendEmail` for aion.ly, and its region, us-east-1 unless set.
+     * Unset, no offer is sent.
+     */
+    AWS_ACCESS_KEY_ID?: string;
+    AWS_SECRET_ACCESS_KEY?: string;
+    AWS_REGION?: string;
   }
 }

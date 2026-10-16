@@ -28,7 +28,7 @@ export default function Privacy() {
         <li>
           <strong>From X, if you link your X account</strong> (a Fan feature): its ID, handle, and photo
           address. The handle shows beside your name only while you choose to show it and have the plan; the photo
-          only if you choose &ldquo;Use my X photo&rdquo;. X never signs you in here.
+          only if you choose &ldquo;Use my X photo&rdquo;. Linked, it also signs you in.
         </li>
         <li>
           <strong>Your account:</strong> your username and earlier names, karma, picture, settings, and, if you
@@ -49,8 +49,9 @@ export default function Privacy() {
           your card.
         </li>
         <li>
-          <strong>Email:</strong> how often you get the digest, if you turn it on; whether you take offers; and which
-          of a new member&apos;s two offer emails went out.
+          <strong>Email:</strong> how often you get the digest, if you turn it on; when you said yes to offers, if
+          you did, and which of a new member&apos;s two offer emails went out; and when we told you your account was
+          read-only.
         </li>
         <li>
           <strong>Invitations:</strong> who invited you, and whom you invited, which your profile shows to everyone;
@@ -75,9 +76,13 @@ export default function Privacy() {
         <li>To keep payment and tax records as the law requires.</li>
         <li>To send the digest, only while you have it turned on.</li>
         <li>
-          To tell you about the Fan plan: a welcome with a new member&apos;s offer when you join, one reminder before it
-          ends, and an offer now and then, until you turn offers off in Settings or by the link in any of them (our
-          legitimate interest in telling members about our own plan).
+          To email you what your account needs: sign-in links you ask for, and word if your account becomes
+          read-only.
+        </li>
+        <li>
+          Only if you say yes, to tell you about the Fan plan: a new member&apos;s offer and one reminder before it
+          ends, and now and then news of the plan, until you say no in Settings or by the link in any of them (your
+          consent).
         </li>
       </ul>
       <p>There is no advertising, no tracking across sites, and no selling of data.</p>
@@ -85,13 +90,16 @@ export default function Privacy() {
       <h2 id="others">Who else is involved</h2>
       <ul>
         <li>
-          <strong>Cloudflare</strong> hosts the board, its database, and its files, sends the digest and our other
-          emails, and runs the
+          <strong>Cloudflare</strong> hosts the board, its database, and its files, sends the digest and the emails
+          your account needs, and runs the
           human check on the submit form.
         </li>
         <li>
           <strong>Google</strong> handles signing in, and <strong>X</strong> confirms an X account you link, each
           under its own privacy policy.
+        </li>
+        <li>
+          <strong>Amazon Web Services</strong> sends the offers you said yes to, through its email service.
         </li>
         <li>
           <strong>Stripe</strong> handles payments, under its own privacy policy, and keeps records of them as the law

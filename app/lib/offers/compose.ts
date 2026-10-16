@@ -45,7 +45,7 @@ export function composeOfferEmail(input: {
   const when = kind === "welcome" ? `for your first ${hours}` : `ends in about ${hours}`;
   const benefits =
     "Fans post text and uploads, connect an AI agent of their own, share clickable links, get the fan mark, and with the yearly plan a short username. And they keep aion.ly free of ads for everyone.";
-  const why = "You get this because you joined aion.ly.";
+  const why = "You get this because you asked aion.ly for offers by email.";
 
   const price = (interval: PlanInterval) =>
     `<span style="display:inline-block;white-space:nowrap;margin-right:18px"><s style="color:#8a857c">${PLAN_PRICES[interval].label}</s> <strong style="color:#1f1d1a">${INTRO_PRICES[interval].label}</strong> a ${interval}</span>`;

@@ -158,7 +158,10 @@ test("pages for members send a signed-out visitor to sign in, and back", async (
   // Either tab keeps where to return.
   await page.getByRole("navigation", { name: "Join or sign in" }).getByRole("link", { name: "Sign in" }).click();
   await expect(page).toHaveURL(/\/signin\?next=%2Fsettings&tab=member$/);
-  await expect(page.locator('input[name="next"]')).toHaveValue("/settings");
+  // Every way in returns there: Google, and a link by email.
+  const nexts = page.locator('input[name="next"]');
+  await expect(nexts).toHaveCount(2);
+  for (const next of await nexts.all()) await expect(next).toHaveValue("/settings");
 });
 
 test("the welcome step shows the name, and the first change is free", async ({ page, context, account }) => {
@@ -312,3 +315,32 @@ test("a sign-in refused for another reason returns to Sign in", async ({ page })
   await expect(tabs.getByRole("link", { name: "Sign in" })).toHaveAttribute("aria-current", "page");
   await expect(page.getByRole("button", { name: "Continue with Google" })).toBeVisible();
 });
+
+test("members ask for a sign-in link by email, and the answer never says whether the address has an account", async ({ page }) => {
+  await open(page, "/signin?tab=member");
+  // No X app is set up locally, so X is not offered.
+  await expect(page.getByRole("button", { name: "Continue with X" })).toHaveCount(0);
+  await page.getByLabel("Or get a sign-in link by email").fill("nobody-here@aion.ly");
+  await page.getByRole("button", { name: "Send link" }).click();
+  await expect(page).toHaveURL(/\/signin\?tab=member&next=%2F&sent=$/);
+  await expect(page.getByText("If an account here uses that email, a sign-in link is on its way.")).toBeVisible();
+  const tabs = page.getByRole("navigation", { name: "Join or sign in" });
+  await expect(tabs.getByRole("link", { name: "Sign in" })).toHaveAttribute("aria-current", "page");
+});
+
+test("a sign-in link signs in only on the member's own click, and a used one says so", async ({ page }) => {
+  await open(page, "/signin/email?token=short");
+  await expect(page.getByText("This sign-in link is not complete.")).toBeVisible();
+  // Opening it signs nobody in; the click does, once.
+  await open(page, `/signin/email?token=${"A".repeat(32)}&next=%2Fsaved`);
+  await expect(page.getByText("Your sign-in link works once.")).toBeVisible();
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page).toHaveURL(/\/signin\?tab=member&next=%2Fsaved&error=INVALID_TOKEN$/);
+  await expect(page.getByText("That sign-in link was used already or has expired.")).toBeVisible();
+});
+
+test("an X account that is linked to no account here says how to link it", async ({ page }) => {
+  await open(page, "/signin?tab=member&error=signup_disabled");
+  await expect(page.getByText("No account here has this X account linked.")).toBeVisible();
+});
+

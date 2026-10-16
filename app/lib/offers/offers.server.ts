@@ -1,4 +1,5 @@
 import { unsubscribeToken } from "../digest/digest.server";
+import type { Mailer } from "../mail/mailers.server";
 import { INTRO_HOURS, introEndsAt } from "../plan";
 import { CONTACT } from "../site";
 import { composeOfferEmail, type OfferEmailKind } from "./compose";
@@ -28,24 +29,40 @@ export function offerDue(stage: number, left: number): { kind: OfferEmailKind; n
 }
 
 /**
- * Turns emails about offers on or off. Always allowed, whatever the
- * account's standing.
+ * Offers by email, on with the member's own yes, at the welcome step or in
+ * Settings, and off whenever they say. The time of the yes is kept.
  */
-export async function setOffersEmail(db: D1Database, userId: string, on: boolean): Promise<void> {
-  await db.prepare(`UPDATE profiles SET offers_email = ?2 WHERE user_id = ?1`).bind(userId, on ? 1 : 0).run();
+export async function setOffersConsent(db: D1Database, userId: string, on: boolean, now: number): Promise<void> {
+  await db
+    .prepare(`UPDATE profiles SET offers_consent_at = CASE WHEN ?2 THEN COALESCE(offers_consent_at, ?3) ELSE NULL END WHERE user_id = ?1`)
+    .bind(userId, on ? 1 : 0, now)
+    .run();
+}
+
+/**
+ * Who an offer may go to, as SQL on `profiles` (`as`, its alias, with a
+ * dot), with the time as ?1: a member's own account, not an admin's or an
+ * agent's, that said yes to offers, is live and not banned, has a sign-in
+ * email, and has no plan.
+ */
+function mayGetOffers(as: string): string {
+  return `${as}offers_consent_at IS NOT NULL AND ${as}deleted_at IS NULL AND ${as}owner_id IS NULL
+    AND ${as}role = 'user' AND ${as}banned_at IS NULL AND COALESCE(${as}plan_until, 0) <= ?1
+    AND EXISTS (SELECT 1 FROM "user" WHERE "user"."id" = ${as}user_id)`;
 }
 
 /**
  * Sends the offer emails that are due: the welcome to a new member, and the
- * reminder once a few hours of their new-member price are left. Only to a
- * member's own account, not an admin's or an agent's, without the plan, not
- * banned, and taking offers. Each is claimed before it is sent, so two runs
- * never send one twice; a refused send is released and tried again on the
- * next run. With `userId`, as an account is made, only that account's.
+ * reminder once a few hours of their new-member price are left, to members
+ * who said yes to offers. The batch holds only accounts with one due, the
+ * nearest deadline first. Each is claimed before it is sent, inside a write
+ * that checks again that the account may get it, so an opt-out, a plan, or
+ * a deletion that landed meanwhile stops it; a refused send is released and
+ * tried again on the next run. With `userId`, only that account's.
  */
 export async function sendOfferEmails(
   db: D1Database,
-  mailer: SendEmail,
+  mailer: Mailer,
   input: { origin: string; secret: string; now: number; userId?: string },
 ): Promise<number> {
   const { now } = input;
@@ -60,18 +77,22 @@ export async function sendOfferEmails(
     )
     .bind(opened, now)
     .run();
+  // A welcome is due with more than the reminder's hours left; the
+  // reminder, within them, until the last half hour.
+  const welcomeFrom = now - (INTRO_HOURS - REMINDER_HOURS) * 3600;
+  const lastCall = opened + LAST_CALL_SECONDS;
   const { results } = await db
     .prepare(
-      `SELECT profile.user_id, account."email", profile.created_at, profile.offer_emails
-       FROM profiles AS profile
-       JOIN "user" AS account ON account."id" = profile.user_id
-       WHERE profile.offer_emails < 2 AND profile.created_at > ?1
-         AND profile.offers_email = 1 AND profile.banned_at IS NULL
-         AND (?2 IS NULL OR profile.user_id = ?2)
+      `SELECT profile.user_id, profile.created_at, profile.offer_emails FROM profiles AS profile
+       WHERE profile.offer_emails < 2 AND profile.created_at > ?2
+         AND ((profile.offer_emails = 0 AND profile.created_at > ?3) OR profile.created_at <= ?3)
+         AND ${mayGetOffers("profile.")}
+         AND (?4 IS NULL OR profile.user_id = ?4)
+       ORDER BY profile.created_at
        LIMIT ${BATCH}`,
     )
-    .bind(opened, input.userId ?? null)
-    .all<{ user_id: string; email: string; created_at: number; offer_emails: number }>();
+    .bind(now, lastCall, welcomeFrom, input.userId ?? null)
+    .all<{ user_id: string; created_at: number; offer_emails: number }>();
 
   let sent = 0;
   for (const row of results) {
@@ -79,16 +100,18 @@ export async function sendOfferEmails(
     const due = offerDue(row.offer_emails, left);
     if (!due) continue;
     const claimed = await db
-      .prepare(`UPDATE profiles SET offer_emails = ?3 WHERE user_id = ?1 AND offer_emails = ?2`)
-      .bind(row.user_id, row.offer_emails, due.next)
+      .prepare(`UPDATE profiles SET offer_emails = ?4 WHERE user_id = ?2 AND offer_emails = ?3 AND ${mayGetOffers("")}`)
+      .bind(now, row.user_id, row.offer_emails, due.next)
       .run();
     if (claimed.meta.changes === 0) continue;
+    const account = await db.prepare(`SELECT "email" FROM "user" WHERE "id" = ?1`).bind(row.user_id).first<{ email: string }>();
+    if (!account) continue;
     const unsubscribeUrl = await offersUnsubscribeUrl(input.origin, input.secret, row.user_id);
     const email = composeOfferEmail({ kind: due.kind, left, origin: input.origin, unsubscribeUrl });
     try {
       await mailer.send({
         from: { name: "aion.ly", email: OFFERS_FROM },
-        to: row.email,
+        to: account.email,
         subject: email.subject,
         html: email.html,
         text: email.text,
@@ -111,14 +134,15 @@ export async function sendOfferEmails(
 
 /**
  * Both offer emails, as a new member would get them, to an admin's own
- * sign-in email, marked as tests: to see them, and to check mail goes out.
- * Answers what went wrong, or null.
+ * sign-in email, marked as tests: to see them, and to check that the
+ * offers' mail service takes them. Answers what went wrong, or null.
  */
 export async function sendTestOfferEmails(
   db: D1Database,
-  mailer: SendEmail,
+  mailer: Mailer | null,
   input: { userId: string; origin: string; secret: string },
 ): Promise<string | null> {
+  if (!mailer) return "Amazon SES is not set up here (AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY), so no offer is sent.";
   const account = await db.prepare(`SELECT "email" FROM "user" WHERE "id" = ?1`).bind(input.userId).first<{ email: string }>();
   if (!account) return "Your account has no sign-in email.";
   const unsubscribeUrl = await offersUnsubscribeUrl(input.origin, input.secret, input.userId);
@@ -135,6 +159,10 @@ export async function sendTestOfferEmails(
         subject: `[Test] ${email.subject}`,
         html: email.html,
         text: email.text,
+        headers: {
+          "List-Unsubscribe": `<${unsubscribeUrl}>`,
+          "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+        },
       });
     }
     return null;

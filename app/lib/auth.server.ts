@@ -2,6 +2,7 @@ import { env, waitUntil } from "cloudflare:workers";
 import { betterAuth } from "better-auth";
 import type { TwitterProfile } from "@better-auth/core/social-providers";
 import { APIError } from "better-auth/api";
+import { magicLink } from "better-auth/plugins/magic-link";
 
 import { accountRecord, createProfile, linkedWith } from "./db/accounts.server";
 import { signUpRefusal } from "./db/deletion.server";
@@ -9,7 +10,9 @@ import { attachInvite, claimInvite } from "./db/invites.server";
 import { INVITE_COOKIE, normalizeInviteCode } from "./invites";
 import { rememberXAccount, type XProfile } from "./db/x-accounts.server";
 import { newId } from "./ids";
-import { sendOfferEmails } from "./offers/offers.server";
+import { accountMailer } from "./mail/mailers.server";
+import { SIGN_IN_LINK_MINUTES } from "./notices/notices";
+import { sendSignInLink } from "./notices/notices.server";
 
 // A session lasts 30 days and is extended once a day while in use.
 const SESSION_SECONDS = 30 * 24 * 3600;
@@ -59,11 +62,11 @@ export function xConfigured(): boolean {
 }
 
 /**
- * X's own sign-in, used only to link an X account to a fan's board
- * account: it never makes an account, and never signs anyone in (see the
- * session hook below). It reads the profile once, with the photo's
- * address, which X bills as one user read; X's own provider would read it
- * twice to look for an email, which linking does not need.
+ * X's own sign-in: to link an X account to a fan's board account, and then
+ * to sign in to that account with it. It never makes an account. It reads
+ * the profile once, with the photo's address, which X bills as one user
+ * read; X's own provider would read it twice to look for an email, which
+ * the board does not need.
  */
 function xProvider(seen: (profile: XProfile) => void) {
   return {
@@ -161,7 +164,7 @@ function createAuth(origin: string, request?: Request) {
     account: {
       updateAccountOnSignIn: false,
       // An X account is linked only on purpose, from Settings, whatever its
-      // email: never by a matching email at sign-in. Google is the one way in.
+      // email: never by a matching email at sign-in. Accounts are made with Google only.
       accountLinking: x
         ? { enabled: true, trustedProviders: ["twitter"], allowDifferentEmails: true, disableImplicitLinking: true }
         : { enabled: false },
@@ -199,13 +202,6 @@ function createAuth(origin: string, request?: Request) {
           after: async (user) => {
             await createProfile(env.DB, user.id);
             await attachInvite(env.DB, { userId: user.id });
-            // The welcome, with a new member's offer, once the response is
-            // on its way. Mail goes out only where the site's address is
-            // set; one that fails is sent by the hourly run.
-            if (env.SITE_ORIGIN) {
-              const welcome = { origin: env.SITE_ORIGIN, secret: env.BETTER_AUTH_SECRET, now: Math.floor(Date.now() / 1000), userId: user.id };
-              waitUntil(sendOfferEmails(env.DB, env.EMAIL, welcome).catch((error) => console.error("welcome email", error)));
-            }
           },
         },
       },
@@ -239,20 +235,23 @@ function createAuth(origin: string, request?: Request) {
         },
         update: { before: async (account) => ({ data: withoutTokens(account) }) },
       },
-      // Google is the only way in: a linked X account never signs anyone in,
-      // however its sign-in is started.
-      session: {
-        create: {
-          before: async (session, context) => {
-            const provider = (context as { params?: { id?: string } } | null | undefined)?.params?.id;
-            if (provider === "twitter") {
-              throw APIError.from("FORBIDDEN", { code: "x_sign_in", message: "Sign in with Google; X is only linked." });
-            }
-            return { data: session };
-          },
-        },
-      },
     },
+    plugins: [
+      // A sign-in link by email, for accounts that exist: never a new one.
+      // The link leads to the board's own page, whose button finishes the
+      // sign-in, so a mail scanner opening it uses nothing up.
+      magicLink({
+        disableSignUp: true,
+        storeToken: "hashed",
+        expiresIn: SIGN_IN_LINK_MINUTES * 60,
+        sendMagicLink: async ({ email, url, token }) => {
+          const next = new URL(url).searchParams.get("callbackURL") ?? "/";
+          const link = `${origin}/signin/email?${new URLSearchParams({ token, next })}`;
+          const send = { email, url: link, origin, now: Math.floor(Date.now() / 1000) };
+          waitUntil(sendSignInLink(env.DB, accountMailer(), send).catch((error) => console.error("sign-in link", error)));
+        },
+      }),
+    ],
   });
 }
 

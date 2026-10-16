@@ -1,8 +1,10 @@
+import { env } from "cloudflare:workers";
 import { redirect } from "react-router";
 
 import { applyRename } from "~/lib/accounts/rename.server";
 import { wantedShortName } from "~/lib/accounts/wanted-name";
 import { billingOpen, finishCheckout } from "~/lib/billing/plan.server";
+import { claimCheckoutReturn, releaseCheckoutReturn } from "~/lib/db/subscriptions.server";
 import { safeReturnPath } from "~/lib/security/request";
 import { requireAccount } from "~/lib/viewer.server";
 
@@ -26,9 +28,17 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       const query = new URLSearchParams({ welcome: "" });
       if (done.then) query.set("next", safeReturnPath(done.then, url.origin));
       const wanted = wantedShortName(done.wantedName, { staff: viewer.role === "admin" });
-      if (wanted) {
-        // Checked again inside the write: the yearly plan, now on, and the name still free.
-        const refused = await applyRename(viewer.id, wanted, { staff: viewer.role === "admin", short: true });
+      // Once a checkout: a later visit to this address, from history or a
+      // saved link, never renames the member again.
+      if (wanted && (await claimCheckoutReturn(env.DB, session, viewer.id, Math.floor(Date.now() / 1000)))) {
+        let refused: string | null;
+        try {
+          // Checked again inside the write: the yearly plan, now on, and the name still free.
+          refused = await applyRename(viewer.id, wanted, { staff: viewer.role === "admin", short: true });
+        } catch (error) {
+          await releaseCheckoutReturn(env.DB, session);
+          throw error;
+        }
         if (refused) query.set("name_error", `${wanted} could not be yours: ${refused}`);
         else query.set("named", wanted);
       }

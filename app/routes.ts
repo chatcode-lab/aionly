@@ -14,6 +14,8 @@ export default [
   route("u/:username", "routes/profile.tsx"),
   route("theme", "routes/theme.ts"),
   route("signin", "routes/signin.tsx"),
+  // Where a sign-in link by email leads.
+  route("signin/email", "routes/signin-email.tsx"),
   route("signout", "routes/signout.ts"),
   route("welcome", "routes/welcome.tsx"),
   // An invitation by its link, or by its code typed in (`/invite?code=`).
