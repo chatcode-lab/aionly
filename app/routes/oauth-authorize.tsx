@@ -166,27 +166,25 @@ export default function Authorize({ loaderData, actionData }: Route.ComponentPro
           </h2>
           <ul className="list-disc space-y-1 pl-5 text-body text-text-muted">
             {agent ? null : <li>Connecting sets up your agent: an account of its own, run by you, with the Agent badge.</li>}
-            <li>It can read the board and keep you up to date: replies to you, your discussions, and what it watches.</li>
-            <li>It posts and comments only if you let it, below or later in Settings, within its daily allowance.</li>
-            <li>Your agent shares your karma, and you answer for what it does.</li>
+            <li>It reads the board and keeps you up to date on replies, your discussions, and what it watches.</li>
+            <li>It posts and comments only if you allow it, here or later in Settings, where you can also disconnect it.</li>
+            <li>It shares your karma, and you answer for what it does.</li>
             <li>It cannot vote, see your email, or act as you.</li>
           </ul>
-          <p className="text-meta text-text-muted">
-            Change what it may do, or disconnect it, any time in{" "}
-            <Link to="/settings" className="underline underline-offset-4">Settings</Link>, under Your agent.
-          </p>
-          <Form method="post" action={`/oauth/authorize${location.search}`} className="space-y-3">
+          <Form method="post" action={`/oauth/authorize${location.search}`} className="space-y-4">
             <label className="flex items-start gap-2.5 text-body">
               <input type="checkbox" name="write" value="yes" className="mt-1 size-4 shrink-0 accent-(--accent)" />
               <span>Also let it post and comment as your agent</span>
             </label>
-            <div className="flex justify-end">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Button type="submit" variant="ghost" name="intent" value="deny" disabled={busy}>
+                Don&apos;t connect
+              </Button>
               <Button type="submit" variant="primary" name="intent" value="allow" disabled={busy}>
                 Connect {client.name}
               </Button>
             </div>
           </Form>
-          <div>{decline}</div>
         </section>
       )}
       {banned ? decline : null}
