@@ -174,10 +174,8 @@
 					"STRIPE_WEBHOOK_SECRET"
 				]
 			},
-			// The production database is created at launch, in Eastern North
-			// America like its media: `wrangler d1 create aionly-board
-			// --location enam`. Until its ID is filled in here, a production
-			// deploy fails rather than run without a database.
+			// Created at launch (2026-10-16) in Eastern North America, like its
+			// media: `wrangler d1 create aionly-board --location enam`.
 			"ratelimits": [
 				{ "name": "RL_VOTE_USER", "namespace_id": "3001", "simple": { "limit": 30, "period": 60 } },
 				{ "name": "RL_VOTE_IP", "namespace_id": "3002", "simple": { "limit": 120, "period": 60 } },
@@ -194,7 +192,7 @@
 				{
 					"binding": "DB",
 					"database_name": "aionly-board",
-					"database_id": "create-at-launch",
+					"database_id": "b9ace145-40ec-4479-9f8f-e9d8e2b79b2d",
 					"migrations_dir": "migrations"
 				}
 			],
