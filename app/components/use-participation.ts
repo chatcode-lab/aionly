@@ -53,14 +53,21 @@ async function postJson(
 /**
  * Votes and saves on one page's posts and comments. Each change shows at once
  * and is undone if the server refuses it. Signed out, it opens sign-in
- * instead. `loadedAt` is when the page's data was loaded, in seconds.
+ * instead. `loadedAt` is when the page's data was loaded, in seconds. A
+ * new `scope`, such as another page or order of a discussion, takes the
+ * marks loaded with it, without the page starting afresh.
  */
-export function useParticipation(initial: ViewerMarks, loadedAt: number) {
+export function useParticipation(initial: ViewerMarks, loadedAt: number, scope?: string) {
   const viewer = useViewer();
   const signIn = useSignIn();
   const notify = useNotify();
   const [, refresh] = useReducer((count: number) => count + 1, 0);
   const [marks, setMarks] = useState(initial);
+  const [shown, setShown] = useState(scope);
+  if (scope !== shown) {
+    setShown(scope);
+    setMarks(initial);
+  }
   // Only the latest request for an item may settle it.
   const latest = useRef(new Map<string, number>());
 

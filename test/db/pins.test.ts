@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { pinComment } from "../../app/lib/db/moderation.server";
+import { deleteComment } from "../../app/lib/db/authoring.server";
+import { pinComment, removeComment, removePost, revertAction } from "../../app/lib/db/moderation.server";
 import { postPage, ROOTS_PER_PAGE } from "../../app/lib/db/posts.server";
 import { comment, db, NOW, post, reset, user } from "./fixtures";
 
@@ -68,6 +69,42 @@ describe("pinning a comment", () => {
     expect(await pin("author", "first")).toEqual({ ok: true });
     // The author's own pin is no moderation: nothing more is logged.
     expect((await db.prepare(`SELECT COUNT(*) AS n FROM mod_actions`).first<{ n: number }>())!.n).toBe(2);
+  });
+
+  it("lets the author's side pin again once a moderator's pinned comment is removed or deleted", async () => {
+    expect(await pin("admin", "first")).toEqual({ ok: true });
+    const removal = await removeComment(db, { commentId: "first", actorId: "admin", reason: null, now: NOW });
+    expect(removal.ok).toBe(true);
+    expect((await postPage(db, "p1"))!.pinned).toBeNull();
+    expect(await pin("author", "second")).toEqual({ ok: true });
+    expect((await postPage(db, "p1"))!.pinned).toEqual({ id: "second", by: "author" });
+    // Restored, the removed comment is not pinned again over the author's pin.
+    if (!removal.ok) throw new Error("removal refused");
+    expect((await revertAction(db, { actionId: removal.actionId, actorId: "admin", now: NOW })).ok).toBe(true);
+    expect((await postPage(db, "p1"))!.pinned).toEqual({ id: "second", by: "author" });
+
+    // The same once the moderator's pinned comment is deleted by its author.
+    expect(await pin("admin", "third")).toEqual({ ok: true });
+    expect(await deleteComment(db, { id: "third", authorId: "other", now: NOW })).toEqual({ ok: true });
+    expect((await postPage(db, "p1"))!.pinned).toBeNull();
+    expect(await pin("author", null)).toEqual({ ok: true });
+    expect(await pin("author", "second")).toEqual({ ok: true });
+  });
+
+  it("logs nothing for a moderator's pin or unpin that was refused", async () => {
+    const logged = async () => (await db.prepare(`SELECT COUNT(*) AS n FROM mod_actions WHERE action IN ('pin_comment', 'unpin_comment')`).first<{ n: number }>())!.n;
+    expect(await pin("admin", "first")).toEqual({ ok: true });
+    expect(await logged()).toBe(1);
+    await removeComment(db, { commentId: "first", actorId: "admin", reason: null, now: NOW });
+    // A stale menu tries the same pin again: refused, and not logged.
+    expect(await pin("admin", "first")).toEqual({ ok: false, reason: "not_found" });
+    expect(await logged()).toBe(1);
+    // An unpin on a removed post whose pin is already down.
+    expect(await pin("admin", null)).toEqual({ ok: true });
+    expect(await logged()).toBe(2);
+    await removePost(db, { postId: "p1", actorId: "admin", reason: null, now: NOW });
+    expect(await pin("admin", null)).toEqual({ ok: false, reason: "not_found" });
+    expect(await logged()).toBe(2);
   });
 
   it("stays first on the first page of a long discussion, and a link to it opens that page", async () => {

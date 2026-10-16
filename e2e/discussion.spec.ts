@@ -357,3 +357,66 @@ test("a saved comment is listed under Saved, Comments, and can be unsaved there"
   await page.reload();
   await expect(page.getByText(text)).toHaveCount(0);
 });
+
+test("the 30th comment, which turns the discussion best first, clears its box and draft and is shown", async ({ page, context, account, newAccount, browser, baseURL }, testInfo) => {
+  await account.signIn(context);
+  const path = await publish(page, account, `Thirty comments for ${account.username}`);
+  const postId = path.split("/")[2]!;
+
+  // Twenty-nine comments from six other members, five each at most, the
+  // burst a member may send in a minute.
+  for (let member = 0, sent = 0; sent < 29; member += 1) {
+    const other = await browser.newContext({ baseURL });
+    await newAccount().signIn(other);
+    for (let n = 0; n < 5 && sent < 29; n += 1, sent += 1) {
+      const response = await other.request.post(`/p/${postId}`, {
+        form: { intent: "comment", body: `Comment ${sent + 1} of 29, from member ${member + 1}` },
+        headers: { Origin: baseURL! },
+      });
+      expect(response.status(), await response.text()).toBe(200);
+    }
+    await other.close();
+  }
+
+  await open(page, path);
+  const order = page.getByRole("navigation", { name: "Order comments" });
+  await expect(order.getByRole("link", { name: "Oldest" })).toHaveAttribute("aria-current", "true");
+  const text = `The thirtieth, from ${account.username} in ${testInfo.project.name}`;
+  const box = page.getByLabel("Comment", { exact: true });
+  await box.fill(text);
+  await page.getByRole("button", { name: "Comment", exact: true }).click();
+
+  await expect(commentItem(page, text)).toBeVisible();
+  await expect(order.getByRole("link", { name: "Best" })).toHaveAttribute("aria-current", "true");
+  await expect(box).toHaveValue("");
+  await expect(page).toHaveURL(/#c-[0-9A-Za-z]{12}$/);
+  expect(await page.evaluate((key) => localStorage.getItem(key), `draft:comment:${postId}:top`)).toBeNull();
+  await page.reload();
+  await expect(box).toHaveValue("");
+  await expect(page.getByText(text, { exact: true })).toHaveCount(1);
+});
+
+test("another order of a discussion shows the votes loaded with it", async ({ page, context, account, otherAccount, browser, baseURL }) => {
+  await account.signIn(context);
+  const path = await publish(page, account, `Votes across orders for ${account.username}`);
+  const postId = path.split("/")[2]!;
+  const theirs = await browser.newContext({ baseURL });
+  await otherAccount.signIn(theirs);
+  for (const body of ["The first answer, to vote on.", "The second answer, left alone."]) {
+    const response = await theirs.request.post(`/p/${postId}`, { form: { intent: "comment", body }, headers: { Origin: baseURL! } });
+    expect(response.status()).toBe(200);
+  }
+  await theirs.close();
+
+  await open(page, path);
+  const item = page.locator("li[id^='c-']", { hasText: "The first answer, to vote on." });
+  const up = item.getByRole("group", { name: "Vote on this comment" }).getByRole("button", { name: "Upvote" });
+  await expect(up).toHaveAttribute("aria-pressed", "false");
+  // The same account votes from another tab, which this page does not see.
+  const id = (await item.getAttribute("id"))!.slice("c-".length);
+  const vote = await context.request.post("/api/vote", { data: { type: "comment", id, value: 1 }, headers: { Origin: baseURL! } });
+  expect(vote.ok(), await vote.text()).toBe(true);
+  await page.getByRole("navigation", { name: "Order comments" }).getByRole("link", { name: "Newest" }).click();
+  await expect(page).toHaveURL(/order=new/);
+  await expect(up).toHaveAttribute("aria-pressed", "true");
+});

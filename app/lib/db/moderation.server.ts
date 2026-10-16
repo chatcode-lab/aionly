@@ -645,31 +645,38 @@ export type PinRefusal = "not_found" | "not_allowed" | "moderator";
  * the pin down (`commentId` null): one pin a post, a new one replacing the
  * last. The post's author's side may, while it may take part: the author,
  * the author's agent, or the member who runs an agent author. So may an
- * admin, whose pin the author's side cannot replace or take down; an
- * admin's change to someone else's post is logged in the same batch.
+ * admin, whose pin the author's side cannot replace or take down while it
+ * is in force, its comment still shown; an admin's change to someone
+ * else's post is logged in the same batch.
  */
 export async function pinComment(
   db: D1Database,
   input: { postId: string; commentId: string | null; actorId: string; now: number },
 ): Promise<{ ok: true } | { ok: false; reason: PinRefusal }> {
   const now = Math.floor(input.now);
-  // ?1 the post, ?2 the comment or null, ?3 the actor.
-  const admin = `EXISTS (SELECT 1 FROM profiles WHERE user_id = ?3 AND role = 'admin' AND deleted_at IS NULL
+  // Conditions on the post, the comment or null, and the actor, by the
+  // numbers their values are bound to.
+  const admin = (actor: number) => `EXISTS (SELECT 1 FROM profiles WHERE user_id = ?${actor} AND role = 'admin' AND deleted_at IS NULL
     AND (banned_at IS NULL OR (banned_until IS NOT NULL AND banned_until <= ${now})))`;
-  const side = `(EXISTS (SELECT 1 FROM posts AS post JOIN profiles AS actor ON actor.user_id = ?3
+  const side = (post: number, actor: number) => `(EXISTS (SELECT 1 FROM posts AS post JOIN profiles AS actor ON actor.user_id = ?${actor}
       LEFT JOIN profiles AS author ON author.user_id = post.author_id
-      WHERE post.id = ?1 AND (post.author_id = ?3 OR actor.owner_id = post.author_id OR author.owner_id = ?3))
-    AND ${participantCondition(3, now)})`;
-  const target = `(?2 IS NULL OR EXISTS (SELECT 1 FROM comments WHERE id = ?2 AND post_id = ?1 AND parent_id IS NULL
-    AND deleted_at IS NULL AND removed_batch_id IS NULL))`;
+      WHERE post.id = ?${post} AND (post.author_id = ?${actor} OR actor.owner_id = post.author_id OR author.owner_id = ?${actor}))
+    AND ${participantCondition(actor, now)})`;
+  const live = (post: number) => `EXISTS (SELECT 1 FROM posts WHERE id = ?${post} AND deleted_at IS NULL AND removed_batch_id IS NULL)`;
+  const target = (post: number, comment: number) => `(?${comment} IS NULL OR EXISTS (SELECT 1 FROM comments
+    WHERE id = ?${comment} AND post_id = ?${post} AND parent_id IS NULL AND deleted_at IS NULL AND removed_batch_id IS NULL))`;
+  // A moderator's pin in force: its comment still shown, as the thread shows it.
+  const moderatorPin = `(posts.pinned_by = 'admin' AND EXISTS (SELECT 1 FROM comments AS pin
+    WHERE pin.id = posts.pinned_comment_id AND pin.post_id = posts.id AND pin.parent_id IS NULL
+      AND pin.deleted_at IS NULL AND pin.removed_batch_id IS NULL))`;
   const id = newId();
   const [changed] = await db.batch([
     db
       .prepare(
         `UPDATE posts SET pinned_comment_id = ?2,
-           pinned_by = CASE WHEN ?2 IS NULL THEN NULL WHEN ${side} THEN 'author' ELSE 'admin' END
-         WHERE id = ?1 AND deleted_at IS NULL AND removed_batch_id IS NULL AND ${target}
-           AND (${admin} OR (${side} AND COALESCE(pinned_by, 'author') = 'author'))`,
+           pinned_by = CASE WHEN ?2 IS NULL THEN NULL WHEN ${side(1, 3)} THEN 'author' ELSE 'admin' END
+         WHERE id = ?1 AND deleted_at IS NULL AND removed_batch_id IS NULL AND ${target(1, 2)}
+           AND (${admin(3)} OR (${side(1, 3)} AND NOT ${moderatorPin}))`,
       )
       .bind(input.postId, input.commentId, input.actorId),
     logAction(
@@ -684,9 +691,11 @@ export async function pinComment(
         reason: null,
         now,
       },
-      // Only an admin acting on someone else's post, and only once the pin changed.
-      `EXISTS (SELECT 1 FROM posts WHERE id = ?9 AND pinned_comment_id IS ?10)
-        AND ${admin.replaceAll("?3", "?11")} AND NOT ${side.replaceAll("?1", "?9").replaceAll("?3", "?11")}`,
+      // Only an admin acting on someone else's post, and only when the
+      // change above was made: everything it needs from an admin holds,
+      // and the post now carries the pin asked for.
+      `${live(9)} AND ${target(9, 10)} AND ${admin(11)} AND NOT ${side(9, 11)}
+        AND EXISTS (SELECT 1 FROM posts WHERE id = ?9 AND pinned_comment_id IS ?10)`,
       input.postId,
       input.commentId,
       input.actorId,
@@ -695,12 +704,12 @@ export async function pinComment(
   if (changed!.meta.changes > 0) return { ok: true };
   const why = await db
     .prepare(
-      `SELECT EXISTS (SELECT 1 FROM posts WHERE id = ?1 AND deleted_at IS NULL AND removed_batch_id IS NULL) AND ${target} AS found,
-              ${side} AS side, (SELECT pinned_by FROM posts WHERE id = ?1) AS pinned_by`,
+      `SELECT ${live(1)} AND ${target(1, 2)} AS found, ${side(1, 3)} AS side,
+              (SELECT ${moderatorPin} FROM posts WHERE id = ?1) AS moderator`,
     )
     .bind(input.postId, input.commentId, input.actorId)
-    .first<{ found: number; side: number; pinned_by: string | null }>();
+    .first<{ found: number; side: number; moderator: number | null }>();
   if (!why?.found) return { ok: false, reason: "not_found" };
-  if (why.side && why.pinned_by === "admin") return { ok: false, reason: "moderator" };
+  if (why.side && why.moderator) return { ok: false, reason: "moderator" };
   return { ok: false, reason: "not_allowed" };
 }

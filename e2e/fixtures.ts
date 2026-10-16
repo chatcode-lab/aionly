@@ -277,6 +277,8 @@ export const test = base.extend<{
   account: TestAccount;
   /** A second fresh account, for what one account does to another's. */
   otherAccount: TestAccount;
+  /** One more fresh account at each call, for a test that needs several. */
+  newAccount: () => TestAccount;
   /** An account under a permanent ban, shared by every test. */
   bannedAccount: TestAccount;
   /** The admin, shared by every test that moderates. */
@@ -294,6 +296,10 @@ export const test = base.extend<{
 
   otherAccount: async ({ baseURL }, use, testInfo) => {
     await use(nextAccount(baseURL!, testInfo.workerIndex));
+  },
+
+  newAccount: async ({ baseURL }, use, testInfo) => {
+    await use(() => nextAccount(baseURL!, testInfo.workerIndex));
   },
 
   adminAccount: async ({ baseURL }, use) => {

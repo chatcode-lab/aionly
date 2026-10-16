@@ -415,16 +415,17 @@ function useCommentOnAnotherPage(pages: number) {
 }
 
 /**
- * A fresh page for each post, and each page and order of its discussion:
- * the viewer's votes and saves come with the comments loaded.
+ * A fresh page for each post. Another page or order of its discussion only
+ * takes the viewer's votes and saves loaded with it: a comment being sent
+ * keeps its box, which clears it once it is in, even when the comment
+ * turns the discussion to best first.
  */
 export default function Post(props: Route.ComponentProps) {
-  const { loaderData } = props;
-  return <PostView key={`${loaderData.id}:${loaderData.page}:${loaderData.order}`} {...props} />;
+  return <PostView key={props.loaderData.id} {...props} />;
 }
 
 function PostView({ loaderData }: Route.ComponentProps) {
-  const participation = useParticipation(loaderData.marks, loaderData.now);
+  const participation = useParticipation(loaderData.marks, loaderData.now, `${loaderData.page}:${loaderData.order}`);
   const signIn = useSignIn();
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
