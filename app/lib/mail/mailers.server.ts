@@ -5,6 +5,8 @@ import { deliverable } from "./address";
 /** One email, as the board writes it, whichever service sends it. */
 export interface Mail {
   from: { name: string; email: string };
+  /** Where a reply goes, when not to the sender. */
+  replyTo?: string;
   to: string;
   subject: string;
   html: string;
@@ -12,41 +14,70 @@ export interface Mail {
   headers?: Record<string, string>;
 }
 
-/** What sends mail: Cloudflare's binding, Amazon SES, or a test's stand-in. */
+/** The service that carried a mail. */
+export type Carrier = "ses" | "cloudflare";
+
+/**
+ * What sends mail: Amazon SES, Cloudflare's binding, or a test's stand-in.
+ * Answers the service that carried it, or null when the address cannot
+ * reach anyone and nothing was sent.
+ */
 export interface Mailer {
-  send(mail: Mail): Promise<unknown>;
+  send(mail: Mail): Promise<Carrier | null | void>;
 }
 
 /** Hands mail on, except to an address that cannot reach anyone. */
-function guarded(send: (mail: Mail) => Promise<unknown>): Mailer {
+function guarded(send: (mail: Mail) => Promise<Carrier>): Mailer {
   return { send: async (mail) => (deliverable(mail.to) ? send(mail) : null) };
 }
 
-/**
- * Cloudflare's Email Sending, for the mail an account needs or asked for:
- * the digest, sign-in links, and notices about the account. Cloudflare
- * takes transactional mail only, so never offers.
- */
-export function accountMailer(binding: SendEmail = env.EMAIL): Mailer {
-  return guarded((mail) => binding.send(mail));
-}
-
-/** Whether Amazon SES is set up here, for offers. */
-export function offersMailerConfigured(): boolean {
+/** Whether Amazon SES, the board's mail service, is set up here. */
+export function sesConfigured(): boolean {
   return Boolean(env.AWS_ACCESS_KEY_ID && env.AWS_SECRET_ACCESS_KEY);
 }
 
-/**
- * Amazon SES, for offers to members who said yes to them: marketing mail,
- * which Cloudflare's Email Sending does not carry. Null where SES is not
- * set up, and then no offer is sent.
- */
-export function offersMailer(): Mailer | null {
+/** Sends through SES where it is set up, or null. */
+function sesSender(): ((mail: Mail) => Promise<Carrier>) | null {
   const accessKeyId = env.AWS_ACCESS_KEY_ID;
   const secretAccessKey = env.AWS_SECRET_ACCESS_KEY;
   if (!accessKeyId || !secretAccessKey) return null;
   const region = env.AWS_REGION || "us-east-1";
-  return guarded((mail) => sendWithSes({ accessKeyId, secretAccessKey, region }, mail));
+  return async (mail) => {
+    await sendWithSes({ accessKeyId, secretAccessKey, region }, mail);
+    return "ses";
+  };
+}
+
+/**
+ * Mail an account needs: sign-in links and notices about the account.
+ * Through Amazon SES, and through Cloudflare's Email Sending where SES is
+ * not set up or refuses it, so a sign-in link still arrives. Cloudflare
+ * takes transactional mail only, so it is the backup for these alone.
+ */
+export function transactionalMailer(binding: SendEmail = env.EMAIL, onSesRefused?: (error: unknown) => void): Mailer {
+  const ses = sesSender();
+  return guarded(async (mail) => {
+    if (ses) {
+      try {
+        return await ses(mail);
+      } catch (error) {
+        console.error("ses refused, sending through cloudflare", error);
+        onSesRefused?.(error);
+      }
+    }
+    await binding.send(mail);
+    return "cloudflare";
+  });
+}
+
+/**
+ * Mail beyond what an account needs: the digest and offers. Only through
+ * Amazon SES, as Cloudflare's Email Sending takes transactional mail only;
+ * null where SES is not set up, and then none is sent.
+ */
+export function bulkMailer(): Mailer | null {
+  const ses = sesSender();
+  return ses ? guarded(ses) : null;
 }
 
 const encoder = new TextEncoder();
@@ -78,6 +109,22 @@ function mailbox(from: Mail["from"]): string {
 }
 
 /**
+ * What SES's refusal means, when the answer alone is unclear: a secret
+ * that is an SES SMTP password, which is made from the secret access key
+ * and is not it.
+ */
+function sesHint(status: number, answer: string, secretAccessKey: string): string {
+  const smtpPassword = /^B[A-Za-z0-9+/]{43}$/.test(secretAccessKey);
+  if (status === 403 && answer.includes("signature") && smtpPassword) {
+    return " AWS_SECRET_ACCESS_KEY looks like an SES SMTP password, which is made from a secret access key and cannot stand in for it: create an access key for the IAM user instead.";
+  }
+  if (status === 403 && answer.includes("not authorized")) {
+    return " The IAM user needs ses:SendEmail on the aion.ly identity.";
+  }
+  return "";
+}
+
+/**
  * Sends through SES's v2 API, signed with AWS Signature Version 4, so the
  * Worker carries no SDK.
  */
@@ -90,6 +137,7 @@ async function sendWithSes(
   const body = JSON.stringify({
     FromEmailAddress: mailbox(mail.from),
     Destination: { ToAddresses: [mail.to] },
+    ...(mail.replyTo ? { ReplyToAddresses: [mail.replyTo] } : {}),
     Content: {
       Simple: {
         Subject: { Data: sesSubject(mail.subject), Charset: "UTF-8" },
@@ -126,5 +174,8 @@ async function sendWithSes(
     body,
     signal: AbortSignal.timeout(10_000),
   });
-  if (!response.ok) throw new Error(`SES answered ${response.status}: ${(await response.text()).slice(0, 300)}`);
+  if (!response.ok) {
+    const answer = (await response.text()).slice(0, 300);
+    throw new Error(`SES answered ${response.status}: ${answer}${sesHint(response.status, answer, secretAccessKey)}`);
+  }
 }

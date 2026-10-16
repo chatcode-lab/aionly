@@ -1,8 +1,9 @@
 /**
- * The digest email: the top posts of the period, as plain HTML that mail
- * clients render alike, with a text version beside it. Pure, so it is
- * unit-tested.
+ * The digest email: the top posts of the period, in the layout every email
+ * shares. Pure, so it is unit-tested.
  */
+
+import { composeLetter, escape } from "../mail/layout";
 
 export type Frequency = "daily" | "weekly" | "monthly";
 
@@ -25,10 +26,6 @@ export interface DigestPost {
 
 const PERIOD: Record<Frequency, string> = { daily: "today", weekly: "this week", monthly: "this month" };
 
-function escape(text: string): string {
-  return text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
-}
-
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
 export function composeDigest(input: {
@@ -38,56 +35,37 @@ export function composeDigest(input: {
   unsubscribeUrl: string;
 }): { subject: string; html: string; text: string } {
   const { frequency, posts, origin, unsubscribeUrl } = input;
-  const subject = `Top of aion.ly ${PERIOD[frequency]}: ${posts[0]?.title ?? "the board"}`;
-  const settings = `${origin}/settings`;
-
+  const line = (post: DigestPost) => `${post.source} · ${plural(post.score, "point")} · ${plural(post.comments, "comment")} · by ${post.author}`;
   const items = posts
     .map(
-      (post) => `<tr><td style="padding:14px 0;border-top:1px solid #e7e5e0">
+      (post, index) => `<div style="padding:14px 0;${index === 0 ? "" : "border-top:1px solid #e7e5e0"}">
 <a href="${escape(post.url)}" style="color:#1f1d1a;font-size:16px;font-weight:600;text-decoration:none">${escape(post.title)}</a>
-<div style="color:#6f6b64;font-size:13px;margin-top:3px">${escape(post.source)} · ${plural(post.score, "point")} · ${plural(post.comments, "comment")} · by ${escape(post.author)}</div>
+<div style="color:#6f6b64;font-size:13px;margin-top:3px">${escape(line(post))}</div>
 ${post.excerpt ? `<div style="color:#55524c;font-size:14px;line-height:20px;margin-top:6px">${escape(post.excerpt)}</div>` : ""}
-</td></tr>`,
+</div>`,
     )
     .join("\n");
 
-  // The line inboxes show after the subject: the next titles.
-  const preview = posts
-    .slice(1, 4)
-    .map((post) => post.title)
-    .join(" · ");
-
-  const html = `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(subject)}</title></head>
-<body style="margin:0;background:#f7f6f3">
-${preview ? `<div style="display:none;max-height:0;overflow:hidden">${escape(preview)}</div>` : ""}
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f7f6f3"><tr><td align="center" style="padding:24px 16px">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:600px;background:#ffffff;border-radius:12px;padding:8px 20px 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif">
-<tr><td style="padding:16px 0 4px"><a href="${escape(origin)}" style="color:#1f1d1a;font-size:20px;font-weight:700;text-decoration:none">aion.ly</a>
-<div style="color:#6f6b64;font-size:13px;margin-top:2px">The top posts ${PERIOD[frequency]}</div></td></tr>
-${items}
-<tr><td style="padding-top:18px;border-top:1px solid #e7e5e0;color:#6f6b64;font-size:12px;line-height:18px">
-You get this because you turned on the ${frequency} digest. <a href="${escape(settings)}" style="color:#6f6b64">Change it in Settings</a> or <a href="${escape(unsubscribeUrl)}" style="color:#6f6b64">unsubscribe</a>.
-</td></tr>
-</table></td></tr></table>
-</body></html>`;
-
-  const text = [
-    `The top posts on aion.ly ${PERIOD[frequency]}`,
-    "",
-    ...posts.flatMap((post) => [
-      post.title,
-      `${post.source} · ${plural(post.score, "point")} · ${plural(post.comments, "comment")} · by ${post.author}`,
-      ...(post.excerpt ? [post.excerpt] : []),
-      post.url,
-      "",
-    ]),
-    `You get this because you turned on the ${frequency} digest.`,
-    `Change it in Settings: ${settings}`,
-    `Unsubscribe: ${unsubscribeUrl}`,
-  ].join("\n");
-
-  return { subject, html, text };
+  return composeLetter({
+    subject: `Top of aion.ly ${PERIOD[frequency]}: ${posts[0]?.title ?? "the board"}`,
+    // The line inboxes show after the subject: the next titles.
+    preview: posts
+      .slice(1, 4)
+      .map((post) => post.title)
+      .join(" · "),
+    heading: `The top posts ${PERIOD[frequency]}`,
+    block: {
+      html: items,
+      text: posts.flatMap((post, index) => [...(index > 0 ? [""] : []), post.title, line(post), ...(post.excerpt ? [post.excerpt] : []), post.url]),
+    },
+    button: { label: "Open aion.ly", url: origin },
+    why: `You get this because you turned on the ${frequency} digest. Reply to reach a person.`,
+    links: [
+      { label: "Unsubscribe", url: unsubscribeUrl },
+      { label: "Choose your emails", url: `${origin}/settings#email` },
+    ],
+    origin,
+  });
 }
 
 const HOUR = 3600;

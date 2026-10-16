@@ -35,7 +35,7 @@ import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.se
 import { requireAccount, requireParticipant } from "~/lib/viewer.server";
 import { useViewer } from "~/lib/use-viewer";
 import { privatePageMeta } from "~/lib/meta";
-import { setOffersConsent } from "~/lib/offers/offers.server";
+import { setOffers } from "~/lib/offers/offers.server";
 import { sendOffersSoon } from "~/lib/offers/send.server";
 import { readTheme } from "~/lib/theme";
 import { COMMENT_REPLIES, type CommentReplies, parseCommentReplies } from "~/lib/replies";
@@ -74,11 +74,11 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   // The one page that shows the account's email, and only to its owner.
   const google = await env.DB.prepare(
     `SELECT "email", "image" IS NOT NULL AS has_photo,
-       (SELECT offers_consent_at FROM profiles WHERE user_id = "user"."id") AS offers_consent_at
+       (SELECT offers_off_at FROM profiles WHERE user_id = "user"."id") AS offers_off_at
      FROM "user" WHERE "id" = ?1`,
   )
     .bind(viewer.id)
-    .first<{ email: string; has_photo: number; offers_consent_at: number | null }>();
+    .first<{ email: string; has_photo: number; offers_off_at: number | null }>();
   return {
     id: viewer.id,
     username: viewer.username,
@@ -88,8 +88,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     origin: url.origin,
     photoUrl: viewer.avatarKey ? imageAddress(viewer.avatarKey) : undefined,
     hasGooglePhoto: google?.has_photo === 1,
-    // When the member said yes to offers by email, or null.
-    offersSince: google?.offers_consent_at ?? null,
+    // When the member turned offers by email off, or null while they are on.
+    offersOffSince: google?.offers_off_at ?? null,
     banned: viewer.ban !== null,
     firstChange: status.firstChange,
     nextChangeAt: status.nextChangeAt,
@@ -229,12 +229,12 @@ export async function action({ request, context }: Route.ActionArgs) {
     if (!(await withinLimits(request, "write", account.id))) return { deleteError: RATE_LIMITED_MESSAGE };
     return deleteAccountAction(request, account, form);
   }
-  // Offers by email: on only by the member's own yes, off whenever they say.
+  // Offers by email: on unless the member turns them off.
   if (form.get("intent") === "offers") {
     const account = await requireAccount(request, context);
     if (!(await withinLimits(request, "write", account.id))) return { offersError: RATE_LIMITED_MESSAGE };
     const on = form.get("offers") === "on";
-    await setOffersConsent(env.DB, account.id, on, Math.floor(Date.now() / 1000));
+    await setOffers(env.DB, account.id, on, Math.floor(Date.now() / 1000));
     // A new member's offer, if their day is not over.
     if (on) sendOffersSoon(account.id, new URL(request.url).origin);
     return { offersSaved: true };
@@ -904,19 +904,19 @@ function DeleteAccountForm({ username, error }: { username: string; error?: stri
 
 /**
  * The emails the account gets, besides the notices it needs: the digest of
- * top posts, free and off until chosen, and offers about the Fan plan, off
- * until the member says yes.
+ * top posts, free and off until chosen, and offers about the Fan plan, on
+ * until the member turns them off.
  */
 function EmailSection({
-  offersSince,
+  offersOffSince,
   banned,
   error,
 }: {
-  offersSince: number | null;
+  offersOffSince: number | null;
   banned: boolean;
   error: string | undefined;
 }) {
-  const offers = offersSince !== null;
+  const offers = offersOffSince === null;
   const viewer = useViewer();
   const digestFetcher = useFetcher();
   const pending = digestFetcher.formData?.get("digest");
@@ -951,8 +951,8 @@ function EmailSection({
             <p className="text-body font-medium">Offers</p>
             <p className="text-meta text-text-muted">
               {offers
-                ? `On since ${formatDate(offersSince)}: a new member's offer, and now and then news of the Fan plan.`
-                : "Off. Turn it on for a new member's offer, and now and then news of the Fan plan."}
+                ? "On: a new member's offer, and now and then news of the Fan plan."
+                : `Off since ${formatDate(offersOffSince)}. Turn it on for a new member's offer, and now and then news of the Fan plan.`}
             </p>
           </div>
           <Button type="submit" disabled={busy}>
@@ -1086,7 +1086,7 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
 
       <Section title="Email" id="email">
         <EmailSection
-          offersSince={loaderData.offersSince}
+          offersOffSince={loaderData.offersOffSince}
           banned={banned}
           error={actionData && "offersError" in actionData ? actionData.offersError : undefined}
         />

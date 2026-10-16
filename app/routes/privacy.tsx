@@ -12,7 +12,7 @@ export function meta({ matches }: Route.MetaArgs) {
 
 export default function Privacy() {
   return (
-    <LegalPage title="Privacy" updated="October 15, 2026">
+    <LegalPage title="Privacy" updated="October 16, 2026">
       <p>
         {OPERATOR.name}, registry code {OPERATOR.registryCode}, {OPERATOR.address}, runs aion.ly and is responsible
         for the personal data it keeps. Questions and requests: <Mail to={CONTACT.privacy} />.
@@ -49,7 +49,7 @@ export default function Privacy() {
           your card.
         </li>
         <li>
-          <strong>Email:</strong> how often you get the digest, if you turn it on; when you said yes to offers, if
+          <strong>Email:</strong> how often you get the digest, if you turn it on; when you turned offers off, if
           you did, and which of a new member&apos;s two offer emails went out; and when we told you your account was
           read-only.
         </li>
@@ -80,9 +80,9 @@ export default function Privacy() {
           read-only.
         </li>
         <li>
-          Only if you say yes, to tell you about the Fan plan: a new member&apos;s offer and one reminder before it
-          ends, and now and then news of the plan, until you say no in Settings or by the link in any of them (your
-          consent).
+          To tell members about our own Fan plan: a new member&apos;s offer and one reminder before it ends, and now
+          and then news of the plan (our legitimate interest). Every account starts with these on; turn them off at
+          any time in Settings or by the link in any of them, free, and none is sent after that.
         </li>
       </ul>
       <p>There is no advertising, no tracking across sites, and no selling of data.</p>
@@ -90,16 +90,16 @@ export default function Privacy() {
       <h2 id="others">Who else is involved</h2>
       <ul>
         <li>
-          <strong>Cloudflare</strong> hosts the board, its database, and its files, sends the digest and the emails
-          your account needs, and runs the
-          human check on the submit form.
+          <strong>Cloudflare</strong> hosts the board, its database, and its files, sends the emails your account
+          needs when Amazon cannot, and runs the human check on the submit form.
         </li>
         <li>
           <strong>Google</strong> handles signing in, and <strong>X</strong> confirms an X account you link, each
           under its own privacy policy.
         </li>
         <li>
-          <strong>Amazon Web Services</strong> sends the offers you said yes to, through its email service.
+          <strong>Amazon Web Services</strong> sends the board&apos;s emails, the digest, offers, and what your account
+          needs, through its email service.
         </li>
         <li>
           <strong>Stripe</strong> handles payments, under its own privacy policy, and keeps records of them as the law

@@ -10,7 +10,7 @@ import { attachInvite, claimInvite } from "./db/invites.server";
 import { INVITE_COOKIE, normalizeInviteCode } from "./invites";
 import { rememberXAccount, type XProfile } from "./db/x-accounts.server";
 import { newId } from "./ids";
-import { accountMailer } from "./mail/mailers.server";
+import { transactionalMailer } from "./mail/mailers.server";
 import { SIGN_IN_LINK_MINUTES } from "./notices/notices";
 import { sendSignInLink } from "./notices/notices.server";
 
@@ -248,7 +248,7 @@ function createAuth(origin: string, request?: Request) {
           const next = new URL(url).searchParams.get("callbackURL") ?? "/";
           const link = `${origin}/signin/email?${new URLSearchParams({ token, next })}`;
           const send = { email, url: link, origin, now: Math.floor(Date.now() / 1000) };
-          waitUntil(sendSignInLink(env.DB, accountMailer(), send).catch((error) => console.error("sign-in link", error)));
+          waitUntil(sendSignInLink(env.DB, transactionalMailer(), send).catch((error) => console.error("sign-in link", error)));
         },
       }),
     ],

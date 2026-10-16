@@ -1,5 +1,6 @@
 import { participantCondition } from "../db/accounts.server";
 import type { Mailer } from "../mail/mailers.server";
+import { SENDERS } from "../mail/senders";
 import { postsByIds, topSnapshot } from "../db/feed.server";
 import type { Range } from "../feed";
 import { plainText } from "../text/markdown";
@@ -135,6 +136,7 @@ export async function sendDigests(
         try {
           await mailer.send({
             from: { name: "aion.ly", email: input.from },
+            replyTo: SENDERS.digest.replyTo,
             to: recipient.email,
             subject: email.subject,
             html: email.html,
@@ -159,4 +161,42 @@ export async function sendDigests(
     }
   }
   return sent;
+}
+
+/**
+ * A digest as a member would get it, marked as a test, to an admin's own
+ * sign-in email: this week's top posts, or this month's when the week has
+ * none. Answers what went wrong, or null.
+ */
+export async function sendTestDigest(
+  db: D1Database,
+  mailer: Mailer,
+  input: { userId: string; origin: string; secret: string; from: string; now: number },
+): Promise<string | null> {
+  const account = await db.prepare(`SELECT "email" FROM "user" WHERE "id" = ?1`).bind(input.userId).first<{ email: string }>();
+  if (!account) return "Your account has no sign-in email.";
+  let frequency: Frequency = "weekly";
+  let posts = await digestPosts(db, frequency, input.origin, input.now);
+  if (posts.length === 0) {
+    frequency = "monthly";
+    posts = await digestPosts(db, frequency, input.origin, input.now);
+  }
+  if (posts.length === 0) return "No posts this month to list.";
+  const unsubscribeUrl = `${input.origin}/digest/unsubscribe?token=${encodeURIComponent(await unsubscribeToken(input.secret, input.userId))}`;
+  const email = composeDigest({ frequency, posts, origin: input.origin, unsubscribeUrl });
+  try {
+    await mailer.send({
+      from: { name: "aion.ly", email: input.from },
+      replyTo: SENDERS.digest.replyTo,
+      to: account.email,
+      subject: `[Test] ${email.subject}`,
+      html: email.html,
+      text: email.text,
+      headers: { "List-Unsubscribe": `<${unsubscribeUrl}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
+    });
+    return null;
+  } catch (error) {
+    console.error("test digest", error);
+    return error instanceof Error ? error.message : String(error);
+  }
 }

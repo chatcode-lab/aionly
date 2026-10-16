@@ -9,10 +9,7 @@ import { type Check, paymentChecks } from "~/lib/billing/check.server";
 import { saveSettings, settingHistory, settingsInForce } from "~/lib/db/settings.server";
 import { formatAge } from "~/lib/format";
 import { privatePageMeta } from "~/lib/meta";
-import { accountMailer, offersMailer } from "~/lib/mail/mailers.server";
-import { NOTICES_FROM } from "~/lib/notices/notices.server";
-import { composeReadOnlyNotice, composeSignInLink } from "~/lib/notices/notices";
-import { sendTestOfferEmails } from "~/lib/offers/offers.server";
+import { sendTestEmails } from "~/lib/mail/checks.server";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { SETTINGS, type SettingGroup, type SettingKey, type Settings, settingSpec } from "~/lib/settings";
 import { requireAdmin } from "~/lib/viewer.server";
@@ -38,31 +35,7 @@ type SaveAnswer =
   | { kind: "problems"; problems: Partial<Record<SettingKey, string>>; typed: Partial<Record<SettingKey, string>> }
   | { kind: "error"; error: string }
   | { kind: "payments"; checks: Check[] }
-  | { kind: "mail"; error: string | null; which: "offers" | "notices" };
-
-/**
- * The notices an account may get, as samples marked as tests, to an
- * admin's own sign-in email through Cloudflare: a sign-in link (to the
- * sign-in page, not a working one) and the read-only notice.
- */
-async function sendTestNotices(userId: string, origin: string): Promise<string | null> {
-  const account = await env.DB.prepare(`SELECT "email" FROM "user" WHERE "id" = ?1`).bind(userId).first<{ email: string }>();
-  if (!account) return "Your account has no sign-in email.";
-  const settings = await settingsInForce(env.DB);
-  const samples = [
-    composeSignInLink({ url: `${origin}/signin`, origin }),
-    composeReadOnlyNotice({ karma: settings.karma_floor - 3, floor: settings.karma_floor, room: settings.fresh_start_room, origin }),
-  ];
-  try {
-    for (const sample of samples) {
-      await accountMailer().send({ from: { name: "aion.ly", email: NOTICES_FROM }, to: account.email, ...sample, subject: `[Test] ${sample.subject}` });
-    }
-    return null;
-  } catch (error) {
-    console.error("test notices", error);
-    return error instanceof Error ? error.message : String(error);
-  }
-}
+  | { kind: "mail"; checks: Check[] };
 
 export async function action({ request, context }: Route.ActionArgs): Promise<SaveAnswer> {
   const viewer = await requireAdmin(request, context);
@@ -70,13 +43,9 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Sa
   const form = await request.formData();
   // The checks: whether payments can work here, and whether mail goes out.
   if (form.get("intent") === "check-payments") return { kind: "payments", checks: await paymentChecks() };
-  const origin = new URL(request.url).origin;
   if (form.get("intent") === "test-emails") {
-    const error = await sendTestOfferEmails(env.DB, offersMailer(), { userId: viewer.id, origin, secret: env.BETTER_AUTH_SECRET });
-    return { kind: "mail", error, which: "offers" };
-  }
-  if (form.get("intent") === "test-notices") {
-    return { kind: "mail", error: await sendTestNotices(viewer.id, origin), which: "notices" };
+    const origin = new URL(request.url).origin;
+    return { kind: "mail", checks: await sendTestEmails({ userId: viewer.id, origin, now: Math.floor(Date.now() / 1000) }) };
   }
   const values: Partial<Settings> = {};
   const typed: Partial<Record<SettingKey, string>> = {};
@@ -186,9 +155,9 @@ function Checks({ answer, busy }: { answer: SaveAnswer | undefined; busy: FormDa
         Checks
       </h2>
       <p className="text-body text-text-muted">
-        Whether payments are set up here, and whether mail goes out, as samples to your sign-in email: the offers a
-        new member who said yes gets, through Amazon SES, and the notices an account gets (a sign-in link, and word
-        that it is read-only), through Cloudflare.
+        Whether payments are set up here, and whether mail goes out: every email the board sends, as samples to your
+        sign-in email, each with the service that carried it. Amazon SES carries them all; Cloudflare is the backup
+        for sign-in links and notices.
       </p>
       <div className="flex flex-wrap gap-2">
         <Form method="post">
@@ -198,17 +167,12 @@ function Checks({ answer, busy }: { answer: SaveAnswer | undefined; busy: FormDa
         </Form>
         <Form method="post">
           <Button type="submit" name="intent" value="test-emails" disabled={busy !== undefined}>
-            {busy === "test-emails" ? "Sending…" : "Send me the offer emails"}
-          </Button>
-        </Form>
-        <Form method="post">
-          <Button type="submit" name="intent" value="test-notices" disabled={busy !== undefined}>
-            {busy === "test-notices" ? "Sending…" : "Send me the notices"}
+            {busy === "test-emails" ? "Sending…" : "Send me every email"}
           </Button>
         </Form>
       </div>
-      {answer?.kind === "payments" ? (
-        <ul className="divide-y divide-border" aria-label="Payment checks">
+      {answer?.kind === "payments" || answer?.kind === "mail" ? (
+        <ul className="divide-y divide-border" aria-label={answer.kind === "payments" ? "Payment checks" : "Email checks"}>
           {answer.checks.map((check) => (
             <li key={check.label} className="flex flex-wrap items-baseline gap-x-2 py-1.5 text-body">
               <span aria-hidden className={check.ok ? "text-text" : "text-danger"}>
@@ -224,14 +188,7 @@ function Checks({ answer, busy }: { answer: SaveAnswer | undefined; busy: FormDa
         </ul>
       ) : null}
       {answer?.kind === "mail" ? (
-        answer.error ? (
-          <Notice tone="danger">Mail did not go out: {answer.error}</Notice>
-        ) : (
-          <Notice>
-            Sent both {answer.which === "offers" ? "offers, through Amazon SES," : "notices, through Cloudflare,"} to your
-            sign-in email. Look in spam too if they do not arrive within a few minutes.
-          </Notice>
-        )
+        <p className="text-meta text-text-muted">Look in spam too if they do not arrive within a few minutes.</p>
       ) : null}
     </section>
   );

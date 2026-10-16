@@ -4,7 +4,7 @@ import { Form, Link } from "react-router";
 import { Button } from "~/components/ui/button";
 import { readUnsubscribeToken, setDigest } from "~/lib/digest/digest.server";
 import { privatePageMeta } from "~/lib/meta";
-import { setOffersConsent } from "~/lib/offers/offers.server";
+import { setOffers } from "~/lib/offers/offers.server";
 
 import type { Route } from "./+types/unsubscribe";
 
@@ -53,7 +53,7 @@ export async function action({ request }: Route.ActionArgs) {
   const userId = await tokenOwner(request, form);
   const list = listOf(request, form);
   if (!userId) return { done: false, list };
-  if (list === "offers") await setOffersConsent(env.DB, userId, false, Math.floor(Date.now() / 1000));
+  if (list === "offers") await setOffers(env.DB, userId, false, Math.floor(Date.now() / 1000));
   else await setDigest(env.DB, userId, null, Math.floor(Date.now() / 1000));
   return { done: true, list };
 }

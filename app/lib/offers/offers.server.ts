@@ -1,7 +1,7 @@
 import { unsubscribeToken } from "../digest/digest.server";
 import type { Mailer } from "../mail/mailers.server";
+import { SENDERS } from "../mail/senders";
 import { INTRO_HOURS, introEndsAt } from "../plan";
-import { CONTACT } from "../site";
 import { composeOfferEmail, type OfferEmailKind } from "./compose";
 
 /** The reminder goes once this little of a new member's price is left. */
@@ -9,9 +9,6 @@ export const REMINDER_HOURS = 4;
 
 /** Closer to the end than this, no reminder goes: it might arrive too late. */
 const LAST_CALL_SECONDS = 30 * 60;
-
-/** Offers come from the address that reaches a person, so a reply is read. */
-export const OFFERS_FROM = CONTACT.general;
 
 /** Accounts sent to in one run; the next carries on. */
 const BATCH = 100;
@@ -29,12 +26,13 @@ export function offerDue(stage: number, left: number): { kind: OfferEmailKind; n
 }
 
 /**
- * Offers by email, on with the member's own yes, at the welcome step or in
- * Settings, and off whenever they say. The time of the yes is kept.
+ * Offers by email: on for a member unless they turn them off, at the
+ * welcome step, in Settings, or from an offer email. When they turned them
+ * off is kept.
  */
-export async function setOffersConsent(db: D1Database, userId: string, on: boolean, now: number): Promise<void> {
+export async function setOffers(db: D1Database, userId: string, on: boolean, now: number): Promise<void> {
   await db
-    .prepare(`UPDATE profiles SET offers_consent_at = CASE WHEN ?2 THEN COALESCE(offers_consent_at, ?3) ELSE NULL END WHERE user_id = ?1`)
+    .prepare(`UPDATE profiles SET offers_off_at = CASE WHEN ?2 THEN NULL ELSE COALESCE(offers_off_at, ?3) END WHERE user_id = ?1`)
     .bind(userId, on ? 1 : 0, now)
     .run();
 }
@@ -42,11 +40,11 @@ export async function setOffersConsent(db: D1Database, userId: string, on: boole
 /**
  * Who an offer may go to, as SQL on `profiles` (`as`, its alias, with a
  * dot), with the time as ?1: a member's own account, not an admin's or an
- * agent's, that said yes to offers, is live and not banned, has a sign-in
- * email, and has no plan.
+ * agent's, with offers on, live and not banned, with a sign-in email, and
+ * no plan.
  */
 function mayGetOffers(as: string): string {
-  return `${as}offers_consent_at IS NOT NULL AND ${as}deleted_at IS NULL AND ${as}owner_id IS NULL
+  return `${as}offers_off_at IS NULL AND ${as}deleted_at IS NULL AND ${as}owner_id IS NULL
     AND ${as}role = 'user' AND ${as}banned_at IS NULL AND COALESCE(${as}plan_until, 0) <= ?1
     AND EXISTS (SELECT 1 FROM "user" WHERE "user"."id" = ${as}user_id)`;
 }
@@ -54,7 +52,7 @@ function mayGetOffers(as: string): string {
 /**
  * Sends the offer emails that are due: the welcome to a new member, and the
  * reminder once a few hours of their new-member price are left, to members
- * who said yes to offers. The batch holds only accounts with one due, the
+ * with offers on. The batch holds only accounts with one due, the
  * nearest deadline first. Each is claimed before it is sent, inside a write
  * that checks again that the account may get it, so an opt-out, a plan, or
  * a deletion that landed meanwhile stops it; a refused send is released and
@@ -110,7 +108,7 @@ export async function sendOfferEmails(
     const email = composeOfferEmail({ kind: due.kind, left, origin: input.origin, unsubscribeUrl });
     try {
       await mailer.send({
-        from: { name: "aion.ly", email: OFFERS_FROM },
+        ...SENDERS.offers,
         to: account.email,
         subject: email.subject,
         html: email.html,
@@ -154,7 +152,7 @@ export async function sendTestOfferEmails(
     for (const [kind, left] of samples) {
       const email = composeOfferEmail({ kind, left, origin: input.origin, unsubscribeUrl });
       await mailer.send({
-        from: { name: "aion.ly", email: OFFERS_FROM },
+        ...SENDERS.offers,
         to: account.email,
         subject: `[Test] ${email.subject}`,
         html: email.html,

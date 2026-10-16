@@ -77,7 +77,7 @@ describe("upgrading a database with data in it", () => {
       INSERT INTO profiles (user_id, created_at, karma, vote_karma) VALUES ('low', 0, -120, -120), ('fresh', 0, -120, -120), ('fine', 0, 5, 5);
       UPDATE profiles SET karma_floor = -170 WHERE user_id = 'fresh';
     `);
-    migrate(db, "0022_offer_emails.sql", MIGRATIONS[MIGRATIONS.length - 1]!);
+    migrate(db, "0022_offer_emails.sql", "0023_consent_notices_returns.sql");
     const rows = db.prepare(`SELECT user_id, offers_consent_at, floor_emailed_at IS NOT NULL AS told FROM profiles ORDER BY user_id`).all();
     expect(rows).toEqual([
       { user_id: "fine", offers_consent_at: null, told: 0 },
@@ -87,6 +87,26 @@ describe("upgrading a database with data in it", () => {
     ]);
     const columns = db.prepare(`SELECT name FROM pragma_table_info('profiles')`).all().map((row) => (row as { name: string }).name);
     expect(columns).not.toContain("offers_email");
+  });
+
+  it("turns offers on for everyone but those who joined while offers needed a yes and gave none, at 0024", () => {
+    const db = new DatabaseSync(":memory:");
+    migrate(db, "", "0023_consent_notices_returns.sql");
+    db.exec(`
+      INSERT INTO profiles (user_id, created_at, karma, vote_karma) VALUES ('yes', 0, 1, 1), ('none', 0, 1, 1);
+      UPDATE profiles SET offers_consent_at = 5 WHERE user_id = 'yes';
+    `);
+    migrate(db, "0023_consent_notices_returns.sql", MIGRATIONS[MIGRATIONS.length - 1]!);
+    const rows = db.prepare(`SELECT user_id, offers_off_at IS NULL AS offers FROM profiles ORDER BY user_id`).all();
+    expect(rows).toEqual([
+      { user_id: "none", offers: 0 },
+      { user_id: "yes", offers: 1 },
+    ]);
+    // New profiles start with offers on.
+    db.exec(`INSERT INTO profiles (user_id, created_at) VALUES ('new', 0)`);
+    expect(db.prepare(`SELECT offers_off_at FROM profiles WHERE user_id = 'new'`).get()).toEqual({ offers_off_at: null });
+    const columns = db.prepare(`SELECT name FROM pragma_table_info('profiles')`).all().map((row) => (row as { name: string }).name);
+    expect(columns).not.toContain("offers_consent_at");
   });
 });
 

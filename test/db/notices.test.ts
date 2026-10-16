@@ -6,7 +6,7 @@ import { composeReadOnlyNotice, composeSignInLink } from "../../app/lib/notices/
 import { sendReadOnlyNotices } from "../../app/lib/notices/notices.server";
 import { DAY, db, NOW, reset, user } from "./fixtures";
 
-type Sent = { to: string; subject: string; text: string; from: { email: string } };
+type Sent = { to: string; subject: string; text: string; from: { email: string }; replyTo?: string };
 
 describe("the read-only notice", () => {
   const sent: Sent[] = [];
@@ -32,7 +32,12 @@ describe("the read-only notice", () => {
     await member("low", "low_member", -120);
     await member("fine", "fine_member", 5);
     expect(await sendReadOnlyNotices(db, mailer, { ...input, now: NOW })).toBe(1);
-    expect(sent[0]).toMatchObject({ to: "low@example.invalid", from: { email: "hey@aion.ly" }, subject: "Your aion.ly account is read-only for now" });
+    expect(sent[0]).toMatchObject({
+      to: "low@example.invalid",
+      from: { email: "noreply@aion.ly" },
+      replyTo: "hey@aion.ly",
+      subject: "Your aion.ly account is read-only for now",
+    });
     expect(sent[0]!.text).toContain("Your karma reached -120, at or below -100");
     expect(sent[0]!.text).toContain("See the ways back: https://aion.ly/fresh-start");
     // Once each fall.

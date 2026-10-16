@@ -71,10 +71,9 @@ test("the plan page shows what fans get, picks out what was asked for, and its p
 test("a new member's welcome leads to the plan, with a quiet way on", async ({ page, context, account }) => {
   await account.signIn(context);
   await open(page, "/welcome?next=%2Fu%2Fquiet_otter_482");
-  // Offers by email only with the member's own yes, unticked to start.
-  const offers = page.getByRole("checkbox", { name: /Email me the new-member offer/ });
-  await expect(offers).not.toBeChecked();
-  await offers.check();
+  // Offers by email are on, with the way to turn them off; nothing to tick.
+  await expect(page.getByText(/We.ll email you the new-member offer, 30% off for 24 hours/)).toBeVisible();
+  await expect(page.getByRole("checkbox")).toHaveCount(0);
   await page.getByRole("button", { name: "Continue" }).click();
   await expect(page).toHaveURL(/\/fan\?joined=&next=%2Fu%2Fquiet_otter_482$/);
   await expect(page.getByRole("heading", { name: `Welcome to aion.ly, ${account.username}` })).toBeVisible();
@@ -82,7 +81,7 @@ test("a new member's welcome leads to the plan, with a quiet way on", async ({ p
   await page.getByRole("link", { name: "Not now, take me to the board" }).click();
   await expect(page).toHaveURL(/\/u\/quiet_otter_482$/);
   await open(page, "/settings");
-  await expect(page.getByRole("region", { name: "Email" })).toContainText(/On since .+: a new member's offer/);
+  await expect(page.getByRole("region", { name: "Email" })).toContainText("On: a new member's offer");
 });
 
 test("a short name typed at the welcome is claimed with the yearly plan", async ({ page, context, account }) => {
@@ -223,23 +222,24 @@ test("Settings chooses the emails, and an offer's one-click link turns offers of
     email.getByLabel("Digest of top posts").selectOption("weekly"),
   ]);
   await expect(page.getByRole("button", { name: "Email digest: Weekly" })).toBeVisible();
-  // Offers are off until the member says yes, and off again whenever they say.
-  await expect(email).toContainText("Off. Turn it on for a new member's offer");
-  await email.getByRole("button", { name: "Turn on" }).click();
-  await expect(email).toContainText(/On since .+: a new member's offer/);
+  // Offers are on until the member turns them off, and on again whenever they say.
+  await expect(email).toContainText("On: a new member's offer");
   await email.getByRole("button", { name: "Turn off" }).click();
-  await expect(email).toContainText("Off. Turn it on for a new member's offer");
+  await expect(email).toContainText(/Off since .+\. Turn it on for a new member's offer/);
   await email.getByRole("button", { name: "Turn on" }).click();
-  await expect(email).toContainText(/On since/);
+  await expect(email).toContainText("On: a new member's offer");
 
   // A mail client's one click, with the signed token alone.
   const token = encodeURIComponent(await unsubscribeToken(account.id));
   const oneClick = await request.post(`/unsubscribe?list=offers&token=${token}`, { form: { "List-Unsubscribe": "One-Click" } });
   expect(oneClick.status()).toBe(200);
   await open(page, "/settings");
-  await expect(email).toContainText("Off. Turn it on for a new member's offer");
+  await expect(email).toContainText(/Off since .+\. Turn it on for a new member's offer/);
   // The digest stays as it was.
   await expect(email.getByLabel("Digest of top posts")).toHaveValue("weekly");
+  // As the next run finds it.
+  await email.getByRole("button", { name: "Turn on" }).click();
+  await expect(email).toContainText("On: a new member's offer");
 });
 
 test("a fan connects an agent, which pauses when the plan ends", async ({ page, context, account, request }) => {

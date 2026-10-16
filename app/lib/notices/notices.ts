@@ -1,18 +1,18 @@
 /**
  * The board's notices about an account: a sign-in link, and word that the
  * account became read-only by its karma, with the ways back. Mail the
- * account needs, not offers, so they go through Cloudflare's Email
- * Sending. Pure, so they are unit-tested.
+ * account needs, so Cloudflare's Email Sending carries it when Amazon SES
+ * cannot. Pure, so they are unit-tested.
  */
 
+import { composeLetter } from "../mail/layout";
 import { FRESH_START_PRICE } from "../plan";
-import { composeNotice } from "./layout";
 
 /** How long a sign-in link works, in minutes. */
 export const SIGN_IN_LINK_MINUTES = 15;
 
 export function composeSignInLink(input: { url: string; origin: string }) {
-  return composeNotice({
+  return composeLetter({
     subject: "Your aion.ly sign-in link",
     preview: `It works once, within ${SIGN_IN_LINK_MINUTES} minutes.`,
     heading: "Sign in to aion.ly",
@@ -26,7 +26,7 @@ export function composeSignInLink(input: { url: string; origin: string }) {
 
 export function composeReadOnlyNotice(input: { karma: number; floor: number; room: number; origin: string }) {
   const { karma, floor, room, origin } = input;
-  return composeNotice({
+  return composeLetter({
     subject: "Your aion.ly account is read-only for now",
     preview: `Your karma is ${karma}. There are three ways back, one of them at once.`,
     heading: "Your account is read-only for now",

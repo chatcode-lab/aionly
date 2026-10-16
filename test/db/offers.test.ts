@@ -2,14 +2,14 @@ import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { readUnsubscribeToken } from "../../app/lib/digest/digest.server";
-import { offersMailer, sesSubject } from "../../app/lib/mail/mailers.server";
+import { bulkMailer, sesSubject, transactionalMailer } from "../../app/lib/mail/mailers.server";
 import { composeOfferEmail } from "../../app/lib/offers/compose";
-import { offerDue, sendOfferEmails, sendTestOfferEmails, setOffersConsent } from "../../app/lib/offers/offers.server";
+import { offerDue, sendOfferEmails, sendTestOfferEmails, setOffers } from "../../app/lib/offers/offers.server";
 import { DAY, db, NOW, reset, user } from "./fixtures";
 
 const HOUR = 3600;
 
-type Sent = { to: string; subject: string; text: string; from: { email: string }; headers?: Record<string, string> };
+type Sent = { to: string; subject: string; text: string; from: { email: string }; replyTo?: string; headers?: Record<string, string> };
 
 /**
  * The database, with `after` run once the sender has read its recipients
@@ -49,11 +49,11 @@ describe("a new member's offer emails", () => {
   const refusing = { send: async () => Promise.reject(new Error("refused")) };
   const input = { origin: "https://aion.ly", secret: "s" };
 
-  /** A member who joined `ago` seconds before NOW, with a sign-in email, who said yes to offers unless `consent` is false. */
-  async function member(id: string, name: string, ago: number, fields: Parameters<typeof user>[2] & { consent?: boolean } = {}) {
+  /** A member who joined `ago` seconds before NOW, with a sign-in email, with offers on unless `offers` is false. */
+  async function member(id: string, name: string, ago: number, fields: Parameters<typeof user>[2] & { offers?: boolean } = {}) {
     await user(id, name, fields);
     await db.batch([
-      db.prepare(`UPDATE profiles SET created_at = ?2, offers_consent_at = ?3 WHERE user_id = ?1`).bind(id, NOW - ago, fields.consent === false ? null : NOW - ago),
+      db.prepare(`UPDATE profiles SET created_at = ?2, offers_off_at = ?3 WHERE user_id = ?1`).bind(id, NOW - ago, fields.offers === false ? NOW - ago : null),
       db
         .prepare(`INSERT INTO "user" ("id", "name", "email", "emailVerified", "createdAt", "updatedAt") VALUES (?1, 'n', ?2, 1, ?3, ?3)`)
         .bind(id, `${id}@example.invalid`, new Date(NOW * 1000).toISOString()),
@@ -66,12 +66,13 @@ describe("a new member's offer emails", () => {
     await db.prepare(`DELETE FROM "user"`).run();
   });
 
-  it("welcomes a member who said yes, reminds them hours before the price ends, and sends each once", async () => {
+  it("welcomes a new member, reminds them hours before the price ends, and sends each once", async () => {
     await member("new", "fresh_member", 60);
     expect(await sendOfferEmails(db, mailer, { ...input, now: NOW, userId: "new" })).toBe(1);
     expect(sent[0]).toMatchObject({
       to: "new@example.invalid",
-      from: { email: "hey@aion.ly" },
+      from: { email: "noreply@aion.ly" },
+      replyTo: "hey@aion.ly",
       subject: "Welcome to aion.ly: 30% off the Fan plan for 24 hours",
       headers: { "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
     });
@@ -89,27 +90,28 @@ describe("a new member's offer emails", () => {
     expect(sent).toHaveLength(2);
   });
 
-  it("never mails without a yes, nor a fan, an admin, a banned or deleted account, or one that said no again", async () => {
-    await member("silent", "silent_member", 60, { consent: false });
+  it("never mails one who turned offers off, nor a fan, an admin, a banned or deleted account", async () => {
+    await member("silent", "silent_member", 60, { offers: false });
     await member("fan", "fan_member", 60, { plan: true });
     await member("boss", "head_admin", 60, { role: "admin" });
     await member("bad", "banned_member", 60, { banReason: "spam" });
     await member("gone", "gone_member", 60, { deletedAt: NOW });
     await member("quiet", "quiet_member", 60);
     await member("old", "old_member", 2 * DAY);
-    await setOffersConsent(db, "quiet", false, NOW);
+    await setOffers(db, "quiet", false, NOW);
+    expect(await db.prepare(`SELECT offers_off_at FROM profiles WHERE user_id = 'quiet'`).first()).toEqual({ offers_off_at: NOW });
     expect(await sendOfferEmails(db, mailer, { ...input, now: NOW })).toBe(0);
     expect(sent).toEqual([]);
-    // A yes in Settings, and offers come.
-    await setOffersConsent(db, "silent", true, NOW);
-    expect(await db.prepare(`SELECT offers_consent_at FROM profiles WHERE user_id = 'silent'`).first()).toEqual({ offers_consent_at: NOW });
+    // Turned on again in Settings, and offers come.
+    await setOffers(db, "silent", true, NOW);
+    expect(await db.prepare(`SELECT offers_off_at FROM profiles WHERE user_id = 'silent'`).first()).toEqual({ offers_off_at: null });
     expect(await sendOfferEmails(db, mailer, { ...input, now: NOW })).toBe(1);
     expect(sent.map((message) => message.to)).toEqual(["silent@example.invalid"]);
   });
 
   it("checks again when claiming, so a no, a plan, or a deletion landing after the read stops the send (F61)", async () => {
     const changes: Array<[string, () => Promise<unknown>]> = [
-      ["said no", () => setOffersConsent(db, "new", false, NOW)],
+      ["turned offers off", () => setOffers(db, "new", false, NOW)],
       ["became a fan", () => db.prepare(`UPDATE profiles SET plan_until = ?1 WHERE user_id = 'new'`).bind(NOW + 30 * DAY).run()],
       [
         "was deleted",
@@ -155,11 +157,11 @@ describe("a new member's offer emails", () => {
     expect(offerDue(0, 20 * HOUR)).toEqual({ kind: "welcome", next: 1 });
   });
 
-  it("start with no yes for a new profile", async () => {
+  it("are on for a new profile", async () => {
     await user("new", "fresh_member");
-    expect(await db.prepare(`SELECT offer_emails, offers_consent_at FROM profiles WHERE user_id = 'new'`).first()).toEqual({
+    expect(await db.prepare(`SELECT offer_emails, offers_off_at FROM profiles WHERE user_id = 'new'`).first()).toEqual({
       offer_emails: 0,
-      offers_consent_at: null,
+      offers_off_at: null,
     });
   });
 
@@ -175,7 +177,7 @@ describe("a new member's offer emails", () => {
   });
 });
 
-describe("offers through Amazon SES", () => {
+describe("mail through Amazon SES", () => {
   const aws = (env as unknown as Record<string, string | undefined>);
   const saved = { id: aws.AWS_ACCESS_KEY_ID, key: aws.AWS_SECRET_ACCESS_KEY, region: aws.AWS_REGION };
   afterEach(() => {
@@ -185,10 +187,10 @@ describe("offers through Amazon SES", () => {
     vi.restoreAllMocks();
   });
 
-  it("are off until SES is set up, then go as a signed v2 request with the unsubscribe headers", async () => {
+  it("holds offers and digests until SES is set up, then sends them as a signed v2 request with the unsubscribe headers", async () => {
     aws.AWS_ACCESS_KEY_ID = undefined;
     aws.AWS_SECRET_ACCESS_KEY = undefined;
-    expect(offersMailer()).toBeNull();
+    expect(bulkMailer()).toBeNull();
     aws.AWS_ACCESS_KEY_ID = "AKIDEXAMPLE";
     aws.AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY";
     aws.AWS_REGION = "us-east-1";
@@ -197,9 +199,10 @@ describe("offers through Amazon SES", () => {
       calls.push({ url: String(input), init: init! });
       return Response.json({ MessageId: "m" });
     });
-    const mailer = offersMailer()!;
+    const mailer = bulkMailer()!;
     const mail = {
-      from: { name: "aion.ly", email: "hey@aion.ly" },
+      from: { name: "aion.ly", email: "noreply@aion.ly" },
+      replyTo: "hey@aion.ly",
       subject: "Your 30% off ends in about 4 hours",
       html: "<p>hi</p>",
       text: "hi",
@@ -208,7 +211,7 @@ describe("offers through Amazon SES", () => {
     // An address for examples only: nothing goes out.
     await mailer.send({ ...mail, to: "someone@example.invalid" });
     expect(calls).toEqual([]);
-    await mailer.send({ ...mail, to: "member@gmail.com" });
+    expect(await mailer.send({ ...mail, to: "member@gmail.com" })).toBe("ses");
     expect(calls).toHaveLength(1);
     expect(calls[0]!.url).toBe("https://email.us-east-1.amazonaws.com/v2/email/outbound-emails");
     const headers = calls[0]!.init.headers as Record<string, string>;
@@ -216,13 +219,53 @@ describe("offers through Amazon SES", () => {
       /^AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE\/\d{8}\/us-east-1\/ses\/aws4_request, SignedHeaders=content-type;host;x-amz-content-sha256;x-amz-date, Signature=[0-9a-f]{64}$/,
     );
     const body = JSON.parse(String(calls[0]!.init.body));
-    expect(body.FromEmailAddress).toBe(`"aion.ly" <hey@aion.ly>`);
+    expect(body.FromEmailAddress).toBe(`"aion.ly" <noreply@aion.ly>`);
     expect(body.Destination.ToAddresses).toEqual(["member@gmail.com"]);
+    expect(body.ReplyToAddresses).toEqual(["hey@aion.ly"]);
     expect(body.Content.Simple.Headers).toEqual([
       { Name: "List-Unsubscribe", Value: "<https://aion.ly/unsubscribe>" },
       { Name: "List-Unsubscribe-Post", Value: "List-Unsubscribe=One-Click" },
     ]);
     expect(body.Content.Simple.Body.Text.Data).toBe("hi");
+  });
+
+  it("sends sign-in links and notices through SES, and through Cloudflare when SES is not set up or refuses", async () => {
+    const carried: string[] = [];
+    const binding = { send: async (message: { to: string }) => (carried.push(message.to), { messageId: "m" }) } as unknown as SendEmail;
+    const mail = { from: { name: "aion.ly", email: "noreply@aion.ly" }, subject: "Your aion.ly sign-in link", html: "<p>hi</p>", text: "hi" };
+    aws.AWS_ACCESS_KEY_ID = undefined;
+    aws.AWS_SECRET_ACCESS_KEY = undefined;
+    expect(await transactionalMailer(binding).send({ ...mail, to: "member@gmail.com" })).toBe("cloudflare");
+    expect(carried).toEqual(["member@gmail.com"]);
+
+    aws.AWS_ACCESS_KEY_ID = "AKIDEXAMPLE";
+    aws.AWS_SECRET_ACCESS_KEY = "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY";
+    const answer = { status: 200 };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+      answer.status === 200 ? Response.json({ MessageId: "m" }) : new Response('{"message":"The request signature we calculated does not match"}', answer),
+    );
+    expect(await transactionalMailer(binding).send({ ...mail, to: "member@gmail.com" })).toBe("ses");
+    expect(carried).toHaveLength(1);
+    answer.status = 403;
+    const refusals: string[] = [];
+    const mailer = transactionalMailer(binding, (error) => refusals.push(String(error)));
+    expect(await mailer.send({ ...mail, to: "member@gmail.com" })).toBe("cloudflare");
+    expect(carried).toHaveLength(2);
+    expect(refusals[0]).toMatch(/SES answered 403/);
+    // Offers and digests have no backup.
+    await expect(bulkMailer()!.send({ ...mail, to: "member@gmail.com" })).rejects.toThrow(/SES answered 403/);
+    expect(carried).toHaveLength(2);
+  });
+
+  it("says when the secret is an SES SMTP password, not a secret access key", async () => {
+    aws.AWS_ACCESS_KEY_ID = "AKIDEXAMPLE";
+    // The shape of an SMTP password: a version byte of 4 and 32 more, in base64.
+    aws.AWS_SECRET_ACCESS_KEY = btoa(String.fromCharCode(4, ...new Uint8Array(32).fill(7)));
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async () => new Response('{"message":"The request signature we calculated does not match the signature you provided."}', { status: 403 }),
+    );
+    const mail = { from: { name: "aion.ly", email: "noreply@aion.ly" }, subject: "s", html: "h", text: "t", to: "member@gmail.com" };
+    await expect(bulkMailer()!.send(mail)).rejects.toThrow(/looks like an SES SMTP password/);
   });
 
   it("encodes a subject SES would refuse as it is", () => {
@@ -241,7 +284,7 @@ describe("the offer email", () => {
     expect(email.html).toContain("https://aion.ly/unsubscribe?list=offers&#38;token=t");
     expect(email.html).toContain("Holy Traction OÜ, Sepapaja tn 6, 15551 Tallinn, Estonia");
     expect(email.text).toContain("$70 a year instead of $100");
-    expect(email.text).toContain("You get this because you asked aion.ly for offers by email.");
+    expect(email.text).toContain("You get this as a member of aion.ly, with offers by email on.");
     expect(email.text).toContain("Unsubscribe from offers: https://aion.ly/unsubscribe?list=offers&token=t");
   });
 });

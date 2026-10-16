@@ -1,11 +1,8 @@
 import { loadSettings } from "../db/settings.server";
 import { settingSql } from "../db/setting-sql.server";
 import type { Mailer } from "../mail/mailers.server";
-import { CONTACT } from "../site";
+import { SENDERS } from "../mail/senders";
 import { composeReadOnlyNotice, composeSignInLink } from "./notices";
-
-/** Notices come from the address that reaches a person, so an appeal by reply is read. */
-export const NOTICES_FROM = CONTACT.general;
 
 /** A notice sent, then karma back above the floor: after this long, the next fall sends another. */
 const REARM_SECONDS = 7 * 24 * 3600;
@@ -65,7 +62,7 @@ export async function sendReadOnlyNotices(db: D1Database, mailer: Mailer, input:
     if (!account) continue;
     const email = composeReadOnlyNotice({ karma: row.karma, floor: row.floor, room, origin: input.origin });
     try {
-      await mailer.send({ from: { name: "aion.ly", email: NOTICES_FROM }, to: account.email, ...email });
+      await mailer.send({ ...SENDERS.notices, to: account.email, ...email });
       sent += 1;
     } catch (error) {
       console.error("read-only notice", error);
@@ -108,6 +105,6 @@ export async function sendSignInLink(
     .bind(address, new Date((input.now - 3600) * 1000).toISOString())
     .first<{ links: number }>();
   if ((recent?.links ?? 0) > LINKS_PER_HOUR) return false;
-  await mailer.send({ from: { name: "aion.ly", email: NOTICES_FROM }, to: address, ...composeSignInLink({ url: input.url, origin: input.origin }) });
+  await mailer.send({ ...SENDERS.signIn, to: address, ...composeSignInLink({ url: input.url, origin: input.origin }) });
   return true;
 }

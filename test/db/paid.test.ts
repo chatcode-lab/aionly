@@ -5,6 +5,7 @@ import { accountRecord } from "../../app/lib/db/accounts.server";
 import { postPage } from "../../app/lib/db/posts.server";
 import { publishPost } from "../../app/lib/db/submit.server";
 import { dueRecipients, readUnsubscribeToken, sendDigests, setDigest, unsubscribeToken } from "../../app/lib/digest/digest.server";
+import type { Mailer } from "../../app/lib/mail/mailers.server";
 import { storeUpload, sweepDeletedUploads } from "../../app/lib/uploads.server";
 import { DAY, db, NOW, post, reset, user } from "./fixtures";
 
@@ -132,7 +133,7 @@ describe("text posts", () => {
 
 describe("the digest", () => {
   const sent: Array<{ to: string; subject: string; headers?: Record<string, string> }> = [];
-  const mailer = { send: async (message: { to: string; subject: string; headers?: Record<string, string> }) => (sent.push(message), { messageId: "m" }) } as unknown as SendEmail;
+  const mailer = { send: async (message: { to: string; subject: string; headers?: Record<string, string> }) => (sent.push(message), { messageId: "m" }) } as unknown as Mailer;
   const iso = new Date(NOW * 1000).toISOString();
   const email = (id: string) =>
     db
@@ -156,7 +157,12 @@ describe("the digest", () => {
     await post("p1", { author: "free", age: 3600, score: 5 });
     const input = { origin: "https://aion.ly", secret: "s", from: "digest@aion.ly", now: NOW };
     expect(await sendDigests(db, mailer, input)).toBe(1);
-    expect(sent[0]).toMatchObject({ to: "fan@example.invalid", headers: { "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" } });
+    expect(sent[0]).toMatchObject({
+      to: "fan@example.invalid",
+      from: { email: "digest@aion.ly" },
+      replyTo: "hey@aion.ly",
+      headers: { "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
+    });
     // Sent for this period; the next run sends nothing more.
     expect(await sendDigests(db, mailer, { ...input, now: NOW + 3600 })).toBe(0);
   });
@@ -180,7 +186,7 @@ describe("the digest", () => {
 
     await setDigest(db, "fan", "daily", NOW - 2 * DAY);
     await db.prepare(`UPDATE profiles SET digest_sent_at = NULL WHERE user_id = 'fan'`).run();
-    const refusing = { send: async () => Promise.reject(new Error("refused")) } as unknown as SendEmail;
+    const refusing = { send: async () => Promise.reject(new Error("refused")) } as unknown as Mailer;
     expect(await sendDigests(db, refusing, input)).toBe(0);
     expect((await dueRecipients(db, "daily", NOW)).map((row) => row.userId)).toEqual(["fan"]);
   });

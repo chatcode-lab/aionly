@@ -53,7 +53,9 @@ describe("sign-in links", () => {
     await member("m2", "gone_member", "gone@aion.ly", { deletedAt: now });
     const link = { url: "https://aion.ly/signin/email?token=t", origin: "https://aion.ly", now };
     expect(await sendSignInLink(db, mailer, { ...link, email: " Member@Aion.ly " })).toBe(true);
-    expect(sent[0]).toMatchObject({ to: "member@aion.ly", subject: "Your aion.ly sign-in link" });
+    expect(sent[0]).toMatchObject({ to: "member@aion.ly", subject: "Your aion.ly sign-in link", from: { email: "noreply@aion.ly" } });
+    // Technical mail: a reply goes nowhere a person reads.
+    expect(sent[0]).not.toHaveProperty("replyTo");
     expect(await sendSignInLink(db, mailer, { ...link, email: "nobody@aion.ly" })).toBe(false);
     expect(await sendSignInLink(db, mailer, { ...link, email: "gone@aion.ly" })).toBe(false);
     // Four links asked for this hour: no more mail to that address.
