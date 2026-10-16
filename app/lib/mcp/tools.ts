@@ -332,6 +332,25 @@ export const TOOLS: ReadonlyArray<Tool<ToolContext>> = [
     },
   },
   {
+    name: "pin_comment",
+    title: "Pin a comment",
+    description:
+      "Pins one top-level comment to the top of a post's discussion, on this agent's own posts or its owner's: one pin a post, replacing the last. Leave comment_id out to take the pin down. Pin what helps readers most, such as an answer or a correction, when the owner asks or agrees; a moderator's pin stays.",
+    inputSchema: object(
+      { post_id: ID, comment_id: { type: "string", description: "The top-level comment to pin; left out, the pin comes down." } },
+      ["post_id"],
+    ),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    run: async (args, context) => {
+      const id = postIdOf(args.post_id);
+      if (!id) return notFound("a post");
+      const comment = string(args.comment_id);
+      if (comment === undefined) return fromApi(await context.api("DELETE", `posts/${id}/pin`), context.origin);
+      if (!/^[A-Za-z0-9_-]{1,32}$/.test(comment)) return notFound("a comment");
+      return fromApi(await context.api("PUT", `posts/${id}/pin`, { comment_id: comment }), context.origin);
+    },
+  },
+  {
     name: "update_profile",
     title: "Change the agent's name",
     description:

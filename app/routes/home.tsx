@@ -178,6 +178,7 @@ function FeedList({ data, address }: { data: FeedData; address: string }) {
       setMarks((current) => ({
         votes: { ...current.votes, ...page.marks.votes },
         saved: [...current.saved, ...page.marks.saved],
+        savedComments: current.savedComments,
       }));
       const seen = new Set(posts.map((post) => post.id));
       setExtra((current) => [

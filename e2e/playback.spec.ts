@@ -56,6 +56,14 @@ async function commands(frame: Frame): Promise<string[]> {
   return frame.evaluate(() => (window as unknown as Fake).commands);
 }
 
+/** Whether the song's frame is gone, or plays nothing: it has no pause, so it is rebuilt or released. */
+async function songStopped(page: Page): Promise<boolean> {
+  const frame = card(page, SONG).locator("iframe");
+  if ((await frame.count()) === 0) return true;
+  const content = await (await frame.elementHandle())?.contentFrame();
+  return content ? !(await isPlaying(content)) : true;
+}
+
 async function playingCount(page: Page): Promise<number> {
   let count = 0;
   for (const frame of page.frames()) {
@@ -161,7 +169,8 @@ test("playback the viewer starts takes over, and stops once scrolled away", asyn
   await expect.poll(() => isPlaying(sintel)).toBe(false);
 });
 
-test("a song loads ahead, and it and a video never play together", async ({ page }) => {
+test("a song loads ahead, and it and a video never play together", async ({ page }, testInfo) => {
+  test.skip(Boolean(testInfo.project.use.hasTouch), "On a touch screen a song waits for a tap; see the next test.");
   // With autoplay off, only what the viewer starts plays.
   await page.addInitScript(() => window.localStorage.setItem("autoplay", "off"));
   await page.goto("/");
@@ -192,6 +201,41 @@ test("a song loads ahead, and it and a video never play together", async ({ page
   await expect.poll(async () => isPlaying(await player(page, SONG))).toBe(false);
   expect(await isPlaying(video!)).toBe(true);
   expect(await playingCount(page)).toBe(1);
+});
+
+test("on a touch screen a song waits for a tap, and stops when a video starts or it scrolls away", async ({ page }, testInfo) => {
+  test.skip(!testInfo.project.use.hasTouch, "Only touch screens wait for a tap.");
+  await page.addInitScript(() => window.localStorage.setItem("autoplay", "off"));
+  await page.goto("/");
+  await focus(page, SONG);
+  // A tap inside a frame tells the page nothing here, so the song loads from a tap on its card.
+  const poster = card(page, SONG).getByRole("button", { name: "Play song from Suno" });
+  await expect(poster).toBeVisible();
+  await page.waitForTimeout(600);
+  await expect(card(page, SONG).locator("iframe")).toHaveCount(0);
+  await poster.tap();
+  const song = await player(page, SONG);
+  await card(page, SONG).frameLocator("iframe").getByRole("button", { name: "Play" }).tap();
+  await expect.poll(() => isPlaying(song)).toBe(true);
+
+  // The viewer starts a video: the song, which has no pause command, is stopped.
+  let video: Frame | undefined;
+  await focus(page, BUNNY);
+  await expect
+    .poll(() => (video = page.frames().find((frame) => frame.url().includes("youtube-nocookie"))))
+    .toBeTruthy();
+  await expect.poll(() => video!.evaluate(() => "player" in window)).toBe(true);
+  await video!.evaluate(() => (window as unknown as Fake).viewerPlay());
+  await expect.poll(() => songStopped(page), { timeout: 10_000 }).toBe(true);
+  expect(await playingCount(page)).toBe(1);
+
+  // Started again and scrolled away, it stops as well.
+  await focus(page, SONG);
+  await card(page, SONG).getByRole("button", { name: "Play song from Suno" }).tap();
+  await card(page, SONG).frameLocator("iframe").getByRole("button", { name: "Play" }).tap();
+  await expect.poll(async () => isPlaying(await player(page, SONG))).toBe(true);
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await expect.poll(() => songStopped(page), { timeout: 10_000 }).toBe(true);
 });
 
 test("under data saver a song waits for a tap, at the player's height", async ({ page }) => {

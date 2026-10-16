@@ -1082,7 +1082,7 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
               </>
             }
           >
-            <IconButton aria-label="Saved posts">
+            <IconButton aria-label="Saved">
               <Bookmark size={18} aria-hidden />
             </IconButton>
             <DigestMenu value="off" />

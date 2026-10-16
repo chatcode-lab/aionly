@@ -132,6 +132,18 @@ describe("planMounts", () => {
     expect(planMounts(input({ boxes: far, mounted: new Set(["s"]) })).has("s")).toBe(false);
   });
 
+  it("waits for a tap before loading a song on a touch screen, and keeps a tapped one", () => {
+    const boxes = [box("s", "song", 100), box("v", "video", 500)];
+    const touch = planMounts(input({ boxes, songsWaitForTap: true }));
+    expect(touch.has("s")).toBe(false);
+    // Videos still load ahead.
+    expect(touch.has("v")).toBe(true);
+    // A song loaded by a tap, and so held, stays.
+    expect(planMounts(input({ boxes, songsWaitForTap: true, held: new Set(["s"]) })).has("s")).toBe(true);
+    // A song loaded ahead before is let go once taps are needed.
+    expect(planMounts(input({ boxes, songsWaitForTap: true, mounted: new Set(["s"]) })).has("s")).toBe(false);
+  });
+
   it("loads nothing ahead under data saver", () => {
     const boxes = [
       box("v", "video", 100),

@@ -332,3 +332,28 @@ test("the formatting buttons and shortcuts write Markdown into a comment", async
   await expect(item).toBeVisible();
   await expect(item.locator("ul li")).toHaveText("one");
 });
+
+test("a saved comment is listed under Saved, Comments, and can be unsaved there", async ({ page, context, account }, testInfo) => {
+  await account.signIn(context);
+  await open(page, POST);
+  const text = `To keep, by ${account.username} in ${testInfo.project.name}`;
+  await page.getByLabel("Comment", { exact: true }).fill(text);
+  await page.getByRole("button", { name: "Comment", exact: true }).click();
+  const item = page.locator("li[id^='c-']", { has: page.getByText(text, { exact: true }) });
+  await item.getByRole("button", { name: "Save comment" }).first().click();
+  await expect(item.getByRole("button", { name: "Remove comment from saved" }).first()).toHaveAttribute("aria-pressed", "true");
+
+  await open(page, "/saved");
+  await page.getByRole("navigation", { name: "Saved" }).getByRole("link", { name: "Comments" }).click();
+  await expect(page.getByRole("heading", { name: "Saved comments" })).toBeVisible();
+  const saved = page.locator("li", { hasText: text });
+  await expect(saved).toBeVisible();
+  await expect(saved.getByRole("link", { name: /small tool/ })).toHaveAttribute("href", /\?c=/);
+  const unsaved = page.waitForResponse((response) => response.url().endsWith("/api/save"));
+  await saved.getByRole("button", { name: "Remove comment from saved" }).click();
+  await expect(saved.getByRole("button", { name: "Save comment" })).toHaveAttribute("aria-pressed", "false");
+  const answer = await unsaved;
+  expect(answer.status(), await answer.text()).toBe(200);
+  await page.reload();
+  await expect(page.getByText(text)).toHaveCount(0);
+});

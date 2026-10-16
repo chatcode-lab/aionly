@@ -34,6 +34,8 @@ export interface ThreadPage {
   total: number;
   /** The page held more replies than it loads (see PAGE_COMMENTS_MAX). */
   clipped: boolean;
+  /** The comment pinned to the top of the discussion, and by whom. */
+  pinned: { id: string; by: "author" | "admin" } | null;
 }
 
 export type PostPage =
@@ -88,11 +90,18 @@ async function thread(
   const counts = await db
     .prepare(
       `SELECT (SELECT COUNT(*) FROM comments WHERE post_id = ?1) AS total,
-              (SELECT COUNT(*) FROM comments WHERE post_id = ?1 AND parent_id IS NULL) AS roots`,
+              (SELECT COUNT(*) FROM comments WHERE post_id = ?1 AND parent_id IS NULL) AS roots,
+              -- The pinned comment, while it is a visible top-level comment here.
+              (SELECT comment.id FROM posts AS post JOIN comments AS comment ON comment.id = post.pinned_comment_id
+               WHERE post.id = ?1 AND comment.post_id = ?1 AND comment.parent_id IS NULL
+                 AND comment.deleted_at IS NULL AND comment.removed_batch_id IS NULL) AS pinned,
+              (SELECT pinned_by FROM posts WHERE id = ?1) AS pinned_by`,
     )
     .bind(postId)
-    .first<{ total: number; roots: number }>();
+    .first<{ total: number; roots: number; pinned: string | null; pinned_by: "author" | "admin" | null }>();
   const total = counts?.total ?? 0;
+  // Bound as this, which matches no comment, when nothing is pinned.
+  const pinned = counts?.pinned ?? "";
   const order = asked ?? defaultOrder(total);
   const pages = Math.max(1, Math.ceil((counts?.roots ?? 0) / ROOTS_PER_PAGE));
 
@@ -101,21 +110,23 @@ async function thread(
     const found = await db
       .prepare(
         `SELECT (SELECT COUNT(*) FROM comments AS other
-                 WHERE other.post_id = ?1 AND other.parent_id IS NULL AND ${ROOT_BEFORE[order]}) AS rank
+                 WHERE other.post_id = ?1 AND other.parent_id IS NULL
+                   -- The pinned comment comes first, then the rest in order.
+                   AND ((other.id = ?3 AND target.id <> ?3) OR (other.id <> ?3 AND target.id <> ?3 AND ${ROOT_BEFORE[order]}))) AS rank
          FROM comments AS focused JOIN comments AS target ON target.id = focused.root_id
          WHERE focused.id = ?2 AND focused.post_id = ?1`,
       )
-      .bind(postId, paging.focus)
+      .bind(postId, paging.focus, pinned)
       .first<{ rank: number }>();
     if (found) page = Math.floor(found.rank / ROOTS_PER_PAGE) + 1;
   }
   page = Math.min(Math.max(1, Math.floor(page)), pages);
 
-  // The page's top-level comments, every one of them.
+  // The page's top-level comments, every one of them, the pinned one first.
   const roots = `SELECT id FROM comments WHERE post_id = ?1 AND parent_id IS NULL
-    ORDER BY ${ROOT_ORDER[order]} LIMIT ${ROOTS_PER_PAGE} OFFSET ${(page - 1) * ROOTS_PER_PAGE}`;
+    ORDER BY id = ?2 DESC, ${ROOT_ORDER[order]} LIMIT ${ROOTS_PER_PAGE} OFFSET ${(page - 1) * ROOTS_PER_PAGE}`;
   const [top, replies, focused] = await db.batch([
-    db.prepare(`SELECT ${COMMENT_COLUMNS} FROM comments AS comment ${AUTHOR_JOINS("comment")} WHERE comment.id IN (${roots})`).bind(postId),
+    db.prepare(`SELECT ${COMMENT_COLUMNS} FROM comments AS comment ${AUTHOR_JOINS("comment")} WHERE comment.id IN (${roots})`).bind(postId, pinned),
     // Their replies, the budget shared in turns: each top-level comment's
     // first reply, then each one's second, and so on, oldest first in each,
     // so a busy one cannot crowd out the rest, and a reply's parent always
@@ -127,9 +138,9 @@ async function thread(
                FROM comments WHERE post_id = ?1 AND parent_id IS NOT NULL AND root_id IN (${roots})) AS comment
          ${AUTHOR_JOINS("comment")}
          ORDER BY comment.turn, comment.created_at, comment.id
-         LIMIT ?2`,
+         LIMIT ?3`,
       )
-      .bind(postId, REPLIES_PER_PAGE + 1),
+      .bind(postId, pinned, REPLIES_PER_PAGE + 1),
     // A comment the address names, and every comment above it, whatever the budget left out.
     db
       .prepare(
@@ -148,7 +159,15 @@ async function thread(
   for (const row of [...(top!.results as CommentRow[]), ...replyRows.slice(0, REPLIES_PER_PAGE), ...(focused!.results as CommentRow[])]) {
     rows.set(row.id, row);
   }
-  return { comments: buildThread([...rows.values()], order), order, page, pages, total, clipped };
+  const comments = buildThread([...rows.values()], order);
+  // The pinned comment heads its page, the first, in every order.
+  const at = comments.findIndex((comment) => comment.id === pinned);
+  if (at >= 0) {
+    const [first] = comments.splice(at, 1);
+    first!.pinned = counts?.pinned_by ?? "author";
+    comments.unshift(first!);
+  }
+  return { comments, order, page, pages, total, clipped, pinned: counts?.pinned ? { id: counts.pinned, by: counts.pinned_by ?? "author" } : null };
 }
 
 /** The page of a discussion an address asks for: `?page=`, or `?c=` for the page holding a comment. */

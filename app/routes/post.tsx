@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
-import { useCallback, useEffect, useState } from "react";
-import { data, Link, redirect, useLocation, useNavigate } from "react-router";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { data, Link, redirect, useFetcher, useLocation, useNavigate } from "react-router";
 
 import { CommentMenu, PostMenu } from "~/components/author-menus";
 import { CommentThread } from "~/components/comment";
@@ -8,6 +8,8 @@ import { CommentBox, CommentEditor } from "~/components/comment-box";
 import { MentionsProvider } from "~/components/mentions";
 import { useNotify } from "~/components/notify";
 import { PostCard, PostTombstone } from "~/components/post-card";
+import { Bookmark, Pin } from "lucide-react";
+import { cn } from "~/lib/cn";
 import { Button } from "~/components/ui/button";
 import { useSignIn } from "~/components/sign-in";
 import { useModerate } from "~/components/use-moderate";
@@ -33,6 +35,7 @@ import {
 import { viewerMarks } from "~/lib/db/marks.server";
 import { linkMentions, mentionHosts, mentionNames } from "~/lib/db/mentions.server";
 import { postPage, threadPaging } from "~/lib/db/posts.server";
+import { pinComment } from "~/lib/db/moderation.server";
 import { formatWait } from "~/lib/format";
 import { newId } from "~/lib/ids";
 import type { CommentData } from "~/lib/public-types";
@@ -122,7 +125,7 @@ export async function action({ params, request, context }: Route.ActionArgs) {
   const refuse = (error: string, status: number) =>
     data<AuthoringResult>({ ok: false, intent, error }, { status });
 
-  if (!["comment", "edit-comment", "delete-comment", "delete-post"].includes(intent)) {
+  if (!["comment", "edit-comment", "delete-comment", "delete-post", "pin-comment", "unpin-comment"].includes(intent)) {
     return refuse("That was not understood.", 400);
   }
   const viewer = await viewerOf(context);
@@ -187,8 +190,21 @@ export async function action({ params, request, context }: Route.ActionArgs) {
       if (result.ok) return { ok: true, intent, id: postId } satisfies AuthoringResult;
       return refuse(CHANGE_REFUSAL[result.reason], result.reason === "not_found" ? 404 : 403);
     }
+    case "pin-comment":
+    case "unpin-comment": {
+      if (intent === "pin-comment" && !ROW_ID.test(id)) return refuse("That was not understood.", 400);
+      const result = await pinComment(env.DB, { postId, commentId: intent === "pin-comment" ? id : null, actorId: viewer.id, now });
+      if (result.ok) return { ok: true, intent, id } satisfies AuthoringResult;
+      return refuse(PIN_REFUSAL[result.reason], result.reason === "not_found" ? 404 : 403);
+    }
   }
 }
+
+const PIN_REFUSAL = {
+  not_found: "That comment is not here to pin: only a visible top-level comment can be.",
+  not_allowed: "Only the post's author, their agent, or a moderator can pin a comment.",
+  moderator: "A moderator pinned a comment here, so it stays.",
+} as const;
 
 export function meta({ loaderData, matches, location }: Route.MetaArgs) {
   if (!loaderData || loaderData.state !== "live") {
@@ -327,6 +343,21 @@ function OrderSwitch({ path, order, total }: { path: string; order: CommentOrder
   );
 }
 
+/** Pins or unpins a comment through the page's action, saying so, or why not. */
+function usePinning() {
+  const fetcher = useFetcher<AuthoringResult>();
+  const notify = useNotify();
+  const handled = useRef<AuthoringResult | undefined>(undefined);
+  useEffect(() => {
+    const result = fetcher.data;
+    if (fetcher.state !== "idle" || !result || handled.current === result) return;
+    handled.current = result;
+    if (!result.ok) notify(result.error);
+    else notify(result.intent === "pin-comment" ? "Pinned to the top of the discussion." : "Unpinned.");
+  }, [fetcher.state, fetcher.data, notify]);
+  return { submit: (fields: Record<string, string>, options: { method: "post" }) => void fetcher.submit(fields, options) };
+}
+
 /**
  * Links to a long discussion's other pages, keeping the order the reader
  * chose; each lands at the comments.
@@ -383,7 +414,16 @@ function useCommentOnAnotherPage(pages: number) {
   }, [pages, search, hash, navigate]);
 }
 
-export default function Post({ loaderData }: Route.ComponentProps) {
+/**
+ * A fresh page for each post, and each page and order of its discussion:
+ * the viewer's votes and saves come with the comments loaded.
+ */
+export default function Post(props: Route.ComponentProps) {
+  const { loaderData } = props;
+  return <PostView key={`${loaderData.id}:${loaderData.page}:${loaderData.order}`} {...props} />;
+}
+
+function PostView({ loaderData }: Route.ComponentProps) {
   const participation = useParticipation(loaderData.marks, loaderData.now);
   const signIn = useSignIn();
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
@@ -397,6 +437,17 @@ export default function Post({ loaderData }: Route.ComponentProps) {
   const closeEditor = useCallback(() => setEditing(null), []);
   const own = (comment: CommentData) => viewerId !== undefined && comment.author?.id === viewerId;
   const admin = participation.viewer?.role === "admin" && !participation.viewer.ban;
+  // Pinning a top-level comment: the post's author's side, unless a moderator pinned one; or an admin.
+  const pinner = usePinning();
+  const mayPin = (comment: CommentData): boolean => {
+    const viewer = participation.viewer;
+    if (loaderData.state !== "live" || !viewer || viewer.ban || comment.state !== "visible") return false;
+    if (!loaderData.comments.some((top) => top.id === comment.id)) return false;
+    if (admin) return true;
+    const author = loaderData.post.author;
+    const side = viewer.id === author.id || author.ownerId === viewer.id;
+    return side && loaderData.pinned?.by !== "admin";
+  };
   useCommentOnAnotherPage(loaderData.pages);
 
   return (
@@ -489,6 +540,18 @@ export default function Post({ loaderData }: Route.ComponentProps) {
                     <CommentMenu
                       postId={postId}
                       comment={comment}
+                      pin={
+                        mayPin(comment)
+                          ? {
+                              pinned: comment.pinned !== undefined,
+                              onSelect: () =>
+                                pinner.submit(
+                                  { intent: comment.pinned ? "unpin-comment" : "pin-comment", id: comment.id },
+                                  { method: "post" },
+                                ),
+                            }
+                          : undefined
+                      }
                       onEdit={
                         live
                           ? () => {
@@ -500,6 +563,33 @@ export default function Post({ loaderData }: Route.ComponentProps) {
                     />
                   ) : null
                 }
+                renderBadge={(comment) =>
+                  comment.pinned ? (
+                    <span
+                      title={comment.pinned === "admin" ? "Pinned by a moderator" : "Pinned by the author"}
+                      className="inline-flex items-center gap-1 text-meta font-medium text-accent"
+                    >
+                      <Pin size={12} aria-hidden />
+                      Pinned
+                    </span>
+                  ) : null
+                }
+                renderAction={(comment) => (
+                  <button
+                    type="button"
+                    aria-pressed={participation.isSaved(comment.id, "comment")}
+                    aria-label={participation.isSaved(comment.id, "comment") ? "Remove comment from saved" : "Save comment"}
+                    onClick={() => void participation.toggleSave(comment.id, "comment")}
+                    className={cn(
+                      "inline-flex size-8 items-center justify-center rounded-lg focus-visible:-outline-offset-2 pointer-coarse:size-(--touch)",
+                      participation.isSaved(comment.id, "comment")
+                        ? "text-accent hover:bg-accent-soft"
+                        : "text-text-faint hover:bg-surface-2 hover:text-text",
+                    )}
+                  >
+                    <Bookmark size={15} aria-hidden fill={participation.isSaved(comment.id, "comment") ? "currentColor" : "none"} />
+                  </button>
+                )}
                 renderTombstone={(comment) =>
                   admin && comment.state === "removed" ? <RestoreButton type="comment" id={comment.id} /> : null
                 }

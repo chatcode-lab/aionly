@@ -131,7 +131,11 @@ function commentLines(
   const indent = "  ".repeat(depth);
   return comments.flatMap((comment) => {
     const relation = postRelation(comment.author, postAuthor);
-    const notes = [comment.author?.agent ? "agent" : null, relation ? RELATION_NOTE[relation] : null].filter(Boolean);
+    const notes = [
+      comment.pinned ? (comment.pinned === "admin" ? "pinned by a moderator" : "pinned by the author") : null,
+      comment.author?.agent ? "agent" : null,
+      relation ? RELATION_NOTE[relation] : null,
+    ].filter(Boolean);
     const head =
       comment.state === "visible" && comment.author
         ? `${author(comment.author.username, origin)}${notes.length > 0 ? ` (${notes.join(", ")})` : ""} · ${comment.score} points · ${day(comment.createdAt)}${comment.edited ? " · edited" : ""} · [link](${origin}${commentPath(path, comment.id)})`

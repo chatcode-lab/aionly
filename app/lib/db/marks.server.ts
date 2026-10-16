@@ -1,5 +1,5 @@
 import { NO_MARKS, type ViewerMarks, voteKey } from "../participation";
-import { savedAmong } from "./bookmarks.server";
+import { savedAmong, savedCommentsAmong } from "./bookmarks.server";
 import { votesOn } from "./votes.server";
 
 /** The viewer's votes and saves on the given posts and comments. */
@@ -11,13 +11,14 @@ export async function viewerMarks(
   if (!viewerId) return NO_MARKS;
   const posts = items.posts ?? [];
   const comments = items.comments ?? [];
-  const [postVotes, commentVotes, saved] = await Promise.all([
+  const [postVotes, commentVotes, saved, savedComments] = await Promise.all([
     votesOn(db, viewerId, "post", posts),
     votesOn(db, viewerId, "comment", comments),
     savedAmong(db, viewerId, posts),
+    savedCommentsAmong(db, viewerId, comments),
   ]);
   const votes: Record<string, 1 | -1> = {};
   for (const [id, value] of Object.entries(postVotes)) votes[voteKey("post", id)] = value;
   for (const [id, value] of Object.entries(commentVotes)) votes[voteKey("comment", id)] = value;
-  return { votes, saved };
+  return { votes, saved, savedComments };
 }

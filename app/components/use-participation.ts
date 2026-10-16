@@ -75,6 +75,7 @@ export function useParticipation(initial: ViewerMarks, loadedAt: number) {
     setMarks((current) => ({
       votes: { ...current.votes, ...more.votes },
       saved: [...current.saved, ...more.saved],
+      savedComments: [...current.savedComments, ...more.savedComments],
     }));
   }, []);
 
@@ -119,22 +120,22 @@ export function useParticipation(initial: ViewerMarks, loadedAt: number) {
     refresh();
   };
 
-  const isSaved = (id: string): boolean =>
-    later(`save:${id}`)?.saved ?? marks.saved.includes(id);
+  const isSaved = (id: string, type: TargetType = "post"): boolean =>
+    later(`save:${type}:${id}`)?.saved ?? (type === "post" ? marks.saved : marks.savedComments).includes(id);
 
-  const toggleSave = async (id: string) => {
+  const toggleSave = async (id: string, type: TargetType = "post") => {
     if (!viewer) {
-      signIn({ title: "Sign in to save posts" });
+      signIn({ title: type === "post" ? "Sign in to save posts" : "Sign in to save comments" });
       return;
     }
-    const key = `save:${id}`;
-    const was = isSaved(id);
+    const key = `save:${type}:${id}`;
+    const was = isSaved(id, type);
     const ticket = (latest.current.get(key) ?? 0) + 1;
     latest.current.set(key, ticket);
 
     record(key, { saved: !was });
     refresh();
-    const { ok, status, data } = await postJson("/api/save", { id, saved: !was });
+    const { ok, status, data } = await postJson("/api/save", { type, id, saved: !was });
     if (latest.current.get(key) !== ticket || ok) return;
     record(key, { saved: was });
     refresh();

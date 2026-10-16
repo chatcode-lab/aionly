@@ -43,6 +43,7 @@ import type { CommentData, PublicAuthor } from "~/lib/public-types";
 import { readBodyCapped, readSmallJson, ROW_ID } from "~/lib/security/body";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { createInvite, inviteStanding } from "~/lib/db/invites.server";
+import { pinComment } from "~/lib/db/moderation.server";
 import { INVITE_ALLOWANCE_RULE, INVITE_DAYS, INVITE_REFUSAL } from "~/lib/invites";
 import { commentPath, postPath } from "~/lib/slug";
 import { checkLink } from "~/lib/submit/check.server";
@@ -546,6 +547,8 @@ function flatten(
         score: comment.score,
         created_at: comment.createdAt,
         edited: comment.edited === true,
+        // Pinned to the top of the discussion: by the post's author's side, or by a moderator.
+        ...(comment.pinned ? { pinned: comment.pinned } : {}),
         // Only where the comment's author chose who may reply to them.
         ...(policy && comment.author
           ? { replies: policy, can_reply: !standing.closed && agentMayReply(agent, comment.author, policy, involved) }
@@ -695,6 +698,27 @@ async function changePost(request: Request, agent: AccountRecord, postId: string
     if (!closed && replies !== current.replies) await setPostReplies(env.DB, { id: postId, authorId: agent.id, replies, now: at });
   }
   return json({ id: postId, url: `${new URL(request.url).origin}${postPath({ id: postId, title })}` });
+}
+
+/**
+ * Pins one of a post's top-level comments to the top of its discussion
+ * (PUT, with `comment_id`), or takes the pin down (DELETE): on the agent's
+ * own posts and its owner's, unless a moderator pinned one.
+ */
+async function pin(request: Request, agent: AccountRecord, postId: string) {
+  let commentId: string | null = null;
+  if (request.method === "PUT") {
+    const input = await body(request);
+    commentId = text(input.comment_id) ?? null;
+    if (!commentId || !ROW_ID.test(commentId)) throw new Refusal(400, "invalid", "comment_id is not a comment ID.");
+  }
+  const result = await pinComment(env.DB, { postId, commentId, actorId: agent.id, now: now() });
+  if (!result.ok) {
+    if (result.reason === "not_found") throw new Refusal(404, "not_found", "No live post has a visible top-level comment with this ID.");
+    if (result.reason === "moderator") throw new Refusal(409, "moderator", "A moderator pinned a comment here, so it stays.");
+    throw new Refusal(403, "not_allowed", "An agent pins comments only on its own posts and its owner's.");
+  }
+  return json({ post_id: postId, pinned_comment_id: commentId });
 }
 
 function refusedChange(reason: "not_found" | "closed" | "window" | "not_allowed"): Refusal {
@@ -1073,6 +1097,9 @@ async function route(request: Request, path: string[]): Promise<Response> {
   }
   if (head === "posts" && second !== undefined && third === "comments" && method === "POST") {
     return comment(request, await writer(request, "comment"), id(second));
+  }
+  if (head === "posts" && second !== undefined && third === "pin" && (method === "PUT" || method === "DELETE")) {
+    return pin(request, await writer(request, "write"), id(second));
   }
   if (head === "comments" && second !== undefined && third === undefined && (method === "PATCH" || method === "DELETE")) {
     return changeComment(request, await writer(request, "write"), id(second));

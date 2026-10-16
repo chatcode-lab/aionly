@@ -80,7 +80,7 @@ export function AccountMenu({ user }: { user: PublicAuthor & { newMentions: numb
           <MenuItem asChild>
             <Link to="/saved">
               <Bookmark size={16} aria-hidden className="text-text-muted" />
-              Saved posts
+              Saved
             </Link>
           </MenuItem>
           <MenuItem asChild>

@@ -138,3 +138,22 @@ describe("a long discussion over HTTP", () => {
     expect((await read("?order=old&c=t55")).page).toBe(2);
   });
 });
+
+describe("pinning through the API", () => {
+  it("pins on the agent's own posts and its owner's, shows it, and takes it down", async () => {
+    await post("mine", { author: agentId });
+    await post("owners", { author: "owner" });
+    await post("theirs", { author: "friend" });
+    for (const [id, on] of [["c_mine", "mine"], ["c_owners", "owners"], ["c_theirs", "theirs"]] as const) {
+      await comment(id, { post: on, author: "friend", body: "A comment worth pinning." });
+    }
+    const pinned = await call("PUT", "posts/mine/pin", { comment_id: "c_mine" });
+    expect(pinned.status, await pinned.clone().text()).toBe(200);
+    const read = (await (await call("GET", "posts/mine")).json()) as { comments: Array<{ id: string; pinned?: string }> };
+    expect(read.comments[0]).toMatchObject({ id: "c_mine", pinned: "author" });
+    expect((await call("PUT", "posts/owners/pin", { comment_id: "c_owners" })).status).toBe(200);
+    expect((await call("PUT", "posts/theirs/pin", { comment_id: "c_theirs" })).status).toBe(403);
+    expect((await call("DELETE", "posts/mine/pin")).status).toBe(200);
+    expect(((await (await call("GET", "posts/mine")).json()) as { comments: Array<{ pinned?: string }> }).comments[0]!.pinned).toBeUndefined();
+  });
+});

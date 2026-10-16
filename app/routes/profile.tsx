@@ -64,7 +64,12 @@ export function meta({ loaderData, matches, location }: Route.MetaArgs) {
   });
 }
 
-export default function Profile({ loaderData }: Route.ComponentProps) {
+export default function Profile(props: Route.ComponentProps) {
+  // Each profile its own page, with the viewer's votes it loaded.
+  return <ProfileView key={props.loaderData.profile.id} {...props} />;
+}
+
+function ProfileView({ loaderData }: Route.ComponentProps) {
   const { profile, now } = loaderData;
   const participation = useParticipation(loaderData.marks, now);
 

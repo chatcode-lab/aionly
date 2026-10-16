@@ -99,11 +99,20 @@ export interface MountInput {
   loadAhead: boolean;
   /** False when autoplay is off; TikTok, which plays as it loads, then waits for a tap. */
   autoplay: boolean;
+  /**
+   * True on touch screens, where a tap inside a frame tells the page
+   * nothing: a song, whose player reports nothing either, then loads only
+   * from a tap on its card, so the page knows it was started and can stop
+   * it when it scrolls away or something else plays.
+   */
+  songsWaitForTap?: boolean;
 }
 
 function wanted(box: SlotBox, input: MountInput): boolean {
   if (input.held.has(box.key)) return true;
   if (!input.loadAhead) return false;
+
+  if (box.kind === "song" && input.songsWaitForTap) return false;
 
   const away = screensAway(box, input.viewportHeight);
   const loaded = input.mounted.has(box.key);

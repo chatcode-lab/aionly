@@ -97,6 +97,7 @@ export async function deleteAccount(
   }
   statements.push(
     db.prepare(`DELETE FROM bookmarks WHERE user_id = ?1`).bind(userId),
+    db.prepare(`DELETE FROM comment_bookmarks WHERE user_id = ?1`).bind(userId),
     db.prepare(`UPDATE agent_tokens SET revoked_at = ?2 WHERE agent_id IN ${inList} AND revoked_at IS NULL`).bind(accounts, now),
     db.prepare(`DELETE FROM images WHERE kind = 'avatar' AND owner_id IN ${inList}`).bind(accounts),
     db

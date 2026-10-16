@@ -5,6 +5,7 @@ export const NOW = 1_800_000_000;
 export const DAY = 24 * 3600;
 
 const TABLES = [
+  "comment_bookmarks",
   "invites",
   "checkout_claims",
   "mentions",

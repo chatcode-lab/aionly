@@ -38,6 +38,8 @@ const VERB: Record<ModerationAction, string> = {
   fresh_start: "gave a fresh start to",
   purge_media: "deleted the files of",
   take_name: "took the name away from",
+  pin_comment: "pinned a comment",
+  unpin_comment: "took down the pinned comment of",
 };
 
 // What an undo undid, as a noun.

@@ -158,7 +158,43 @@ test("an admin pins an announcement above the feed; readers can collapse it", as
   await open(admin, "/p/s_post_13");
   await admin.locator("article").first().getByRole("button", { name: "Post actions" }).click();
   await admin.getByRole("menuitem", { name: "Unpin" }).click();
-  await expect(admin.getByText("Unpinned.").first()).toBeVisible();
+  await expect(admin.getByText("Unpinned.", { exact: true }).first()).toBeVisible();
   await page.reload();
   await expect(page.getByRole("button", { name: /Announcement/ })).toHaveCount(0);
+});
+
+test("an admin pins a comment to the top of a discussion, and takes it down", async ({ browser, otherAccount, adminAccount }, testInfo) => {
+  // Two signed-in browsers and several page loads.
+  test.slow();
+  // A post of each project's own, so runs side by side do not pin over each other.
+  const post = testInfo.project.name.includes("narrow") ? "/p/s_post_11" : "/p/s_post_10";
+  const text = `Worth pinning, by ${otherAccount.username} in ${testInfo.project.name}`;
+  const writer = await as(browser, otherAccount);
+  await open(writer, post);
+  await writer.getByLabel("Comment", { exact: true }).fill(text);
+  await writer.getByRole("button", { name: "Comment", exact: true }).click();
+  await expect(writer.getByText(text, { exact: true })).toBeVisible();
+
+  const admin = await as(browser, adminAccount);
+  await open(admin, post);
+  const item = admin.locator("li[id^='c-']", { has: admin.getByText(text, { exact: true }) });
+  try {
+    await item.getByRole("button", { name: "Comment actions" }).first().click();
+    await admin.getByRole("menuitem", { name: "Pin to the top" }).click();
+    await expect(admin.getByText("Pinned to the top of the discussion.", { exact: true })).toBeVisible();
+    // First in the thread, marked, in any order.
+    const first = admin.locator("section[aria-labelledby=comments-heading] ul > li").first();
+    await expect(first).toContainText(text);
+    await expect(first.getByText("Pinned", { exact: true })).toHaveAttribute("title", "Pinned by a moderator");
+    await open(admin, `${post}?order=new`);
+    await expect(admin.locator("section[aria-labelledby=comments-heading] ul > li").first()).toContainText(text);
+    // The writer sees it too, and cannot take a moderator's pin down.
+    await open(writer, post);
+    await expect(writer.locator("section[aria-labelledby=comments-heading] ul > li").first()).toContainText(text);
+  } finally {
+    await open(admin, post);
+    await admin.locator("li[id^='c-']", { has: admin.getByText(text, { exact: true }) }).getByRole("button", { name: "Comment actions" }).first().click();
+    await admin.getByRole("menuitem", { name: "Unpin" }).click();
+    await expect(admin.getByText("Unpinned.", { exact: true })).toBeVisible();
+  }
 });

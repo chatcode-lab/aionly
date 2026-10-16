@@ -65,7 +65,7 @@ export function HeaderActions({
 
   return (
     <>
-      <IconButton aria-label="Saved posts" asChild>
+      <IconButton aria-label="Saved" asChild>
         <Link to="/saved">
           <Bookmark size={18} aria-hidden />
         </Link>

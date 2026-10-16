@@ -85,7 +85,7 @@ test("signed in, the top bar holds saved posts, the digest, and the account menu
   await account.signIn(context);
   await open(page, "/");
   const header = page.locator("header");
-  await expect(header.getByRole("link", { name: "Saved posts" })).toBeVisible();
+  await expect(header.getByRole("link", { name: "Saved", exact: true })).toBeVisible();
   await expect(header.getByRole("button", { name: /^Email digest/ })).toBeVisible();
   await header.getByRole("button", { name: `Account: ${account.username}` }).click();
   await expect(page.getByRole("menuitem", { name: "Settings" })).toBeVisible();

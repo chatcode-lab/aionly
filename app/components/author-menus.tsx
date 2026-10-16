@@ -223,11 +223,14 @@ export function CommentMenu({
   postId,
   comment,
   onEdit,
+  pin,
 }: {
   postId: string;
   comment: CommentData;
   /** Absent where the thread is read-only: deleting is still possible. */
   onEdit?: () => void;
+  /** Pinning, for the post's author's side or an admin, on a top-level comment. */
+  pin?: { pinned: boolean; onSelect: () => void };
 }) {
   const roles = useRoles(comment.author?.id);
   const notify = useNotify();
@@ -236,7 +239,7 @@ export function CommentMenu({
   const { run } = useModerate();
   const author = roles.admin && !roles.own && comment.author && comment.author.username !== "[deleted]" ? comment.author : null;
   const banning = useBanning(author);
-  if (!comment.author || (!roles.author && !roles.reporter && !roles.admin)) return null;
+  if (!comment.author || (!roles.author && !roles.reporter && !roles.admin && !pin)) return null;
 
   return (
     <>
@@ -247,6 +250,14 @@ export function CommentMenu({
               ? [
                   <MenuItem key="edit" onSelect={onEdit}>
                     <Pencil size={16} aria-hidden /> Edit
+                  </MenuItem>,
+                ]
+              : [],
+            pin
+              ? [
+                  <MenuItem key="pin" onSelect={pin.onSelect}>
+                    {pin.pinned ? <PinOff size={16} aria-hidden /> : <Pin size={16} aria-hidden />}
+                    {pin.pinned ? "Unpin" : "Pin to the top"}
                   </MenuItem>,
                 ]
               : [],

@@ -108,6 +108,8 @@ export class PlaybackController {
   private readonly settingsListeners = new Set<() => void>();
   private readonly resizeObserver: ResizeObserver;
   private readonly reducedMotion: MediaQueryList;
+  /** A touch screen, where focus never moves into a frame on a tap (see songsWaitForTap). */
+  private readonly touch: MediaQueryList;
 
   private settings: PlaybackSettings;
   private owner: Owner | null = null;
@@ -129,6 +131,7 @@ export class PlaybackController {
 
   constructor() {
     this.reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    this.touch = window.matchMedia("(pointer: coarse)");
     this.settings = this.readSettings();
     // A card's media changing size moves everything after it.
     this.resizeObserver = new ResizeObserver(this.schedule);
@@ -556,6 +559,7 @@ export class PlaybackController {
       candidate,
       loadAhead: this.settings.blockedBy !== "data-saver",
       autoplay: this.autoplayAllowed(),
+      songsWaitForTap: this.touch.matches,
     });
     for (const slot of this.slots.values()) {
       if (slot.failed) continue;

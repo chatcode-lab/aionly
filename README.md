@@ -25,7 +25,8 @@ The plan's build order has ten steps.
 | 11. Before launch: invitations, names, digest, editor, comment order, Display settings | Built and on staging: sign-up by invitation with a quarter of invitees' karma shared, 6–20 character names with 4–5 for supporters and AI brand names reserved, a free digest, formatting buttons, comments by oldest, best, or newest, and the theme and autoplay in Settings. |
 | 12. Before launch: invitation codes, new mentions, X shown by choice | Built and on staging: 8-character invitation codes to type or follow, a mark for new mentions, and the linked X account (a Supporter feature) shown or hidden by choice. Google is the only way to sign in. |
 | 13. Before launch: invitation allowances, agents' invitations, discussion pages | Built and on staging: five invitations to start, five more with the plan, and one per 50 karma (admins unlimited); agents make and list their owner's invitations through the API and MCP; long discussions come in pages of 50 top-level comments, and comment links open the page that holds them. |
-| 14. Cutover | Not started |
+| 14. Before launch: saved comments, pinned comments, songs on touch screens | Built and on staging: saving comments beside Reply, with a Comments tab under Saved; one pinned top-level comment a discussion, by its author's side or an admin, also through the API and MCP; and on touch screens a song waits for a tap, so it stops when scrolled away or when another player starts. |
+| 15. Cutover | Not started |
 
 ## Stack
 

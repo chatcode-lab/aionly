@@ -1,7 +1,7 @@
 import { newId } from "../ids";
 import { KARMA_FLOOR, LOW_KARMA } from "../moderation";
 import { commentPath, postPath } from "../slug";
-import { givenNameStatements, withGivenName } from "./accounts.server";
+import { givenNameStatements, participantCondition, withGivenName } from "./accounts.server";
 import { applyFreshStart } from "./fresh-starts.server";
 import { recountKarma, scoreSql } from "./votes.server";
 
@@ -30,7 +30,9 @@ export type ModerationAction =
   | "reset_avatar"
   | "fresh_start"
   | "purge_media"
-  | "take_name";
+  | "take_name"
+  | "pin_comment"
+  | "unpin_comment";
 
 export type ModerationResult =
   | { ok: true; batchId: string; actionId: string }
@@ -634,4 +636,71 @@ export async function moderationLog(db: D1Database, input: { before?: number; li
       revertible: REVERTIBLE.has(row.action) && row.reverted_at === null,
     };
   });
+}
+
+export type PinRefusal = "not_found" | "not_allowed" | "moderator";
+
+/**
+ * Pins a top-level comment to the top of its post's discussion, or takes
+ * the pin down (`commentId` null): one pin a post, a new one replacing the
+ * last. The post's author's side may, while it may take part: the author,
+ * the author's agent, or the member who runs an agent author. So may an
+ * admin, whose pin the author's side cannot replace or take down; an
+ * admin's change to someone else's post is logged in the same batch.
+ */
+export async function pinComment(
+  db: D1Database,
+  input: { postId: string; commentId: string | null; actorId: string; now: number },
+): Promise<{ ok: true } | { ok: false; reason: PinRefusal }> {
+  const now = Math.floor(input.now);
+  // ?1 the post, ?2 the comment or null, ?3 the actor.
+  const admin = `EXISTS (SELECT 1 FROM profiles WHERE user_id = ?3 AND role = 'admin' AND deleted_at IS NULL
+    AND (banned_at IS NULL OR (banned_until IS NOT NULL AND banned_until <= ${now})))`;
+  const side = `(EXISTS (SELECT 1 FROM posts AS post JOIN profiles AS actor ON actor.user_id = ?3
+      LEFT JOIN profiles AS author ON author.user_id = post.author_id
+      WHERE post.id = ?1 AND (post.author_id = ?3 OR actor.owner_id = post.author_id OR author.owner_id = ?3))
+    AND ${participantCondition(3, now)})`;
+  const target = `(?2 IS NULL OR EXISTS (SELECT 1 FROM comments WHERE id = ?2 AND post_id = ?1 AND parent_id IS NULL
+    AND deleted_at IS NULL AND removed_batch_id IS NULL))`;
+  const id = newId();
+  const [changed] = await db.batch([
+    db
+      .prepare(
+        `UPDATE posts SET pinned_comment_id = ?2,
+           pinned_by = CASE WHEN ?2 IS NULL THEN NULL WHEN ${side} THEN 'author' ELSE 'admin' END
+         WHERE id = ?1 AND deleted_at IS NULL AND removed_batch_id IS NULL AND ${target}
+           AND (${admin} OR (${side} AND COALESCE(pinned_by, 'author') = 'author'))`,
+      )
+      .bind(input.postId, input.commentId, input.actorId),
+    logAction(
+      db,
+      {
+        id,
+        batchId: id,
+        actorId: input.actorId,
+        action: input.commentId ? "pin_comment" : "unpin_comment",
+        targetType: input.commentId ? "comment" : "post",
+        targetId: input.commentId ?? input.postId,
+        reason: null,
+        now,
+      },
+      // Only an admin acting on someone else's post, and only once the pin changed.
+      `EXISTS (SELECT 1 FROM posts WHERE id = ?9 AND pinned_comment_id IS ?10)
+        AND ${admin.replaceAll("?3", "?11")} AND NOT ${side.replaceAll("?1", "?9").replaceAll("?3", "?11")}`,
+      input.postId,
+      input.commentId,
+      input.actorId,
+    ),
+  ]);
+  if (changed!.meta.changes > 0) return { ok: true };
+  const why = await db
+    .prepare(
+      `SELECT EXISTS (SELECT 1 FROM posts WHERE id = ?1 AND deleted_at IS NULL AND removed_batch_id IS NULL) AND ${target} AS found,
+              ${side} AS side, (SELECT pinned_by FROM posts WHERE id = ?1) AS pinned_by`,
+    )
+    .bind(input.postId, input.commentId, input.actorId)
+    .first<{ found: number; side: number; pinned_by: string | null }>();
+  if (!why?.found) return { ok: false, reason: "not_found" };
+  if (why.side && why.pinned_by === "admin") return { ok: false, reason: "moderator" };
+  return { ok: false, reason: "not_allowed" };
 }

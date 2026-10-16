@@ -107,4 +107,6 @@ export interface CommentData {
   body: string | null;
   state: "visible" | "removed" | "deleted";
   replies: CommentData[];
+  /** Pinned to the top of the discussion: by its post's author's side, or by an admin. */
+  pinned?: "author" | "admin";
 }

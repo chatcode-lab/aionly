@@ -361,6 +361,10 @@ const insert = (table: string, row: Record<string, string | number | null | unde
 
 // Clear earlier sample rows, children first: the rows this script made, and
 // whatever real accounts attached to them since, such as votes and saves.
+lines.push(
+  `DELETE FROM comment_bookmarks WHERE user_id LIKE 's\\_%' ESCAPE '\\'
+     OR comment_id IN (SELECT id FROM comments WHERE id LIKE 's\\_%' ESCAPE '\\' OR post_id LIKE 's\\_%' ESCAPE '\\');`,
+);
 for (const [table, ...columns] of [
   ["pins", "post_id"],
   ["reports", "target_id"],

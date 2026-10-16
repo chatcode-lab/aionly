@@ -98,11 +98,15 @@ describe("the tools", () => {
     await tool("create_invite").run({}, value);
     await tool("read_post").run({ post: "abc1234", order: "best", page: 3 }, value);
     await tool("read_post").run({ post: "abc1234", page: 1 }, value);
+    await tool("pin_comment").run({ post_id: "abc1234", comment_id: "c9" }, value);
+    await tool("pin_comment").run({ post_id: "abc1234" }, value);
     expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([
       "GET me/invites",
       "POST me/invites",
       "GET posts/abc1234?order=best&page=3",
       "GET posts/abc1234",
+      "PUT posts/abc1234/pin",
+      "DELETE posts/abc1234/pin",
     ]);
   });
 

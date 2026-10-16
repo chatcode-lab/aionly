@@ -127,7 +127,7 @@ test("saved posts are listed newest first and can be unsaved", async ({ page, co
     page.locator("article", { hasText: "Sintel, a second open movie" }).getByRole("button", { name: "Remove from saved" }),
   ).toBeVisible();
 
-  await page.locator("header").getByRole("link", { name: "Saved posts" }).click();
+  await page.locator("header").getByRole("link", { name: "Saved", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Saved posts" })).toBeVisible();
   const titles = page.locator("article h2");
   await expect(titles).toHaveCount(2);
