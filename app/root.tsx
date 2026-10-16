@@ -22,6 +22,7 @@ import { SiteFooter, SiteHeader } from "./components/site-chrome";
 import { useTheme } from "./components/theme-switch";
 import { ErrorState, Notice } from "./components/ui/states";
 import { ToastProvider } from "./components/ui/toast";
+import { invitesRequired } from "./lib/auth.server";
 import { appEnvironment } from "./lib/env.server";
 import { formatDate } from "./lib/format";
 import { imageAddress } from "./lib/media.server";
@@ -74,6 +75,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     theme: readTheme(request.headers.get("Cookie")),
     reviewPages: appEnvironment() !== "production",
     inAppBrowser: detectInAppBrowser(request.headers.get("User-Agent") ?? ""),
+    // Whether a new account needs an invitation, for the sign-in screen.
+    openSignup: !invitesRequired(),
     viewer,
   };
 }

@@ -1,6 +1,6 @@
 import { redirect } from "react-router";
 
-import { SignInPanel } from "~/components/sign-in";
+import { SignInPanel, type SignInTab, tabForError } from "~/components/sign-in";
 import { authFor } from "~/lib/auth.server";
 import { detectInAppBrowser } from "~/lib/in-app-browser";
 import { withinLimits } from "~/lib/security/rate-limit.server";
@@ -26,7 +26,7 @@ const ERRORS: Record<string, string> = {
   identity_deleted: "The account this Google account made here was deleted in the last 30 days. A new one can be made after that.",
   identity_banned: "This Google account cannot make a new account here.",
   // A new account without an invitation, or with one that no longer works.
-  invite_required: "aion.ly takes new members by invitation. Enter the code you were given below, or open the link, then sign in.",
+  invite_required: "That Google account has no account here yet, and a new one needs an invitation. Enter its code below, or open the link you were given.",
   invite_invalid: "That invitation no longer works: it was used, revoked, or expired, or its sender cannot invite now. Ask for a new one.",
   invalid_code: "The sign-in was not accepted. Try again.",
   // X is only linked, from Settings; it signs nobody in.
@@ -42,8 +42,12 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   if (await viewerOf(context)) throw redirect(next);
 
   const code = url.searchParams.get("error");
+  const asked = url.searchParams.get("tab");
   return {
     next,
+    // The tab asked for, or New member, unless a sign-in was refused for
+    // something other than a missing invitation.
+    tab: (asked === "member" || asked === "join" ? asked : tabForError(code)) as SignInTab,
     inAppBrowser: detectInAppBrowser(request.headers.get("User-Agent") ?? ""),
     error: code
       ? (ERRORS[code] ?? `Sign-in did not finish (${code.replace(/[^\w.-]/g, "").slice(0, 60) || "unknown"}). Try again in a moment.`)
@@ -87,16 +91,19 @@ export async function action({ request }: Route.ActionArgs) {
 }
 
 export default function SignIn({ loaderData }: Route.ComponentProps) {
+  const { next } = loaderData;
   return (
     <main className="mx-auto max-w-md px-(--gutter) py-10">
-      <h1 className="text-display font-semibold">Sign in</h1>
+      <h1 className="text-display font-semibold">Join or sign in</h1>
       <p className="mt-1 mb-6 text-body text-text-muted">
         To vote, save posts, and share what you made or found.
       </p>
       <SignInPanel
-        next={loaderData.next}
+        next={next}
         inAppBrowser={loaderData.inAppBrowser}
         error={loaderData.error}
+        tab={loaderData.tab}
+        tabHref={(tab) => `/signin?${new URLSearchParams(tab === "join" ? { next } : { next, tab })}`}
       />
     </main>
   );

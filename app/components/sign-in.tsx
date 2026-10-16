@@ -8,9 +8,10 @@ import {
   useId,
   useState,
 } from "react";
-import { Form, useLocation, useRouteLoaderData } from "react-router";
+import { Form, Link, useLocation, useRouteLoaderData } from "react-router";
 
 import { copyText } from "~/lib/clipboard";
+import { cn } from "~/lib/cn";
 import { draftsAsText } from "~/lib/drafts";
 
 import { Button } from "./ui/button";
@@ -76,17 +77,91 @@ export function CopyButton({
   );
 }
 
+/** The sign-in screen's two tabs: joining with an invitation, and signing in. */
+export type SignInTab = "join" | "member";
+
+/** The tab a refused sign-in returns to: joining, when it lacked an invitation. */
+export function tabForError(error: string | null | undefined): SignInTab {
+  return !error || error.startsWith("invite_") ? "join" : "member";
+}
+
+const TAB_CLASS =
+  "inline-flex h-9 items-center justify-center rounded-md px-3 text-body whitespace-nowrap transition-colors duration-150 pointer-coarse:h-(--touch)";
+const TAB_ACTIVE = "bg-surface font-medium text-text shadow-sm";
+const TAB_IDLE = "text-text-muted hover:text-text";
+
+const TABS: ReadonlyArray<{ value: SignInTab; label: string }> = [
+  { value: "join", label: "New member" },
+  { value: "member", label: "Sign in" },
+];
+
+/**
+ * New member first: someone new learns at once that joining takes an
+ * invitation, rather than finding out from a refused sign-in. Links where
+ * the page has an address for each (`href`), so it works without scripts;
+ * buttons in the dialog.
+ */
+function SignInTabs({ tab, onTab, href }: { tab: SignInTab; onTab: (next: SignInTab) => void; href?: (tab: SignInTab) => string }) {
+  const items = TABS.map((option) => {
+    const active = option.value === tab;
+    const className = cn(TAB_CLASS, active ? TAB_ACTIVE : TAB_IDLE);
+    return href ? (
+      <Link key={option.value} to={href(option.value)} replace preventScrollReset aria-current={active ? "page" : undefined} className={className}>
+        {option.label}
+      </Link>
+    ) : (
+      <button key={option.value} type="button" aria-pressed={active} onClick={() => onTab(option.value)} className={className}>
+        {option.label}
+      </button>
+    );
+  });
+  const className = "grid grid-cols-2 gap-0.5 rounded-lg bg-surface-2 p-0.5";
+  return href ? (
+    <nav aria-label="Join or sign in" className={className}>
+      {items}
+    </nav>
+  ) : (
+    <div role="group" aria-label="Join or sign in" className={className}>
+      {items}
+    </div>
+  );
+}
+
+/** Continue with Google, which makes the account too where it may. */
+function GoogleSignIn({ next }: { next: string }) {
+  return (
+    <>
+      {/* A full page load: the browser leaves for Google from here. */}
+      <Form method="post" action="/signin" reloadDocument>
+        <input type="hidden" name="next" value={next} />
+        <Button type="submit" variant="secondary" className="w-full">
+          <GoogleMark />
+          Continue with Google
+        </Button>
+      </Form>
+      <p className="text-meta text-text-muted">
+        Your Google name, email, and photo stay private; the board shows only the username you choose.
+      </p>
+    </>
+  );
+}
+
 /**
  * Google sign-in, or, inside an app's own browser where Google refuses to
  * sign anyone in, how to continue in a real browser. `next` is where the
- * visitor returns afterwards. Unless `invited`, it also takes an
- * invitation code, for someone given one to type.
+ * visitor returns afterwards. While new accounts need an invitation, it is
+ * in two tabs, New member (an invitation's code) and Sign in, New member
+ * first; `tab` picks one, and `tabHref` makes them links, as on the sign-in
+ * page. On an invitation's own page (`invited`), or with sign-up open to
+ * all, it is the one button.
  */
 export function SignInPanel({
   next,
   inAppBrowser,
   error,
   invited = false,
+  tab: shown,
+  tabHref,
 }: {
   next: string;
   /** The app whose browser this is, or null in a regular browser. */
@@ -94,9 +169,15 @@ export function SignInPanel({
   error?: string;
   /** Shown on an invitation's own page, which needs no code. */
   invited?: boolean;
+  tab?: SignInTab;
+  tabHref?: (tab: SignInTab) => string;
 }) {
+  const root = useRouteLoaderData("root") as { openSignup?: boolean } | undefined;
   const [draft, setDraft] = useState<string | null>(null);
   useEffect(() => setDraft(draftsAsText()), []);
+  const [chosen, setChosen] = useState<SignInTab>(shown ?? "join");
+  // A link's tab, as the page's address names it.
+  const tab = tabHref ? (shown ?? "join") : chosen;
 
   if (inAppBrowser) {
     const link =
@@ -121,23 +202,37 @@ export function SignInPanel({
     );
   }
 
+  const notice = error ? <Notice tone="danger">{error}</Notice> : null;
+  if (invited || root?.openSignup) {
+    return (
+      <div className="space-y-3">
+        {notice}
+        <GoogleSignIn next={next} />
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-3">
-      {error ? <Notice tone="danger">{error}</Notice> : null}
-      {/* A full page load: the browser leaves for Google from here. */}
-      <Form method="post" action="/signin" reloadDocument>
-        <input type="hidden" name="next" value={next} />
-        <Button type="submit" variant="secondary" className="w-full">
-          <GoogleMark />
-          Continue with Google
-        </Button>
-      </Form>
-      <p className="text-meta text-text-muted">
-        Your Google name, email, and photo stay private; the board shows only the username you choose.
-      </p>
-      {invited ? null : (
-        <div className="border-t border-border pt-3">
-          <InviteCodeForm label="New here? aion.ly takes new members by invitation. Enter your code, or open the link you were given." />
+    <div className="space-y-4">
+      <SignInTabs tab={tab} onTab={setChosen} href={tabHref} />
+      {notice}
+      {tab === "join" ? (
+        <div className="space-y-3">
+          <p className="text-body">
+            aion.ly takes new members by invitation, from someone already here. Open the link you were given, or
+            enter its code.
+          </p>
+          <InviteCodeForm label="Your invitation code" />
+          <p className="text-meta text-text-muted">
+            With the invitation, you make your account with Google. Already a member? Choose Sign in.
+          </p>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          <GoogleSignIn next={next} />
+          <p className="text-meta text-text-muted">
+            For accounts made here. A new one needs an invitation: see New member.
+          </p>
         </div>
       )}
     </div>
@@ -191,13 +286,15 @@ export function SignInProvider({ children }: { children: ReactNode }) {
   const location = useLocation();
   const [request, setRequest] = useState<SignInRequest | null>(null);
   const open = useCallback((next?: SignInRequest) => setRequest(next ?? {}), []);
+  // Another page, such as the invitation a typed code leads to, closes it.
+  useEffect(() => setRequest(null), [location.key]);
 
   return (
     <SignInContext value={open}>
       {children}
       <DialogRoot open={request !== null} onOpenChange={(value) => !value && setRequest(null)}>
         {request ? (
-          <DialogContent title={request.title ?? "Sign in to aion.ly"}>
+          <DialogContent title={request.title ?? "Join or sign in"}>
             <SignInPanel
               next={`${location.pathname}${location.search}`}
               inAppBrowser={root?.inAppBrowser ?? null}

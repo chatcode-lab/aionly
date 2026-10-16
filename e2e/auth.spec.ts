@@ -1,6 +1,6 @@
 import { expect, open, test } from "./fixtures";
 
-test("signed out, the top bar offers Sign in, which explains Google sign-in", async ({ page }) => {
+test("signed out, the top bar offers Sign in, which opens on New member, then signs in with Google", async ({ page }) => {
   await open(page, "/");
   const header = page.locator("header");
   await expect(header.getByRole("button", { name: "Account:" })).toHaveCount(0);
@@ -11,9 +11,31 @@ test("signed out, the top bar offers Sign in, which explains Google sign-in", as
   );
   await header.getByRole("link", { name: "Sign in" }).click();
 
-  const dialog = page.getByRole("dialog", { name: "Sign in to aion.ly" });
+  const dialog = page.getByRole("dialog", { name: "Join or sign in" });
+  const tabs = dialog.getByRole("group", { name: "Join or sign in" });
+  // New member first and open: joining takes an invitation.
+  await expect(tabs.getByRole("button").first()).toHaveText("New member");
+  await expect(tabs.getByRole("button", { name: "New member" })).toHaveAttribute("aria-pressed", "true");
+  await expect(dialog.getByLabel("Your invitation code")).toBeVisible();
+  await expect(dialog).toContainText("by invitation");
+  await expect(dialog.getByRole("button", { name: "Continue with Google" })).toHaveCount(0);
+
+  await tabs.getByRole("button", { name: "Sign in" }).click();
+  await expect(tabs.getByRole("button", { name: "Sign in" })).toHaveAttribute("aria-pressed", "true");
   await expect(dialog.getByRole("button", { name: "Continue with Google" })).toBeVisible();
   await expect(dialog).toContainText("stay private");
+  await expect(dialog.getByLabel("Your invitation code")).toHaveCount(0);
+});
+
+test("a code typed in the sign-in dialog leads to its invitation, and the dialog closes", async ({ page }) => {
+  await open(page, "/");
+  await page.locator("header").getByRole("link", { name: "Sign in" }).click();
+  const dialog = page.getByRole("dialog", { name: "Join or sign in" });
+  await dialog.getByLabel("Your invitation code").fill("no such code");
+  await dialog.getByRole("button", { name: "Use code" }).click();
+  await expect(page).toHaveURL(/\/invite\/NOSUCHCODE$|\/invite\?code=/);
+  await expect(page.getByText("There is no invitation with this code.")).toBeVisible();
+  await expect(dialog).toHaveCount(0);
 });
 
 test.describe("without scripts", () => {
@@ -23,6 +45,11 @@ test.describe("without scripts", () => {
     await page.goto("/u/quiet_otter_482");
     await page.locator("header").getByRole("link", { name: "Sign in" }).click();
     await expect(page).toHaveURL(/\/signin\?next=%2Fu%2Fquiet_otter_482$/);
+    await expect(page.getByLabel("Your invitation code")).toBeVisible();
+
+    // The tabs are links here, so Sign in opens without scripts.
+    await page.getByRole("navigation", { name: "Join or sign in" }).getByRole("link", { name: "Sign in" }).click();
+    await expect(page).toHaveURL(/\/signin\?next=%2Fu%2Fquiet_otter_482&tab=member$/);
 
     // The form posts and the browser heads for Google.
     const leaving = page.waitForRequest((request) =>
@@ -127,7 +154,10 @@ test("signing out ends the session", async ({ page, context, account }) => {
 test("pages for members send a signed-out visitor to sign in, and back", async ({ page }) => {
   await page.goto("/settings");
   await expect(page).toHaveURL(/\/signin\?next=%2Fsettings$/);
-  await expect(page.getByRole("heading", { name: "Sign in" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Join or sign in" })).toBeVisible();
+  // Either tab keeps where to return.
+  await page.getByRole("navigation", { name: "Join or sign in" }).getByRole("link", { name: "Sign in" }).click();
+  await expect(page).toHaveURL(/\/signin\?next=%2Fsettings&tab=member$/);
   await expect(page.locator('input[name="next"]')).toHaveValue("/settings");
 });
 
@@ -247,7 +277,7 @@ test("a member makes an invitation, whose link or typed code greets the invited 
   const visitor = await browser.newContext();
   const guest = await visitor.newPage();
   await open(guest, "/signin");
-  await guest.getByLabel(/New here\?/).fill(code.toLowerCase());
+  await guest.getByLabel("Your invitation code").fill(code.toLowerCase());
   await guest.getByRole("button", { name: "Use code" }).click();
   await expect(guest).toHaveURL(new RegExp(`/invite/${code}$`));
   await expect(guest.getByRole("heading", { name: `${account.username} invited you to aion.ly` })).toBeVisible();
@@ -264,8 +294,18 @@ test("a member makes an invitation, whose link or typed code greets the invited 
   await visitor.close();
 });
 
-test("a sign-in without an invitation says how to join", async ({ page }) => {
+test("a sign-in without an invitation says how to join, on New member", async ({ page }) => {
   await open(page, "/signin?error=invite_required");
-  await expect(page.getByText("Enter the code you were given below, or open the link")).toBeVisible();
-  await expect(page.getByLabel(/New here\?/)).toBeVisible();
+  await expect(page.getByText("has no account here yet, and a new one needs an invitation")).toBeVisible();
+  const tabs = page.getByRole("navigation", { name: "Join or sign in" });
+  await expect(tabs.getByRole("link", { name: "New member" })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByLabel("Your invitation code")).toBeVisible();
+});
+
+test("a sign-in refused for another reason returns to Sign in", async ({ page }) => {
+  await open(page, "/signin?error=access_denied");
+  await expect(page.getByText("Sign-in was cancelled.")).toBeVisible();
+  const tabs = page.getByRole("navigation", { name: "Join or sign in" });
+  await expect(tabs.getByRole("link", { name: "Sign in" })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("button", { name: "Continue with Google" })).toBeVisible();
 });
