@@ -194,6 +194,44 @@ export interface StripeCheckoutSession {
   payment_status: string;
   payment_intent?: string | null;
   metadata?: Record<string, string> | null;
+  /** Before tax, in the currency's smallest unit. */
+  amount_subtotal?: number | null;
+  currency?: string | null;
+}
+
+/** A paid invoice, as the board records it: a plan's payment. */
+export interface StripeInvoice {
+  id: string;
+  object: "invoice";
+  customer: string;
+  currency: string;
+  amount_paid: number;
+  /** Before tax, after discounts. */
+  total_excluding_tax?: number | null;
+  subtotal: number;
+  status_transitions?: { paid_at?: number | null } | null;
+}
+
+/** A charge, as a refund reports it: the whole refunded so far, tax included. */
+export interface StripeCharge {
+  id: string;
+  object: "charge";
+  amount: number;
+  amount_refunded: number;
+  payment_intent?: string | null;
+}
+
+/**
+ * The invoice a payment intent paid, if any. Since API version
+ * 2025-03-31 a charge no longer names its invoice; the invoice's payments
+ * do.
+ */
+export async function invoiceOfPaymentIntent(client: StripeClient, paymentIntent: string): Promise<string | null> {
+  const { data } = await client.request<{ data: Array<{ invoice: string }> }>("GET", "/invoice_payments", {
+    payment: { type: "payment_intent", payment_intent: paymentIntent },
+    limit: 1,
+  });
+  return data[0]?.invoice ?? null;
 }
 
 export function getCheckoutSession(client: StripeClient, id: string): Promise<StripeCheckoutSession> {

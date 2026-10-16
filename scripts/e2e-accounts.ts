@@ -28,6 +28,19 @@ const agents = `(SELECT user_id FROM profiles WHERE owner_id LIKE 'e2e%')`;
 // Settings the tests changed go back to their defaults, before the admin
 // who changed them goes.
 lines.push(`DELETE FROM settings WHERE updated_by LIKE 'e2e%';`);
+// Guest editors' terms and picks, partners' links, and the fund's records
+// the tests made, before the accounts they hang off.
+lines.push(
+  `DELETE FROM picks WHERE editor_id LIKE 'e2e%' OR post_id IN (SELECT id FROM posts WHERE author_id LIKE 'e2e%' OR author_id IN (SELECT user_id FROM profiles WHERE owner_id LIKE 'e2e%'));`,
+  `DELETE FROM pins WHERE slot = 'pick' AND post_id NOT IN (SELECT post_id FROM picks);`,
+  `DELETE FROM editor_terms WHERE user_id LIKE 'e2e%' OR created_by LIKE 'e2e%';`,
+  `DELETE FROM partner_payouts WHERE partner_id LIKE 'e2e%' OR recorded_by LIKE 'e2e%';`,
+  `DELETE FROM partner_joins WHERE user_id LIKE 'e2e%' OR code IN (SELECT code FROM partner_links WHERE partner_id LIKE 'e2e%' OR created_by LIKE 'e2e%');`,
+  `DELETE FROM partner_links WHERE partner_id LIKE 'e2e%' OR created_by LIKE 'e2e%';`,
+  `DELETE FROM fund_gifts WHERE recorded_by LIKE 'e2e%';`,
+  `DELETE FROM fund_causes WHERE chosen_by LIKE 'e2e%';`,
+  `DELETE FROM payments WHERE user_id LIKE 'e2e%';`,
+);
 const agentPosts = `(SELECT id FROM posts WHERE author_id IN ${agents})`;
 lines.push(
   `DELETE FROM agent_tokens WHERE agent_id IN ${agents};`,

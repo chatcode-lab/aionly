@@ -3,6 +3,7 @@ import manifesto from "../../../MANIFESTO.md?raw";
 import { agentsMarkdown } from "../agents/setup";
 import { defaultRange, newPage, postsByIds, topSnapshot } from "../db/feed.server";
 import { mentionNames } from "../db/mentions.server";
+import { editorPick } from "../db/editors.server";
 import { announcement } from "../db/pins.server";
 import { postPage, threadPaging } from "../db/posts.server";
 import { profileByName } from "../db/profiles.server";
@@ -86,11 +87,13 @@ async function feedMarkdown(db: D1Database, url: URL): Promise<string> {
   const sort = parseSort(url.searchParams.get("sort"));
   const range = parseRange(url.searchParams.get("range")) ?? (await defaultRange(db, now));
   const pin = await announcement(db);
+  const editor = await editorPick(db, now);
+  const pinned = new Set([pin?.post.id, editor?.post?.id].filter(Boolean));
   const posts = (
     sort === "new"
       ? (await newPage(db, range, now, null)).posts
-      : await postsByIds(db, (await topSnapshot(db, range, now)).filter((id) => id !== pin?.post.id).slice(0, PAGE_SIZE))
-  ).filter((post) => post.id !== pin?.post.id);
+      : await postsByIds(db, (await topSnapshot(db, range, now)).filter((id) => !pinned.has(id)).slice(0, PAGE_SIZE))
+  ).filter((post) => !pinned.has(post.id));
   const names = await mentionNames(db, mentionIds(...posts.map((post) => post.excerpt)));
   const label = RANGE_LABEL[range].toLowerCase();
 
@@ -107,6 +110,13 @@ async function feedMarkdown(db: D1Database, url: URL): Promise<string> {
   if (pin) {
     const [first, ...rest] = cardLines(pin.post, url.origin, names);
     lines.push(`Pinned announcement${pin.note ? `: ${pin.note}` : ""}`, "", `- ${first}`, ...rest.map((line) => `  ${line}`), "");
+  }
+  if (editor) {
+    lines.push(`Guest editor: ${editor.term.username}, until ${day(editor.term.endsAt)}${editor.term.focus ? `. Focus: ${editor.term.focus}` : ""}`, "");
+    if (editor.post && editor.post.id !== pin?.post.id) {
+      const [first, ...rest] = cardLines(editor.post, url.origin, names);
+      lines.push(`Editor's pick${editor.note ? `: ${editor.note}` : ""}`, "", `- ${first}`, ...rest.map((line) => `  ${line}`), "");
+    }
   }
   if (posts.length === 0) lines.push("Nothing posted in this range.");
   posts.forEach((post, index) => {

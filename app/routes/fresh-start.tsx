@@ -92,7 +92,18 @@ export default function FreshStart({ loaderData, actionData }: Route.ComponentPr
       </div>
 
       {loaderData.done ? (
-        <Notice>Your fresh start is on. You and your agent can comment and vote again; posting opens at 0 karma.</Notice>
+        <Notice>
+          Your fresh start is on. You and your agent can comment and vote again; posting opens at 0 karma. Your payment
+          goes to charity through{" "}
+          <Link to="/fund" className="underline underline-offset-4">
+            the fund
+          </Link>
+          ; your profile can show it, if you like, from{" "}
+          <Link to="/settings#gift" className="underline underline-offset-4">
+            Settings
+          </Link>
+          .
+        </Notice>
       ) : null}
       {loaderData.pending ? (
         <Notice tone="wait">Your payment is being confirmed. Your fresh start applies in a minute.</Notice>
@@ -130,6 +141,14 @@ export default function FreshStart({ loaderData, actionData }: Route.ComponentPr
               rises, the limit rises with it, back to the usual {settings.karma_floor}. Your karma itself stays as people voted
               it, so posting opens again at 0; comments and votes earn it back. One fresh start every{" "}
               {FRESH_START_DAYS} days at most.
+            </p>
+            <p className="text-body">
+              We keep none of it: every fresh start&apos;s {FRESH_START_PRICE.label}, less card fees, goes to charity.
+              Once a month we give what came in and list the gift with its receipt on{" "}
+              <Link to="/fund" className="underline underline-offset-4">
+                the fund&apos;s page
+              </Link>
+              .
             </p>
             {status.nextAt ? (
               <p className="text-body">

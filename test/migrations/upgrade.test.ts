@@ -108,5 +108,20 @@ describe("upgrading a database with data in it", () => {
     const columns = db.prepare(`SELECT name FROM pragma_table_info('profiles')`).all().map((row) => (row as { name: string }).name);
     expect(columns).not.toContain("offers_consent_at");
   });
+
+  it("counts the paid fresh starts so far for the fund, at 0025", () => {
+    const db = new DatabaseSync(":memory:");
+    migrate(db, "", "0024_offers_on.sql");
+    db.exec(`
+      INSERT INTO profiles (user_id, created_at) VALUES ('low', 0);
+      INSERT INTO fresh_starts (id, user_id, source, created_at, applied_at) VALUES
+        ('cs_paid', 'low', 'stripe', 10, 11), ('cs_declined', 'low', 'stripe', 20, NULL), ('act_free', 'low', 'admin', 30, 31);
+    `);
+    migrate(db, "0024_offers_on.sql", MIGRATIONS[MIGRATIONS.length - 1]!);
+    expect(db.prepare(`SELECT id, kind, amount_cents, paid_at FROM payments`).all()).toEqual([
+      { id: "cs_paid", kind: "fresh_start", amount_cents: 2000, paid_at: 11 },
+    ]);
+    expect(db.prepare(`SELECT show_gift FROM profiles`).get()).toEqual({ show_gift: 0 });
+  });
 });
 

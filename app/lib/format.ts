@@ -65,3 +65,11 @@ export function formatDate(seconds: number): string {
   const date = new Date(seconds * 1000);
   return `${date.getUTCDate()} ${MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()}`;
 }
+
+/** "$20", or "$20.50" when there are cents, from US cents. */
+export function formatMoney(cents: number): string {
+  const sign = cents < 0 ? "−" : "";
+  const whole = Math.abs(cents);
+  const dollars = Math.floor(whole / 100).toLocaleString("en-US");
+  return whole % 100 === 0 ? `${sign}$${dollars}` : `${sign}$${dollars}.${String(whole % 100).padStart(2, "0")}`;
+}

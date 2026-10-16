@@ -7,7 +7,9 @@ import { magicLink } from "better-auth/plugins/magic-link";
 import { accountRecord, createProfile, linkedWith } from "./db/accounts.server";
 import { signUpRefusal } from "./db/deletion.server";
 import { attachInvite, claimInvite } from "./db/invites.server";
+import { attachPartner, claimPartnerJoin } from "./db/partners.server";
 import { INVITE_COOKIE, normalizeInviteCode } from "./invites";
+import { normalizePartnerCode, PARTNER_COOKIE } from "./partners";
 import { rememberXAccount, type XProfile } from "./db/x-accounts.server";
 import { newId } from "./ids";
 import { transactionalMailer } from "./mail/mailers.server";
@@ -42,6 +44,13 @@ export function inviteFrom(request: Request | undefined): string | null {
   const cookie = request?.headers.get("Cookie") ?? "";
   const code = new RegExp(`(?:^|;\\s*)${INVITE_COOKIE}=([^;]+)`).exec(cookie)?.[1] ?? null;
   return code ? normalizeInviteCode(code) : null;
+}
+
+/** The partner link this browser carries, from `/join/<code>`. */
+export function partnerFrom(request: Request | undefined): string | null {
+  const cookie = request?.headers.get("Cookie") ?? "";
+  const code = new RegExp(`(?:^|;\\s*)${PARTNER_COOKIE}=([^;]+)`).exec(cookie)?.[1] ?? null;
+  return code ? normalizePartnerCode(code) : null;
 }
 
 /** Provider tokens are never kept: the board needs only who signed in. */
@@ -183,16 +192,19 @@ function createAuth(origin: string, request?: Request) {
             // for this account and no other.
             const id = newId();
             // New members come by invitation: the link's code, claimed
-            // inside the write, so one invitation makes one account.
-            if (invitesRequired()) {
-              const code = inviteFrom(request);
-              const claimed = code ? await claimInvite(env.DB, { code, userId: id, now: Math.floor(Date.now() / 1000) }) : false;
-              if (!claimed) {
-                throw APIError.from("FORBIDDEN", {
-                  code: code ? "invite_invalid" : "invite_required",
-                  message: "A new account needs an invitation from a member.",
-                });
-              }
+            // inside the write, so one invitation makes one account; or by
+            // a partner's link, good for many. A partner's link counts with
+            // open sign-up too, for the partner's share.
+            const now = Math.floor(Date.now() / 1000);
+            const code = inviteFrom(request);
+            const partner = partnerFrom(request);
+            const invited = code ? await claimInvite(env.DB, { code, userId: id, now }) : false;
+            const joined = !invited && partner ? await claimPartnerJoin(env.DB, { code: partner, userId: id, now }) : false;
+            if (invitesRequired() && !invited && !joined) {
+              throw APIError.from("FORBIDDEN", {
+                code: code || partner ? "invite_invalid" : "invite_required",
+                message: "A new account needs an invitation from a member.",
+              });
             }
             return { data: { ...user, id } };
           },
@@ -202,6 +214,7 @@ function createAuth(origin: string, request?: Request) {
           after: async (user) => {
             await createProfile(env.DB, user.id);
             await attachInvite(env.DB, { userId: user.id });
+            await attachPartner(env.DB, { userId: user.id });
           },
         },
       },

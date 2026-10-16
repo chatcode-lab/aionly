@@ -5,6 +5,7 @@ import { viewerContext } from "../context";
 import { authFor } from "./auth.server";
 import { accountRecord, type AccountRecord, createProfile } from "./db/accounts.server";
 import { attachInvite } from "./db/invites.server";
+import { attachPartner } from "./db/partners.server";
 
 // Better Auth's session cookie, with or without the `__Secure-` prefix.
 const SESSION_COOKIE = /(?:^|;\s*)(?:__Secure-)?better-auth\.session_token=/;
@@ -27,10 +28,11 @@ export async function loadViewer(request: Request): Promise<AccountRecord | null
   if (record?.deleted) return null;
   if (record && !record.invitePending) return record;
 
-  // The profile and its invitation are set up as the account is created;
-  // if a step failed, finish it now.
+  // The profile and its invitation or partner are set up as the account is
+  // created; if a step failed, finish it now.
   if (!record) await createProfile(env.DB, userId);
   await attachInvite(env.DB, { userId });
+  await attachPartner(env.DB, { userId });
   return accountRecord(env.DB, userId);
 }
 

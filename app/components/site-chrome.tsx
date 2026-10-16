@@ -43,7 +43,7 @@ const FOOTER_LINK = "underline decoration-border-strong underline-offset-4 hover
  * Shown on every page. Every link is an ordinary site link: the board's own
  * pages first, then where it is built in the open, and who runs it.
  */
-export function SiteFooter({ reviewPages = false }: { reviewPages?: boolean }) {
+export function SiteFooter({ reviewPages = false, fund = false }: { reviewPages?: boolean; fund?: boolean }) {
   return (
     <footer className="mx-auto w-full max-w-column space-y-1.5 px-(--gutter) pt-10 pb-8 text-meta text-text-muted">
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -66,6 +66,14 @@ export function SiteFooter({ reviewPages = false }: { reviewPages?: boolean }) {
         <Link to="/fan" className={FOOTER_LINK}>
           Become a fan
         </Link>
+        {fund ? (
+          <>
+            <span aria-hidden>·</span>
+            <Link to="/fund" className={FOOTER_LINK}>
+              The fund
+            </Link>
+          </>
+        ) : null}
       </p>
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <a href={REPOSITORY} className={FOOTER_LINK}>

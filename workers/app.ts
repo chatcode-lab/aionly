@@ -4,6 +4,7 @@ import { createRequestHandler, RouterContextProvider } from "react-router";
 import { nonceContext, viewerContext, waitUntilContext } from "../app/context";
 import { revokeShortNames, sweepExpiredVerifications } from "../app/lib/db/accounts.server";
 import { sweepInviteClaims } from "../app/lib/db/invites.server";
+import { sweepPartnerJoins } from "../app/lib/db/partners.server";
 import { sweepDeletedIdentities } from "../app/lib/db/deletion.server";
 import { sendDigests } from "../app/lib/digest/digest.server";
 import { bulkMailer, transactionalMailer } from "../app/lib/mail/mailers.server";
@@ -237,9 +238,10 @@ export default {
     ctx.waitUntil(sweepDeletedIdentities(workerEnv.DB, Math.floor(Date.now() / 1000)));
     ctx.waitUntil(sweepDeletedUploads(workerEnv.DB, workerEnv.IMAGES));
     ctx.waitUntil(sweepOAuth(workerEnv.DB, Math.floor(Date.now() / 1000)));
-    // Short names whose plan ended, and invitation claims whose sign-up never finished.
+    // Short names whose plan ended, and invitation and partner claims whose sign-up never finished.
     ctx.waitUntil(revokeShortNames(workerEnv.DB, Math.floor(Date.now() / 1000)));
     ctx.waitUntil(sweepInviteClaims(workerEnv.DB, Math.floor(Date.now() / 1000)));
+    ctx.waitUntil(sweepPartnerJoins(workerEnv.DB, Math.floor(Date.now() / 1000)));
     // Digests that are due: each period's, for whoever has not had it yet.
     // Digests and offers go through Amazon SES only, where it is set up.
     const origin = workerEnv.SITE_ORIGIN;

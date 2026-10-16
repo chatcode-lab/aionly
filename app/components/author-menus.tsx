@@ -1,4 +1,4 @@
-import { Ban, Flag, Pencil, Pin, PinOff, ShieldX, Trash2, UserRoundX } from "lucide-react";
+import { Award, Ban, Flag, Pencil, Pin, PinOff, ShieldX, Trash2, UserRoundX } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Link, useFetcher } from "react-router";
 
@@ -9,6 +9,7 @@ import { useModeration } from "~/lib/use-moderation";
 import { useViewer } from "~/lib/use-viewer";
 
 import { BanDialog } from "./ban-dialog";
+import { PickDialog } from "./pick-dialog";
 import { useNotify } from "./notify";
 import { ReportDialog } from "./report-dialog";
 import { useSignIn } from "./sign-in";
@@ -61,6 +62,8 @@ function useRoles(authorId: string | undefined) {
     /** Reporting: anyone else; signed out, it leads to sign-in. */
     reporter: !own && (viewer === null || active),
     admin: active && viewer.role === "admin",
+    /** Picking posts: the guest editor of the running term. */
+    editor: active && viewer.editor === true,
   };
 }
 
@@ -131,7 +134,9 @@ export function PostMenu({
   const { run } = useModerate();
   const author = roles.admin && !roles.own && post.author.username !== "[deleted]" ? post.author : null;
   const banning = useBanning(author);
-  if (!roles.author && !roles.reporter && !roles.admin) return null;
+  const [picking, setPicking] = useState(false);
+  const editor = roles.editor;
+  if (!roles.author && !roles.reporter && !roles.admin && !editor) return null;
   const pinned = moderation?.pinnedPostId === post.id;
 
   return (
@@ -146,6 +151,25 @@ export function PostMenu({
                       <Pencil size={16} aria-hidden /> Edit
                     </Link>
                   </MenuItem>,
+                ]
+              : [],
+            // The guest editor's pick, while their term runs.
+            editor
+              ? [
+                  post.editorsPick ? (
+                    <MenuItem
+                      key="unpick"
+                      onSelect={() =>
+                        run({ action: "unpick", id: post.id }, () => notify("Pick taken back."), { endpoint: "/api/pick" })
+                      }
+                    >
+                      <Award size={16} aria-hidden /> Take back the pick
+                    </MenuItem>
+                  ) : (
+                    <MenuItem key="pick" onSelect={() => setPicking(true)}>
+                      <Award size={16} aria-hidden /> Pick as editor
+                    </MenuItem>
+                  ),
                 ]
               : [],
             roles.reporter ? [<div key="report">{reporting.item()}</div>] : [],
@@ -199,6 +223,7 @@ export function PostMenu({
       </Menu>
       {reporting.dialog}
       {banning.dialog}
+      {editor ? <PickDialog postId={post.id} open={picking} onOpenChange={setPicking} /> : null}
       {roles.author ? (
         <ConfirmDialog
           open={deletion.open}

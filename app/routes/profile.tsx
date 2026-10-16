@@ -3,12 +3,12 @@ import { data, Link, redirect } from "react-router";
 
 import { PostMenu, ProfileMenu } from "~/components/author-menus";
 import { Avatar } from "~/components/avatar";
-import { AgentBadge, PostCard, FanMark, XMark } from "~/components/post-card";
+import { AgentBadge, PickBadge, PostCard, FanMark, XMark } from "~/components/post-card";
 import { EmptyState } from "~/components/ui/states";
 import { canVoteOn } from "~/lib/participation";
 import { viewerMarks } from "~/lib/db/marks.server";
 import { profileByName } from "~/lib/db/profiles.server";
-import { formatAge, formatCount, formatMonthYear } from "~/lib/format";
+import { formatAge, formatCount, formatDate, formatMoney, formatMonthYear } from "~/lib/format";
 import { useParticipation } from "~/components/use-participation";
 import { viewerOf } from "~/lib/viewer.server";
 import { pageMeta, privatePageMeta } from "~/lib/meta";
@@ -131,6 +131,20 @@ function ProfileView({ loaderData }: Route.ComponentProps) {
               </>
             ) : null}
           </p>
+          {profile.editorTerms ? (
+            <p className="mt-1 flex flex-wrap items-center gap-1.5 text-body text-text-muted">
+              <PickBadge label="Guest editor" />
+              {profile.editorTerms.map((term) => `${formatDate(term.startsAt)} to ${formatDate(term.endsAt)}`).join(", ")}
+            </p>
+          ) : null}
+          {profile.giftCents ? (
+            <p className="mt-1 text-body text-text-muted">
+              Gave {formatMoney(profile.giftCents)} to charity through{" "}
+              <Link to="/fund" className="font-medium text-text hover:underline">
+                the fund
+              </Link>
+            </p>
+          ) : null}
           {profile.invited.total > 0 ? (
             <p className="mt-1 text-body text-text-muted">
               Invited {profile.invited.total === 1 ? "one member" : `${profile.invited.total} members`}

@@ -1,0 +1,308 @@
+import { newId } from "../ids";
+import type { PublicAuthor } from "../public-types";
+import { AUTHOR_COLUMNS, AUTHOR_JOINS, toPublicAuthor } from "./rows.server";
+import { settleKarma } from "./votes.server";
+
+/**
+ * Partner links (see `../partners.ts`): made by admins for a partner's
+ * account, each keeping the share and the months it was made with. A link
+ * works while it is not revoked, not past its end, below its limit, and
+ * its partner's account is live and not banned. A member who joins through
+ * one is invited by the partner, as by an invitation, and their plan
+ * payments in their first months count toward the partner's share.
+ */
+
+const banned = (alias: string, now: string) =>
+  `(${alias}.banned_at IS NOT NULL AND (${alias}.banned_until IS NULL OR ${alias}.banned_until > ${now}))`;
+
+/** Whether the link `link` (an alias of partner_links) takes a sign-up at `now` (SQL). */
+function openSql(link: string, now: string): string {
+  return `(${link}.revoked_at IS NULL AND (${link}.ends_at IS NULL OR ${link}.ends_at > ${now})
+    AND (${link}.max_uses IS NULL OR (SELECT COUNT(*) FROM partner_joins WHERE partner_joins.code = ${link}.code) < ${link}.max_uses)
+    AND EXISTS (SELECT 1 FROM profiles AS partner WHERE partner.user_id = ${link}.partner_id
+                AND partner.deleted_at IS NULL AND partner.owner_id IS NULL AND NOT ${banned("partner", now)}))`;
+}
+
+export type PartnerLinkState = "open" | "full" | "ended" | "revoked" | "paused";
+
+/** A partner link as its page shows it, or null when there is none. */
+export async function partnerLinkByCode(
+  db: D1Database,
+  code: string,
+  now: number,
+): Promise<{ state: PartnerLinkState; partner: PublicAuthor; sharePercent: number; shareMonths: number } | null> {
+  const row = await db
+    .prepare(
+      `SELECT link.revoked_at, link.ends_at, link.max_uses, link.share_percent, link.share_months,
+              (SELECT COUNT(*) FROM partner_joins WHERE partner_joins.code = link.code) AS joined,
+              ${openSql("link", "?2")} AS open, ${AUTHOR_COLUMNS}
+       FROM (SELECT *, partner_id AS author_id FROM partner_links WHERE code = ?1) AS link
+       ${AUTHOR_JOINS("link")}`,
+    )
+    .bind(code, now)
+    .first<Parameters<typeof toPublicAuthor>[0] & {
+      revoked_at: number | null;
+      ends_at: number | null;
+      max_uses: number | null;
+      share_percent: number;
+      share_months: number;
+      joined: number;
+      open: number;
+    }>();
+  if (!row) return null;
+  const state: PartnerLinkState = row.open
+    ? "open"
+    : row.revoked_at !== null
+      ? "revoked"
+      : row.ends_at !== null && row.ends_at <= now
+        ? "ended"
+        : row.max_uses !== null && row.joined >= row.max_uses
+          ? "full"
+          : "paused";
+  return { state, partner: toPublicAuthor(row), sharePercent: row.share_percent, shareMonths: row.share_months };
+}
+
+/**
+ * Claims a partner link for a sign-up, before its account exists, for the
+ * account ID the sign-up will make, inside the write: only while the link
+ * takes sign-ups, so its limit holds however many sign up at once.
+ */
+export async function claimPartnerJoin(db: D1Database, input: { code: string; userId: string; now: number }): Promise<boolean> {
+  const claimed = await db
+    .prepare(
+      `INSERT INTO partner_joins (user_id, code, joined_at)
+       SELECT ?2, link.code, ?3 FROM partner_links AS link WHERE link.code = ?1 AND ${openSql("link", "?3")}
+       ON CONFLICT (user_id) DO NOTHING`,
+    )
+    .bind(input.code, input.userId, input.now)
+    .run();
+  return claimed.meta.changes > 0;
+}
+
+/**
+ * Gives the new account the partner it joined through as its inviter,
+ * unless an invitation already named one, and settles the partner's karma,
+ * as attachInvite does. Safe to repeat.
+ */
+export async function attachPartner(db: D1Database, input: { userId: string }): Promise<void> {
+  const partner = `SELECT link.partner_id FROM partner_joins AS joined JOIN partner_links AS link ON link.code = joined.code
+    WHERE joined.user_id = ?1 AND link.partner_id <> ?1`;
+  await db.batch([
+    db
+      .prepare(`UPDATE profiles SET invited_by = (${partner}) WHERE user_id = ?1 AND invited_by IS NULL AND EXISTS (${partner})`)
+      .bind(input.userId),
+    ...settleKarma(db, `(SELECT invited_by FROM profiles WHERE user_id = ?1)`, input.userId),
+  ]);
+}
+
+/** How long a claim waits for its sign-up to finish before the sweep looks at it. */
+const CLAIM_GRACE_SECONDS = 600;
+
+/**
+ * Settles partner claims whose sign-up did not finish: one whose account
+ * was made gets its partner; one whose account never came is dropped, so
+ * it no longer counts toward the link's limit.
+ */
+export async function sweepPartnerJoins(db: D1Database, now: number): Promise<number> {
+  const { results } = await db
+    .prepare(
+      `SELECT joined.user_id FROM partner_joins AS joined JOIN profiles AS profile ON profile.user_id = joined.user_id
+       WHERE joined.joined_at < ?1 AND profile.invited_by IS NULL LIMIT 100`,
+    )
+    .bind(now - CLAIM_GRACE_SECONDS)
+    .all<{ user_id: string }>();
+  for (const { user_id: userId } of results) await attachPartner(db, { userId });
+  const dropped = await db
+    .prepare(`DELETE FROM partner_joins WHERE joined_at < ?1 AND NOT EXISTS (SELECT 1 FROM "user" WHERE "id" = partner_joins.user_id)`)
+    .bind(now - CLAIM_GRACE_SECONDS)
+    .run();
+  return results.length + dropped.meta.changes;
+}
+
+export interface PartnerLinkStats {
+  code: string;
+  partner: string;
+  partnerId: string;
+  sharePercent: number;
+  shareMonths: number;
+  maxUses: number | null;
+  endsAt: number | null;
+  revokedAt: number | null;
+  note: string | null;
+  createdAt: number;
+  /** Not revoked, and not past its end. */
+  live: boolean;
+  /** Accounts made through it. */
+  joined: number;
+  /** Of those, how many have the Fan plan now. */
+  fans: number;
+  /** What they paid for the plan in their shared months, before VAT, less refunds. */
+  revenueCents: number;
+  /** The partner's share of it. */
+  earnedCents: number;
+}
+
+export interface PartnerStanding {
+  links: PartnerLinkStats[];
+  earnedCents: number;
+  paidCents: number;
+  payouts: Array<{ id: string; paidOn: string; amountCents: number; note: string | null }>;
+}
+
+/**
+ * Each link with what it brought, for an admin (every link) or a partner
+ * (their own), and the partner's share earned and paid out. A payment
+ * counts when it came after the member joined and before the link's
+ * months from then ran out.
+ */
+export async function partnerLinks(db: D1Database, input: { partnerId?: string; now: number }): Promise<PartnerLinkStats[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT link.code, link.partner_id, name.name AS partner, link.share_percent, link.share_months, link.max_uses,
+              link.ends_at, link.revoked_at, link.note, link.created_at,
+              (SELECT COUNT(*) FROM partner_joins AS joined JOIN profiles AS member ON member.user_id = joined.user_id
+                WHERE joined.code = link.code AND member.deleted_at IS NULL) AS joined,
+              (SELECT COUNT(*) FROM partner_joins AS joined JOIN profiles AS member ON member.user_id = joined.user_id
+                WHERE joined.code = link.code AND member.deleted_at IS NULL AND COALESCE(member.plan_until, 0) > ?2) AS fans,
+              (SELECT COALESCE(SUM(payment.amount_cents - payment.refunded_cents), 0)
+                FROM partner_joins AS joined JOIN payments AS payment ON payment.user_id = joined.user_id AND payment.kind = 'plan'
+                WHERE joined.code = link.code AND payment.paid_at >= joined.joined_at
+                  AND payment.paid_at < unixepoch(joined.joined_at, 'unixepoch', '+' || link.share_months || ' months')) AS revenue
+       FROM partner_links AS link
+       JOIN usernames AS name ON name.user_id = link.partner_id AND name.is_current = 1
+       WHERE ?1 IS NULL OR link.partner_id = ?1
+       ORDER BY link.created_at DESC
+       LIMIT 200`,
+    )
+    .bind(input.partnerId ?? null, input.now)
+    .all<{
+      code: string;
+      partner_id: string;
+      partner: string;
+      share_percent: number;
+      share_months: number;
+      max_uses: number | null;
+      ends_at: number | null;
+      revoked_at: number | null;
+      note: string | null;
+      created_at: number;
+      joined: number;
+      fans: number;
+      revenue: number;
+    }>();
+  return results.map((row) => ({
+    code: row.code,
+    partner: row.partner,
+    partnerId: row.partner_id,
+    sharePercent: row.share_percent,
+    shareMonths: row.share_months,
+    maxUses: row.max_uses,
+    endsAt: row.ends_at,
+    revokedAt: row.revoked_at,
+    note: row.note,
+    createdAt: row.created_at,
+    live: row.revoked_at === null && (row.ends_at === null || row.ends_at > input.now),
+    joined: row.joined,
+    fans: row.fans,
+    revenueCents: row.revenue,
+    earnedCents: Math.floor((row.revenue * row.share_percent) / 100),
+  }));
+}
+
+/** A partner's links, their share earned, and what was paid out to them. */
+export async function partnerStanding(db: D1Database, partnerId: string, now: number): Promise<PartnerStanding> {
+  const links = await partnerLinks(db, { partnerId, now });
+  const { results } = await db
+    .prepare(`SELECT id, paid_on, amount_cents, note FROM partner_payouts WHERE partner_id = ?1 ORDER BY paid_on DESC LIMIT 200`)
+    .bind(partnerId)
+    .all<{ id: string; paid_on: string; amount_cents: number; note: string | null }>();
+  const payouts = results.map((row) => ({ id: row.id, paidOn: row.paid_on, amountCents: row.amount_cents, note: row.note }));
+  return {
+    links,
+    earnedCents: links.reduce((sum, link) => sum + link.earnedCents, 0),
+    paidCents: payouts.reduce((sum, payout) => sum + payout.amountCents, 0),
+    payouts,
+  };
+}
+
+export type PartnerLinkProblem = "taken" | "no_partner";
+
+/**
+ * Makes a partner link for a member's account, by an admin. Its terms are
+ * fixed with it. Answers the problem, or null.
+ */
+export async function createPartnerLink(
+  db: D1Database,
+  input: {
+    code: string;
+    partner: string;
+    sharePercent: number;
+    shareMonths: number;
+    maxUses: number | null;
+    endsAt: number | null;
+    note: string | null;
+    actorId: string;
+    now: number;
+  },
+): Promise<PartnerLinkProblem | null> {
+  const partner = await db
+    .prepare(
+      `SELECT profile.user_id FROM usernames AS name JOIN profiles AS profile ON profile.user_id = name.user_id
+       WHERE name.name = ?1 AND name.is_current = 1 AND profile.deleted_at IS NULL AND profile.owner_id IS NULL`,
+    )
+    .bind(input.partner.trim().replace(/^@/, "").toLowerCase())
+    .first<{ user_id: string }>();
+  if (!partner) return "no_partner";
+  try {
+    await db
+      .prepare(
+        `INSERT INTO partner_links (code, partner_id, share_percent, share_months, max_uses, ends_at, note, created_by, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`,
+      )
+      .bind(input.code, partner.user_id, input.sharePercent, input.shareMonths, input.maxUses, input.endsAt, input.note, input.actorId, input.now)
+      .run();
+  } catch (error) {
+    if (String(error).includes("UNIQUE")) return "taken";
+    throw error;
+  }
+  return null;
+}
+
+/** Stops a link taking sign-ups, by an admin. Those who joined keep counting. */
+export async function revokePartnerLink(db: D1Database, input: { code: string; now: number }): Promise<boolean> {
+  const revoked = await db
+    .prepare(`UPDATE partner_links SET revoked_at = ?2 WHERE code = ?1 AND revoked_at IS NULL`)
+    .bind(input.code, input.now)
+    .run();
+  return revoked.meta.changes > 0;
+}
+
+/** Records a payout of a partner's share, by an admin. */
+export async function recordPayout(
+  db: D1Database,
+  input: { partnerId: string; amountCents: number; paidOn: string; note: string | null; actorId: string; now: number },
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO partner_payouts (id, partner_id, amount_cents, currency, paid_on, note, recorded_by, recorded_at)
+       VALUES (?1, ?2, ?3, 'usd', ?4, ?5, ?6, ?7)`,
+    )
+    .bind(newId(), input.partnerId, input.amountCents, input.paidOn, input.note, input.actorId, input.now)
+    .run();
+}
+
+/** Every partner's share earned and paid out, for admins. */
+export async function partnersOwed(db: D1Database, now: number): Promise<Array<{ partnerId: string; partner: string; earnedCents: number; paidCents: number }>> {
+  const links = await partnerLinks(db, { now });
+  const { results } = await db
+    .prepare(`SELECT partner_id, SUM(amount_cents) AS paid FROM partner_payouts GROUP BY partner_id`)
+    .all<{ partner_id: string; paid: number }>();
+  const paid = new Map(results.map((row) => [row.partner_id, row.paid]));
+  const partners = new Map<string, { partnerId: string; partner: string; earnedCents: number; paidCents: number }>();
+  for (const link of links) {
+    const entry = partners.get(link.partnerId) ?? { partnerId: link.partnerId, partner: link.partner, earnedCents: 0, paidCents: paid.get(link.partnerId) ?? 0 };
+    entry.earnedCents += link.earnedCents;
+    partners.set(link.partnerId, entry);
+  }
+  return [...partners.values()];
+}

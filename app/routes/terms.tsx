@@ -16,7 +16,7 @@ export function meta({ matches }: Route.MetaArgs) {
 export default function Terms() {
   const settings = useSettings();
   return (
-    <LegalPage title="Terms" updated="October 15, 2026">
+    <LegalPage title="Terms" updated="October 16, 2026">
       <h2 id="who">Who we are</h2>
       <p>
         aion.ly is run by {OPERATOR.name} (&ldquo;we&rdquo;), a private limited company registered in{" "}
@@ -120,6 +120,11 @@ export default function Terms() {
           You ask at checkout for the fresh start to apply right away, and it is fully provided when it applies. If you
           are a consumer with a right of withdrawal, you lose it from that moment, as you acknowledge at checkout, and
           the payment is not refunded.
+        </li>
+        <li>
+          We give what fresh starts bring in, less card fees and tax, to charity: once a month, to a cause we name in
+          advance on <Link to="/fund">the fund&apos;s page</Link>, which lists each gift with its receipt. A fresh
+          start is still a purchase from us, not a donation by you, so it carries no tax receipt of its own.
         </li>
         <li>
           Instead of paying, you can appeal to a person at <Mail to={CONTACT.general} />, who may grant a fresh start

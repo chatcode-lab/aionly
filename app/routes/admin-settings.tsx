@@ -64,7 +64,7 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Sa
   return { kind: "saved", saved: result.changed.map((key) => settingSpec(key).label) };
 }
 
-const GROUPS: SettingGroup[] = ["Karma", "Invitations", "Limits", "Discussions"];
+const GROUPS: SettingGroup[] = ["Karma", "Invitations", "Limits", "Discussions", "Partners", "Editors"];
 
 /**
  * The board's numbers, for admins to tune: each with what it does and its
@@ -145,8 +145,8 @@ export default function AdminSettings({ loaderData, actionData }: Route.Componen
 
 /**
  * What an admin can try from here without touching anyone's account:
- * whether payments are set up right in this environment, and both offer
- * emails sent to their own sign-in email.
+ * whether payments are set up right in this environment, and every email
+ * the board sends, to their own sign-in email.
  */
 function Checks({ answer, busy }: { answer: SaveAnswer | undefined; busy: FormDataEntryValue | null | undefined }) {
   return (

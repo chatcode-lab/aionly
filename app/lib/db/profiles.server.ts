@@ -2,6 +2,7 @@ import type { PostCardData } from "../public-types";
 import { imageAddress } from "../media.server";
 import { postPath } from "../slug";
 import { plainText } from "../text/markdown";
+import { termsOf } from "./editors.server";
 import { withPlainMentions } from "./mentions.server";
 import {
   AUTHOR_JOINS,
@@ -39,6 +40,10 @@ export interface PublicProfile {
   x?: { id: string; handle: string };
   /** Who invited this member, when they came by invitation. */
   invitedBy?: string;
+  /** What their fresh starts gave to the fund, in cents, when they show it. */
+  giftCents?: number;
+  /** Their terms as guest editor, latest first. */
+  editorTerms?: Array<{ startsAt: number; endsAt: number }>;
   /** Members they invited, newest first, and how many in all. */
   invited: { names: string[]; total: number };
   /** The part of their karma that comes from those they invited. */
@@ -76,6 +81,9 @@ export async function profileByName(
               CASE WHEN ${X_SHOWN} THEN profile.x_id END AS x_id,
               CASE WHEN ${X_SHOWN} THEN profile.x_handle END AS x_handle,
               (SELECT name FROM usernames WHERE user_id = profile.owner_id AND is_current = 1) AS owner_name,
+              CASE WHEN profile.show_gift = 1 THEN
+                (SELECT SUM(amount_cents - refunded_cents) FROM payments WHERE user_id = profile.user_id AND kind = 'fresh_start')
+              END AS gift_cents,
               (SELECT name.name FROM profiles AS agent
                JOIN usernames AS name ON name.user_id = agent.user_id AND name.is_current = 1
                WHERE agent.owner_id = profile.user_id AND agent.deleted_at IS NULL) AS agent_name
@@ -101,6 +109,7 @@ export async function profileByName(
       x_handle: string | null;
       owner_name: string | null;
       agent_name: string | null;
+      gift_cents: number | null;
     }>();
   if (!owner) return null;
   if (owner.is_current !== 1) {
@@ -181,6 +190,8 @@ export async function profileByName(
       ...(owner.fan === 1 ? { fan: true } : {}),
       ...(owner.x_id && owner.x_handle ? { x: { id: owner.x_id, handle: owner.x_handle } } : {}),
       ...(owner.inviter_name ? { invitedBy: owner.inviter_name } : {}),
+      ...(owner.gift_cents ? { giftCents: owner.gift_cents } : {}),
+      ...(await termsOf(db, owner.user_id, Math.floor(Date.now() / 1000)).then((terms) => (terms.length > 0 ? { editorTerms: terms } : {}))),
       invited: { names: (invited!.results as Array<{ name: string }>).map((row) => row.name), total: owner.invited_total },
       inviteKarma: owner.karma - owner.vote_karma,
       posts: await withPlainMentions(db, cards, "excerpt"),

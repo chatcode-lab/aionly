@@ -15,17 +15,19 @@ export function LinkTabs({
   label,
   tabs,
   current,
+  className,
 }: {
   /** Names the group for assistive technology, such as "Sort". */
   label: string;
   tabs: LinkTab[];
   /** The `to` of the active tab. */
   current: string;
+  className?: string;
 }) {
   return (
     <nav
       aria-label={label}
-      className="flex items-center gap-0.5 rounded-lg bg-surface-2 p-0.5"
+      className={cn("flex items-center gap-0.5 rounded-lg bg-surface-2 p-0.5", className)}
     >
       {tabs.map((tab) => {
         const active = tab.to === current;

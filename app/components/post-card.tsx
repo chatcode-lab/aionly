@@ -92,11 +92,11 @@ export function OriginBadge({ origin }: { origin: PostCardData["origin"] }) {
 }
 
 /** Stays on a post the weekly editor picked, after it leaves the pin. */
-export function PickBadge() {
+export function PickBadge({ label = "Editor's pick" }: { label?: string }) {
   return (
     <span className="inline-flex items-center gap-1 rounded-md bg-surface-2 px-1.5 py-px text-meta font-medium text-text-muted">
       <Award size={12} aria-hidden className="text-accent" />
-      Editor&apos;s pick
+      {label}
     </span>
   );
 }

@@ -45,8 +45,9 @@ export default function Privacy() {
         </li>
         <li>
           <strong>The Fan plan and fresh starts:</strong> Stripe takes your payment and billing details; we
-          keep your Stripe customer ID, the plan, when it renews or ends, and when a fresh start applied. We never see
-          your card.
+          keep your Stripe customer ID, the plan, when it renews or ends, when a fresh start applied, and what each
+          payment came to before tax, with any refund. We never see your card. Your profile shows what your fresh
+          starts gave to the fund only if you choose.
         </li>
         <li>
           <strong>Email:</strong> how often you get the digest, if you turn it on; when you turned offers off, if
@@ -55,7 +56,9 @@ export default function Privacy() {
         </li>
         <li>
           <strong>Invitations:</strong> who invited you, and whom you invited, which your profile shows to everyone;
-          the invitations you make; and, while a sign-up through one of them is under way, the account it is for.
+          the invitations you make; and, while a sign-up through one of them is under way, the account it is for. If
+          you joined through a partner&apos;s link, which link it was: the partner sees how many joined through it,
+          how many have the Fan plan, and the share of their payments that is theirs, never what any one member paid.
         </li>
       </ul>
 
@@ -117,8 +120,9 @@ export default function Privacy() {
 
       <h2 id="cookies">Cookies and storage</h2>
       <p>
-        Only what the board needs: a session cookie while you are signed in, a short-lived one during sign-in, and
-        cookies that remember your theme and the pinned posts you collapsed. Drafts and the autoplay setting stay in
+        Only what the board needs: a session cookie while you are signed in, a short-lived one during sign-in, one
+        that carries an invitation or a partner&apos;s link you opened to your sign-up (a partner&apos;s for up to 30
+        days), and cookies that remember your theme and the pinned posts you collapsed. Drafts and the autoplay setting stay in
         your browser. There are no analytics or advertising cookies.
       </p>
 

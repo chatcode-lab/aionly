@@ -26,6 +26,8 @@ import { invitesRequired, xConfigured } from "./lib/auth.server";
 import { appEnvironment } from "./lib/env.server";
 import { formatDate } from "./lib/format";
 import { introEndsAt } from "./lib/plan";
+import { currentEditor } from "./lib/db/editors.server";
+import { fundStarted } from "./lib/db/fund.server";
 import { loadSettings } from "./lib/db/settings.server";
 import { imageAddress } from "./lib/media.server";
 import { detectInAppBrowser } from "./lib/in-app-browser";
@@ -57,6 +59,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
         digest: account.digest,
         newMentions: account.newMentions,
         ...(account.fan && account.showMark ? { fan: true } : {}),
+        ...((await currentEditor(env.DB, Math.floor(Date.now() / 1000)))?.userId === account.id ? { editor: true } : {}),
         // A new member's prices, while they last, for every paywall to show.
         ...(!account.entitled && !account.ownerId && Date.now() / 1000 < introEndsAt(account.createdAt)
           ? { introUntil: introEndsAt(account.createdAt) }
@@ -80,6 +83,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     origin: new URL(request.url).origin,
     theme: readTheme(request.headers.get("Cookie")),
     reviewPages: appEnvironment() !== "production",
+    // The fund, in the footer once a fresh start has been paid for.
+    fund: await fundStarted(env.DB),
     inAppBrowser: detectInAppBrowser(request.headers.get("User-Agent") ?? ""),
     // The numbers admins tune, for every page's words and rules.
     settings: await loadSettings(env.DB),
@@ -158,7 +163,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
               </SiteHeader>
               {data?.viewer?.ban ? <BanNotice ban={data.viewer.ban} karma={data.viewer.karma} /> : null}
               <div className="flex-1">{children}</div>
-              <SiteFooter reviewPages={data?.reviewPages ?? false} />
+              <SiteFooter reviewPages={data?.reviewPages ?? false} fund={data?.fund ?? false} />
             </SignInProvider>
           </NotifyProvider>
         </ToastProvider>

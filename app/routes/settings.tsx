@@ -11,6 +11,7 @@ import { RepliesField } from "~/components/replies-field";
 import { DisplaySettings, useTheme } from "~/components/theme-switch";
 import { UsernameForm } from "~/components/username-form";
 import { Button } from "~/components/ui/button";
+import { TextArea } from "~/components/ui/field";
 import { Notice } from "~/components/ui/states";
 import { applyRename } from "~/lib/accounts/rename.server";
 import { SHORT_USERNAME_MIN, USERNAME_MAX, USERNAME_MIN, USERNAME_PROBLEM } from "~/lib/accounts/usernames";
@@ -28,7 +29,7 @@ import { deleteAccount, identityHash } from "~/lib/db/deletion.server";
 import { describeWatch, watchListOf } from "~/lib/db/updates.server";
 import { planStatus, type PlanStatus, setShowMark } from "~/lib/db/subscriptions.server";
 import { clearStaleX, type LinkedX, linkedX, setXShown, unlinkMethod } from "~/lib/db/x-accounts.server";
-import { formatAge, formatDate } from "~/lib/format";
+import { formatAge, formatDate, formatMoney } from "~/lib/format";
 import { setGooglePhoto, setXPhoto } from "~/lib/images.server";
 import { imageAddress } from "~/lib/media.server";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
@@ -36,6 +37,10 @@ import { requireAccount, requireParticipant } from "~/lib/viewer.server";
 import { useViewer } from "~/lib/use-viewer";
 import { privatePageMeta } from "~/lib/meta";
 import { setOffers } from "~/lib/offers/offers.server";
+import { giftStanding, setShowGift } from "~/lib/db/fund.server";
+import { partnerStanding, type PartnerStanding } from "~/lib/db/partners.server";
+import { currentEditor, forgetEditor, picksOfTerm, setFocus } from "~/lib/db/editors.server";
+import { FOCUS_MAX } from "~/lib/editors";
 import { sendOffersSoon } from "~/lib/offers/send.server";
 import { readTheme } from "~/lib/theme";
 import { COMMENT_REPLIES, type CommentReplies, parseCommentReplies } from "~/lib/replies";
@@ -110,6 +115,14 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       error: linkError === null ? undefined : linkErrorMessage(linkError),
     },
     commentReplies: viewer.replyPolicy,
+    // What the member's fresh starts gave to the fund, and whether it shows.
+    gift: await giftStanding(env.DB, viewer.id),
+    // The running term, for its guest editor: the focus, and the picks.
+    editing: await currentEditor(env.DB, Math.floor(Date.now() / 1000)).then(async (term) =>
+      term && term.userId === viewer.id ? { term, picks: await picksOfTerm(env.DB, term.id) } : null,
+    ),
+    // A partner's links, what they brought, and the share earned and paid.
+    partner: await partnerStanding(env.DB, viewer.id, Math.floor(Date.now() / 1000)),
     plan: {
       fan: viewer.fan,
       admin: viewer.role === "admin",
@@ -238,6 +251,22 @@ export async function action({ request, context }: Route.ActionArgs) {
     // A new member's offer, if their day is not over.
     if (on) sendOffersSoon(account.id, new URL(request.url).origin);
     return { offersSaved: true };
+  }
+  // The guest editor's note on the term's focus.
+  if (form.get("intent") === "focus") {
+    const account = await requireParticipant(request, context);
+    if (!(await withinLimits(request, "write", account.id))) return { focusError: RATE_LIMITED_MESSAGE };
+    const focus = String(form.get("focus") ?? "").trim().slice(0, FOCUS_MAX);
+    const saved = await setFocus(env.DB, { editorId: account.id, focus: focus || null, now: Math.floor(Date.now() / 1000) });
+    forgetEditor();
+    return saved ? { focusSaved: true } : { focusError: "Your term is over, so the focus can no longer change." };
+  }
+  // Showing on the profile what one's fresh starts gave, or not.
+  if (form.get("intent") === "gift") {
+    const account = await requireAccount(request, context);
+    if (!(await withinLimits(request, "write", account.id))) return { giftError: RATE_LIMITED_MESSAGE };
+    await setShowGift(env.DB, account.id, form.get("show") === "on");
+    return { giftSaved: true };
   }
   if (form.get("intent") === "token-revoke" || form.get("intent") === "token-read") {
     const account = await requireAccount(request, context);
@@ -965,6 +994,147 @@ function EmailSection({
   );
 }
 
+/**
+ * The guest editor's own tools for the running term: the focus note, shown
+ * above the feed, and the picks so far. A post is picked from its ⋯ menu.
+ */
+function EditorSection({
+  editing,
+  saved,
+  error,
+}: {
+  editing: { term: { endsAt: number; focus: string | null }; picks: Array<{ postId: string; title: string; note: string | null }> };
+  saved: boolean;
+  error: string | undefined;
+}) {
+  const navigation = useNavigation();
+  const busy = navigation.state !== "idle" && navigation.formData?.get("intent") === "focus";
+  const [focus, setFocusText] = useState(editing.term.focus ?? "");
+  return (
+    <div className="space-y-3">
+      <p className="text-body text-text-muted">
+        You lead the board until {formatDate(editing.term.endsAt)}. Pick a post from its ⋯ menu: your latest pick is
+        pinned above the feed with your line, and every pick keeps an Editor&apos;s pick mark.
+      </p>
+      <Form method="post" className="space-y-2">
+        <input type="hidden" name="intent" value="focus" />
+        <TextArea
+          label="This term's focus"
+          name="focus"
+          value={focus}
+          onChange={(event) => setFocusText(event.target.value)}
+          maxLength={FOCUS_MAX}
+          count={{ value: focus.length, max: FOCUS_MAX }}
+          hint="Shown above the feed: what the board is about while you edit, and what you want more of."
+          rows={3}
+        />
+        <Button type="submit" disabled={busy}>
+          {busy ? "Saving…" : "Save the focus"}
+        </Button>
+      </Form>
+      {saved ? <Notice>Saved. The feed shows it within a few seconds.</Notice> : null}
+      {error ? <Notice tone="danger">{error}</Notice> : null}
+      {editing.picks.length > 0 ? (
+        <ul className="divide-y divide-border border-t border-border">
+          {editing.picks.map((pick) => (
+            <li key={pick.postId} className="py-2 text-body">
+              <Link to={`/p/${pick.postId}`} className="font-medium hover:underline">
+                {pick.title}
+              </Link>
+              {pick.note ? <span className="text-text-muted"> · {pick.note}</span> : null}
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="text-meta text-text-muted">No picks yet.</p>
+      )}
+    </div>
+  );
+}
+
+/**
+ * A partner's own links: the address to share, who joined, how many became
+ * fans, and their share, earned and paid out (see /partners).
+ */
+function PartnerSection({ standing, origin }: { standing: PartnerStanding; origin: string }) {
+  const owed = Math.max(0, standing.earnedCents - standing.paidCents);
+  return (
+    <div className="space-y-3">
+      <ul className="divide-y divide-border">
+        {standing.links.map((link) => {
+          const address = `${origin}/join/${link.code}`;
+          return (
+            <li key={link.code} className="space-y-1 py-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="font-mono text-body [overflow-wrap:anywhere]">{address.replace(/^https?:\/\//, "")}</span>
+                {link.live ? (
+                  <CopyButton text={address} label="Copy link" done="Link copied" />
+                ) : (
+                  <span className="text-meta text-text-muted">No longer takes sign-ups</span>
+                )}
+              </div>
+              <p className="text-meta text-text-muted">
+                {link.joined} joined · {link.fans} {link.fans === 1 ? "fan" : "fans"} now · your share, {link.sharePercent}% of
+                their plan payments in their first {link.shareMonths} months: {formatMoney(link.earnedCents)}
+              </p>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="text-body">
+        Earned {formatMoney(standing.earnedCents)} · paid to you {formatMoney(standing.paidCents)} · to come{" "}
+        {formatMoney(owed)}
+      </p>
+      {standing.payouts.length > 0 ? (
+        <ul className="text-meta text-text-muted">
+          {standing.payouts.map((payout) => (
+            <li key={payout.id}>
+              {payout.paidOn}: {formatMoney(payout.amountCents)}
+              {payout.note ? ` · ${payout.note}` : ""}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      <p className="text-meta text-text-muted">
+        Say that it is your partner link when you share it. See{" "}
+        <Link to="/partners" className="underline underline-offset-4">
+          what partners get
+        </Link>
+        .
+      </p>
+    </div>
+  );
+}
+
+/**
+ * What the member's fresh starts gave to charity through the fund, which
+ * their profile shows only if they choose: it tells that their karma once
+ * reached the floor.
+ */
+function GiftSection({ gave, shown, error }: { gave: number; shown: boolean; error: string | undefined }) {
+  const navigation = useNavigation();
+  const busy = navigation.state !== "idle" && navigation.formData?.get("intent") === "gift";
+  return (
+    <Form method="post" className="space-y-3">
+      <input type="hidden" name="intent" value="gift" />
+      <input type="hidden" name="show" value={shown ? "off" : "on"} />
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-body text-text-muted">
+          Your fresh starts gave {formatMoney(gave)} to charity through{" "}
+          <Link to="/fund" className="underline underline-offset-4">
+            the fund
+          </Link>
+          . {shown ? "Your profile shows it." : "Your profile can show it, if you like."}
+        </p>
+        <Button type="submit" disabled={busy}>
+          {shown ? "Hide it" : "Show it"}
+        </Button>
+      </div>
+      {error ? <Notice tone="danger">{error}</Notice> : null}
+    </Form>
+  );
+}
+
 function Section({ title, id, children }: { title: React.ReactNode; id?: string; children: React.ReactNode }) {
   const heading = useId();
   return (
@@ -1091,6 +1261,32 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
           error={actionData && "offersError" in actionData ? actionData.offersError : undefined}
         />
       </Section>
+
+      {loaderData.editing ? (
+        <Section title="Guest editor" id="editor">
+          <EditorSection
+            editing={loaderData.editing}
+            saved={Boolean(actionData && "focusSaved" in actionData)}
+            error={actionData && "focusError" in actionData ? actionData.focusError : undefined}
+          />
+        </Section>
+      ) : null}
+
+      {loaderData.partner.links.length > 0 ? (
+        <Section title="Your partner link" id="partner">
+          <PartnerSection standing={loaderData.partner} origin={loaderData.origin} />
+        </Section>
+      ) : null}
+
+      {loaderData.gift.gaveCents > 0 ? (
+        <Section title="Your gift" id="gift">
+          <GiftSection
+            gave={loaderData.gift.gaveCents}
+            shown={loaderData.gift.shown}
+            error={actionData && "giftError" in actionData ? actionData.giftError : undefined}
+          />
+        </Section>
+      ) : null}
 
       <Section title="Account">
         <dl>

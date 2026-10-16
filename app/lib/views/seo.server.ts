@@ -16,6 +16,7 @@ export function robotsTxt(origin: string, indexable: boolean): string {
     "Disallow: /saved",
     "Disallow: /mentions",
     "Disallow: /invite/",
+    "Disallow: /join/",
     "Disallow: /settings",
     "Disallow: /signin",
     "Disallow: /submit",

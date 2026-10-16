@@ -48,6 +48,8 @@ export interface ViewerSummary extends PublicAuthor {
   newMentions: number;
   /** Until when, in seconds, a member without the plan gets a new member's prices. */
   introUntil?: number;
+  /** The guest editor of the running term, who picks posts. */
+  editor?: boolean;
 }
 
 export type PostMedia =
@@ -85,7 +87,7 @@ export interface PostCardData {
   commentCount: number;
   excerpt: string;
   media: PostMedia;
-  /** True once a weekly editor has picked the post, pinned or not. */
+  /** True once a guest editor has picked the post, pinned or not. */
   editorsPick?: boolean;
 }
 

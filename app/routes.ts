@@ -20,6 +20,9 @@ export default [
   route("welcome", "routes/welcome.tsx"),
   // An invitation by its link, or by its code typed in (`/invite?code=`).
   route("invite/:code?", "routes/invite.tsx"),
+  // A partner's link, good for many accounts, and what partners get.
+  route("join/:code", "routes/join.tsx"),
+  route("partners", "routes/partners.tsx"),
   route("settings", "routes/settings.tsx"),
   route("deleted", "routes/deleted.tsx"),
   route("fan", "routes/fan.tsx"),
@@ -28,6 +31,8 @@ export default [
   route("supporter/*", "routes/supporter-moved.ts"),
   route("fresh-start", "routes/fresh-start.tsx"),
   route("fresh-start/done", "routes/fresh-start-done.ts"),
+  // Where fresh starts' money goes.
+  route("fund", "routes/fund.tsx"),
   route("manifesto", "routes/manifesto.tsx"),
   route("rules", "routes/rules.tsx"),
   route("terms", "routes/terms.tsx"),
@@ -41,12 +46,16 @@ export default [
   route("admin/users", "routes/admin-users.tsx"),
   route("admin/log", "routes/admin-log.tsx"),
   route("admin/settings", "routes/admin-settings.tsx"),
+  route("admin/editors", "routes/admin-editors.tsx"),
+  route("admin/partners", "routes/admin-partners.tsx"),
+  route("admin/fund", "routes/admin-fund.tsx"),
   route("img/:key", "routes/img.ts"),
   route("api/auth/*", "routes/api-auth.ts"),
   route("api/vote", "routes/api-vote.ts"),
   route("api/save", "routes/api-save.ts"),
   route("api/report", "routes/api-report.ts"),
   route("api/moderate", "routes/api-moderate.ts"),
+  route("api/pick", "routes/api-pick.ts"),
   route("api/stripe", "routes/api-stripe.ts"),
   route("api/digest", "routes/api-digest.ts"),
   // Unsubscribing from an email, without signing in: the digest's links

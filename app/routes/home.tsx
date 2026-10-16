@@ -8,6 +8,7 @@ import { PostCard } from "~/components/post-card";
 import { Button } from "~/components/ui/button";
 import { EmptyState, Notice } from "~/components/ui/states";
 import { defaultRange, newPage, postsByIds, topSnapshot } from "~/lib/db/feed.server";
+import { editorPick } from "~/lib/db/editors.server";
 import { announcement } from "~/lib/db/pins.server";
 import { viewerMarks } from "~/lib/db/marks.server";
 import {
@@ -26,6 +27,7 @@ import type { PostCardData } from "~/lib/public-types";
 import { useParticipation } from "~/components/use-participation";
 import { viewerOf } from "~/lib/viewer.server";
 import { useViewer } from "~/lib/use-viewer";
+import { formatDate } from "~/lib/format";
 import { HOME_TITLE, pageMeta } from "~/lib/meta";
 import { SITE_NAME, TAGLINE } from "~/lib/site";
 
@@ -56,19 +58,27 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   // The announcement sits above the feed and is not repeated in it. A reader
   // who collapsed this pin gets it collapsed from the server, with no shift.
   const pin = await announcement(env.DB);
+  // The guest editor of the running term, with their focus and latest pick.
+  const editor = await editorPick(env.DB, now);
+  const pickedId = editor?.post?.id === pin?.post.id ? null : (editor?.post?.id ?? null);
+  const cookies = request.headers.get("Cookie") ?? "";
+  const collapsedOf = (name: string, id: string | null) =>
+    id !== null && new RegExp(`(?:^|;\\s*)${name}=([^;]+)`).exec(cookies)?.[1] === id;
   const pinnedId = pin?.post.id ?? null;
-  const pinCollapsed =
-    pinnedId !== null && /(?:^|;\s*)pin_collapsed=([^;]+)/.exec(request.headers.get("Cookie") ?? "")?.[1] === pinnedId;
-  const base = { sort, range, rangePicked: picked !== null, now, pin, pinCollapsed };
+  const pinCollapsed = collapsedOf("pin_collapsed", pinnedId);
+  const pickCollapsed = collapsedOf("pick_collapsed", pickedId);
+  const base = { sort, range, rangePicked: picked !== null, now, pin, pinCollapsed, editor, pickedId, pickCollapsed };
+  // Pinned posts are not repeated in the feed below them.
+  const pinned = new Set([pinnedId, pickedId].filter((id): id is string => id !== null));
 
   const marks = (posts: PostCardData[]) =>
     viewerMarks(env.DB, viewer?.id ?? null, {
-      posts: [...posts.map((post) => post.id), ...(pinnedId ? [pinnedId] : [])],
+      posts: [...posts.map((post) => post.id), ...pinned],
     });
 
   if (sort === "new") {
     const page = await newPage(env.DB, range, now, null);
-    const posts = page.posts.filter((post) => post.id !== pinnedId);
+    const posts = page.posts.filter((post) => !pinned.has(post.id));
     return {
       ...base,
       posts,
@@ -80,7 +90,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 
   // Top is cut from a fixed ranking, so later votes cannot skip or repeat
   // posts while someone pages through it.
-  const snapshot = (await topSnapshot(env.DB, range, now)).filter((id) => id !== pinnedId);
+  const snapshot = (await topSnapshot(env.DB, range, now)).filter((id) => !pinned.has(id));
   const posts = await postsByIds(env.DB, snapshot.slice(0, PAGE_SIZE));
   return { ...base, posts, marks: await marks(posts), snapshot, nextCursor: null };
 }
@@ -293,6 +303,54 @@ function Announcement({ data }: { data: FeedData }) {
   );
 }
 
+/**
+ * The guest editor of the running term: who, until when, their focus, and
+ * their latest pick, pinned and collapsible to one line.
+ */
+function EditorBlock({ data }: { data: FeedData }) {
+  const editor = data.editor!;
+  const participation = useParticipation(data.marks, data.now);
+  const [collapsed, setCollapsed] = useState(data.pickCollapsed);
+  const post = data.pickedId ? editor.post : null;
+  return (
+    <div className="mb-3 space-y-2">
+      <p className="text-meta text-text-muted">
+        Guest editor{" "}
+        <Link to={`/u/${editor.term.username}`} className="font-medium text-text hover:underline">
+          {editor.term.username}
+        </Link>
+        , until {formatDate(editor.term.endsAt)}
+        {editor.term.focus ? <span className="text-text">: {editor.term.focus}</span> : null}
+      </p>
+      {post ? (
+        <PinnedPost
+          label="Editor's pick"
+          title={post.title}
+          byline={editor.term.username}
+          note={editor.note ?? undefined}
+          collapsed={collapsed}
+          onCollapsedChange={(next) => {
+            setCollapsed(next);
+            // Remembered per pick: a new pick starts expanded.
+            document.cookie = `pick_collapsed=${next ? post.id : ""}; path=/; max-age=31536000; samesite=lax`;
+          }}
+        >
+          <PostCard
+            post={{ ...post, score: participation.scoreOf("post", post.id, post.score) }}
+            now={data.now}
+            vote={participation.voteOf("post", post.id)}
+            onVote={(next) => void participation.vote("post", post.id, post.score, next)}
+            canVote={canVoteOn(participation.viewer?.id, post.author)}
+            saved={participation.isSaved(post.id)}
+            onToggleSave={() => void participation.toggleSave(post.id)}
+            menu={<PostMenu post={post} />}
+          />
+        </PinnedPost>
+      ) : null}
+    </div>
+  );
+}
+
 export default function Feed({ loaderData }: Route.ComponentProps) {
   const address = feedPath(
     loaderData.sort,
@@ -318,6 +376,7 @@ export default function Feed({ loaderData }: Route.ComponentProps) {
       {loaderData.pin ? (
         <Announcement data={loaderData} />
       ) : null}
+      {loaderData.editor ? <EditorBlock data={loaderData} /> : null}
       {/* A new ranking or a different feed starts the list afresh. */}
       <FeedList
         key={`${address}:${loaderData.now}`}

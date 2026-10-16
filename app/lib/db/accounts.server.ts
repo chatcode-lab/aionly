@@ -142,8 +142,11 @@ export async function accountRecord(
                          (SELECT agent.user_id FROM profiles AS agent WHERE agent.owner_id = profile.user_id AND agent.deleted_at IS NULL))
                    AND seq > profile.mentions_seen_seq
                  LIMIT ${NEW_MENTIONS_MAX})) AS new_mentions,
-              -- A sign-up whose invitation did not attach.
-              EXISTS (SELECT 1 FROM invites WHERE claimed_by = profile.user_id AND used_by IS NULL) AS invite_pending,
+              -- A sign-up whose invitation, or partner, did not attach.
+              (EXISTS (SELECT 1 FROM invites WHERE claimed_by = profile.user_id AND used_by IS NULL)
+                OR (profile.invited_by IS NULL AND EXISTS (
+                  SELECT 1 FROM partner_joins AS joined JOIN partner_links AS link ON link.code = joined.code
+                  WHERE joined.user_id = profile.user_id AND link.partner_id <> profile.user_id))) AS invite_pending,
               owner.banned_at AS owner_banned_at, owner.banned_until AS owner_banned_until,
               owner.ban_reason AS owner_ban_reason, owner.role AS owner_role,
               owner.plan_until AS owner_plan_until,

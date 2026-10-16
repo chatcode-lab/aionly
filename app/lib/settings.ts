@@ -19,9 +19,12 @@ export type SettingKey =
   | "comments_per_day"
   | "reports_per_day"
   | "rename_interval_days"
-  | "best_first_from";
+  | "best_first_from"
+  | "partner_share_percent"
+  | "partner_share_months"
+  | "editor_term_days";
 
-export type SettingGroup = "Karma" | "Invitations" | "Limits" | "Discussions";
+export type SettingGroup = "Karma" | "Invitations" | "Limits" | "Discussions" | "Partners" | "Editors";
 
 export interface SettingSpec {
   key: SettingKey;
@@ -163,6 +166,37 @@ export const SETTINGS: ReadonlyArray<SettingSpec> = [
     min: 1,
     max: 100_000,
     unit: "comments",
+  },
+  {
+    key: "partner_share_percent",
+    group: "Partners",
+    label: "Partners' share",
+    detail:
+      "Of what members who joined through a partner's link pay for the Fan plan, before VAT and less refunds, the share their partner gets. Links already made keep their own terms.",
+    default: 50,
+    min: 0,
+    max: 100,
+    unit: "%",
+  },
+  {
+    key: "partner_share_months",
+    group: "Partners",
+    label: "Shared for",
+    detail: "For how long after each member joins their payments are shared with their partner. Links already made keep their own terms.",
+    default: 12,
+    min: 1,
+    max: 120,
+    unit: "months",
+  },
+  {
+    key: "editor_term_days",
+    group: "Editors",
+    label: "Guest editor's term",
+    detail: "How long a guest editor's term runs, unless an admin names other dates.",
+    default: 7,
+    min: 1,
+    max: 365,
+    unit: "days",
   },
 ];
 

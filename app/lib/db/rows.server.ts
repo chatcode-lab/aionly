@@ -86,7 +86,8 @@ export const POST_COLUMNS = `
   post.id, post.kind, post.url, post.provider, post.origin, post.title, post.description,
   post.page_title, post.thumb_key, post.aspect, post.score, post.comment_count,
   post.created_at, post.edited_at, post.media_key, post.media_type, post.media_width,
-  post.media_height, post.media_duration,${AUTHOR_COLUMNS}`;
+  post.media_height, post.media_duration,
+  EXISTS (SELECT 1 FROM picks WHERE picks.post_id = post.id) AS picked,${AUTHOR_COLUMNS}`;
 
 export interface PostRow extends AuthorRow {
   id: string;
@@ -109,6 +110,8 @@ export interface PostRow extends AuthorRow {
   comment_count: number;
   created_at: number;
   edited_at: number | null;
+  /** 1 once a guest editor picked it. */
+  picked?: number;
 }
 
 function excerptOf(description: string): string {
@@ -171,6 +174,7 @@ export function toPublicPost(row: PostRow): PostDetail {
     excerpt: excerptOf(row.description),
     description: row.description,
     media: mediaOf(row, thumbUrl),
+    ...(row.picked ? { editorsPick: true } : {}),
   };
 }
 

@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { type AccountRecord } from "../db/accounts.server";
 import { readBodyCapped } from "../security/body";
 import { applyFreshStart, type FreshStartOutcome } from "../db/fresh-starts.server";
+import { recordPayment, recordRefund } from "../db/payments.server";
 import {
   applySubscription,
   type CheckoutKind,
@@ -26,13 +27,16 @@ import {
   expireOpenCheckouts,
   getCheckoutSession,
   getSubscription,
+  invoiceOfPaymentIntent,
   isRunning,
   paidFreshStart,
   portalConfigurationFor,
   pricesByLookupKey,
   refundPayment,
   runningSubscriptions,
+  type StripeCharge,
   type StripeCheckoutSession,
+  type StripeInvoice,
   type StripeSubscription,
   stripeClient,
   verifyWebhook,
@@ -154,6 +158,18 @@ export async function freshStartCheckoutUrl(viewer: AccountRecord, origin: strin
  */
 async function settleFreshStart(session: StripeCheckoutSession, userId: string): Promise<FreshStartOutcome> {
   const outcome = await applyFreshStart(env.DB, { id: session.id, userId, source: "stripe", now: now() });
+  // What it brought in, for the fund.
+  if (outcome === "applied") {
+    await recordPayment(env.DB, {
+      id: session.id,
+      userId,
+      kind: "fresh_start",
+      amountCents: session.amount_subtotal ?? FRESH_START_PRICE.cents,
+      currency: session.currency ?? "usd",
+      paidAt: now(),
+      paymentIntent: session.payment_intent ?? null,
+    });
+  }
   if (outcome === "declined" && session.payment_intent) {
     await refundPayment(client(), session.payment_intent, "fresh start within 30 days of the last one");
   }
@@ -258,6 +274,39 @@ const SUBSCRIPTION_EVENTS = new Set([
   "customer.subscription.resumed",
 ]);
 
+/** Records a paid invoice of a member's plan, before tax; one that paid nothing is left out. */
+async function recordInvoice(invoice: StripeInvoice): Promise<void> {
+  if (invoice.amount_paid <= 0) return;
+  const member = await env.DB.prepare(`SELECT user_id FROM subscriptions WHERE customer_id = ?1`)
+    .bind(invoice.customer)
+    .first<{ user_id: string }>();
+  if (!member) {
+    console.error("stripe invoice for an unknown customer", invoice.id);
+    return;
+  }
+  await recordPayment(env.DB, {
+    id: invoice.id,
+    userId: member.user_id,
+    kind: "plan",
+    amountCents: invoice.total_excluding_tax ?? invoice.subtotal,
+    currency: invoice.currency,
+    paidAt: invoice.status_transitions?.paid_at ?? now(),
+  });
+}
+
+/**
+ * Records a refund against the payment it refunds: a fresh start, by its
+ * payment intent, or a plan's invoice, which Stripe names when asked.
+ */
+async function recordChargeRefund(charge: StripeCharge): Promise<void> {
+  if (!charge.payment_intent) return;
+  const refund = { paymentIntent: charge.payment_intent, refunded: charge.amount_refunded, paid: charge.amount };
+  if (await recordRefund(env.DB, refund)) return;
+  if (!env.STRIPE_SECRET_KEY) return;
+  const invoice = await invoiceOfPaymentIntent(client(), charge.payment_intent);
+  if (invoice) await recordRefund(env.DB, { ...refund, id: invoice });
+}
+
 /**
  * Stripe's webhook: every change to a subscription carries the whole
  * subscription, which is applied as Stripe's word on it, and a completed
@@ -288,5 +337,8 @@ export async function handleWebhook(request: Request): Promise<Response> {
     const userId = paidFreshStart(session);
     if (userId) await settleFreshStart(session, userId);
   }
+  // A plan's payment, recorded for partners' shares.
+  if (event.type === "invoice.paid") await recordInvoice(event.data.object as StripeInvoice);
+  if (event.type === "charge.refunded") await recordChargeRefund(event.data.object as StripeCharge);
   return Response.json({ received: true });
 }
