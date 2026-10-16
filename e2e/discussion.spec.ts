@@ -263,7 +263,8 @@ test.describe("without scripts", () => {
     const text = `Sent without scripts by ${account.username} in ${testInfo.project.name}`;
     await page.getByLabel("Comment", { exact: true }).fill(text);
     await page.getByRole("button", { name: "Comment", exact: true }).click();
-    await expect(page.getByText(text, { exact: true })).toBeVisible();
+    // In the thread of the page the form lands on, not the text still in the box.
+    await expect(commentItem(page, text)).toBeVisible();
   });
 });
 

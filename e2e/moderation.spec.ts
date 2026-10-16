@@ -173,7 +173,8 @@ test("an admin pins a comment to the top of a discussion, and takes it down", as
   await open(writer, post);
   await writer.getByLabel("Comment", { exact: true }).fill(text);
   await writer.getByRole("button", { name: "Comment", exact: true }).click({ timeout: 10_000 });
-  await expect(writer.getByText(text, { exact: true })).toBeVisible();
+  // In the thread, not just still in the box: only then does the admin's page load it.
+  await expect(writer.locator("li[id^='c-']", { has: writer.getByText(text, { exact: true }) })).toBeVisible();
 
   const admin = await as(browser, adminAccount);
   await open(admin, post);
