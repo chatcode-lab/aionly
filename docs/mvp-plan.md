@@ -395,7 +395,7 @@ fresh_starts(id PK, user_id, source, karma, floor, created_at, applied_at,
 
 - **The switch (2026-10-16, 22:22 UTC):** the legacy Worker's routes and the Pages domain came off, and attaching `aion.ly` to the board's Worker as a custom domain was refused, since the zone's proxied record for `aion.ly` (to the old Pages address) cannot be replaced with the deploy's token. A Worker route `aion.ly/*` serves the board instead, kept in `wrangler.jsonc`; the record must stay proxied. About 30 seconds of downtime. Moving to a custom domain later means deleting that record in the dashboard first.
 - **Cleanup, early (owner's decision, 2026-10-16, no 30-day window):** deleted the legacy Workers (`aionly-back`, `aionly-dev-back`) and their routes, the Pages project, the `aionly` and `aionly-dev` databases, their six KV namespaces, both email queues, the `aion-ly` bucket, and the legacy live Stripe webhook. The legacy newsletter products stay archived, since Stripe keeps products that have prices; live mode had no customers. A private export of the legacy database stays outside the repository. Left for the owner: the AWS SNS subscription and the legacy SES key.
-- **First admin:** sign-up was opened (`OPEN_SIGNUP` as a production secret) for the owner's first sign-in, to be made admin and closed again (`wrangler secret delete OPEN_SIGNUP`).
+- **First admin:** sign-up was opened (`OPEN_SIGNUP` as a production secret) for the owner's first sign-in; on 2026-10-17 that account, the only one, was made admin and the secret deleted, so joining takes an invitation again.
 
 1. Confirm there are no active, trialing, or past-due subscriptions in Stripe live mode.
 2. Export the old D1 database to private storage and record the current Pages and Worker deployment IDs.
