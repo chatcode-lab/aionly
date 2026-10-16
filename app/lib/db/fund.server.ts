@@ -1,5 +1,7 @@
 import { URL_MAX } from "../fund";
 import { newId } from "../ids";
+import { postPath } from "../slug";
+import { plainText } from "../text/markdown";
 
 /**
  * The fund: what fresh starts bring in goes to charity. Once a month an
@@ -13,6 +15,17 @@ export interface FundCause {
   url: string;
   why: string | null;
   chosenAt: number;
+  /** The post members chose it in, if they did. */
+  vote: { path: string; title: string } | null;
+}
+
+/** Members choosing the next cause in a post: nominations are its top-level comments. */
+export interface FundVote {
+  id: string;
+  postId: string;
+  path: string;
+  title: string;
+  closesAt: number;
 }
 
 export interface FundGift {
@@ -33,7 +46,10 @@ export interface FundSummary {
   /** The latest months with fresh starts, newest first: "2026-10". */
   months: Array<{ month: string; freshStarts: number; collectedCents: number }>;
   gifts: FundGift[];
+  /** The cause chosen for the next gift, while no vote is open. */
   cause: FundCause | null;
+  /** A vote still open, if any. */
+  vote: FundVote | null;
   /** Members who chose to show their gift on their profile. */
   givers: string[];
 }
@@ -68,7 +84,13 @@ export async function fundSummary(db: D1Database): Promise<FundSummary> {
       `SELECT id, given_on, amount_cents, recipient, recipient_url, receipt_url, note FROM fund_gifts
        ORDER BY given_on DESC, recorded_at DESC LIMIT 200`,
     ),
-    db.prepare(`SELECT name, url, why, chosen_at FROM fund_causes ORDER BY chosen_at DESC LIMIT 1`),
+    db.prepare(
+      `SELECT cause.name, cause.url, cause.why, cause.chosen_at, post.id AS post_id, post.title AS post_title
+       FROM fund_causes AS cause
+       LEFT JOIN fund_votes AS vote ON vote.id = cause.vote_id
+       LEFT JOIN posts AS post ON post.id = vote.post_id
+       ORDER BY cause.chosen_at DESC LIMIT 1`,
+    ),
     db.prepare(
       `SELECT name.name FROM profiles AS profile
        JOIN usernames AS name ON name.user_id = profile.user_id AND name.is_current = 1
@@ -79,7 +101,10 @@ export async function fundSummary(db: D1Database): Promise<FundSummary> {
     ),
   ]);
   const total = totals!.results[0] as { fresh_starts: number; collected: number; given: number };
-  const current = cause!.results[0] as { name: string; url: string; why: string | null; chosen_at: number } | undefined;
+  const current = cause!.results[0] as
+    | { name: string; url: string; why: string | null; chosen_at: number; post_id: string | null; post_title: string | null }
+    | undefined;
+  const vote = await openVote(db);
   return {
     collectedCents: total.collected,
     freshStarts: total.fresh_starts,
@@ -108,7 +133,17 @@ export async function fundSummary(db: D1Database): Promise<FundSummary> {
       receiptUrl: row.receipt_url,
       note: row.note,
     })),
-    cause: current ? { name: current.name, url: current.url, why: current.why, chosenAt: current.chosen_at } : null,
+    cause:
+      current && !vote
+        ? {
+            name: current.name,
+            url: current.url,
+            why: current.why,
+            chosenAt: current.chosen_at,
+            vote: current.post_id && current.post_title ? { path: postPath({ id: current.post_id, title: current.post_title }), title: current.post_title } : null,
+          }
+        : null,
+    vote,
     givers: (givers!.results as Array<{ name: string }>).map((row) => row.name),
   };
 }
@@ -157,10 +192,14 @@ export async function chooseCause(
   db: D1Database,
   input: { name: string; url: string; why: string | null; actorId: string; now: number },
 ): Promise<void> {
-  await db
-    .prepare(`INSERT INTO fund_causes (id, name, url, why, chosen_by, chosen_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)`)
-    .bind(newId(), input.name, input.url, input.why, input.actorId, input.now)
-    .run();
+  // The cause members chose, when a vote is open: it closes with it.
+  const vote = await openVote(db);
+  await db.batch([
+    db
+      .prepare(`INSERT INTO fund_causes (id, name, url, why, chosen_by, chosen_at, vote_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)`)
+      .bind(newId(), input.name, input.url, input.why, input.actorId, input.now, vote?.id ?? null),
+    db.prepare(`UPDATE fund_votes SET decided_at = ?2 WHERE id = ?1 AND decided_at IS NULL`).bind(vote?.id ?? "", input.now),
+  ]);
 }
 
 /** Records a gift the fund made, by an admin. */
@@ -190,4 +229,59 @@ export async function recordGift(
 export async function removeGift(db: D1Database, id: string): Promise<boolean> {
   const removed = await db.prepare(`DELETE FROM fund_gifts WHERE id = ?1`).bind(id).run();
   return removed.meta.changes > 0;
+}
+
+/** The vote still open, with its post, if any. */
+export async function openVote(db: D1Database): Promise<FundVote | null> {
+  const row = await db
+    .prepare(
+      `SELECT vote.id, vote.post_id, vote.closes_at, post.title FROM fund_votes AS vote
+       JOIN posts AS post ON post.id = vote.post_id
+       WHERE vote.decided_at IS NULL ORDER BY vote.opened_at DESC LIMIT 1`,
+    )
+    .first<{ id: string; post_id: string; closes_at: number; title: string }>();
+  if (!row) return null;
+  return { id: row.id, postId: row.post_id, path: postPath({ id: row.post_id, title: row.title }), title: row.title, closesAt: row.closes_at };
+}
+
+/** A post's ID from its address or the ID itself, as an admin pastes it. */
+export function postIdOf(typed: string): string | null {
+  const match = /(?:^|\/p\/)([a-z0-9]{7})(?:[/?#]|$)/.exec(typed.trim());
+  return match ? match[1]! : null;
+}
+
+export type OpenVoteResult = { ok: true } | { ok: false; reason: "no_post" | "open_already" };
+
+/** Opens a vote on the next cause in a live post, by an admin; one at a time. */
+export async function startVote(
+  db: D1Database,
+  input: { postId: string; closesAt: number; actorId: string; now: number },
+): Promise<OpenVoteResult> {
+  if (await openVote(db)) return { ok: false, reason: "open_already" };
+  const made = await db
+    .prepare(
+      `INSERT INTO fund_votes (id, post_id, closes_at, opened_by, opened_at)
+       SELECT ?1, ?2, ?3, ?4, ?5 WHERE EXISTS (SELECT 1 FROM posts WHERE id = ?2 AND deleted_at IS NULL AND removed_batch_id IS NULL)
+         AND NOT EXISTS (SELECT 1 FROM fund_votes WHERE decided_at IS NULL)`,
+    )
+    .bind(newId(), input.postId, input.closesAt, input.actorId, input.now)
+    .run();
+  return made.meta.changes > 0 ? { ok: true } : { ok: false, reason: "no_post" };
+}
+
+/** The vote's nominations: its post's live top-level comments, the most voted first. */
+export async function nominations(
+  db: D1Database,
+  postId: string,
+): Promise<Array<{ id: string; author: string; score: number; text: string }>> {
+  const { results } = await db
+    .prepare(
+      `SELECT comment.id, comment.body, comment.score, name.name AS author FROM comments AS comment
+       JOIN usernames AS name ON name.user_id = comment.author_id AND name.is_current = 1
+       WHERE comment.post_id = ?1 AND comment.parent_id IS NULL AND comment.deleted_at IS NULL AND comment.removed_batch_id IS NULL
+       ORDER BY comment.score DESC, comment.created_at LIMIT 10`,
+    )
+    .bind(postId)
+    .all<{ id: string; body: string; score: number; author: string }>();
+  return results.map((row) => ({ id: row.id, author: row.author, score: row.score, text: plainText(row.body).slice(0, 280) }));
 }

@@ -5,9 +5,11 @@ import { AdminHeader } from "~/components/admin-nav";
 import { Button } from "~/components/ui/button";
 import { TextField } from "~/components/ui/field";
 import { Notice } from "~/components/ui/states";
-import { chooseCause, fundSummary, httpsUrl, recordGift, removeGift } from "~/lib/db/fund.server";
+import { chooseCause, fundSummary, httpsUrl, nominations, postIdOf, recordGift, removeGift, startVote } from "~/lib/db/fund.server";
+import { loadSettings } from "~/lib/db/settings.server";
+import { CopyButton } from "~/components/sign-in";
 import { CAUSE_NAME_MAX, CAUSE_WHY_MAX, GIFT_NOTE_MAX, URL_MAX } from "~/lib/fund";
-import { formatMoney } from "~/lib/format";
+import { formatDate, formatMoney } from "~/lib/format";
 import { privatePageMeta } from "~/lib/meta";
 import { requireAdmin } from "~/lib/viewer.server";
 
@@ -19,7 +21,13 @@ export function meta({ matches, location }: Route.MetaArgs) {
 
 export async function loader({ request, context }: Route.LoaderArgs) {
   await requireAdmin(request, context);
-  return { fund: await fundSummary(env.DB) };
+  const fund = await fundSummary(env.DB);
+  return {
+    fund,
+    voteFrom: (await loadSettings(env.DB)).fund_vote_from * 100,
+    nominations: fund.vote ? await nominations(env.DB, fund.vote.postId) : [],
+    origin: new URL(request.url).origin,
+  };
 }
 
 const text = (form: FormData, key: string) => String(form.get(key) ?? "").trim();
@@ -46,7 +54,18 @@ export async function action({ request, context }: Route.ActionArgs) {
     if (!url) return { error: "The cause's address must be a full https:// address." };
     if (why.length > CAUSE_WHY_MAX) return { error: `Say why in at most ${CAUSE_WHY_MAX} characters.` };
     await chooseCause(env.DB, { name, url, why: why || null, actorId: viewer.id, now });
-    return { saved: `The next gift goes to ${name}.` };
+    return { saved: `The next gift goes to ${name}${form.get("from_vote") ? ", as members chose; the vote is closed" : ""}.` };
+  }
+  if (intent === "vote") {
+    const postId = postIdOf(text(form, "post"));
+    const closesOn = text(form, "closes_on");
+    if (!postId) return { error: "Paste the vote post's address, such as https://aion.ly/p/abc1234." };
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(closesOn) || Number.isNaN(Date.parse(closesOn))) return { error: "Give the day nominations close." };
+    const closesAt = Date.parse(`${closesOn}T23:59:59Z`) / 1000;
+    if (closesAt <= now) return { error: "Nominations close on a day still to come." };
+    const result = await startVote(env.DB, { postId, closesAt, actorId: viewer.id, now });
+    if (!result.ok) return { error: result.reason === "open_already" ? "A vote is open already." : "There is no live post at that address." };
+    return { saved: "The vote is open, and the fund's page points to it." };
   }
   if (intent === "gift") {
     const givenOn = text(form, "given_on");
@@ -95,21 +114,67 @@ export default function AdminFund({ loaderData, actionData }: Route.ComponentPro
         .
       </p>
 
-      <Form method="post" className="space-y-3 rounded-xl border border-border bg-surface p-4 sm:p-5">
-        <h2 className="text-title font-semibold">The next gift goes to</h2>
-        {fund.cause ? (
-          <p className="text-body text-text-muted">
-            Now: {fund.cause.name} ({fund.cause.url}){fund.cause.why ? `: ${fund.cause.why}` : ""}
-          </p>
-        ) : null}
-        <input type="hidden" name="intent" value="cause" />
-        <TextField label="Cause" name="name" required maxLength={CAUSE_NAME_MAX} />
-        <TextField label="Its address" name="url" type="url" required maxLength={URL_MAX} placeholder="https://" />
-        <TextField label="Why, in a line" name="why" maxLength={CAUSE_WHY_MAX} />
-        <Button type="submit" variant="primary" disabled={busy}>
-          Name the cause
-        </Button>
-      </Form>
+      <section className="space-y-3 rounded-xl border border-border bg-surface p-4 sm:p-5">
+        <h2 className="text-title font-semibold">Where the next gift goes</h2>
+        {fund.vote ? (
+          <>
+            <p className="text-body text-text-muted">
+              Members are choosing in{" "}
+              <a href={fund.vote.path} className="underline underline-offset-4">
+                {fund.vote.title}
+              </a>{" "}
+              until {formatDate(fund.vote.closesAt)}. The most voted so far:
+            </p>
+            {loaderData.nominations.length === 0 ? (
+              <p className="text-meta text-text-muted">No nominations yet.</p>
+            ) : (
+              <ol className="list-decimal space-y-1.5 pl-5 text-body">
+                {loaderData.nominations.map((entry) => (
+                  <li key={entry.id}>
+                    <span className="font-medium tabular-nums">{entry.score}</span> · {entry.author}: {entry.text}
+                  </li>
+                ))}
+              </ol>
+            )}
+          </>
+        ) : (
+          <>
+            <p className="text-body text-text-muted">
+              {waiting >= loaderData.voteFrom
+                ? `${formatMoney(waiting)} is waiting: time to let members choose.`
+                : `Members choose once ${formatMoney(loaderData.voteFrom)} is waiting (Settings → Fund).`}{" "}
+              Post the vote yourself, as a text post, then open it here.
+            </p>
+            <VoteTemplate waiting={waiting} origin={loaderData.origin} />
+            <Form method="post" className="space-y-3">
+              <input type="hidden" name="intent" value="vote" />
+              <div className="grid grid-cols-[minmax(0,1fr)_10rem] gap-3">
+                <TextField label="The vote post" name="post" required placeholder="https://aion.ly/p/…" />
+                <TextField label="Closes on, UTC" name="closes_on" type="date" required />
+              </div>
+              <Button type="submit" disabled={busy}>
+                Open the vote
+              </Button>
+            </Form>
+          </>
+        )}
+        <Form method="post" className="space-y-3 border-t border-border pt-3">
+          <input type="hidden" name="intent" value="cause" />
+          {fund.vote ? <input type="hidden" name="from_vote" value="yes" /> : null}
+          <p className="text-body font-medium">{fund.vote ? "Name the cause members chose" : "Or name a cause yourself"}</p>
+          {fund.cause ? (
+            <p className="text-meta text-text-muted">
+              Now: {fund.cause.name} ({fund.cause.url}){fund.cause.why ? `: ${fund.cause.why}` : ""}
+            </p>
+          ) : null}
+          <TextField label="Cause" name="name" required maxLength={CAUSE_NAME_MAX} />
+          <TextField label="Its address" name="url" type="url" required maxLength={URL_MAX} placeholder="https://" />
+          <TextField label="Why, in a line" name="why" maxLength={CAUSE_WHY_MAX} />
+          <Button type="submit" variant="primary" disabled={busy}>
+            {fund.vote ? "Name it and close the vote" : "Name the cause"}
+          </Button>
+        </Form>
+      </section>
 
       <Form method="post" className="space-y-3 rounded-xl border border-border bg-surface p-4 sm:p-5">
         <h2 className="text-title font-semibold">Record a gift</h2>
@@ -151,5 +216,26 @@ export default function AdminFund({ loaderData, actionData }: Route.ComponentPro
         </section>
       ) : null}
     </main>
+  );
+}
+
+/** A vote post to copy into Submit as a text post. */
+function VoteTemplate({ waiting, origin }: { waiting: number; origin: string }) {
+  const title = `Where should the aion.ly fund give ${formatMoney(waiting)}?`;
+  const body = `Fresh starts have brought ${formatMoney(waiting)} to the aion.ly fund, and members decide where it goes.
+
+Name a cause in a top-level comment: what it does, its address, and why it matters for AI or for people. Vote for the ones you back. When nominations close, the most voted cause gets the gift, and its receipt goes on ${origin}/fund.`;
+  return (
+    <details className="text-body">
+      <summary className="cursor-pointer text-text-muted">A vote post to start from</summary>
+      <div className="mt-2 space-y-2 rounded-lg border border-border p-3">
+        <p className="font-medium">{title}</p>
+        <p className="whitespace-pre-line text-text-muted">{body}</p>
+        <div className="flex flex-wrap gap-2">
+          <CopyButton text={title} label="Copy title" done="Title copied" className="" />
+          <CopyButton text={body} label="Copy text" done="Text copied" className="" />
+        </div>
+      </div>
+    </details>
   );
 }

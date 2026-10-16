@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createCheckout,
+  createFreshStartCheckout,
   encodeForm,
   expireOpenCheckouts,
   paidFreshStart,
@@ -164,5 +165,25 @@ describe("fresh start payments", () => {
     expect(paidFreshStart({ ...session, payment_status: "unpaid" })).toBeNull();
     expect(paidFreshStart({ ...session, mode: "subscription" })).toBeNull();
     expect(paidFreshStart({ ...session, metadata: {} })).toBeNull();
+  });
+
+  it("charge the amount the member chose, on the fresh start's product, with tax on top", async () => {
+    let form: URLSearchParams | null = null;
+    const fetcher = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      form = init?.body as URLSearchParams;
+      return Response.json({ url: "https://checkout.stripe.com/c/pay/x" });
+    }) as typeof fetch;
+    const client = stripeClient("sk_test_x", fetcher);
+    await createFreshStartCheckout(client, { customerId: "cus_1", productId: "prod_fresh", amountCents: 5000, userId: "u1", origin: "https://aion.ly", startNowAt: NOW });
+    const fields = Object.fromEntries([...form!]);
+    expect(fields).toMatchObject({
+      "line_items[0][price_data][currency]": "usd",
+      "line_items[0][price_data][product]": "prod_fresh",
+      "line_items[0][price_data][unit_amount]": "5000",
+      "line_items[0][price_data][tax_behavior]": "exclusive",
+      "line_items[0][quantity]": "1",
+      "automatic_tax[enabled]": "true",
+      "metadata[kind]": "fresh_start",
+    });
   });
 });

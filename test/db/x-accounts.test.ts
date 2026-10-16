@@ -158,5 +158,7 @@ describe("linked X accounts", () => {
   it("asks X for its larger photo", () => {
     expect(largerXPhoto("https://pbs.twimg.com/a/b_normal.png")).toBe("https://pbs.twimg.com/a/b_400x400.png");
     expect(largerXPhoto(null)).toBeNull();
+    // X's own picture for an account without a photo is no photo.
+    expect(largerXPhoto("https://abs.twimg.com/sticky/default_profile_images/default_profile_normal.png")).toBeNull();
   });
 });

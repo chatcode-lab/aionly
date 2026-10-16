@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { useState } from "react";
 import { Form, Link, redirect, useNavigation } from "react-router";
 
 import { Mail } from "~/components/legal";
@@ -6,11 +7,11 @@ import { Button } from "~/components/ui/button";
 import { Notice } from "~/components/ui/states";
 import { billingOpen, BUSY, CheckoutBusy, freshStartCheckoutUrl } from "~/lib/billing/plan.server";
 import { freshStartStatus } from "~/lib/db/fresh-starts.server";
-import { formatDate } from "~/lib/format";
+import { formatDate, formatMoney } from "~/lib/format";
 import { pageMeta } from "~/lib/meta";
 import { FRESH_START_DAYS } from "~/lib/moderation";
 import { useSettings } from "~/lib/use-settings";
-import { FRESH_START_PRICE } from "~/lib/plan";
+import { FRESH_START_AMOUNTS, FRESH_START_MAX_CENTS, FRESH_START_PRICE, freshStartAmount } from "~/lib/plan";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { CONTACT } from "~/lib/site";
 import { requireAccount } from "~/lib/viewer.server";
@@ -56,8 +57,12 @@ export async function action({ request, context }: Route.ActionArgs) {
   if (status.nextAt) return { error: `The next fresh start is possible from ${formatDate(status.nextAt)}.` };
   const form = await request.formData();
   if (form.get("start_now") !== "yes") return { error: "Tick the box to apply the fresh start right away, then try again." };
+  const amount = freshStartAmount(String(form.get("amount") ?? ""));
+  if (amount === null) {
+    return { error: `Choose a whole number of dollars from ${FRESH_START_PRICE.label} to ${formatMoney(FRESH_START_MAX_CENTS)}.` };
+  }
   try {
-    return redirect(await freshStartCheckoutUrl(viewer, new URL(request.url).origin, now), 303);
+    return redirect(await freshStartCheckoutUrl(viewer, new URL(request.url).origin, now, amount), 303);
   } catch (error) {
     if (error instanceof CheckoutBusy) return { error: BUSY };
     console.error("stripe fresh start checkout", error);
@@ -133,7 +138,7 @@ export default function FreshStart({ loaderData, actionData }: Route.ComponentPr
 
           <section aria-labelledby="fresh" className="space-y-3 rounded-xl border border-border bg-surface p-4 sm:p-5">
             <h2 id="fresh" className="text-title font-semibold">
-              A fresh start, {FRESH_START_PRICE.label} plus VAT
+              A fresh start, from {FRESH_START_PRICE.label} plus VAT
             </h2>
             <p className="text-body text-text-muted">
               Take part again at once, with {settings.fresh_start_room} karma of room: read-only again only at{" "}
@@ -141,7 +146,8 @@ export default function FreshStart({ loaderData, actionData }: Route.ComponentPr
               {settings.karma_floor}. Karma stays as voted, so posting opens at 0. One every {FRESH_START_DAYS} days at most.
             </p>
             <p className="text-body">
-              We keep none of it: less card fees, it goes to charity each month, with receipts on{" "}
+              Pay what you like from {FRESH_START_PRICE.label}. We keep none of it: less card fees, it goes to a cause members
+              choose, with receipts on{" "}
               <Link to="/fund" className="underline underline-offset-4">
                 the fund&apos;s page
               </Link>
@@ -154,6 +160,7 @@ export default function FreshStart({ loaderData, actionData }: Route.ComponentPr
               </p>
             ) : (
               <Form method="post" className="space-y-3">
+                <AmountPicker />
                 <label className="flex items-start gap-2 text-meta text-text-muted">
                   <input type="checkbox" name="start_now" value="yes" required className="mt-0.5 size-4 shrink-0 accent-(--accent)" />
                   <span>
@@ -162,7 +169,7 @@ export default function FreshStart({ loaderData, actionData }: Route.ComponentPr
                   </span>
                 </label>
                 <Button type="submit" variant="primary" disabled={!open || busy}>
-                  {busy ? "Opening checkout…" : open ? `Pay ${FRESH_START_PRICE.label} for a fresh start` : "Payments open soon"}
+                  {busy ? "Opening checkout…" : open ? "Continue to payment" : "Payments open soon"}
                 </Button>
                 <p className="text-meta text-text-muted">
                   Through Stripe.{" "}
@@ -195,5 +202,53 @@ export default function FreshStart({ loaderData, actionData }: Route.ComponentPr
         </>
       )}
     </main>
+  );
+}
+
+/**
+ * The amount of a fresh start: its price or more, at a click or typed, in
+ * whole dollars. Sent as `amount`.
+ */
+function AmountPicker() {
+  const [choice, setChoice] = useState<string>(String(FRESH_START_AMOUNTS[0]));
+  const [other, setOther] = useState("");
+  const amount = choice === "other" ? other : String(Number(choice) / 100);
+  const option = "flex h-9 cursor-pointer items-center rounded-lg border px-3 text-body has-[:checked]:border-accent has-[:checked]:bg-accent-soft has-[:checked]:font-medium has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent pointer-coarse:h-(--touch)";
+  return (
+    <fieldset className="space-y-2">
+      <legend className="text-body font-medium">Amount, before VAT</legend>
+      <input type="hidden" name="amount" value={amount} />
+      <div className="flex flex-wrap items-center gap-2">
+        {FRESH_START_AMOUNTS.map((cents) => (
+          <label key={cents} className={`${option} border-border-strong`}>
+            <input
+              type="radio"
+              name="amount_choice"
+              value={cents}
+              checked={choice === String(cents)}
+              onChange={() => setChoice(String(cents))}
+              className="sr-only"
+            />
+            {formatMoney(cents)}
+          </label>
+        ))}
+        <label className={`${option} gap-1 border-border-strong`}>
+          <input type="radio" name="amount_choice" value="other" checked={choice === "other"} onChange={() => setChoice("other")} className="sr-only" />
+          <span aria-hidden>$</span>
+          <input
+            aria-label="Another amount, in dollars"
+            inputMode="numeric"
+            value={other}
+            onFocus={() => setChoice("other")}
+            onChange={(event) => {
+              setChoice("other");
+              setOther(event.target.value.replace(/[^\d]/g, "").slice(0, 4));
+            }}
+            placeholder="Other"
+            className="w-16 bg-transparent text-body outline-none placeholder:text-text-faint"
+          />
+        </label>
+      </div>
+    </fieldset>
   );
 }

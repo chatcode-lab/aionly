@@ -1,6 +1,6 @@
 import { env, waitUntil } from "cloudflare:workers";
 import { betterAuth } from "better-auth";
-import type { TwitterProfile } from "@better-auth/core/social-providers";
+import { google, type TwitterProfile } from "@better-auth/core/social-providers";
 import { APIError } from "better-auth/api";
 import { magicLink } from "better-auth/plugins/magic-link";
 
@@ -63,6 +63,30 @@ function withoutTokens<T extends Record<string, unknown>>(account: T): T {
     accessTokenExpiresAt: null,
     refreshTokenExpiresAt: null,
   };
+}
+
+/**
+ * Whether the Google account's photo is Google's default, a letter on a
+ * color, by the People API's own flag. Unknown, as when the API is not
+ * enabled for the board's Google project, counts as a photo of their own.
+ */
+export async function googlePhotoIsDefault(accessToken: string, fetcher: typeof fetch = fetch): Promise<boolean> {
+  try {
+    const response = await fetcher("https://people.googleapis.com/v1/people/me?personFields=photos", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!response.ok) {
+      console.error("google people api", response.status);
+      return false;
+    }
+    const { photos = [] } = (await response.json()) as { photos?: Array<{ default?: boolean; metadata?: { primary?: boolean } }> };
+    const photo = photos.find((entry) => entry.metadata?.primary) ?? photos[0];
+    return photo?.default === true;
+  } catch (error) {
+    console.error("google people api", error);
+    return false;
+  }
 }
 
 /** Linking X is offered once the board's X app is configured. */
@@ -129,6 +153,8 @@ function createAuth(origin: string, request?: Request) {
   // one request only, so this is never shared.
   let seenX: XProfile | null = null;
   const x = xConfigured();
+  // Better Auth's own reading of Google's sign-in, which the board's wraps.
+  const googleProfile = google({ clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET });
   return betterAuth({
     appName: "aion.ly",
     baseURL: origin,
@@ -160,6 +186,13 @@ function createAuth(origin: string, request?: Request) {
         clientSecret: env.GOOGLE_CLIENT_SECRET,
         // Lets someone with several Google accounts pick the right one.
         prompt: "select_account",
+        // Google's letter picture for an account without a photo is not
+        // kept as one: Settings then offers no Google photo to use.
+        getUserInfo: async (token) => {
+          const info = await googleProfile.getUserInfo(token);
+          if (!info?.user.image || !token.accessToken) return info;
+          return (await googlePhotoIsDefault(token.accessToken)) ? { ...info, user: { ...info.user, image: undefined } } : info;
+        },
       },
       ...(x ? { twitter: xProvider((profile) => (seenX = profile)) } : {}),
     },

@@ -102,6 +102,19 @@ export async function pricesByLookupKey(client: StripeClient, keys: string[]): P
   return new Map(data.filter((price) => price.lookup_key).map((price) => [price.lookup_key!, price.id]));
 }
 
+/** A price by its lookup key, with its product and amount, if active. */
+export async function priceByLookupKey(
+  client: StripeClient,
+  key: string,
+): Promise<{ id: string; product: string; unitAmount: number | null } | null> {
+  const { data } = await client.request<{ data: Array<{ id: string; product: string; unit_amount: number | null }> }>("GET", "/prices", {
+    lookup_keys: [key],
+    active: true,
+  });
+  const price = data[0];
+  return price ? { id: price.id, product: price.product, unitAmount: price.unit_amount } : null;
+}
+
 export async function createCustomer(client: StripeClient, input: { email: string; userId: string }): Promise<string> {
   const customer = await client.request<{ id: string }>(
     "POST",
@@ -164,14 +177,28 @@ export async function createCheckout(
  */
 export async function createFreshStartCheckout(
   client: StripeClient,
-  input: { customerId: string; priceId: string; userId: string; origin: string; startNowAt: number; attempt?: string },
+  input: {
+    customerId: string;
+    /** The fresh start's product, and the amount the member chose, before tax, in cents. */
+    productId: string;
+    amountCents: number;
+    userId: string;
+    origin: string;
+    startNowAt: number;
+    attempt?: string;
+  },
 ): Promise<string> {
   const metadata = { user_id: input.userId, kind: "fresh_start", start_now_requested_at: String(input.startNowAt) };
   const session = await client.request<{ url: string }>("POST", "/checkout/sessions", {
     mode: "payment",
     customer: input.customerId,
     client_reference_id: input.userId,
-    line_items: [{ price: input.priceId, quantity: 1 }],
+    line_items: [
+      {
+        price_data: { currency: "usd", product: input.productId, unit_amount: input.amountCents, tax_behavior: "exclusive" },
+        quantity: 1,
+      },
+    ],
     automatic_tax: { enabled: true },
     customer_update: { address: "auto", name: "auto" },
     tax_id_collection: { enabled: true },

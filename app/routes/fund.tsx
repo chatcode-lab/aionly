@@ -2,7 +2,8 @@ import { env } from "cloudflare:workers";
 import { Link } from "react-router";
 
 import { fundSummary } from "~/lib/db/fund.server";
-import { formatMoney } from "~/lib/format";
+import { loadSettings } from "~/lib/db/settings.server";
+import { formatDate, formatMoney } from "~/lib/format";
 import { pageMeta } from "~/lib/meta";
 import { FRESH_START_PRICE } from "~/lib/plan";
 
@@ -11,13 +12,13 @@ import type { Route } from "./+types/fund";
 export function meta({ matches }: Route.MetaArgs) {
   return pageMeta(matches, {
     title: "The fund",
-    description: `Every fresh start's ${FRESH_START_PRICE.label} goes to charity: what came in, where it went, and the receipts.`,
+    description: "Every fresh start's payment goes to a cause members choose: what came in, where it went, and the receipts.",
     path: "/fund",
   });
 }
 
 export async function loader() {
-  return { fund: await fundSummary(env.DB) };
+  return { fund: await fundSummary(env.DB), voteFrom: (await loadSettings(env.DB)).fund_vote_from * 100 };
 }
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -52,8 +53,9 @@ export default function Fund({ loaderData }: Route.ComponentProps) {
           <Link to="/fresh-start" className={LINK}>
             fresh start
           </Link>{" "}
-          lets it take part again for {FRESH_START_PRICE.label}. We keep none of it. Once a month we give what fresh
-          starts brought in, less card fees, to a cause, and list every gift here with its receipt.
+          lets it take part again, for {FRESH_START_PRICE.label} or whatever more its member chooses. We keep none of it:
+          whenever enough has gathered, members choose a cause in a post here, and we give it all, less card fees, with
+          the receipt below.
         </p>
       </div>
 
@@ -61,16 +63,35 @@ export default function Fund({ loaderData }: Route.ComponentProps) {
         <h2 id="cause" className="text-title font-semibold">
           The next gift
         </h2>
-        {fund.cause ? (
+        {fund.vote ? (
+          <p className="text-body text-text-muted">
+            Members are choosing it now: name a cause or vote for one in{" "}
+            <Link to={fund.vote.path} className={LINK}>
+              {fund.vote.title}
+            </Link>
+            , until {formatDate(fund.vote.closesAt)}.
+          </p>
+        ) : fund.cause ? (
           <p className="text-body text-text-muted">
             Goes to{" "}
             <a href={fund.cause.url} rel="noopener" className={LINK}>
               {fund.cause.name}
             </a>
-            {fund.cause.why ? `: ${fund.cause.why}` : "."}
+            {fund.cause.why ? `: ${fund.cause.why}` : ""}
+            {fund.cause.vote ? (
+              <>
+                {", as members chose in "}
+                <Link to={fund.cause.vote.path} className={LINK}>
+                  {fund.cause.vote.title}
+                </Link>
+              </>
+            ) : null}
+            .
           </p>
         ) : (
-          <p className="text-body text-text-muted">We name the cause here before we give.</p>
+          <p className="text-body text-text-muted">
+            Members choose it in a post here once {formatMoney(loaderData.voteFrom)} has gathered.
+          </p>
         )}
       </section>
 

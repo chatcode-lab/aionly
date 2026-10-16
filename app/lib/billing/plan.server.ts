@@ -29,6 +29,7 @@ import {
   getSubscription,
   invoiceOfPaymentIntent,
   isRunning,
+  priceByLookupKey,
   paidFreshStart,
   portalConfigurationFor,
   pricesByLookupKey,
@@ -137,17 +138,34 @@ export async function checkoutUrl(
   });
 }
 
-/** Stripe's checkout page for a fresh start, for a member who asked for it to apply at once. */
-export async function freshStartCheckoutUrl(viewer: AccountRecord, origin: string, startNowAt: number): Promise<string> {
+/**
+ * Stripe's checkout page for a fresh start, for a member who asked for it to
+ * apply at once, at the amount they chose: the fresh start's price or more.
+ */
+export async function freshStartCheckoutUrl(
+  viewer: AccountRecord,
+  origin: string,
+  startNowAt: number,
+  amountCents: number = FRESH_START_PRICE.cents,
+): Promise<string> {
   const lookupKey = FRESH_START_PRICE.lookupKey;
-  const priceId = (await pricesByLookupKey(client(), [lookupKey])).get(lookupKey);
-  if (!priceId) throw new Error(`no active Stripe price has the lookup key ${lookupKey}`);
+  const price = await priceByLookupKey(client(), lookupKey);
+  if (!price) throw new Error(`no active Stripe price has the lookup key ${lookupKey}`);
+  const amount = Math.max(amountCents, price.unitAmount ?? FRESH_START_PRICE.cents);
   const customerId = await customerFor(viewer);
   // Only the newest checkout can be paid, so one fresh start is bought at a time.
   return holdingCheckout(viewer.id, "fresh_start", async (attempt) => {
     await expireOpenCheckouts(client(), customerId);
     await attempt.holding();
-    return createFreshStartCheckout(client(), { customerId, priceId, userId: viewer.id, origin, startNowAt, attempt: attempt.id });
+    return createFreshStartCheckout(client(), {
+      customerId,
+      productId: price.product,
+      amountCents: amount,
+      userId: viewer.id,
+      origin,
+      startNowAt,
+      attempt: attempt.id,
+    });
   });
 }
 

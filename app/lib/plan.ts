@@ -64,6 +64,21 @@ export function pricesFor(introUntil: number | null | undefined, now: number): R
  */
 export const FRESH_START_PRICE = { cents: 2000, label: "$20", lookupKey: "aionly_fresh_start" } as const;
 
+/**
+ * A fresh start is pay what you like, from its price up: all of it goes to
+ * charity. The amounts offered at a click, and the most one payment takes.
+ */
+export const FRESH_START_AMOUNTS = [2000, 5000, 10000] as const;
+export const FRESH_START_MAX_CENTS = 100_000;
+
+/** Whole dollars as typed or chosen, in cents, if within a fresh start's range. */
+export function freshStartAmount(typed: string): number | null {
+  const dollars = Number(typed.trim().replace(/^\$/, ""));
+  if (!Number.isInteger(dollars)) return null;
+  const cents = dollars * 100;
+  return cents >= FRESH_START_PRICE.cents && cents <= FRESH_START_MAX_CENTS ? cents : null;
+}
+
 export type Benefit = "text" | "upload" | "agent" | "replies" | "links" | "name" | "rename" | "x" | "mark";
 
 /** What the plan adds, in the order the Fan plan page and paywalls list it. */

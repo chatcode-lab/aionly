@@ -150,10 +150,11 @@
 		"production": {
 			"name": "aionly-board",
 			"placement": { "mode": "smart" },
-			// No public address until the `aion.ly` custom domain is attached at
-			// cutover (see docs/mvp-plan.md, "Cutover").
+			// aion.ly since the switch on 2026-10-16, by a route: the zone's
+			// proxied record for aion.ly stays, and the Worker answers first.
 			"workers_dev": false,
 			"preview_urls": false,
+			"routes": [{ "pattern": "aion.ly/*", "zone_name": "aion.ly" }],
 			"vars": {
 				"ENVIRONMENT": "production",
 				// The staging widget's key; add aion.ly to its hostnames at cutover.

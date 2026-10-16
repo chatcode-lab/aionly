@@ -22,9 +22,10 @@ export type SettingKey =
   | "best_first_from"
   | "partner_share_percent"
   | "partner_share_months"
-  | "editor_term_days";
+  | "editor_term_days"
+  | "fund_vote_from";
 
-export type SettingGroup = "Karma" | "Invitations" | "Limits" | "Discussions" | "Partners" | "Editors";
+export type SettingGroup = "Karma" | "Invitations" | "Limits" | "Discussions" | "Partners" | "Editors" | "Fund";
 
 export interface SettingSpec {
   key: SettingKey;
@@ -197,6 +198,16 @@ export const SETTINGS: ReadonlyArray<SettingSpec> = [
     min: 1,
     max: 365,
     unit: "days",
+  },
+  {
+    key: "fund_vote_from",
+    group: "Fund",
+    label: "Vote from",
+    detail: "Once this much from fresh starts waits for a gift, members are asked where it should go, in a vote an admin opens.",
+    default: 200,
+    min: 1,
+    max: 1_000_000,
+    unit: "USD",
   },
 ];
 

@@ -5,7 +5,7 @@ const noSideScroll = () => document.documentElement.scrollWidth - document.docum
 test("the fund says where fresh starts' money goes, open to everyone", async ({ page }) => {
   await open(page, "/fund");
   await expect(page.getByRole("heading", { name: "The fund", level: 1 })).toBeVisible();
-  await expect(page.getByText("We keep none of it.")).toBeVisible();
+  await expect(page.getByText(/We keep none of it/)).toBeVisible();
   await expect(page.getByRole("heading", { name: "The next gift" })).toBeVisible();
   await expect(page.getByRole("link", { name: "fresh start" })).toHaveAttribute("href", "/fresh-start");
   expect(await page.evaluate(noSideScroll)).toBeLessThanOrEqual(0);

@@ -9,7 +9,9 @@ export interface XProfile {
 
 /** X serves a small photo by default; the same address names larger sizes. */
 export function largerXPhoto(url: string | null): string | null {
-  return url ? url.replace(/_normal(\.\w+)$/, "_400x400$1") : null;
+  // X's own picture for an account without a photo is no one's photo.
+  if (!url || url.includes("/default_profile_images/")) return null;
+  return url.replace(/_normal(\.\w+)$/, "_400x400$1");
 }
 
 /**

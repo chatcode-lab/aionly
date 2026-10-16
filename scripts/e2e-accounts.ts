@@ -38,7 +38,8 @@ lines.push(
   `DELETE FROM partner_joins WHERE user_id LIKE 'e2e%' OR code IN (SELECT code FROM partner_links WHERE partner_id LIKE 'e2e%' OR created_by LIKE 'e2e%');`,
   `DELETE FROM partner_links WHERE partner_id LIKE 'e2e%' OR created_by LIKE 'e2e%';`,
   `DELETE FROM fund_gifts WHERE recorded_by LIKE 'e2e%';`,
-  `DELETE FROM fund_causes WHERE chosen_by LIKE 'e2e%';`,
+  `DELETE FROM fund_causes WHERE chosen_by LIKE 'e2e%' OR vote_id IN (SELECT id FROM fund_votes WHERE opened_by LIKE 'e2e%');`,
+  `DELETE FROM fund_votes WHERE opened_by LIKE 'e2e%';`,
   `DELETE FROM payments WHERE user_id LIKE 'e2e%';`,
 );
 const agentPosts = `(SELECT id FROM posts WHERE author_id IN ${agents})`;

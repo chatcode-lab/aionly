@@ -9,6 +9,7 @@ import { Notice } from "~/components/ui/states";
 import {
   createPartnerLink,
   partnerLinks,
+  joinedThrough,
   partnersOwed,
   recordPayout,
   revokePartnerLink,
@@ -28,8 +29,10 @@ export function meta({ matches, location }: Route.MetaArgs) {
 export async function loader({ request, context }: Route.LoaderArgs) {
   await requireAdmin(request, context);
   const now = Math.floor(Date.now() / 1000);
+  const links = await partnerLinks(env.DB, { now });
   return {
-    links: await partnerLinks(env.DB, { now }),
+    links,
+    joined: await joinedThrough(env.DB, links.map((link) => link.code)),
     owed: await partnersOwed(env.DB, now),
     settings: await loadSettings(env.DB),
     origin: new URL(request.url).origin,
@@ -115,7 +118,7 @@ export async function action({ request, context }: Route.ActionArgs) {
  * partner's share, which their own Settings show them too.
  */
 export default function AdminPartners({ loaderData, actionData }: Route.ComponentProps) {
-  const { links, owed, settings, origin } = loaderData;
+  const { links, owed, settings, origin, joined } = loaderData;
   const navigation = useNavigation();
   const busy = navigation.state === "submitting";
   return (
@@ -221,6 +224,22 @@ export default function AdminPartners({ loaderData, actionData }: Route.Componen
                     {link.endsAt !== null ? ` · ends ${formatDate(link.endsAt)}` : ""}
                     {link.note ? ` · ${link.note}` : ""}
                   </p>
+                  {joined[link.code]?.length ? (
+                    <details className="text-meta">
+                      <summary className="cursor-pointer text-text-muted">Who joined</summary>
+                      <p className="mt-1 text-text-muted">
+                        {joined[link.code]!.map((member, index) => (
+                          <span key={member.username}>
+                            {index > 0 ? ", " : null}
+                            <a href={`/u/${member.username}`} className="font-medium text-text hover:underline">
+                              {member.username}
+                            </a>
+                            {member.fan ? " (fan)" : null}
+                          </span>
+                        ))}
+                      </p>
+                    </details>
+                  ) : null}
                 </li>
               );
             })}

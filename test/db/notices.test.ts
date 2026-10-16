@@ -78,7 +78,7 @@ describe("notices", () => {
     expect(link.text).toContain("Sign in: https://aion.ly/signin/email?token=t");
     expect(link.html).toContain(`href="https://aion.ly/signin/email?token=t"`);
     const notice = composeReadOnlyNotice({ karma: -103, floor: -100, room: 50, origin: "https://aion.ly" });
-    expect(notice.text).toContain("A fresh start, $20 plus VAT, lets you take part again at once, with 50 karma of room; we keep none of it, and give it to charity through the aion.ly fund.");
+    expect(notice.text).toContain("A fresh start, from $20 plus VAT, lets you take part again at once, with 50 karma of room; we keep none of it, and give it to a cause members choose.");
     expect(notice.html).not.toContain("30% off");
   });
 });

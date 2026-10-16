@@ -306,3 +306,23 @@ export async function partnersOwed(db: D1Database, now: number): Promise<Array<{
   }
   return [...partners.values()];
 }
+
+/** Who joined through each link, newest first, a few hundred at most per link, for admins. */
+export async function joinedThrough(db: D1Database, codes: string[]): Promise<Record<string, Array<{ username: string; joinedAt: number; fan: boolean }>>> {
+  if (codes.length === 0) return {};
+  const { results } = await db
+    .prepare(
+      `SELECT joined.code, name.name AS username, joined.joined_at, COALESCE(member.plan_until, 0) > ?2 AS fan
+       FROM partner_joins AS joined
+       JOIN profiles AS member ON member.user_id = joined.user_id AND member.deleted_at IS NULL
+       JOIN usernames AS name ON name.user_id = joined.user_id AND name.is_current = 1
+       WHERE joined.code IN (SELECT value FROM json_each(?1))
+       ORDER BY joined.joined_at DESC
+       LIMIT 2000`,
+    )
+    .bind(JSON.stringify(codes), Math.floor(Date.now() / 1000))
+    .all<{ code: string; username: string; joined_at: number; fan: number }>();
+  const byCode: Record<string, Array<{ username: string; joinedAt: number; fan: boolean }>> = {};
+  for (const row of results) (byCode[row.code] ??= []).push({ username: row.username, joinedAt: row.joined_at, fan: row.fan === 1 });
+  return byCode;
+}
