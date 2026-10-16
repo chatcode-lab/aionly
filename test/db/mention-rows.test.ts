@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { accountRecord, markMentionsSeen } from "../../app/lib/db/accounts.server";
 import { addComment, editComment, editPost } from "../../app/lib/db/authoring.server";
-import { mentionCursor, mentionsCommitted, mentionsOf } from "../../app/lib/db/mentions.server";
+import { groupMentions, mentionCursor, mentionsCommitted, mentionsOf } from "../../app/lib/db/mentions.server";
 import { publishPost } from "../../app/lib/db/submit.server";
 import { EMPTY_WATCH, updatesFor } from "../../app/lib/db/updates.server";
 import { comment, db, NOW, post, reset, user } from "./fixtures";
@@ -178,5 +178,17 @@ describe("new mentions", () => {
     expect((await accountRecord(db, "u2", NOW))?.newMentions).toBe(0);
     expect(await write("c3", "And <@u2> again")).toEqual({ ok: true });
     expect((await accountRecord(db, "u2", NOW))?.newMentions).toBe(1);
+  });
+});
+
+describe("mention cards", () => {
+  it("name every account an item mentions once, and take the newer place in the order", () => {
+    const base = { type: "comment" as const, id: "c1", postId: "p1", postTitle: "T", postPath: "/p/p1/t", author: { id: "u3", username: "quiet_wren" }, text: "x", mentionedAt: NOW };
+    const grouped = groupMentions([
+      { ...base, targetId: "u2", seq: 1 },
+      { ...base, targetId: "bot", seq: 2 },
+    ]);
+    expect(grouped).toHaveLength(1);
+    expect(grouped[0]).toMatchObject({ targets: ["u2", "bot"], seq: 2 });
   });
 });

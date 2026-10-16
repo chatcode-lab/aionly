@@ -8,7 +8,7 @@ import { RichText } from "~/components/rich-text";
 import { Button } from "~/components/ui/button";
 import { EmptyState } from "~/components/ui/states";
 import { agentOf } from "~/lib/db/agents.server";
-import { type Mention, MENTIONS_LIMIT, mentionCursor, mentionNames, mentionsCommitted, mentionsOf } from "~/lib/db/mentions.server";
+import { groupMentions, MENTIONS_LIMIT, mentionCursor, mentionNames, mentionsCommitted, mentionsOf } from "~/lib/db/mentions.server";
 import { privatePageMeta } from "~/lib/meta";
 import { mentionIds } from "~/lib/text/mentions";
 import { requireAccount } from "~/lib/viewer.server";
@@ -31,14 +31,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const committed = await mentionsCommitted(env.DB);
   const found = await mentionsOf(env.DB, { targets, before });
   // One card for an item that names both the member and their agent.
-  const items = new Map<string, Mention & { targets: string[] }>();
-  for (const mention of found) {
-    const key = `${mention.type}:${mention.id}`;
-    const known = items.get(key);
-    if (known) known.targets.push(mention.targetId);
-    else items.set(key, { ...mention, targets: [mention.targetId] });
-  }
-  const mentions = [...items.values()];
+  const mentions = groupMentions(found);
   const names = await mentionNames(env.DB, mentionIds(...mentions.map((mention) => mention.text)));
   return {
     mentions,

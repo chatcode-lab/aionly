@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { cancelForDeletion } from "../../app/lib/billing/plan.server";
+import { deleteAccount } from "../../app/lib/db/deletion.server";
 import { claimCheckout } from "../../app/lib/db/subscriptions.server";
 import { rememberCustomer } from "../../app/lib/db/subscriptions.server";
 import { db, NOW, reset, user } from "./fixtures";
@@ -94,6 +95,14 @@ describe("cancelling billing before an account is deleted", () => {
     // The deletion did not go ahead: checkouts may be made again.
     await hold.release();
     expect(await claimCheckout(db, "member", "plan", clock)).not.toBeNull();
+  });
+
+  it("ends its hold in the deletion's own write", async () => {
+    racingStripe();
+    await cancelForDeletion("member");
+    expect((await db.prepare(`SELECT COUNT(*) AS n FROM checkout_claims WHERE user_id = 'member'`).first<{ n: number }>())!.n).toBe(2);
+    await deleteAccount(db, { userId: "member", content: false, banned: false, identities: [], now: NOW });
+    expect(await db.prepare(`SELECT COUNT(*) AS n FROM checkout_claims WHERE user_id = 'member'`).first()).toEqual({ n: 0 });
   });
 
   it("lets go of its hold when Stripe fails, so nothing is left blocked", async () => {

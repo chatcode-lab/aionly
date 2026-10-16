@@ -56,6 +56,7 @@ lines.push(
 );
 for (const [table, column] of [
   ["invites", "inviter_id"],
+  ["checkout_claims", "user_id"],
   ["fresh_starts", "user_id"],
   ["subscriptions", "user_id"],
   ["bookmarks", "user_id"],

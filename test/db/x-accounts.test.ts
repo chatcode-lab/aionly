@@ -6,6 +6,7 @@ import {
   largerXPhoto,
   linkedX,
   rememberXAccount,
+  clearStaleX,
   setXShown,
   unlinkMethod,
 } from "../../app/lib/db/x-accounts.server";
@@ -64,8 +65,30 @@ describe("linked X accounts", () => {
   });
 
   it("link one X account to one board account at most", async () => {
-    await rememberXAccount(db, "member", X);
-    await expect(rememberXAccount(db, "other", X)).rejects.toThrow(/UNIQUE/);
+    await method("member", "twitter", X.id);
+    await expect(method("other", "twitter", X.id)).rejects.toThrow(/UNIQUE/);
+  });
+
+  it("are never written back by a late link step once unlinked, nor shown without their sign-in record", async () => {
+    await method("member", "google");
+    await method("member", "twitter", X.id);
+    // Another tab unlinks before the link's own last step runs.
+    expect(await unlinkMethod(db, "member", "twitter")).toBe(true);
+    await rememberXAccount(db, "member", X, { shown: true });
+    expect(await db.prepare(`SELECT x_id, x_shown FROM profiles WHERE user_id = 'member'`).first()).toEqual({ x_id: null, x_shown: 0 });
+    // Details left behind from before are not shown, and Settings clears them.
+    await db.prepare(`UPDATE profiles SET x_id = ?1, x_handle = 'otter_makes', x_shown = 1 WHERE user_id = 'member'`).bind(X.id).run();
+    const page = await postPage(db, "p1");
+    expect(page?.state === "live" ? page.post.author.x : "missing").toBeUndefined();
+    await clearStaleX(db, "member");
+    expect(await db.prepare(`SELECT x_id FROM profiles WHERE user_id = 'member'`).first()).toEqual({ x_id: null });
+  });
+
+  it("are not written for a member made read-only while X was asking", async () => {
+    await method("member", "twitter", X.id);
+    await db.prepare(`UPDATE profiles SET banned_at = ?1 WHERE user_id = 'member'`).bind(NOW).run();
+    await rememberXAccount(db, "member", X, { shown: true, now: NOW });
+    expect(await db.prepare(`SELECT x_id FROM profiles WHERE user_id = 'member'`).first()).toEqual({ x_id: null });
   });
 
   it("unlink only while another way to sign in remains", async () => {
@@ -107,6 +130,7 @@ describe("linked X accounts", () => {
     await rememberXAccount(db, "member", X);
     await deleteAccount(db, { userId: "member", content: false, banned: false, identities: [], now: NOW });
     // Free to link to a new account.
+    await db.prepare(`UPDATE profiles SET plan_until = ?1 WHERE user_id = 'other'`).bind(NOW + 86400).run();
     await method("other", "twitter", X.id);
     await rememberXAccount(db, "other", X);
     expect((await linkedX(db, "other"))?.handle).toBe("otter_makes");

@@ -327,6 +327,32 @@ describe("postPage", () => {
     expect((await postPage(db, "p1", "best", { focus: "later" }))?.comments[0]?.id).toBe("later");
   });
 
+  it("keeps a reply's parent at the budget's edge, written the same second or a clock's second apart", async () => {
+    await post("p1");
+    await comment("root", { age: 99_999 });
+    const statements = [];
+    for (let index = 0; index < PAGE_COMMENTS_MAX - ROOTS_PER_PAGE - 1; index += 1) {
+      statements.push(
+        db.prepare(`INSERT INTO comments (id, post_id, parent_id, author_id, body, depth, created_at) VALUES (?1, 'p1', 'root', 'u1', 'Reply', 1, ?2)`).bind(`e${index}`, NOW - 90_000 + index),
+      );
+    }
+    // The last two in, at the edge: a parent and its reply in the same second, the reply's ID sorting first.
+    statements.push(
+      db.prepare(`INSERT INTO comments (id, post_id, parent_id, author_id, body, depth, created_at) VALUES ('z_parent', 'p1', 'root', 'u1', 'Parent', 1, ?1)`).bind(NOW - 10),
+      db.prepare(`INSERT INTO comments (id, post_id, parent_id, author_id, body, depth, created_at) VALUES ('a_child', 'p1', 'z_parent', 'u1', 'Child', 2, ?1)`).bind(NOW - 10),
+    );
+    await db.batch(statements);
+    const page = (await postPage(db, "p1", "old"))!;
+    expect(page.clipped).toBe(true);
+    expect(page.comments.map((c) => c.id)).toEqual(["root"]);
+    // A reply stamped a second before its parent, as two servers' clocks might, still nests under it.
+    await db.prepare(`UPDATE comments SET created_at = ?1 WHERE id = 'a_child'`).bind(NOW - 11).run();
+    const skewed = (await postPage(db, "p1", "old"))!;
+    expect(skewed.comments.map((c) => c.id)).toEqual(["root"]);
+    const parent = skewed.comments[0]!.replies.find((c) => c.id === "z_parent");
+    expect(parent?.replies.map((c) => c.id)).toEqual(["a_child"]);
+  });
+
   it("opens a busy discussion best first", async () => {
     await post("p1");
     for (let index = 0; index < 30; index += 1) await comment(`c${index}`, { score: index % 7, age: 1000 - index });

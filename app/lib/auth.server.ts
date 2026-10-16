@@ -210,6 +210,10 @@ function createAuth(origin: string, request?: Request) {
               if (!member?.entitled || member.ownerId) {
                 throw APIError.from("FORBIDDEN", { code: "plan_required", message: "Linking X comes with the Supporter plan." });
               }
+              // A ban, or karma at its floor, that landed while X was asking.
+              if (member.ban) {
+                throw APIError.from("FORBIDDEN", { code: "read_only", message: "A read-only account cannot link X." });
+              }
             }
             // One account of each kind at most, each linked to one board account (Better Auth checks that).
             if (await linkedWith(env.DB, account.userId, account.providerId)) {

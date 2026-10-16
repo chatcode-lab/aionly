@@ -1,3 +1,5 @@
+import { participantCondition } from "./accounts.server";
+
 /** What X says about the account that just signed in with it. */
 export interface XProfile {
   id: string;
@@ -16,13 +18,37 @@ export function largerXPhoto(url: string | null): string | null {
  * index keeps one X account to one board account. `shown` sets whether
  * the profile shows it; left out, that stays as it was.
  */
-export async function rememberXAccount(db: D1Database, userId: string, x: XProfile, options: { shown?: boolean } = {}): Promise<void> {
+export async function rememberXAccount(
+  db: D1Database,
+  userId: string,
+  x: XProfile,
+  options: { shown?: boolean; now?: number } = {},
+): Promise<void> {
+  const now = Math.floor(options.now ?? Date.now() / 1000);
   await db
     .prepare(
       `UPDATE profiles SET x_id = ?2, x_handle = ?3, x_photo_url = ?4, x_shown = COALESCE(?5, x_shown)
-       WHERE user_id = ?1 AND owner_id IS NULL`,
+       WHERE user_id = ?1 AND owner_id IS NULL
+         -- Only while this very X account is still linked: an unlink, or a
+         -- new link, that landed first wins over a late write.
+         AND EXISTS (SELECT 1 FROM "account" WHERE "userId" = ?1 AND "providerId" = 'twitter' AND "accountId" = ?2)
+         -- And while the member may take part and has the plan, as linking needs.
+         AND ${participantCondition(1, now)}
+         AND (role = 'admin' OR COALESCE(plan_until, 0) > ${now})`,
     )
     .bind(userId, x.id, x.handle, largerXPhoto(x.photoUrl), options.shown === undefined ? null : options.shown ? 1 : 0)
+    .run();
+}
+
+/** Forgets X details a profile still holds without the linked account they came from. */
+export async function clearStaleX(db: D1Database, userId: string): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE profiles SET x_id = NULL, x_handle = NULL, x_photo_url = NULL, x_shown = 0
+       WHERE user_id = ?1 AND x_id IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM "account" WHERE "userId" = ?1 AND "providerId" = 'twitter' AND "accountId" = profiles.x_id)`,
+    )
+    .bind(userId)
     .run();
 }
 

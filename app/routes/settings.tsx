@@ -22,7 +22,7 @@ import { INVITE_ALLOWANCE_RULE, INVITE_DAYS, INVITE_REFUSAL } from "~/lib/invite
 import { deleteAccount, identityHash } from "~/lib/db/deletion.server";
 import { describeWatch, watchListOf } from "~/lib/db/updates.server";
 import { planStatus, type PlanStatus, setShowMark } from "~/lib/db/subscriptions.server";
-import { type LinkedX, linkedX, setXShown, unlinkMethod } from "~/lib/db/x-accounts.server";
+import { clearStaleX, type LinkedX, linkedX, setXShown, unlinkMethod } from "~/lib/db/x-accounts.server";
 import { formatAge, formatDate } from "~/lib/format";
 import { PLAN_PRICES } from "~/lib/plan";
 import { setGooglePhoto, setXPhoto } from "~/lib/images.server";
@@ -49,6 +49,7 @@ const LINK_ERRORS: Record<string, string> = {
   identity_banned: "That X account cannot be linked here.",
   unable_to_get_user_info: "X did not share the account's details. The board's X app may be out of credits or not in a Project.",
   plan_required: "Linking X comes with the Supporter plan.",
+  read_only: "Your account is read-only, so it cannot link X now.",
   invalid_code: "X did not accept the sign-in. The board's X app settings may not match.",
   state_mismatch: "The link started in another tab or expired. Try again from here.",
   please_restart_the_process: "The link started in another tab or expired. Try again from here.",
@@ -90,7 +91,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     ),
     x: {
       configured: xConfigured(),
-      linked: await linkedX(env.DB, viewer.id),
+      // Details left from an account no longer linked are forgotten first.
+      linked: await clearStaleX(env.DB, viewer.id).then(() => linkedX(env.DB, viewer.id)),
       error: linkError === null ? undefined : linkErrorMessage(linkError),
     },
     commentReplies: viewer.replyPolicy,

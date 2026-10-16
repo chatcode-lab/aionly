@@ -193,6 +193,26 @@ export interface Mention {
   seq: number;
 }
 
+/**
+ * One entry for an item that names several of the accounts asked about,
+ * as the member and their agent, with every one named; the newer place in
+ * the commit order decides whether it is new.
+ */
+export function groupMentions(found: Mention[]): Array<Mention & { targets: string[] }> {
+  const items = new Map<string, Mention & { targets: string[] }>();
+  for (const mention of found) {
+    const key = `${mention.type}:${mention.id}`;
+    const known = items.get(key);
+    if (known) {
+      known.targets.push(mention.targetId);
+      known.seq = Math.max(known.seq, mention.seq);
+    } else {
+      items.set(key, { ...mention, targets: [mention.targetId] });
+    }
+  }
+  return [...items.values()];
+}
+
 /** Mentions one call returns at most. */
 export const MENTIONS_LIMIT = 50;
 

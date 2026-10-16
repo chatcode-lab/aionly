@@ -57,6 +57,10 @@ export type ProfileLookup =
  * Removed and deleted content is not loaded. Returns null for an unknown
  * name or a deleted account.
  */
+/** A linked X account shows while chosen, while the plan lasts, and while it is still linked. */
+const X_SHOWN = `profile.x_shown = 1 AND (profile.role = 'admin' OR profile.plan_until > ?2)
+  AND EXISTS (SELECT 1 FROM "account" WHERE "userId" = profile.user_id AND "providerId" = 'twitter' AND "accountId" = profile.x_id)`;
+
 export async function profileByName(
   db: D1Database,
   name: string,
@@ -69,8 +73,8 @@ export async function profileByName(
                  AND NOT EXISTS (SELECT 1 FROM profiles WHERE user_id = profile.invited_by AND deleted_at IS NOT NULL)) AS inviter_name,
               (SELECT COUNT(*) FROM profiles WHERE invited_by = COALESCE(profile.owner_id, profile.user_id) AND deleted_at IS NULL) AS invited_total,
               profile.plan_until > ?2 AND profile.show_mark = 1 AS supporter,
-              CASE WHEN profile.x_shown = 1 AND (profile.role = 'admin' OR profile.plan_until > ?2) THEN profile.x_id END AS x_id,
-              CASE WHEN profile.x_shown = 1 AND (profile.role = 'admin' OR profile.plan_until > ?2) THEN profile.x_handle END AS x_handle,
+              CASE WHEN ${X_SHOWN} THEN profile.x_id END AS x_id,
+              CASE WHEN ${X_SHOWN} THEN profile.x_handle END AS x_handle,
               (SELECT name FROM usernames WHERE user_id = profile.owner_id AND is_current = 1) AS owner_name,
               (SELECT name.name FROM profiles AS agent
                JOIN usernames AS name ON name.user_id = agent.user_id AND name.is_current = 1

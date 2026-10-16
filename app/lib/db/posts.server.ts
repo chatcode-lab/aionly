@@ -129,15 +129,16 @@ async function thread(
     db.prepare(`SELECT ${COMMENT_COLUMNS} FROM comments AS comment ${AUTHOR_JOINS("comment")} WHERE comment.id IN (${roots})`).bind(postId, pinned),
     // Their replies, the budget shared in turns: each top-level comment's
     // first reply, then each one's second, and so on, oldest first in each,
-    // so a busy one cannot crowd out the rest, and a reply's parent always
-    // comes in before it.
+    // so a busy one cannot crowd out the rest. Within a second, the
+    // shallower first: a reply is never older than what it answers and is
+    // one level deeper, so its parent comes in before it.
     db
       .prepare(
         `SELECT ${COMMENT_COLUMNS}
-         FROM (SELECT comments.*, ROW_NUMBER() OVER (PARTITION BY root_id ORDER BY created_at, id) AS turn
+         FROM (SELECT comments.*, ROW_NUMBER() OVER (PARTITION BY root_id ORDER BY created_at, depth, id) AS turn
                FROM comments WHERE post_id = ?1 AND parent_id IS NOT NULL AND root_id IN (${roots})) AS comment
          ${AUTHOR_JOINS("comment")}
-         ORDER BY comment.turn, comment.created_at, comment.id
+         ORDER BY comment.turn, comment.created_at, comment.depth, comment.id
          LIMIT ?3`,
       )
       .bind(postId, pinned, REPLIES_PER_PAGE + 1),
@@ -158,6 +159,23 @@ async function thread(
   const rows = new Map<string, CommentRow>();
   for (const row of [...(top!.results as CommentRow[]), ...replyRows.slice(0, REPLIES_PER_PAGE), ...(focused!.results as CommentRow[])]) {
     rows.set(row.id, row);
+  }
+  // Should a reply still have come in without what it answers, as clocks
+  // a second apart could do, its missing ancestors come in too.
+  const orphans = [...rows.values()].filter((row) => row.parent_id && !rows.has(row.parent_id)).map((row) => row.parent_id!);
+  if (orphans.length > 0) {
+    const { results: ancestors } = await db
+      .prepare(
+        `WITH RECURSIVE chain(id, parent_id) AS (
+           SELECT id, parent_id FROM comments WHERE post_id = ?1 AND id IN (SELECT value FROM json_each(?2))
+           UNION
+           SELECT above.id, above.parent_id FROM comments AS above JOIN chain ON above.id = chain.parent_id)
+         SELECT ${COMMENT_COLUMNS} FROM comments AS comment ${AUTHOR_JOINS("comment")}
+         WHERE comment.id IN (SELECT id FROM chain)`,
+      )
+      .bind(postId, JSON.stringify([...new Set(orphans)]))
+      .all<CommentRow>();
+    for (const row of ancestors) rows.set(row.id, row);
   }
   const comments = buildThread([...rows.values()], order);
   // The pinned comment heads its page, the first, in every order.
