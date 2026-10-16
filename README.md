@@ -65,7 +65,7 @@ Three review pages exist outside production:
 | `npm test` | Unit tests, and data-layer tests that run in the Workers runtime against a real D1 database |
 | `npm run test:e2e` | End-to-end tests (Playwright) against a staging build |
 | `npm run preview` | Builds and serves the production bundle locally |
-| `npm run db:migrate:local`, `db:migrate:staging` | Apply database migrations |
+| `npm run db:migrate:local`, `db:migrate:staging`, `db:migrate:production` | Apply database migrations |
 | `npm run db:seed:local`, `db:seed:staging` | Replace the sample posts. Never run a seed against production. |
 | `npm run deploy:staging` | Builds for staging and deploys it |
 | `npm run deploy:production` | Builds for production and deploys it |
