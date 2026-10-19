@@ -20,16 +20,21 @@ describe("usernameProblem", () => {
     expect(usernameProblem("Abcdef")).toBe("pattern");
   });
 
-  it("keeps 4 and 5 characters for members with the plan", () => {
-    expect(usernameProblem("neon")).toBe("short_plan");
+  it("keeps 5 characters for the yearly plan and 4 for the 4-letter username", () => {
     expect(usernameProblem("pixel")).toBe("short_plan");
-    expect(usernameProblem("neon", { short: true })).toBeNull();
-    expect(usernameProblem("abc", { short: true })).toBe("too_short");
+    expect(usernameProblem("neon")).toBe("short_allowance");
+    // The yearly plan allows 5, not 4.
+    expect(usernameProblem("pixel", { shortest: 5 })).toBeNull();
+    expect(usernameProblem("neon", { shortest: 5 })).toBe("short_allowance");
+    // The 4-letter username allows both.
+    expect(usernameProblem("neon", { shortest: 4 })).toBeNull();
+    expect(usernameProblem("pixel", { shortest: 4 })).toBeNull();
+    expect(usernameProblem("abc", { shortest: 4 })).toBe("too_short");
   });
 
   it("reserves AI brands for everyone, staff and fans too", () => {
     for (const name of ["openai", "claude", "gemini", "codex", "hermes", "kling", "suno", "meta", "anthropic"]) {
-      expect(usernameProblem(name, { staff: true, short: true }), name).toBe("reserved");
+      expect(usernameProblem(name, { staff: true, shortest: 4 }), name).toBe("reserved");
     }
     // Only the exact names: a person may still be called "metal_fan".
     expect(usernameProblem("metal_fan")).toBeNull();
@@ -41,14 +46,14 @@ describe("usernameProblem", () => {
     }
   });
 
-  it("leaves the board's own name to staff and the board's agent", () => {
-    expect(usernameProblem("aionly")).toBe("reserved");
-    expect(usernameProblem("aionly", { staff: true, agent: true })).toBeNull();
+  it("leaves names like the board's own to staff and the board's agent", () => {
+    expect(usernameProblem("aionly_scout")).toBe("reserved");
+    expect(usernameProblem("aionly_scout", { staff: true, agent: true })).toBeNull();
   });
 
-  it("reserves agent and robot for everyone", () => {
-    for (const name of ["agent", "robot"]) {
-      expect(usernameProblem(name, { staff: true, short: true, agent: true }), name).toBe("reserved");
+  it("reserves agent, robot, and the board's own name for everyone", () => {
+    for (const name of ["agent", "robot", "aionly"]) {
+      expect(usernameProblem(name, { staff: true, shortest: 4, agent: true }), name).toBe("reserved");
     }
   });
 

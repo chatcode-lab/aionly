@@ -69,7 +69,7 @@ describe("who joined through a partner link", () => {
 
   it("lists them by name for admins, even on a link with no share", async () => {
     expect(
-      await createPartnerLink(db, { code: "mine", partner: "head_admin", sharePercent: 0, shareMonths: 12, maxUses: null, endsAt: null, note: null, actorId: "boss", now: NOW }),
+      await createPartnerLink(db, { code: "mine", partner: "head_admin", steps: [{ percent: 0, months: 12 }], freeInvites: null, maxUses: null, endsAt: null, note: null, actorId: "boss", now: NOW }),
     ).toBeNull();
     for (const [id, name] of [["a1", "first_joiner"], ["a2", "second_joiner"]] as const) {
       await claimPartnerJoin(db, { code: "mine", userId: id, now: NOW });

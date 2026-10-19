@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 
-import { expect, open, serverSecret, setPlan, test } from "./fixtures";
+import { buyName, expect, open, serverSecret, setPlan, test } from "./fixtures";
 
 // A PNG of one pixel.
 const PIXEL = Buffer.from(
@@ -87,11 +87,11 @@ test("a new member's welcome leads to the plan, with a quiet way on", async ({ p
 });
 
 test("a short name typed at the welcome is claimed with the yearly plan", async ({ page, context, account }) => {
-  const short = `w${account.id.replace(/\D/g, "").slice(-3)}a`;
+  const short = `w${account.id.replace(/\D/g, "").slice(-3).padStart(3, "0")}a`;
   await account.signIn(context);
   await open(page, "/welcome?next=%2F");
   await page.getByLabel("Username").fill(short);
-  await expect(page.getByText("Names of 4 or 5 characters come with the yearly Fan plan.")).toBeVisible();
+  await expect(page.getByText("Names of 5 characters come with the yearly Fan plan.")).toBeVisible();
   await page.getByRole("button", { name: "Claim it with the yearly plan" }).click();
   await expect(page).toHaveURL(new RegExp(`/fan\\?joined=&name=${short}&next=%2F$`));
   await expect(page.getByRole("heading", { name: `Claim ${short}` })).toBeVisible();
@@ -445,8 +445,36 @@ test("an account with a running plan is not deleted while Stripe cannot cancel i
   expect((await page.request.get(`/u/${account.username}`)).status()).toBe(200);
 });
 
-test("a name of 4 or 5 characters comes with the yearly plan", async ({ page, context, account, request }) => {
-  const short = `q${account.id.replace(/\D/g, "").slice(-3)}a`;
+test("a name of 4 characters comes with the 4-letter username, bought once, with or without the plan", async ({ page, context, account, request }) => {
+  const four = `k${account.id.replace(/\D/g, "").slice(-3).padStart(3, "0")}`;
+  await account.signIn(context);
+  await open(page, "/settings");
+  await page.getByLabel("Username").fill(four);
+  await expect(page.getByText(/Names of 4 characters come with the 4-letter username, \$250 once/)).toBeVisible();
+  await page.getByRole("button", { name: "Claim it with the 4-letter username" }).click();
+  await expect(page).toHaveURL(new RegExp(`/fan\\?name=${four}&next=%2Fsettings$`));
+  await expect(page.getByRole("heading", { name: `Claim ${four}` })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "The 4-letter username" })).toBeVisible();
+  await expect(page.getByText("$250 once")).toBeVisible();
+  // The name alone, or with the plan; the box asks for it at once, without a refund.
+  const pay = page.getByRole("button", { name: /^(Claim .+|Payments open soon)$/ });
+  await expect(pay).toHaveText(new RegExp(`^(Claim ${four} for \\$250|Payments open soon)$`));
+  await page.getByRole("button", { name: "+ Yearly" }).click();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+  await expect(pay).toHaveText(new RegExp(`^(Claim ${four} and become a fan|Payments open soon)$`));
+  await expect(page.getByRole("checkbox", { name: /cannot be withdrawn or refunded/ })).toBeVisible();
+
+  // Bought, as Stripe reports it: the name is the member's to take, with no plan.
+  await buyName(request, account);
+  await open(page, "/settings");
+  await page.getByLabel("Username").fill(four);
+  await page.getByRole("button", { name: "Save name" }).click();
+  await expect(page.getByText(`Your name is now ${four}.`)).toBeVisible();
+  await expect(page.getByLabel("Username")).toHaveValue(four);
+});
+
+test("a name of 5 characters comes with the yearly plan", async ({ page, context, account, request }) => {
+  const short = `q${account.id.replace(/\D/g, "").slice(-3).padStart(3, "0")}a`;
   await account.signIn(context);
   await open(page, "/settings");
   const name = page.getByLabel("Username");

@@ -1,35 +1,57 @@
+import { WITHDRAWAL_DAYS } from "../plan";
+import { settingSql } from "./setting-sql.server";
+
 /**
- * What members paid, as Stripe reported it, before tax: plan invoices and
- * fresh starts that applied. The fund counts the fresh starts, and partners
- * get their share of plan payments. Each payment is recorded once, however
- * often Stripe reports it.
+ * What members paid, as Stripe reported it, before tax: plan invoices,
+ * fresh starts that applied, and short usernames bought. The fund counts
+ * the fresh starts, and partners get their share of plan payments alone.
+ * Each payment is recorded once, however often Stripe reports it.
  */
 
-export type PaymentKind = "plan" | "fresh_start";
+export type PaymentKind = "plan" | "fresh_start" | "name";
 
-export async function recordPayment(
-  db: D1Database,
-  input: {
-    id: string;
-    userId: string;
-    kind: PaymentKind;
-    amountCents: number;
-    currency: string;
-    paidAt: number;
-    paymentIntent?: string | null;
-  },
-): Promise<void> {
-  await db.batch([
+export interface PaymentInput {
+  id: string;
+  userId: string;
+  kind: PaymentKind;
+  amountCents: number;
+  currency: string;
+  paidAt: number;
+  paymentIntent?: string | null;
+}
+
+export async function recordPayment(db: D1Database, input: PaymentInput): Promise<void> {
+  await db.batch(paymentStatements(db, input));
+}
+
+/**
+ * The statements that record a payment. A member's first payment for the
+ * plan also sets the invitations the plan gives once, at the number in
+ * force, to open when the right of withdrawal has passed.
+ */
+export function paymentStatements(db: D1Database, input: PaymentInput): D1PreparedStatement[] {
+  const amount = Math.max(0, Math.round(input.amountCents));
+  return [
     db
       .prepare(
         `INSERT INTO payments (id, user_id, kind, amount_cents, currency, paid_at, payment_intent)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
          ON CONFLICT (id) DO UPDATE SET payment_intent = COALESCE(payments.payment_intent, excluded.payment_intent)`,
       )
-      .bind(input.id, input.userId, input.kind, Math.max(0, Math.round(input.amountCents)), input.currency.toLowerCase(), input.paidAt, input.paymentIntent ?? null),
+      .bind(input.id, input.userId, input.kind, amount, input.currency.toLowerCase(), input.paidAt, input.paymentIntent ?? null),
     // A refund that came first applies now.
     applyRefunds(db, input.id, input.paymentIntent ?? null),
-  ]);
+    ...(input.kind === "plan" && amount > 0
+      ? [
+          db
+            .prepare(
+              `UPDATE profiles SET paid_invites = ${settingSql("invites_with_plan")}, paid_invites_at = ?2 + ${WITHDRAWAL_DAYS} * 86400
+               WHERE user_id = ?1 AND paid_invites IS NULL AND owner_id IS NULL`,
+            )
+            .bind(input.userId, input.paidAt),
+        ]
+      : []),
+  ];
 }
 
 /**

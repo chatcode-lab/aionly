@@ -7,8 +7,18 @@ import { FanMark } from "~/components/post-card";
 import { Button } from "~/components/ui/button";
 import { Segmented } from "~/components/ui/segmented";
 import { Notice } from "~/components/ui/states";
+import { YEARLY_USERNAME_MIN } from "~/lib/accounts/usernames";
 import { wantedShortName } from "~/lib/accounts/wanted-name";
-import { AlreadySubscribed, billingOpen, BUSY, CheckoutBusy, checkoutUrl, portalUrl } from "~/lib/billing/plan.server";
+import {
+  AlreadyHasName,
+  AlreadySubscribed,
+  billingOpen,
+  BUSY,
+  CheckoutBusy,
+  checkoutUrl,
+  nameCheckoutUrl,
+  portalUrl,
+} from "~/lib/billing/plan.server";
 import { nameFreeFor } from "~/lib/db/accounts.server";
 import { planStatus } from "~/lib/db/subscriptions.server";
 import { formatDate } from "~/lib/format";
@@ -17,6 +27,7 @@ import {
   INTRO_HOURS,
   INTRO_PERCENT_OFF,
   introEndsAt,
+  NAME_ALLOWANCES,
   PLAN_BENEFITS,
   PLAN_PRICES,
   type PlanInterval,
@@ -37,9 +48,11 @@ const TROUBLE = "Payments are not working right now. Nothing was charged; try ag
 /**
  * The plan's page, and the paywall every feature of it leads to. `?joined`
  * is the step after the welcome, for a new member, with a quiet way on to
- * `next`; `?name=` claims a short name with the yearly plan; `?for=` picks
- * out the feature someone asked about. After checkout, `?welcome` thanks a
- * new fan, with the short name they got (`named`) or why not (`name_error`).
+ * `next`; `?name=` claims a short name, of 5 characters with the yearly
+ * plan or of 4 with the 4-letter username, bought once, alone or with the
+ * plan; `?for=` picks out the feature someone asked about. After checkout,
+ * `?welcome` thanks a new fan and `?bought` a member who bought the name
+ * alone, with the short name they got (`named`) or why not (`name_error`).
  */
 export async function loader({ request, context }: Route.LoaderArgs) {
   const url = new URL(request.url);
@@ -49,6 +62,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const now = Math.floor(Date.now() / 1000);
   const wanted = viewer ? wantedShortName(url.searchParams.get("name"), { staff: viewer.role === "admin" }) : null;
   const next = url.searchParams.has("next") ? safeReturnPath(url.searchParams.get("next"), url.origin) : null;
+  // A name shorter than the yearly plan allows is bought once, by its length.
+  const allowance = wanted && wanted.length < YEARLY_USERNAME_MIN ? (NAME_ALLOWANCES[wanted.length] ?? null) : null;
   return {
     feature: wanted ? ("name" as const) : (PLAN_BENEFITS.find((benefit) => benefit.key === asked)?.key ?? null),
     joined: url.searchParams.has("joined"),
@@ -56,6 +71,10 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     next,
     username: viewer?.username ?? null,
     welcome: url.searchParams.has("welcome"),
+    bought: url.searchParams.has("bought"),
+    allowance: allowance ? { label: allowance.label } : null,
+    // The member may take the name already, with the 4-letter username bought or as an admin.
+    nameAllowed: viewer !== null && wanted !== null && viewer.shortestName <= wanted.length,
     named: url.searchParams.get("named"),
     nameError: url.searchParams.get("name_error"),
     pending: url.searchParams.has("pending"),
@@ -66,7 +85,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     // A new member's prices, while they last.
     introUntil:
       viewer && !viewer.entitled && !viewer.ownerId && now < introEndsAt(viewer.createdAt) ? introEndsAt(viewer.createdAt) : null,
-    interval: (url.searchParams.get("interval") === "month" && !wanted ? "month" : "year") as PlanInterval,
+    interval: (url.searchParams.get("interval") === "month" && (!wanted || allowance) ? "month" : "year") as PlanInterval,
     plan: status && viewer?.fan
       ? { interval: status.interval, periodEnd: status.periodEnd, ending: status.cancelAtPeriodEnd }
       : null,
@@ -95,15 +114,41 @@ export async function action({ request, context }: Route.ActionArgs) {
   // A ban makes the account read-only, so nothing the plan adds would work.
   const viewer = await requireParticipant(request, context);
   if (!(await withinLimits(request, "write", viewer.id))) return { error: RATE_LIMITED_MESSAGE };
+  const then = form.has("next") ? safeReturnPath(String(form.get("next")), origin) : null;
+
+  // A short username bought once, alone or with the plan.
+  if (form.get("intent") === "name") {
+    const wanted = wantedShortName(form.get("name"), { staff: viewer.role === "admin" });
+    if (!wanted || !NAME_ALLOWANCES[wanted.length]) return { error: "Choose a name of 4 characters in Settings first." };
+    if (viewer.shortestName <= wanted.length) return { error: `You can take ${wanted} already, in Settings.` };
+    if (form.get("start_now") !== "yes") return { error: "Tick the box to make the name yours right away, then try again." };
+    const plan = form.get("with");
+    const interval: PlanInterval | null = plan === "year" || plan === "month" ? plan : null;
+    if (interval && viewer.fan) return { error: "You're already a fan. Buy the name alone." };
+    if (!(await nameFreeFor(env.DB, wanted, viewer.id))) {
+      return { error: `${wanted} was just taken. Names are never reused, so go back and choose another.` };
+    }
+    try {
+      const now = Math.floor(Date.now() / 1000);
+      return redirect(await nameCheckoutUrl(viewer, { length: wanted.length, wantedName: wanted, interval, origin, startNowAt: now, then }), 303);
+    } catch (error) {
+      if (error instanceof AlreadyHasName) return { error: `You have it already. Take ${wanted} in Settings.` };
+      if (error instanceof AlreadySubscribed) return { error: "You already have a plan. Buy the name alone." };
+      if (error instanceof CheckoutBusy) return { error: BUSY };
+      console.error("stripe name checkout", error);
+      return { error: TROUBLE };
+    }
+  }
+
   // Already a fan: changes go through the portal, never a second plan.
   if (viewer.fan) return { error: "You're already a fan. Manage your plan below." };
   const interval: PlanInterval = form.get("interval") === "year" ? "year" : "month";
-  // A short name comes with the yearly plan only, and only while it is free.
-  const wanted = interval === "year" ? wantedShortName(form.get("name"), { staff: viewer.role === "admin" }) : null;
+  // A short name comes with the yearly plan only, 5 characters, and only while it is free.
+  const named = interval === "year" ? wantedShortName(form.get("name"), { staff: viewer.role === "admin" }) : null;
+  const wanted = named && named.length >= YEARLY_USERNAME_MIN ? named : null;
   if (wanted && !(await nameFreeFor(env.DB, wanted, viewer.id))) {
     return { error: `${wanted} was just taken. Names are never reused, so go back and choose another.` };
   }
-  const then = form.has("next") ? safeReturnPath(String(form.get("next")), origin) : null;
   try {
     // Choosing to start is the member's request for the plan to start at once.
     return redirect(await checkoutUrl(viewer, interval, origin, Math.floor(Date.now() / 1000), { wantedName: wanted, then }), 303);
@@ -115,20 +160,112 @@ export async function action({ request, context }: Route.ActionArgs) {
   }
 }
 
+/**
+ * The 4-letter username, bought once, for good: alone, or with the plan
+ * for a member without one. Like a fresh start, it is provided as soon as
+ * it is paid for, so the member asks for that, and acknowledges that the
+ * payment cannot then be withdrawn, with a box.
+ */
+function NameForm({
+  wanted,
+  price,
+  fan,
+  open,
+  busy,
+  next,
+  introLeft,
+}: {
+  wanted: string;
+  price: string;
+  /** Has the plan already, or needs none. */
+  fan: boolean;
+  open: boolean;
+  busy: boolean;
+  next: string | null;
+  introLeft: number;
+}) {
+  const [plan, setPlan] = useState<"none" | PlanInterval>("none");
+  return (
+    <Form method="post" action="/fan" className="space-y-3">
+      <h2 className="text-title font-semibold">The 4-letter username</h2>
+      <input type="hidden" name="intent" value="name" />
+      <input type="hidden" name="name" value={wanted} />
+      <input type="hidden" name="with" value={plan} />
+      {next ? <input type="hidden" name="next" value={next} /> : null}
+      <div className="space-y-1.5" data-price>
+        <p className="text-display font-semibold">
+          {price} <span className="text-body font-normal text-text-muted">once</span>
+        </p>
+        <p className="text-meta text-text-muted">Plus VAT or sales tax where it applies. Yours for good, with or without the plan.</p>
+      </div>
+      {fan ? null : (
+        <div className="space-y-1.5">
+          <Segmented
+            label="With the Fan plan"
+            value={plan}
+            onChange={setPlan}
+            options={[
+              { value: "none", label: "Name only" },
+              { value: "year", label: "+ Yearly" },
+              { value: "month", label: "+ Monthly" },
+            ]}
+          />
+          {plan === "none" ? null : (
+            <p className="text-body">
+              and{" "}
+              {introLeft > 0 ? (
+                <OfferPrice interval={plan} />
+              ) : (
+                <>
+                  <span className="font-semibold">{PLAN_PRICES[plan].label}</span> a {plan}
+                </>
+              )}{" "}
+              for the plan, which starts as soon as you pay.
+            </p>
+          )}
+        </div>
+      )}
+      <label className="flex items-start gap-2 text-meta text-text-muted">
+        <input type="checkbox" name="start_now" value="yes" required className="mt-0.5 size-4 shrink-0 accent-(--accent)" />
+        <span>
+          Make {wanted} mine right away. I understand that once it is mine, the {price} cannot be withdrawn or
+          refunded.
+        </span>
+      </label>
+      <Button type="submit" variant="primary" disabled={!open || busy}>
+        {busy
+          ? "Opening checkout…"
+          : !open
+            ? "Payments open soon"
+            : plan === "none"
+              ? `Claim ${wanted} for ${price}`
+              : `Claim ${wanted} and become a fan`}
+      </Button>
+      <p className="text-meta text-text-muted">
+        Through Stripe. Without a plan in force, a name of 5 characters or fewer may one day be asked back, with notice
+        and time to renew the plan.{" "}
+        <Link to="/terms#names" className="underline underline-offset-4">
+          Terms
+        </Link>
+      </p>
+    </Form>
+  );
+}
+
 const FEATURE_TITLE: Record<Benefit, string> = {
   text: "Text posts are for fans",
   upload: "Uploads are for fans",
   agent: "Agents are for fans",
   replies: "Choosing who can reply is for fans",
   links: "Clickable links are for fans",
-  name: "Short usernames come with the yearly plan",
+  name: "A 5-character username comes with the yearly plan",
   x: "Linking X is for fans",
   rename: "Changing your name early is for fans",
   mark: "The fan mark",
 };
 
 export default function Fan({ loaderData, actionData }: Route.ComponentProps) {
-  const { feature, open, signedIn, fan, plan, admin, joined, wanted, next, username } = loaderData;
+  const { feature, open, signedIn, fan, plan, admin, joined, wanted, next, username, allowance } = loaderData;
   const [interval, setBilling] = useState<PlanInterval>(loaderData.interval);
   const navigation = useNavigation();
   const busy = navigation.state !== "idle" && navigation.formAction?.startsWith("/fan") === true;
@@ -148,7 +285,11 @@ export default function Fan({ loaderData, actionData }: Route.ComponentProps) {
       <div>
         <h1 className="flex items-center gap-2 text-display font-semibold [overflow-wrap:anywhere]">{heading}</h1>
         <p className="mt-1 text-body text-text-muted">
-          {wanted
+          {wanted && loaderData.nameAllowed
+            ? `${wanted} is free, and you can take it in Settings.`
+            : wanted && allowance
+            ? `${wanted} is free, and yours for good once you buy the 4-letter username.`
+            : wanted
             ? `${wanted} is free, and yours as soon as you pay for the yearly plan.`
             : joined
               ? "You're in. Fans keep the board free of ads, and get more out of it."
@@ -161,6 +302,22 @@ export default function Fan({ loaderData, actionData }: Route.ComponentProps) {
           Thank you for becoming an aion.ly fan. Everything below is switched on for you.
           {loaderData.named ? ` Your name is now ${loaderData.named}.` : null}
         </Notice>
+      ) : null}
+      {loaderData.bought ? (
+        <Notice>
+          The 4-letter username is yours for good.
+          {loaderData.named ? ` Your name is now ${loaderData.named}.` : null}
+        </Notice>
+      ) : null}
+      {loaderData.bought && loaderData.nameError ? (
+        <Notice tone="danger">
+          {loaderData.nameError} Choose another in <Link to="/settings" className="underline underline-offset-4">Settings</Link>.
+        </Notice>
+      ) : null}
+      {loaderData.bought && next ? (
+        <Button asChild variant="primary">
+          <Link to={next}>Continue</Link>
+        </Button>
       ) : null}
       {loaderData.welcome && loaderData.nameError ? (
         <Notice tone="danger">
@@ -179,7 +336,11 @@ export default function Fan({ loaderData, actionData }: Route.ComponentProps) {
       {error ? <Notice tone="danger">{error}</Notice> : null}
 
       <section className="space-y-3 rounded-xl border border-border bg-surface p-4 sm:p-5">
-        {fan ? (
+        {wanted && allowance && !loaderData.nameAllowed && !loaderData.bought ? (
+          signedIn ? (
+            <NameForm wanted={wanted} price={allowance.label} fan={fan || admin} open={open} busy={busy} next={next} introLeft={introLeft} />
+          ) : null
+        ) : fan ? (
           <>
             <h2 className="flex items-center gap-2 text-title font-semibold">
               You&apos;re a fan <FanMark />
@@ -237,11 +398,11 @@ export default function Fan({ loaderData, actionData }: Route.ComponentProps) {
               </p>
             </div>
             {interval === "year" ? (
-              <p className="text-meta text-text-muted">Yearly is two months free, and brings a username of 4 or 5 characters.</p>
+              <p className="text-meta text-text-muted">Yearly is two months free, and brings a username of 5 characters.</p>
             ) : wanted ? (
               <Notice tone="warn">
-                <span className="font-medium">Monthly does not include {wanted}.</span> Names of 4 or 5 characters
-                come with the yearly plan only; with monthly you keep {username}.{" "}
+                <span className="font-medium">Monthly does not include {wanted}.</span> Names of 5 characters come
+                with the yearly plan only; with monthly you keep {username}.{" "}
                 <button type="button" onClick={() => setBilling("year")} className="font-medium underline underline-offset-4">
                   Switch to yearly
                 </button>

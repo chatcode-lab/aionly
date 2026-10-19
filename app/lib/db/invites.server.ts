@@ -31,12 +31,27 @@ export function mayInviteSql(account: string, now: number): string {
 }
 
 /**
+ * SQL for the free invitations of `member`, an alias of profiles: the
+ * number a partner link gave it, or else its level's (see freeInvites).
+ */
+const FREE_SQL = (member: string) => `COALESCE(${member}.free_invites, MAX(0, ${settingSql("invites_to_start")}
+  - ((MAX(${member}.invite_depth, 1) - 1) / ${settingSql("invites_levels")}) * ${settingSql("invites_level_drop")}))`;
+
+/**
+ * SQL that holds once the plan's invitations of `member`, an alias of
+ * profiles, are open: from 14 days after the first payment for the plan,
+ * if the plan was not ended before then, as a withdrawal ends it.
+ */
+const PLAN_OPEN_SQL = (member: string, now: number) =>
+  `(${member}.paid_invites_at <= ${Math.floor(now)} AND COALESCE(${member}.plan_until, 0) >= ${member}.paid_invites_at)`;
+
+/**
  * SQL for how many invitations the member `account` has in all at `now`:
  * see inviteAllowance, which this repeats inside writes.
  */
 function allowanceSql(account: string, now: number): string {
-  return `(SELECT ${settingSql("invites_to_start")}
-      + CASE WHEN COALESCE(member.plan_until, 0) > ${Math.floor(now)} THEN ${settingSql("invites_with_plan")} ELSE 0 END
+  return `(SELECT ${FREE_SQL("member")}
+      + CASE WHEN ${PLAN_OPEN_SQL("member", now)} THEN member.paid_invites ELSE 0 END
       + MAX(member.karma, 0) / ${settingSql("karma_per_invite")}
     FROM profiles AS member WHERE member.user_id = ${account})`;
 }
@@ -59,6 +74,12 @@ export interface InviteStanding {
   open: Array<{ code: string; createdAt: number; expiresAt: number }>;
   /** Invitations in all, or null for an admin, who has no limit. */
   allowance: number | null;
+  /** Of them, the free ones, by level or partner link. */
+  free: number;
+  /** The plan's, given once: how many, when they open, and whether they are open; null until given. */
+  plan: { count: number; opensAt: number; open: boolean } | null;
+  /** Of them, those the member's karma brings. */
+  fromKarma: number;
   /** Invitations spent: used, being used, or open. */
   spent: number;
   /** Everyone who joined through the member's invitations, newest first. */
@@ -73,6 +94,9 @@ export async function inviteStanding(db: D1Database, userId: string, now: number
       .prepare(
         `SELECT profile.owner_id, profile.role, profile.karma, ${mayInviteSql("?1", now)} AS may,
                 ${allowanceSql("?1", now)} AS allowance, ${spentSql("?1", now)} AS spent,
+                ${FREE_SQL("profile")} AS free, profile.paid_invites, profile.paid_invites_at,
+                ${PLAN_OPEN_SQL("profile", now)} AS plan_open,
+                MAX(profile.karma, 0) / ${settingSql("karma_per_invite")} AS from_karma,
                 (profile.banned_at IS NULL OR profile.banned_until <= ?2)
                   AND (profile.role = 'admin' OR profile.karma > COALESCE(profile.karma_floor, ${settingSql("karma_floor")})) AS participant
          FROM profiles AS profile WHERE profile.user_id = ?1`,
@@ -95,7 +119,20 @@ export async function inviteStanding(db: D1Database, userId: string, now: number
       .bind(userId),
   ]);
   const row = account!.results[0] as
-    | { owner_id: string | null; role: string; karma: number; may: number; participant: number; allowance: number; spent: number }
+    | {
+        owner_id: string | null;
+        role: string;
+        karma: number;
+        may: number;
+        participant: number;
+        allowance: number;
+        spent: number;
+        free: number;
+        paid_invites: number | null;
+        paid_invites_at: number | null;
+        plan_open: number | null;
+        from_karma: number;
+      }
     | undefined;
   const openRows = open!.results as Array<{ code: string; created_at: number; expires_at: number }>;
   const admin = row?.role === "admin";
@@ -108,6 +145,12 @@ export async function inviteStanding(db: D1Database, userId: string, now: number
     refusal,
     open: openRows.map((invite) => ({ code: invite.code, createdAt: invite.created_at, expiresAt: invite.expires_at })),
     allowance: admin ? null : (row?.allowance ?? 0),
+    free: row?.free ?? 0,
+    plan:
+      row?.paid_invites != null && row.paid_invites_at !== null
+        ? { count: row.paid_invites, opensAt: row.paid_invites_at, open: row.plan_open === 1 }
+        : null,
+    fromKarma: row?.from_karma ?? 0,
     spent: row?.spent ?? 0,
     invited: (invited!.results as Array<Parameters<typeof toPublicAuthor>[0]>).map(toPublicAuthor),
     admin,
@@ -216,17 +259,22 @@ export async function claimInvite(db: D1Database, input: { code: string; userId:
 }
 
 /**
- * Gives the new account the invitation claimed for it: who invited it, and
- * the invitation marked used, once its profile holds the inviter. The
- * inviter's karma settles, since their invitees' share may now include
- * this one. Safe to repeat: a sign-up whose step failed is finished on the
- * account's next request, or by the hourly sweep.
+ * Gives the new account the invitation claimed for it: who invited it, a
+ * level below them in the invitation tree, and the invitation marked used,
+ * once its profile holds the inviter. The inviter's karma settles, since
+ * their invitees' share may now include this one. Safe to repeat: a
+ * sign-up whose step failed is finished on the account's next request, or
+ * by the hourly sweep.
  */
 export async function attachInvite(db: D1Database, input: { userId: string }): Promise<void> {
   const claim = `SELECT inviter_id FROM invites WHERE claimed_by = ?1 AND used_by IS NULL`;
   await db.batch([
     db
-      .prepare(`UPDATE profiles SET invited_by = (${claim}) WHERE user_id = ?1 AND invited_by IS NULL AND EXISTS (${claim})`)
+      .prepare(
+        `UPDATE profiles SET invited_by = (${claim}),
+           invite_depth = COALESCE((SELECT inviter.invite_depth + 1 FROM profiles AS inviter WHERE inviter.user_id = (${claim})), 1)
+         WHERE user_id = ?1 AND invited_by IS NULL AND EXISTS (${claim})`,
+      )
       .bind(input.userId),
     db
       .prepare(

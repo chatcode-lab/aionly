@@ -38,7 +38,7 @@ beforeEach(async () => {
 describe("partner ledgers (F67, F70, F76)", () => {
   it("keep a deleted member's join and its earned share, and still free a claim that never made an account", async () => {
     await user("star", "guest_star");
-    await createPartnerLink(db, { code: "once", partner: "guest_star", sharePercent: 50, shareMonths: 12, maxUses: 1, endsAt: null, note: null, actorId: "boss", now: NOW });
+    await createPartnerLink(db, { code: "once", partner: "guest_star", steps: [{ percent: 50, months: 12 }], freeInvites: null, maxUses: 1, endsAt: null, note: null, actorId: "boss", now: NOW });
     await claimPartnerJoin(db, { code: "once", userId: "joiner", now: NOW });
     await user("joiner", "joining_member");
     await asUser("joiner", "joiner@example.invalid");
@@ -55,7 +55,7 @@ describe("partner ledgers (F67, F70, F76)", () => {
   it("total what partners earned and were paid over the whole ledger, not the lists' latest", async () => {
     await user("star", "guest_star");
     await user("other", "other_partner");
-    await createPartnerLink(db, { code: "star", partner: "guest_star", sharePercent: 50, shareMonths: 12, maxUses: null, endsAt: null, note: null, actorId: "boss", now: NOW - DAY });
+    await createPartnerLink(db, { code: "star", partner: "guest_star", steps: [{ percent: 50, months: 12 }], freeInvites: null, maxUses: null, endsAt: null, note: null, actorId: "boss", now: NOW - DAY });
     await claimPartnerJoin(db, { code: "star", userId: "m1", now: NOW });
     await user("m1", "paying_member");
     await recordPayment(db, { id: "in_m1", userId: "m1", kind: "plan", amountCents: 700, currency: "usd", paidAt: NOW + 60 });
@@ -63,7 +63,7 @@ describe("partner ledgers (F67, F70, F76)", () => {
     await db.batch(
       Array.from({ length: 200 }, (_, n) =>
         db
-          .prepare(`INSERT INTO partner_links (code, partner_id, share_percent, share_months, created_by, created_at) VALUES (?1, 'other', 50, 12, 'boss', ?2)`)
+          .prepare(`INSERT INTO partner_links (code, partner_id, created_by, created_at) VALUES (?1, 'other', 'boss', ?2)`)
           .bind(`newer-${n}`, NOW + n),
       ),
     );
@@ -80,7 +80,7 @@ describe("partner ledgers (F67, F70, F76)", () => {
   });
 
   it("list who joined through a link of any valid name, `constructor` included", async () => {
-    await createPartnerLink(db, { code: "constructor", partner: "head_admin", sharePercent: 0, shareMonths: 12, maxUses: null, endsAt: null, note: null, actorId: "boss", now: NOW });
+    await createPartnerLink(db, { code: "constructor", partner: "head_admin", steps: [{ percent: 0, months: 12 }], freeInvites: null, maxUses: null, endsAt: null, note: null, actorId: "boss", now: NOW });
     await claimPartnerJoin(db, { code: "constructor", userId: "j1", now: NOW });
     await user("j1", "first_joiner");
     const joined = new Map(await joinedThrough(db, ["constructor"]));

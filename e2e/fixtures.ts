@@ -207,6 +207,37 @@ export async function payFreshStart(request: APIRequestContext, account: TestAcc
   expect(response.status(), await response.text()).toBe(200);
 }
 
+/**
+ * Buys the 4-letter username the way Stripe reports it: a signed webhook
+ * that a checkout for it alone was completed and paid. Nothing reaches
+ * Stripe.
+ */
+export async function buyName(request: APIRequestContext, account: TestAccount): Promise<void> {
+  const now = Math.floor(Date.now() / 1000);
+  const payload = JSON.stringify({
+    id: `evt_name_${account.id}`,
+    type: "checkout.session.completed",
+    created: now,
+    data: {
+      object: {
+        id: `cs_name_${account.id}`,
+        object: "checkout.session",
+        mode: "payment",
+        payment_status: "paid",
+        client_reference_id: account.id,
+        currency: "usd",
+        metadata: { user_id: account.id, kind: "name_allowance", name_length: "4", name_cents: "25000", start_now_requested_at: String(now) },
+      },
+    },
+  });
+  const signature = `t=${now},v1=${await hmacHex(serverSecret("STRIPE_WEBHOOK_SECRET"), `${now}.${payload}`)}`;
+  const response = await request.post("/api/stripe", {
+    headers: { "Content-Type": "application/json", "Stripe-Signature": signature },
+    data: payload,
+  });
+  expect(response.status(), await response.text()).toBe(200);
+}
+
 /** A session cookie value as Better Auth signs it: `token.HMAC`, URL-encoded. */
 async function signedToken(token: string): Promise<string> {
   const key = await crypto.subtle.importKey(

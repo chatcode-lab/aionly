@@ -13,15 +13,14 @@ import {
   sweepPartnerJoins,
 } from "../../app/lib/db/partners.server";
 import { recordPayment } from "../../app/lib/db/payments.server";
-import { normalizePartnerCode, shareWords } from "../../app/lib/partners";
+import { normalizePartnerCode, partnerStepsProblem, shareWords, stepsLabel } from "../../app/lib/partners";
 import { DAY, db, NOW, reset, user } from "./fixtures";
 
 const link = (code: string, fields: Partial<Parameters<typeof createPartnerLink>[1]> = {}) =>
   createPartnerLink(db, {
     code,
     partner: "guest_star",
-    sharePercent: 50,
-    shareMonths: 12,
+    steps: [{ percent: 50, months: 12 }], freeInvites: null,
     maxUses: null,
     endsAt: null,
     note: null,
@@ -58,7 +57,22 @@ describe("partner links", () => {
     expect(normalizePartnerCode(" Star_AI ")).toBe("star_ai");
     expect(normalizePartnerCode("x")).toBeNull();
     expect(normalizePartnerCode("../admin")).toBeNull();
-    expect(shareWords({ percent: 50, months: 12 })).toBe("half of what they pay for the Fan plan in their first year");
+    expect(shareWords([{ percent: 50, months: 12 }])).toBe("half of what they pay for the Fan plan in their first year");
+  });
+
+  it("share in steps, the last of which may last for good", () => {
+    const steps = [
+      { percent: 100, months: 12 },
+      { percent: 50, months: null },
+    ];
+    expect(shareWords(steps)).toBe("all of what they pay for the Fan plan in their first year, then half for as long as they have it");
+    expect(stepsLabel(steps)).toBe("100% for 12 months, then 50% for good");
+    expect(partnerStepsProblem(steps)).toBeNull();
+    expect(partnerStepsProblem([])).toBe("Give the share of at least one step.");
+    expect(partnerStepsProblem([{ percent: 50, months: null }, { percent: 10, months: 12 }])).toBe("Only the last step can last for good.");
+    expect(partnerStepsProblem([{ percent: 101, months: 12 }])).toBe("Each share is a whole percent, 0 to 100.");
+    expect(partnerStepsProblem([{ percent: Number.NaN, months: 12 }])).toBe("Each share is a whole percent, 0 to 100.");
+    expect(partnerStepsProblem([{ percent: 50, months: 0 }])).toMatch(/1 to 120 months/);
   });
 
   it("make many accounts, each invited by the partner, up to the link's limit", async () => {
@@ -86,7 +100,7 @@ describe("partner links", () => {
   });
 
   it("share what members pay for the plan in their first months, before tax and less refunds", async () => {
-    await link("star", { shareMonths: 3 });
+    await link("star", { steps: [{ percent: 50, months: 3 }] });
     await joined("a", "star", NOW);
     await joined("b", "star", NOW);
     await db.prepare(`UPDATE profiles SET plan_until = ?1 WHERE user_id = 'a'`).bind(NOW + 30 * DAY).run();
@@ -110,6 +124,50 @@ describe("partner links", () => {
     const standing = await partnerStanding(db, "star", NOW);
     expect(standing).toMatchObject({ earnedCents: 600, paidCents: 250 });
     expect(standing.payouts).toEqual([{ id: expect.any(String), paidOn: "2026-11-01", amountCents: 250, note: "PayPal" }]);
+  });
+
+  it("share each payment at the step it falls in: all the first year, then half for good", async () => {
+    await link("star", {
+      steps: [
+        { percent: 100, months: 12 },
+        { percent: 50, months: null },
+      ],
+    });
+    await joined("a", "star", NOW);
+    const pay = (id: string, cents: number, at: number, kind: "plan" | "name" = "plan") =>
+      recordPayment(db, { id, userId: "a", kind, amountCents: cents, currency: "usd", paidAt: at });
+    await pay("in_1", 7000, NOW + DAY);
+    await pay("in_2", 7000, NOW + 370 * DAY);
+    await pay("in_3", 7000, NOW + 1500 * DAY);
+    // A 4-letter username is never shared.
+    await pay("cs_name", 25000, NOW + DAY, "name");
+    const [stats] = await partnerLinks(db, { now: NOW + 1600 * DAY });
+    expect(stats).toMatchObject({
+      steps: [
+        { percent: 100, months: 12 },
+        { percent: 50, months: null },
+      ],
+      revenueCents: 21000,
+      earnedCents: 7000 + 3500 + 3500,
+    });
+    expect(await partnersOwed(db, NOW)).toEqual([{ partnerId: "star", partner: "guest_star", earnedCents: 14000, paidCents: 0 }]);
+    expect((await partnerLinkByCode(db, "star", NOW))?.steps).toEqual(stats!.steps);
+  });
+
+  it("give those who join the link's free invitations, a level below the partner", async () => {
+    await link("none", { freeInvites: 0 });
+    await link("level", { code: "level", freeInvites: null });
+    await db.prepare(`UPDATE profiles SET invite_depth = 2 WHERE user_id = 'star'`).run();
+    await joined("a", "none");
+    await joined("b", "level");
+    expect(await db.prepare(`SELECT invite_depth, free_invites FROM profiles WHERE user_id = 'a'`).first()).toEqual({ invite_depth: 3, free_invites: 0 });
+    expect(await db.prepare(`SELECT invite_depth, free_invites FROM profiles WHERE user_id = 'b'`).first()).toEqual({ invite_depth: 3, free_invites: null });
+    expect((await partnerLinks(db, { now: NOW })).map((made) => [made.code, made.freeInvites])).toEqual(
+      expect.arrayContaining([
+        ["none", 0],
+        ["level", null],
+      ]),
+    );
   });
 
   it("drop claims whose account never came, and finish those whose step failed", async () => {
@@ -148,7 +206,7 @@ describe("sign-up through a partner's link", async () => {
   });
 
   it("lets a new account in, invited by the partner, while the link works", async () => {
-    await createPartnerLink(db, { code: "star", partner: "guest_star", sharePercent: 50, shareMonths: 12, maxUses: 1, endsAt: null, note: null, actorId: "boss", now: NOW });
+    await createPartnerLink(db, { code: "star", partner: "guest_star", steps: [{ percent: 50, months: 12 }], freeInvites: null, maxUses: 1, endsAt: null, note: null, actorId: "boss", now: NOW });
     const created = await (await adapter("aionly_partner=star")).createUser({ name: "Fan", email: "fan@signup.invalid", emailVerified: true }, google);
     expect(await db.prepare(`SELECT invited_by FROM profiles WHERE user_id = ?1`).bind(created.id).first()).toEqual({ invited_by: "star" });
     expect(await db.prepare(`SELECT code FROM partner_joins WHERE user_id = ?1`).bind(created.id).first()).toEqual({ code: "star" });

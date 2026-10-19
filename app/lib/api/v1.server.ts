@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import docs from "../../../docs/api.md?raw";
 
 import { applyRename } from "~/lib/accounts/rename.server";
+import { SHORT_USERNAME_MIN, USERNAME_MIN } from "~/lib/accounts/usernames";
 import { DRAFT_BYTES, DRAFT_LIMIT, type DraftFields } from "~/lib/draft-rules";
 import {
   type Draft,
@@ -1253,9 +1254,10 @@ async function rename(request: Request, agent: TokenAgent) {
   const input = await body(request);
   const username = text(input.username);
   if (username === undefined) throw new Refusal(400, "invalid", "Send the new username.", { fields: { username: "Required." } });
-  // The board's own agent, run by an admin, may take a staff-like name.
+  // The board's own agent, run by an admin, may take a staff-like or short name.
   const owner = await env.DB.prepare(`SELECT role FROM profiles WHERE user_id = ?1`).bind(agent.ownerId).first<{ role: string }>();
-  const error = await applyRename(agent.id, username, { staff: owner?.role === "admin", agent: true });
+  const staff = owner?.role === "admin";
+  const error = await applyRename(agent.id, username, { staff, shortest: staff ? SHORT_USERNAME_MIN : USERNAME_MIN, agent: true });
   if (error) throw new Refusal(409, "username", error, { fields: { username: error } });
   const refreshed = await accountRecord(env.DB, agent.id, now());
   return json(await profileOf(refreshed ? { ...refreshed, permission: agent.permission, tokenId: agent.tokenId } : agent, new URL(request.url).origin));
@@ -1280,8 +1282,8 @@ async function invitations(request: Request, agent: TokenAgent) {
     if (!(await withinLimits(request, "write", agent.id))) throw new Refusal(429, "rate_limited", RATE_LIMITED_MESSAGE);
     const code = await createInvite(env.DB, { inviterId: agent.ownerId!, now: at });
     if (!code) {
-      const { refusal } = await inviteStanding(env.DB, agent.ownerId!, at);
-      throw new Refusal(403, refusal ?? "not_allowed", refusal ? inviteRefusal(refusal, settings) : "The owner cannot invite now.");
+      const { refusal, plan } = await inviteStanding(env.DB, agent.ownerId!, at);
+      throw new Refusal(403, refusal ?? "not_allowed", refusal ? inviteRefusal(refusal, settings, plan !== null) : "The owner cannot invite now.");
     }
     // As written, by the length in force then.
     const made = await env.DB.prepare(`SELECT expires_at FROM invites WHERE code = ?1`).bind(code).first<{ expires_at: number }>();
@@ -1290,9 +1292,15 @@ async function invitations(request: Request, agent: TokenAgent) {
   const standing = await inviteStanding(env.DB, agent.ownerId!, at);
   return json({
     may_invite: standing.refusal === null,
-    ...(standing.refusal ? { refusal: { code: standing.refusal, message: inviteRefusal(standing.refusal, settings) } } : {}),
+    ...(standing.refusal
+      ? { refusal: { code: standing.refusal, message: inviteRefusal(standing.refusal, settings, standing.plan !== null) } }
+      : {}),
     // Null for an admin's agent: its owner has no limit.
     allowance: standing.allowance,
+    // What it is made of: free ones, the plan's (given once, open from opens_at), and the karma's.
+    free: standing.free,
+    plan: standing.plan ? { count: standing.plan.count, opens_at: standing.plan.opensAt, open: standing.plan.open } : null,
+    from_karma: standing.fromKarma,
     spent: standing.spent,
     left: standing.allowance === null ? null : Math.max(standing.allowance - standing.spent, 0),
     rule: inviteAllowanceRule(settings),

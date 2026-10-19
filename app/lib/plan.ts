@@ -35,6 +35,12 @@ export const INTRO_PRICES: Record<PlanInterval, PlanPrice> = {
 
 export const INTRO_HOURS = 24;
 
+/**
+ * The consumer's right to withdraw from a first subscription, in days (see
+ * the terms). The plan's invitations open only once it has passed.
+ */
+export const WITHDRAWAL_DAYS = 14;
+
 /** How much less a new member pays, in percent, the same for both prices. */
 export const INTRO_PERCENT_OFF = Math.round(100 - (INTRO_PRICES.year.cents * 100) / PLAN_PRICES.year.cents);
 
@@ -57,6 +63,16 @@ export function introEndsAt(joinedAt: number): number {
 export function pricesFor(introUntil: number | null | undefined, now: number): Record<PlanInterval, PlanPrice> {
   return introUntil && now < introUntil ? INTRO_PRICES : PLAN_PRICES;
 }
+
+/**
+ * Usernames shorter than the yearly plan allows, each bought once and kept
+ * for good, with or without the plan, by the shortest length it allows:
+ * the 4-letter username, before tax, in US cents. Partners never share it.
+ * Shorter ones may follow.
+ */
+export const NAME_ALLOWANCES: Readonly<Record<number, PlanPrice>> = {
+  4: { cents: 25000, label: "$250", lookupKey: "aionly_name_4" },
+};
 
 /**
  * A fresh start for an account made read-only by its karma, before tax, in
@@ -104,7 +120,7 @@ export const PLAN_BENEFITS: ReadonlyArray<{ key: Benefit; label: string; detail:
   {
     key: "name",
     label: "A short username",
-    detail: "4 or 5 characters, where others need 6 or more, with the yearly plan, for as long as it lasts.",
+    detail: "5 characters, where others need 6 or more, with the yearly plan, for as long as it lasts.",
   },
   {
     key: "rename",

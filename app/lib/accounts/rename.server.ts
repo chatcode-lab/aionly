@@ -1,18 +1,18 @@
 import { env } from "cloudflare:workers";
 
 import { renameUser } from "../db/accounts.server";
-import { normalizeUsername, USERNAME_PROBLEM, usernameProblem } from "./usernames";
+import { normalizeUsername, shortNameNeeds, USERNAME_PROBLEM, usernameProblem } from "./usernames";
 
 /**
  * Applies a submitted username, returning an error message or null. `staff`
- * allows staff-like names: for admins and their agents. `short` allows 4 or
- * 5 characters: for a member with the plan. `agent` allows the endings that
- * mark an agent.
+ * allows staff-like names: for admins and their agents. `shortest` is the
+ * shortest name the account may hold, as its record says; the write checks
+ * it again. `agent` allows the endings that mark an agent.
  */
 export async function applyRename(
   userId: string,
   input: string,
-  options: { staff?: boolean; short?: boolean; agent?: boolean } = {},
+  options: { staff?: boolean; shortest?: number; agent?: boolean } = {},
 ): Promise<string | null> {
   const name = normalizeUsername(input);
   const problem = usernameProblem(name, options);
@@ -23,6 +23,6 @@ export async function applyRename(
   return result.reason === "taken"
     ? "That name is taken. Names are never reused, so try another."
     : result.reason === "plan"
-      ? USERNAME_PROBLEM.short_plan
+      ? USERNAME_PROBLEM[shortNameNeeds(name)]
       : "You changed your name recently. Try again later.";
 }

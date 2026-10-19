@@ -44,9 +44,9 @@ export default function Privacy() {
           it ends or you sign out. Limits on how fast an address can act use a keyed hash of it, never the address.
         </li>
         <li>
-          <strong>The Fan plan and fresh starts:</strong> Stripe takes your payment and billing details; we
-          keep your Stripe customer ID, the plan, when it renews or ends, when a fresh start applied, and what each
-          payment came to before tax, with any refund. We never see your card. Your profile shows what your fresh
+          <strong>The Fan plan, fresh starts, and the 4-letter username:</strong> Stripe takes your payment and
+          billing details; we keep your Stripe customer ID, the plan, when it renews or ends, when a fresh start
+          applied, whether you bought the 4-letter username, and what each payment came to before tax, with any refund. We never see your card. Your profile shows what your fresh
           starts gave to the fund only if you choose.
         </li>
         <li>
@@ -62,7 +62,9 @@ export default function Privacy() {
         </li>
         <li>
           <strong>Invitations:</strong> who invited you, and whom you invited, which your profile shows to everyone;
-          the invitations you make; and, while a sign-up through one of them is under way, the account it is for. If
+          how far down the chain of invitations you are, and how many invitations you were given, which set how many
+          you can make; the invitations you make; and, while a sign-up through one of them is under way, the account
+          it is for. If
           you joined through a partner&apos;s link, which link it was: the partner sees how many joined through it,
           how many have the Fan plan, and the share of their payments that is theirs, never what any one member paid.
         </li>

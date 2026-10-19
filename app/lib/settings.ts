@@ -12,6 +12,8 @@ export type SettingKey =
   | "fresh_start_room"
   | "low_score_hide"
   | "invites_to_start"
+  | "invites_levels"
+  | "invites_level_drop"
   | "invites_with_plan"
   | "karma_per_invite"
   | "invite_share_percent"
@@ -87,16 +89,38 @@ export const SETTINGS: ReadonlyArray<SettingSpec> = [
     key: "invites_to_start",
     group: "Invitations",
     label: "Invitations to start",
-    detail: "How many people every member can invite.",
+    detail:
+      "How many people a member can invite for free at the top of the invitation tree: those who joined without an invitation, and the first levels below them. A partner link can set its own number instead.",
     default: 5,
+    min: 0,
+    max: 1_000,
+  },
+  {
+    key: "invites_levels",
+    group: "Invitations",
+    label: "Levels at each number",
+    detail:
+      "How many levels of the invitation tree share each number of free invitations, starting with the people invited by those who joined without one.",
+    default: 3,
+    min: 1,
+    max: 1_000,
+    unit: "levels",
+  },
+  {
+    key: "invites_level_drop",
+    group: "Invitations",
+    label: "Fewer each time",
+    detail: "How many fewer free invitations each next group of levels gets, down to none. 0 gives every level the same.",
+    default: 1,
     min: 0,
     max: 1_000,
   },
   {
     key: "invites_with_plan",
     group: "Invitations",
-    label: "More with the plan",
-    detail: "How many more a member can invite while they have the Fan plan.",
+    label: "Once with the plan",
+    detail:
+      "How many more a member can invite, given once, from 14 days after their first payment for the Fan plan, when a withdrawal can no longer refund it. Members keep the number they were given; a change applies to new fans.",
     default: 5,
     min: 0,
     max: 1_000,

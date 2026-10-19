@@ -12,7 +12,8 @@ import {
 import { deleteAccount } from "../../app/lib/db/deletion.server";
 import { profileByName } from "../../app/lib/db/profiles.server";
 import { castVote } from "../../app/lib/db/votes.server";
-import { inviteAllowance } from "../../app/lib/invites";
+import { freeInvites, inviteAllowance } from "../../app/lib/invites";
+import { recordPayment } from "../../app/lib/db/payments.server";
 import { DEFAULT_SETTINGS } from "../../app/lib/settings";
 import { DAY, db, NOW, post, reset, user } from "./fixtures";
 
@@ -69,7 +70,7 @@ describe("invitations", () => {
     expect(newbie?.kind === "profile" && newbie.profile.invitedBy).toBe("kind_host");
   });
 
-  it("are five to start, five more with the plan, one more per 50 karma; unlimited for admins, never made by agents", async () => {
+  it("are five to start, five more once with the plan, one more per 50 karma; unlimited for admins, never made by agents", async () => {
     const make = (now = NOW) => createInvite(db, { inviterId: "host", now });
     for (let index = 0; index < DEFAULT_SETTINGS.invites_to_start; index += 1) expect(await make()).not.toBeNull();
     expect(await make()).toBeNull();
@@ -85,16 +86,47 @@ describe("invitations", () => {
     expect((await inviteStanding(db, "host", later)).spent).toBe(0);
     await join("host", "used_one", later);
     expect((await inviteStanding(db, "host", later)).spent).toBe(1);
-    // The plan adds five, and every 50 karma one.
+    // Every 50 karma adds one. The plan alone adds none until it is paid for.
     await db.prepare(`UPDATE profiles SET plan_until = ?1, karma = 120 WHERE user_id = 'host'`).bind(NOW + 30 * DAY).run();
-    expect(await inviteStanding(db, "host", NOW)).toMatchObject({ refusal: null, allowance: 12 });
-    expect(inviteAllowance({ plan: true, karma: 120 })).toBe(12);
-    expect(inviteAllowance({ plan: false, karma: -40 })).toBe(5);
+    expect(await inviteStanding(db, "host", NOW)).toMatchObject({ refusal: null, allowance: 7, free: 5, plan: null, fromKarma: 2 });
+    // Its first payment gives five more, once, open 14 days later.
+    await recordPayment(db, { id: "in_1", userId: "host", kind: "plan", amountCents: 700, currency: "usd", paidAt: NOW });
+    expect(await inviteStanding(db, "host", NOW)).toMatchObject({ allowance: 7, plan: { count: 5, opensAt: NOW + 14 * DAY, open: false } });
+    expect(await inviteStanding(db, "host", NOW + 14 * DAY)).toMatchObject({ allowance: 12, plan: { count: 5, open: true } });
+    // Later payments, and a changed setting, give no more.
+    await db.prepare(`INSERT INTO settings (key, value, updated_at, updated_by) VALUES ('invites_with_plan', 9, ?1, 'admin')`).bind(NOW).run();
+    await recordPayment(db, { id: "in_2", userId: "host", kind: "plan", amountCents: 700, currency: "usd", paidAt: NOW + 30 * DAY });
+    expect((await inviteStanding(db, "host", NOW + 14 * DAY)).plan?.count).toBe(5);
+    expect(inviteAllowance({ free: 5, paid: 5, karma: 120 })).toBe(12);
+    expect(inviteAllowance({ free: 5, paid: 0, karma: -40 })).toBe(5);
 
     for (let index = 0; index < 15; index += 1) expect(await createInvite(db, { inviterId: "admin", now: NOW })).not.toBeNull();
     expect((await inviteStanding(db, "admin", NOW)).allowance).toBeNull();
     expect(await createInvite(db, { inviterId: "bot", now: NOW })).toBeNull();
     expect((await inviteStanding(db, "bot", NOW)).refusal).toBe("agent");
+  });
+
+  it("never open the plan's to a member who withdrew within 14 days, unless they pay again", async () => {
+    await db.prepare(`UPDATE profiles SET plan_until = ?1 WHERE user_id = 'host'`).bind(NOW + 30 * DAY).run();
+    await recordPayment(db, { id: "in_1", userId: "host", kind: "plan", amountCents: 700, currency: "usd", paidAt: NOW });
+    // A withdrawal ends the plan at once.
+    await db.prepare(`UPDATE profiles SET plan_until = ?1 WHERE user_id = 'host'`).bind(NOW + 3 * DAY).run();
+    expect(await inviteStanding(db, "host", NOW + 20 * DAY)).toMatchObject({ allowance: 5, plan: { open: false } });
+    await db.prepare(`UPDATE profiles SET plan_until = ?1 WHERE user_id = 'host'`).bind(NOW + 60 * DAY).run();
+    expect(await inviteStanding(db, "host", NOW + 20 * DAY)).toMatchObject({ allowance: 10, plan: { open: true } });
+  });
+
+  it("start with fewer free ones further down the invitation tree", async () => {
+    expect([0, 1, 2, 3, 4, 6, 7, 10, 30].map((depth) => freeInvites(depth))).toEqual([5, 5, 5, 5, 4, 4, 3, 2, 0]);
+    expect(freeInvites(7, { ...DEFAULT_SETTINGS, invites_level_drop: 0 })).toBe(5);
+    // An invitation puts its account a level below the inviter's.
+    await db.prepare(`UPDATE profiles SET invite_depth = 3 WHERE user_id = 'host'`).run();
+    await join("host", "newbie");
+    expect(await db.prepare(`SELECT invite_depth FROM profiles WHERE user_id = 'newbie'`).first()).toEqual({ invite_depth: 4 });
+    expect(await inviteStanding(db, "newbie", NOW)).toMatchObject({ allowance: 4, free: 4 });
+    // A partner link's own number stands in for the level's.
+    await db.prepare(`UPDATE profiles SET free_invites = 0 WHERE user_id = 'newbie'`).run();
+    expect(await inviteStanding(db, "newbie", NOW)).toMatchObject({ allowance: 0, refusal: "limit" });
   });
 
   it("expire after two weeks, and a claim that never became an account is freed", async () => {

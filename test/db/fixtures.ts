@@ -13,6 +13,7 @@ const TABLES = [
   "editor_terms",
   "partner_payouts",
   "partner_joins",
+  "partner_link_steps",
   "partner_links",
   "fund_gifts",
   "fund_causes",

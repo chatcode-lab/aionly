@@ -25,3 +25,20 @@ test("a partner link that does not exist says so", async ({ page }) => {
   expect(response?.status()).toBe(404);
   await expect(page.getByText("There is no link like this.")).toBeVisible();
 });
+
+test("an admin makes a partner link that shares in steps and gives no free invitations", async ({ page, context, adminAccount }, testInfo) => {
+  const code = `steps-${testInfo.project.name}`;
+  await adminAccount.signIn(context);
+  await open(page, "/admin/partners");
+  const form = page.locator("form").filter({ has: page.getByRole("heading", { name: "Make a link" }) });
+  await form.getByLabel("Partner's username").fill("e2e_admin");
+  await form.getByLabel("Link name").fill(code);
+  await form.getByLabel("First, %").fill("100");
+  await form.getByLabel("For months").first().fill("12");
+  await form.getByLabel("Then, %").first().fill("50");
+  await form.getByRole("button", { name: "Make the link" }).click();
+  await expect(page.getByText(`Made /join/${code}.`)).toBeVisible();
+  await expect(page.getByRole("listitem").filter({ hasText: `/join/${code}` })).toContainText(
+    "100% for 12 months, then 50% for good · 0 free invitations each",
+  );
+});

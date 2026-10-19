@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 
-import { type AccountRecord } from "../db/accounts.server";
+import { type AccountRecord, grantNameAllowance } from "../db/accounts.server";
 import { readBodyCapped } from "../security/body";
 import { applyFreshStart, type FreshStartOutcome } from "../db/fresh-starts.server";
 import { paymentWithIntent, recordPayment, recordRefund } from "../db/payments.server";
@@ -16,13 +16,14 @@ import {
   stillHolding,
   runningSubscription,
 } from "../db/subscriptions.server";
-import { FRESH_START_PRICE, INTRO_PRICES, introEndsAt, PLAN_PRICES, type PlanInterval } from "../plan";
+import { FRESH_START_PRICE, INTRO_PRICES, introEndsAt, NAME_ALLOWANCES, PLAN_PRICES, type PlanInterval } from "../plan";
 import {
   cancelSubscription,
   checkoutSubscription,
   createCheckout,
   createCustomer,
   createFreshStartCheckout,
+  createNameCheckout,
   createPortal,
   expireOpenCheckouts,
   getCheckoutSession,
@@ -32,6 +33,8 @@ import {
   isRunning,
   priceByLookupKey,
   paidFreshStart,
+  paidNameAllowance,
+  planCentsOf,
   portalConfigurationFor,
   pricesByLookupKey,
   refundPayment,
@@ -122,7 +125,7 @@ export async function checkoutUrl(
   startNowAt: number,
   onReturn: { wantedName?: string | null; then?: string | null } = {},
 ): Promise<string> {
-  const lookupKey = (now() < introEndsAt(viewer.createdAt) + INTRO_GRACE_SECONDS ? INTRO_PRICES : PLAN_PRICES)[interval].lookupKey;
+  const lookupKey = planLookupKey(viewer, interval);
   const prices = await pricesByLookupKey(client(), [lookupKey]);
   const priceId = prices.get(lookupKey);
   if (!priceId) throw new Error(`no active Stripe price has the lookup key ${lookupKey}`);
@@ -136,6 +139,78 @@ export async function checkoutUrl(
     await expireOpenCheckouts(client(), customerId);
     await attempt.holding();
     return createCheckout(client(), { customerId, priceId, userId: viewer.id, origin, startNowAt, attempt: attempt.id, ...onReturn });
+  });
+}
+
+/** The plan's price for the member now: a new member's within INTRO_HOURS of joining, and a little past. */
+function planLookupKey(viewer: AccountRecord, interval: PlanInterval): string {
+  return (now() < introEndsAt(viewer.createdAt) + INTRO_GRACE_SECONDS ? INTRO_PRICES : PLAN_PRICES)[interval].lookupKey;
+}
+
+/** The member has a short username already as short as the one asked for. */
+export class AlreadyHasName extends Error {}
+
+/**
+ * Stripe's checkout page for a short username, bought once for good, to
+ * take `wantedName`: alone, or with the plan billed by `interval`, for a
+ * member without one, at a new member's price while it lasts. Any checkout
+ * left open is closed first, and it holds the plan's checkout claim, so
+ * two tabs cannot buy two plans.
+ */
+export async function nameCheckoutUrl(
+  viewer: AccountRecord,
+  input: { length: number; wantedName: string; interval: PlanInterval | null; origin: string; startNowAt: number; then?: string | null },
+): Promise<string> {
+  const allowance = NAME_ALLOWANCES[input.length];
+  if (!allowance) throw new Error(`no short username of ${input.length} characters is sold`);
+  if (viewer.nameAllowance !== null && viewer.nameAllowance <= input.length) throw new AlreadyHasName("bought already");
+  const name = await priceByLookupKey(client(), allowance.lookupKey);
+  if (!name) throw new Error(`no active Stripe price has the lookup key ${allowance.lookupKey}`);
+  const planKey = input.interval ? planLookupKey(viewer, input.interval) : null;
+  const planPriceId = planKey ? (await pricesByLookupKey(client(), [planKey])).get(planKey) : null;
+  if (planKey && !planPriceId) throw new Error(`no active Stripe price has the lookup key ${planKey}`);
+  const customerId = await customerFor(viewer);
+  return holdingCheckout(viewer.id, "plan", async (attempt) => {
+    if (planKey) {
+      const running = await runningSubscriptions(client(), customerId);
+      if (running.length > 0) {
+        for (const subscription of running) await applySubscription(env.DB, subscription, { eventAt: now(), now: now() });
+        throw new AlreadySubscribed("this member already has a subscription");
+      }
+    }
+    await expireOpenCheckouts(client(), customerId);
+    await attempt.holding();
+    return createNameCheckout(client(), {
+      customerId,
+      namePriceId: name.id,
+      nameCents: name.unitAmount ?? allowance.cents,
+      length: input.length,
+      planPriceId: planPriceId ?? null,
+      userId: viewer.id,
+      origin: input.origin,
+      startNowAt: input.startNowAt,
+      wantedName: input.wantedName,
+      attempt: attempt.id,
+      then: input.then,
+    });
+  });
+}
+
+/**
+ * Gives the member the short username a paid checkout bought, whether the
+ * member lands back here or Stripe's webhook comes first. Whether one was.
+ */
+async function settleNameAllowance(session: StripeCheckoutSession): Promise<boolean> {
+  const bought = paidNameAllowance(session);
+  if (!bought) return false;
+  return grantNameAllowance(env.DB, {
+    userId: bought.userId,
+    length: bought.length,
+    sessionId: session.id,
+    cents: bought.cents,
+    currency: session.currency ?? "usd",
+    paidAt: now(),
+    paymentIntent: session.payment_intent ?? null,
   });
 }
 
@@ -220,18 +295,24 @@ export async function portalUrl(viewer: AccountRecord, origin: string): Promise<
 }
 
 /**
- * Applies the subscription a finished checkout made, so the plan is on when
- * the fan lands back here, whether or not Stripe's webhook came first.
+ * Applies what a finished checkout bought, so it is on when the member
+ * lands back here, whether or not Stripe's webhook came first: the
+ * subscription it made, and a short username paid for with or without it.
  * Only the account that started the checkout can finish it. With it come
  * what the checkout carried for the return: a short name and where to go.
  */
 export async function finishCheckout(
   viewer: AccountRecord,
   sessionId: string,
-): Promise<{ applied: boolean; wantedName: string | null; then: string | null }> {
-  const { userId, subscription, wantedName, then } = await checkoutSubscription(client(), sessionId);
-  if (userId !== viewer.id || !subscription) return { applied: false, wantedName: null, then: null };
-  return { applied: await applySubscription(env.DB, subscription, { eventAt: now(), now: now() }), wantedName, then };
+): Promise<{ applied: boolean; plan: boolean; name: boolean; wantedName: string | null; then: string | null }> {
+  const { userId, subscription, wantedName, then, session } = await checkoutSubscription(client(), sessionId);
+  const none = { applied: false, plan: false, name: false, wantedName: null, then: null };
+  if (userId !== viewer.id) return none;
+  const name = paidNameAllowance(session) !== null && (await settleNameAllowance(session));
+  const plan = subscription ? await applySubscription(env.DB, subscription, { eventAt: now(), now: now() }) : false;
+  // A checkout that bought the name with the plan waits for both.
+  const applied = subscription ? plan && (name || paidNameAllowance(session) === null) : name;
+  return applied ? { applied, plan, name, wantedName, then } : none;
 }
 
 /**
@@ -297,10 +378,13 @@ const SUBSCRIPTION_EVENTS = new Set([
  * Records a paid invoice of a member's plan, before tax. Only a
  * subscription's invoice is the plan's: a fresh start's checkout makes a
  * one-time invoice too, which the fund counts by its checkout, never as
- * plan revenue a partner shares. One that paid nothing is left out.
+ * plan revenue a partner shares, and a short username bought with the plan
+ * is on its first invoice, which counts its subscription lines alone. One
+ * that paid nothing for the plan is left out.
  */
 async function recordInvoice(invoice: StripeInvoice): Promise<void> {
-  if (invoice.amount_paid <= 0 || !invoiceSubscription(invoice)) return;
+  const planCents = planCentsOf(invoice);
+  if (invoice.amount_paid <= 0 || planCents <= 0 || !invoiceSubscription(invoice)) return;
   const member = await env.DB.prepare(`SELECT user_id FROM subscriptions WHERE customer_id = ?1`)
     .bind(invoice.customer)
     .first<{ user_id: string }>();
@@ -312,7 +396,7 @@ async function recordInvoice(invoice: StripeInvoice): Promise<void> {
     id: invoice.id,
     userId: member.user_id,
     kind: "plan",
-    amountCents: invoice.total_excluding_tax ?? invoice.subtotal,
+    amountCents: planCents,
     currency: invoice.currency,
     paidAt: invoice.status_transitions?.paid_at ?? now(),
   });
@@ -340,9 +424,9 @@ async function recordChargeRefund(charge: StripeCharge): Promise<void> {
 /**
  * Stripe's webhook: every change to a subscription carries the whole
  * subscription, which is applied as Stripe's word on it, and a completed
- * checkout for a fresh start applies it. Answers 400 to an unsigned or
- * wrongly signed request, and 200 to anything else, so Stripe stops
- * retrying events the board has no use for.
+ * checkout for a fresh start or a short username applies it. Answers 400
+ * to an unsigned or wrongly signed request, and 200 to anything else, so
+ * Stripe stops retrying events the board has no use for.
  */
 export async function handleWebhook(request: Request): Promise<Response> {
   // Read only so far before the signature is checked; Stripe's events are a few kilobytes.
@@ -366,6 +450,7 @@ export async function handleWebhook(request: Request): Promise<Response> {
     const session = event.data.object as StripeCheckoutSession;
     const userId = paidFreshStart(session);
     if (userId) await settleFreshStart(session, userId);
+    await settleNameAllowance(session);
   }
   // A plan's payment, recorded for partners' shares.
   if (event.type === "invoice.paid") await recordInvoice(event.data.object as StripeInvoice);

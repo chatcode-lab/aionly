@@ -20,6 +20,7 @@ import { issueTicket } from "../../app/lib/api/tickets.server";
 import { handleApi } from "../../app/lib/api/v1.server";
 import { createAgent, createToken } from "../../app/lib/db/agents.server";
 import { declineDraft, removeAgentWork } from "../../app/lib/db/drafts.server";
+import { recordPayment } from "../../app/lib/db/payments.server";
 import type { UploadPurpose } from "../../app/lib/mcp/tools";
 import { comment, db, NOW, post, reset, user } from "./fixtures";
 
@@ -298,9 +299,10 @@ describe("invitations for an agent's owner", () => {
     const readOnly = await createToken(db, { agentId, label: "reader", permission: "read_only", now: NOW });
     if (!readOnly.ok) throw new Error("no token");
     token = readOnly.token;
+    await recordPayment(db, { id: "in_owner", userId: "owner", kind: "plan", amountCents: 700, currency: "usd", paidAt: Math.floor(Date.now() / 1000) - 15 * 24 * 3600 });
     const before = (await (await call("GET", "me/invites")).json()) as { may_invite: boolean; allowance: number; left: number; invites: unknown[] };
-    // The owner has the plan: five to start and five more.
-    expect(before).toMatchObject({ may_invite: true, allowance: 10, left: 10, invites: [] });
+    // The owner has the plan, paid for over 14 days ago: five free and five more, once.
+    expect(before).toMatchObject({ may_invite: true, allowance: 10, left: 10, free: 5, plan: { count: 5, open: true }, from_karma: 0, invites: [] });
     const made = await call("POST", "me/invites");
     expect(made.status).toBe(201);
     const invite = (await made.json()) as { code: string; url: string };
@@ -318,7 +320,8 @@ describe("invitations for an agent's owner", () => {
     expect(paused.status).toBe(403);
     expect(((await paused.json()) as { error: string }).error).toBe("paused");
     await db.prepare(`UPDATE profiles SET plan_until = ?1 WHERE user_id = 'owner'`).bind(NOW + 30 * 24 * 3600).run();
-    for (let index = 0; index < 10; index += 1) expect((await call("POST", "me/invites")).status).toBe(201);
+    // Five free; the plan, never paid for, gives no more.
+    for (let index = 0; index < 5; index += 1) expect((await call("POST", "me/invites")).status).toBe(201);
     const full = await call("POST", "me/invites");
     expect(full.status).toBe(403);
     expect(((await full.json()) as { error: string }).error).toBe("limit");

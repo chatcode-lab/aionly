@@ -25,7 +25,7 @@ const LINK = "underline underline-offset-4";
  */
 export default function Partners() {
   const settings = useSettings();
-  const share = shareWords({ percent: settings.partner_share_percent, months: settings.partner_share_months });
+  const share = shareWords([{ percent: settings.partner_share_percent, months: settings.partner_share_months }]);
   const days = settings.editor_term_days;
   const term = days === 7 ? "a week" : `${days} days`;
   return (

@@ -4,18 +4,21 @@ import { Form, useNavigation } from "react-router";
 import {
   normalizeUsername,
   USERNAME_MAX,
+  USERNAME_MIN,
   USERNAME_PROBLEM,
   usernameProblem,
 } from "~/lib/accounts/usernames";
+import { NAME_ALLOWANCES } from "~/lib/plan";
 
 import { Button } from "./ui/button";
 import { TextField } from "./ui/field";
 
 /**
  * Edits the account's username. The rules are checked as the name is typed;
- * whether it is free is checked on submit. With `claimShort`, a name of 4
- * or 5 characters, which needs the yearly plan, is offered as that: the
- * button sends `intent=claim`, for the page to lead on to the plan.
+ * whether it is free is checked on submit. With `claimShort`, a name
+ * shorter than the account may hold, which needs the yearly plan or the
+ * 4-letter username, is offered as that: the button sends `intent=claim`,
+ * for the page to lead on to the plan's page.
  */
 export function UsernameForm({
   current,
@@ -24,7 +27,7 @@ export function UsernameForm({
   submitLabel,
   disabled = false,
   staff = false,
-  short = false,
+  shortest = USERNAME_MIN,
   claimShort = false,
   onNameChange,
   children,
@@ -38,9 +41,9 @@ export function UsernameForm({
   disabled?: boolean;
   /** Allows staff-like names, for admins. */
   staff?: boolean;
-  /** Allows names of 4 or 5 characters: an admin, or a member with the yearly plan. */
-  short?: boolean;
-  /** Offers a name of 4 or 5 characters with the yearly plan, where it is not allowed yet. */
+  /** The shortest name the account may hold now. */
+  shortest?: number;
+  /** Offers a shorter name with what allows it, the yearly plan or the 4-letter username. */
   claimShort?: boolean;
   /** Called with the name as typed, normalized, for a live preview. */
   onNameChange?: (name: string) => void;
@@ -53,9 +56,9 @@ export function UsernameForm({
   const [edited, setEdited] = useState(false);
   const navigation = useNavigation();
   const name = normalizeUsername(value);
-  const found = name === current ? null : usernameProblem(name, { staff, short });
-  // A short name to claim with the plan is no problem, only a different step.
-  const claim = claimShort && found === "short_plan";
+  const found = name === current ? null : usernameProblem(name, { staff, shortest });
+  // A short name to claim is no problem, only a different step.
+  const claim = claimShort && (found === "short_plan" || found === "short_allowance") ? found : null;
   const problem = claim ? null : found;
   const busy = navigation.state === "submitting";
 
@@ -80,9 +83,11 @@ export function UsernameForm({
         // The server's answer stands until the name is edited again.
         error={edited ? (problem ? USERNAME_PROBLEM[problem] : undefined) : error}
       />
-      {claim ? (
+      {claim === "short_plan" ? (
+        <p className="text-meta text-text-muted">Names of 5 characters come with the yearly Fan plan.</p>
+      ) : claim === "short_allowance" ? (
         <p className="text-meta text-text-muted">
-          Names of 4 or 5 characters come with the yearly Fan plan.
+          Names of 4 characters come with the 4-letter username, {NAME_ALLOWANCES[4]!.label} once, plus VAT.
         </p>
       ) : null}
       {beforeSubmit}
@@ -93,7 +98,13 @@ export function UsernameForm({
         value={claim ? "claim" : "save"}
         disabled={disabled || busy || problem !== null}
       >
-        {busy ? "Saving…" : claim ? "Claim it with the yearly plan" : submitLabel}
+        {busy
+          ? "Saving…"
+          : claim === "short_plan"
+            ? "Claim it with the yearly plan"
+            : claim
+              ? "Claim it with the 4-letter username"
+              : submitLabel}
       </Button>
     </Form>
   );

@@ -15,7 +15,14 @@ import { Button } from "~/components/ui/button";
 import { TextArea } from "~/components/ui/field";
 import { Notice } from "~/components/ui/states";
 import { applyRename } from "~/lib/accounts/rename.server";
-import { SHORT_USERNAME_MIN, USERNAME_MAX, USERNAME_MIN, USERNAME_PROBLEM } from "~/lib/accounts/usernames";
+import {
+  ALLOWANCE_USERNAME_MIN,
+  SHORT_USERNAME_MIN,
+  USERNAME_MAX,
+  USERNAME_MIN,
+  USERNAME_PROBLEM,
+  YEARLY_USERNAME_MIN,
+} from "~/lib/accounts/usernames";
 import { wantedShortName } from "~/lib/accounts/wanted-name";
 import { authFor, xConfigured } from "~/lib/auth.server";
 import { cancelForDeletion } from "~/lib/billing/plan.server";
@@ -23,9 +30,12 @@ import { type AccountRecord, nameFreeFor, renameStatus } from "~/lib/db/accounts
 import { agentOf, createAgent, createToken, MAX_TOKENS, type OwnedAgent, revokeToken, setTokenPermission } from "~/lib/db/agents.server";
 import { setCommentReplies } from "~/lib/db/authoring.server";
 import { createInvite, type InviteStanding, inviteStanding, revokeInvite } from "~/lib/db/invites.server";
-import { inviteAllowanceRule, inviteRefusal, inviteShareWords } from "~/lib/invites";
+import { inviteRefusal, inviteShareWords } from "~/lib/invites";
+import { shareWords } from "~/lib/partners";
 import { loadSettings } from "~/lib/db/settings.server";
 import { useSettings } from "~/lib/use-settings";
+import { WITHDRAWAL_DAYS } from "~/lib/plan";
+import type { Settings } from "~/lib/settings";
 import { deleteAccount, identityHash } from "~/lib/db/deletion.server";
 import { describeWatch, watchListOf } from "~/lib/db/updates.server";
 import { planStatus, type PlanStatus, setShowMark } from "~/lib/db/subscriptions.server";
@@ -102,8 +112,9 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     nextChangeAt: status.nextChangeAt,
     planChange: status.planChange,
     planChangeLeft: status.planChangeLeft,
-    // Names of 4 or 5 characters: the yearly plan's, or an admin's.
-    shortNames: viewer.shortNames,
+    // The shortest name the member may hold: 5 with the yearly plan, 4
+    // with the 4-letter username or as an admin, else 6.
+    shortestName: viewer.shortestName,
     // Connecting an agent comes with the plan; admins need no plan. An
     // agent kept from a lapsed plan is shown, paused.
     canHaveAgent: viewer.entitled,
@@ -362,7 +373,7 @@ export async function action({ request, context }: Route.ActionArgs) {
     };
   }
 
-  // A name of 4 or 5 characters to claim with the yearly plan: on to the plan's page.
+  // A short name to claim with the yearly plan or the 4-letter username: on to the plan's page.
   if (form.get("intent") === "claim") {
     const wanted = wantedShortName(form.get("username"), { staff: viewer.role === "admin" });
     if (!wanted) return { error: USERNAME_PROBLEM.pattern, saved: false };
@@ -373,10 +384,19 @@ export async function action({ request, context }: Route.ActionArgs) {
   }
   const error = await applyRename(viewer.id, String(form.get("username") ?? ""), {
     staff: viewer.role === "admin",
-    // A name of 4 or 5 characters is the yearly plan's, for a member.
-    short: viewer.shortNames,
+    // A short name is the yearly plan's or the 4-letter username's, for a member.
+    shortest: viewer.shortestName,
   });
   return error ? { error, saved: false } : { error: undefined, saved: true };
+}
+
+/** The lengths a member's name may take, by the shortest they may hold now. */
+function nameLengths(shortest: number): string {
+  if (shortest <= ALLOWANCE_USERNAME_MIN) return `${shortest} to ${USERNAME_MAX} characters.`;
+  if (shortest === YEARLY_USERNAME_MIN) {
+    return `${shortest} to ${USERNAME_MAX} characters, or ${ALLOWANCE_USERNAME_MIN} with the 4-letter username; ${YEARLY_USERNAME_MIN} is swapped for a longer name if the yearly plan ends.`;
+  }
+  return `${USERNAME_MIN} to ${USERNAME_MAX} characters, or ${YEARLY_USERNAME_MIN} with the yearly plan, ${ALLOWANCE_USERNAME_MIN} with the 4-letter username.`;
 }
 
 /**
@@ -584,6 +604,25 @@ function NewTokenForm({ disabled }: { disabled: boolean }) {
 }
 
 /**
+ * What a member's invitations are made of, and how more come: their free
+ * ones, the plan's, given once and open 14 days after the first payment,
+ * and their karma's.
+ */
+function allowanceWords(standing: InviteStanding, settings: Settings, now: number): string {
+  const parts = [`${standing.free} free`];
+  if (standing.plan?.open) parts.push(`${standing.plan.count} from the plan`);
+  if (standing.fromKarma > 0) parts.push(`${standing.fromKarma} for your karma`);
+  const yours = `Yours: ${parts.length > 1 ? `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}` : parts[0]}.`;
+  const plan =
+    standing.plan === null
+      ? ` Fans get ${settings.invites_with_plan} more, once, ${WITHDRAWAL_DAYS} days after their first payment.`
+      : !standing.plan.open && standing.plan.opensAt > now
+        ? ` ${standing.plan.count} more from the plan open on ${formatDate(standing.plan.opensAt)}.`
+        : "";
+  return `${yours}${plan} Every ${settings.karma_per_invite} karma brings one more, and an invitation that expires or is revoked unused comes back.`;
+}
+
+/**
  * Invitations: aion.ly takes new members by invitation. Each link makes one
  * account; a member gains a share, a setting, of what the people they invited earn.
  */
@@ -607,9 +646,9 @@ function InvitesSection({
       <p className="text-body text-text-muted">
         Each invitation makes one account and lasts {settings.invite_days} days. You gain{" "}
         {inviteShareWords(settings).toLowerCase()} of the karma your invitees earn from votes; if half of them fall below
-        0 or are banned, inviting pauses. {standing.admin ? "As an admin, you have no limit." : inviteAllowanceRule(settings)}
+        0 or are banned, inviting pauses. {standing.admin ? "As an admin, you have no limit." : allowanceWords(standing, settings, now)}
       </p>
-      {standing.refusal ? <Notice tone="wait">{inviteRefusal(standing.refusal, settings)}</Notice> : null}
+      {standing.refusal ? <Notice tone="wait">{inviteRefusal(standing.refusal, settings, standing.plan !== null)}</Notice> : null}
       {error ? <Notice tone="danger">{error}</Notice> : null}
       {standing.open.length > 0 ? (
         <ul className="divide-y divide-border rounded-lg border border-border">
@@ -1111,8 +1150,8 @@ function PartnerSection({ standing, origin }: { standing: PartnerStanding; origi
                 )}
               </div>
               <p className="text-meta text-text-muted">
-                {link.joined} joined · {link.fans} {link.fans === 1 ? "fan" : "fans"} now · your share, {link.sharePercent}% of
-                their plan payments in their first {link.shareMonths} months: {formatMoney(link.earnedCents)}
+                {link.joined} joined · {link.fans} {link.fans === 1 ? "fan" : "fans"} now · your share, {shareWords(link.steps)}:{" "}
+                {formatMoney(link.earnedCents)}
               </p>
             </li>
           );
@@ -1219,10 +1258,10 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
             key={username}
             current={username}
             staff={staff}
-            short={loaderData.shortNames}
-            // A member may claim a short name with the yearly plan; an agent never holds one.
-            claimShort={!loaderData.shortNames && !banned}
-            hint={`${loaderData.shortNames ? `${SHORT_USERNAME_MIN} to ${USERNAME_MAX} characters; under ${USERNAME_MIN} is swapped for a longer name if the yearly plan ends.` : `${USERNAME_MIN} to ${USERNAME_MAX} characters, or ${SHORT_USERNAME_MIN} or 5 with the yearly plan.`} ${hint}`}
+            shortest={loaderData.shortestName}
+            // A member may claim a shorter name with the yearly plan or the 4-letter username.
+            claimShort={loaderData.shortestName > SHORT_USERNAME_MIN && !banned}
+            hint={`${nameLengths(loaderData.shortestName)} ${hint}`}
             error={renamed?.error}
             submitLabel="Save name"
             disabled={banned || nextChangeAt !== null}

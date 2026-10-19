@@ -6,7 +6,7 @@ import { Avatar } from "~/components/avatar";
 import { Button } from "~/components/ui/button";
 import { UsernameForm } from "~/components/username-form";
 import { applyRename } from "~/lib/accounts/rename.server";
-import { USERNAME_MAX, USERNAME_MIN, USERNAME_PROBLEM, usernameProblem } from "~/lib/accounts/usernames";
+import { SHORT_USERNAME_MIN, USERNAME_MAX, USERNAME_MIN, USERNAME_PROBLEM, usernameProblem } from "~/lib/accounts/usernames";
 import { wantedShortName } from "~/lib/accounts/wanted-name";
 import { type AccountRecord, nameFreeFor, renameStatus } from "~/lib/db/accounts.server";
 import { safeReturnPath } from "~/lib/security/request";
@@ -42,7 +42,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     id: viewer.id,
     username: viewer.username,
     canRename: status.nextChangeAt === null && !viewer.ban,
-    shortNames: viewer.shortNames,
+    shortestName: viewer.shortestName,
     next,
     onward: onward(viewer, next),
   };
@@ -60,7 +60,7 @@ export async function action({ request, context }: Route.ActionArgs) {
     sendOffersSoon(viewer.id, url.origin);
   };
 
-  // A name of 4 or 5 characters: claimed with the yearly plan, on its page.
+  // A short name: claimed with the yearly plan or the 4-letter username, on the plan's page.
   if (form.get("intent") === "claim") {
     const wanted = wantedShortName(form.get("username"), { staff: viewer.role === "admin" });
     if (!wanted) return { error: USERNAME_PROBLEM.pattern };
@@ -70,7 +70,7 @@ export async function action({ request, context }: Route.ActionArgs) {
   }
   const error = await applyRename(viewer.id, String(form.get("username") ?? ""), {
     staff: viewer.role === "admin",
-    short: viewer.shortNames,
+    shortest: viewer.shortestName,
   });
   if (error) return { error };
   await welcomed();
@@ -88,7 +88,7 @@ export default function Welcome({ loaderData, actionData }: Route.ComponentProps
   const [typed, setTyped] = useState(loaderData.username);
   // The preview follows the name as typed, while it is a valid one, a
   // short one to claim included.
-  const shown = usernameProblem(typed, { staff, short: true }) ? loaderData.username : typed;
+  const shown = usernameProblem(typed, { staff, shortest: SHORT_USERNAME_MIN }) ? loaderData.username : typed;
   return (
     <main className="mx-auto max-w-md space-y-6 px-(--gutter) py-10">
       <h1 className="text-display font-semibold">This is how you&apos;ll appear</h1>
@@ -100,11 +100,11 @@ export default function Welcome({ loaderData, actionData }: Route.ComponentProps
         <UsernameForm
           current={loaderData.username}
           staff={staff}
-          hint={`${USERNAME_MIN} to ${USERNAME_MAX} of a–z, 0–9, and _ (4 or 5 with the yearly plan). Free to change now, then once every ${settings.rename_interval_days} days.`}
+          hint={`${USERNAME_MIN} to ${USERNAME_MAX} of a–z, 0–9, and _ (5 with the yearly plan, 4 with the 4-letter username). Free to change now, then once every ${settings.rename_interval_days} days.`}
           error={actionData?.error}
           submitLabel="Continue"
-          short={loaderData.shortNames}
-          claimShort={!loaderData.shortNames}
+          shortest={loaderData.shortestName}
+          claimShort={loaderData.shortestName > SHORT_USERNAME_MIN}
           onNameChange={setTyped}
           beforeSubmit={
             <p className="text-meta text-text-muted">

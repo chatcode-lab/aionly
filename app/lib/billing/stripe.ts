@@ -212,7 +212,81 @@ export async function createFreshStartCheckout(
   return session.url;
 }
 
-/** A finished checkout session, as the fresh start reads it. */
+/** What a checkout for a short username carries in its metadata. */
+const NAME_ALLOWANCE_KIND = "name_allowance";
+
+/**
+ * A hosted checkout for a username shorter than the plan allows, bought
+ * once (see NAME_ALLOWANCES): alone, as one payment, or with the plan, as
+ * the plan's checkout with the name's price on its first invoice. The
+ * member asked for the name at once, which ends the right of withdrawal
+ * for it once it is theirs; the time is kept with the payment. Promotion
+ * codes are left out, so the name's part is its price exactly.
+ */
+export async function createNameCheckout(
+  client: StripeClient,
+  input: {
+    customerId: string;
+    /** The name's price, and its amount before tax, in cents. */
+    namePriceId: string;
+    nameCents: number;
+    /** The shortest name it allows. */
+    length: number;
+    /** The plan's price, to subscribe at the same time, or null. */
+    planPriceId: string | null;
+    userId: string;
+    origin: string;
+    startNowAt: number;
+    wantedName: string;
+    attempt?: string;
+    then?: string | null;
+  },
+): Promise<string> {
+  const metadata = { user_id: input.userId, start_now_requested_at: String(input.startNowAt) };
+  const name = {
+    kind: NAME_ALLOWANCE_KIND,
+    name_length: String(input.length),
+    name_cents: String(input.nameCents),
+    wanted_name: input.wantedName,
+    ...(input.then ? { then: input.then } : {}),
+  };
+  const common = {
+    customer: input.customerId,
+    client_reference_id: input.userId,
+    automatic_tax: { enabled: true },
+    customer_update: { address: "auto", name: "auto" },
+    tax_id_collection: { enabled: true },
+    billing_address_collection: "auto",
+    metadata: { ...metadata, ...name },
+    success_url: `${input.origin}/fan/done?session={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${input.origin}/fan?${new URLSearchParams({ name: input.wantedName })}`,
+  };
+  const session = await client.request<{ url: string }>(
+    "POST",
+    "/checkout/sessions",
+    input.planPriceId
+      ? {
+          ...common,
+          mode: "subscription",
+          line_items: [
+            { price: input.planPriceId, quantity: 1 },
+            { price: input.namePriceId, quantity: 1 },
+          ],
+          subscription_data: { metadata },
+        }
+      : {
+          ...common,
+          mode: "payment",
+          line_items: [{ price: input.namePriceId, quantity: 1 }],
+          invoice_creation: { enabled: true },
+          payment_intent_data: { metadata: { ...metadata, kind: NAME_ALLOWANCE_KIND } },
+        },
+    input.attempt ? `name-${input.attempt}` : undefined,
+  );
+  return session.url;
+}
+
+/** A finished checkout session, as the board reads it. */
 export interface StripeCheckoutSession {
   id: string;
   object: "checkout.session";
@@ -224,6 +298,24 @@ export interface StripeCheckoutSession {
   /** Before tax, in the currency's smallest unit. */
   amount_subtotal?: number | null;
   currency?: string | null;
+  /** The subscription it made, when expanded. */
+  subscription?: StripeSubscription | string | null;
+}
+
+/**
+ * Whether a session paid for a short username, and for whom, with the
+ * shortest name it allows and its amount before tax: alone or with the
+ * plan, once its payment has gone through.
+ */
+export function paidNameAllowance(
+  session: StripeCheckoutSession,
+): { userId: string; length: number; cents: number; wantedName: string | null } | null {
+  if (session.metadata?.kind !== NAME_ALLOWANCE_KIND || session.payment_status !== "paid") return null;
+  const userId = session.client_reference_id ?? session.metadata?.user_id ?? null;
+  const length = Number(session.metadata?.name_length);
+  const cents = Number(session.metadata?.name_cents);
+  if (!userId || !Number.isInteger(length) || !Number.isInteger(cents)) return null;
+  return { userId, length, cents, wantedName: session.metadata?.wanted_name ?? null };
 }
 
 /** A paid invoice, as the board records it: a plan's payment. */
@@ -241,6 +333,33 @@ export interface StripeInvoice {
   parent?: { subscription_details?: { subscription?: string | null } | null } | null;
   /** The same, before that version. */
   subscription?: string | null;
+  /** Its lines, the first page of them: a combined checkout's first invoice has the plan's and the name's. */
+  lines?: {
+    has_more?: boolean;
+    data: Array<{
+      /** Before tax and discounts. */
+      amount: number;
+      discount_amounts?: Array<{ amount: number }> | null;
+      parent?: { type?: string | null } | null;
+    }>;
+  } | null;
+}
+
+/**
+ * The plan's part of a paid invoice, before tax, after discounts: its
+ * subscription lines. A one-time price billed with the plan, such as the
+ * 4-letter username, is left out, so partners share the plan alone. An
+ * invoice without its lines counts whole.
+ */
+export function planCentsOf(invoice: StripeInvoice): number {
+  const whole = invoice.total_excluding_tax ?? invoice.subtotal;
+  const lines = invoice.lines?.data;
+  if (!lines || lines.length === 0) return whole;
+  const net = (line: (typeof lines)[number]) => line.amount - (line.discount_amounts ?? []).reduce((sum, discount) => sum + discount.amount, 0);
+  const other = lines.filter((line) => line.parent?.type !== "subscription_item_details").reduce((sum, line) => sum + net(line), 0);
+  // Past the first page, the whole less what is known not to be the plan's.
+  if (invoice.lines?.has_more) return whole - other;
+  return lines.filter((line) => line.parent?.type === "subscription_item_details").reduce((sum, line) => sum + net(line), 0);
 }
 
 /** The subscription an invoice bills, or null for a one-time invoice such as a fresh start's. */
@@ -270,8 +389,8 @@ export async function invoiceOfPaymentIntent(client: StripeClient, paymentIntent
   return data[0]?.invoice ?? null;
 }
 
-export function getCheckoutSession(client: StripeClient, id: string): Promise<StripeCheckoutSession> {
-  return client.request<StripeCheckoutSession>("GET", `/checkout/sessions/${encodeURIComponent(id)}`);
+export function getCheckoutSession(client: StripeClient, id: string, expand: string[] = []): Promise<StripeCheckoutSession> {
+  return client.request<StripeCheckoutSession>("GET", `/checkout/sessions/${encodeURIComponent(id)}`, expand.length > 0 ? { expand } : {});
 }
 
 /** Whether a session is a fresh start that has been paid for, and by whom. */
@@ -317,19 +436,21 @@ export async function checkoutSubscription(
   /** What the checkout carried for the return: a short name asked for, and where to go. */
   wantedName: string | null;
   then: string | null;
+  /** The session itself, for a short username it paid for. */
+  session: StripeCheckoutSession;
 }> {
-  const session = await client.request<{
-    client_reference_id: string | null;
-    customer: string | null;
-    subscription: StripeSubscription | null;
-    metadata?: Record<string, string> | null;
-  }>("GET", `/checkout/sessions/${encodeURIComponent(sessionId)}`, { expand: ["subscription"] });
+  const session = await client.request<StripeCheckoutSession & { customer: string | null; subscription: StripeSubscription | null }>(
+    "GET",
+    `/checkout/sessions/${encodeURIComponent(sessionId)}`,
+    { expand: ["subscription"] },
+  );
   return {
     userId: session.client_reference_id,
     customerId: session.customer,
     subscription: session.subscription,
     wantedName: session.metadata?.wanted_name ?? null,
     then: session.metadata?.then ?? null,
+    session,
   };
 }
 

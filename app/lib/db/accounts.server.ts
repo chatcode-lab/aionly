@@ -1,7 +1,8 @@
-import { generateUsername, USERNAME_MIN } from "../accounts/usernames";
+import { generateUsername, SHORT_USERNAME_MIN, USERNAME_MIN, YEARLY_USERNAME_MIN } from "../accounts/usernames";
 import type { Restriction } from "../public-types";
 import type { CommentReplies } from "../replies";
 import { NEW_MENTIONS_MAX } from "../text/mentions";
+import { paymentStatements } from "./payments.server";
 import { settingSql } from "./setting-sql.server";
 
 const DAY = 24 * 3600;
@@ -81,8 +82,14 @@ export interface AccountRecord {
   planUntil: number | null;
   /** The account's own plan is in force. */
   fan: boolean;
-  /** Names of 4 or 5 characters are open to it: an admin, or a member with the yearly plan in force. */
-  shortNames: boolean;
+  /**
+   * The shortest name it may hold now: 4 for an admin and the board's own
+   * agent, 4 with the 4-letter username, 5 with the yearly plan in force,
+   * else 6. See shortestNameSql, which the write checks.
+   */
+  shortestName: number;
+  /** The shortest name the 4-letter username, bought once, allows, or null. */
+  nameAllowance: number | null;
   /**
    * The account may use the plan's features: an admin, a fan, or the
    * agent of either. Admins need no plan.
@@ -133,7 +140,7 @@ export async function accountRecord(
               profile.created_at, profile.banned_at, profile.banned_until,
               profile.ban_reason, profile.deleted_at, profile.owner_id,
               profile.limits, profile.plan_until, profile.show_mark, profile.digest, profile.reply_policy,
-              profile.karma_floor, username.name, profile.mentions_seen_seq,
+              profile.karma_floor, username.name, profile.mentions_seen_seq, profile.name_allowance,
               COALESCE(profile.karma_floor, ${settingSql("karma_floor")}) AS floor_in_force,
               -- Mentions of the member or their agent since they last looked, up to 99.
               (SELECT COUNT(*) FROM (
@@ -177,6 +184,7 @@ export async function accountRecord(
       karma_floor: number | null;
       name: string;
       mentions_seen_seq: number;
+      name_allowance: number | null;
       new_mentions: number;
       invite_pending: number;
       owner_banned_at: number | null;
@@ -222,7 +230,12 @@ export async function accountRecord(
     limits: parseLimits(row.limits),
     planUntil: row.plan_until,
     fan,
-    shortNames: !row.owner_id && (row.role === "admin" || (fan && row.plan_interval === "year")),
+    shortestName: exempt
+      ? SHORT_USERNAME_MIN
+      : row.owner_id
+        ? USERNAME_MIN
+        : Math.min(row.name_allowance ?? USERNAME_MIN, fan && row.plan_interval === "year" ? YEARLY_USERNAME_MIN : USERNAME_MIN),
+    nameAllowance: row.name_allowance,
     entitled,
     showMark: row.show_mark === 1,
     digest: row.digest,
@@ -391,8 +404,8 @@ export async function renameUser(
     (SELECT COUNT(*) FROM usernames WHERE user_id = ?1 AND given = 0) <= 1
     OR (SELECT MAX(created_at) FROM usernames WHERE user_id = ?1 AND given = 0) <= ${at} - ${settingSql("rename_interval_days")} * ${DAY}
   )`;
-  // A short name needs the yearly plan as the write lands.
-  const shortRule = short ? ` AND ${shortNameAllowed("?1", String(at))}` : "";
+  // A short name needs what allows it as the write lands.
+  const shortRule = short ? ` AND length(?2) >= ${shortestNameSql("?1", String(at))}` : "";
   // Otherwise the plan's early change, which the batch's first statement
   // marks used for this very name (?2), now.
   const allowed = `(${due} OR EXISTS (SELECT 1 FROM profiles WHERE user_id = ?1 AND plan_rename_at = ${at} AND plan_rename = ?2))${shortRule}`;
@@ -403,10 +416,11 @@ export async function renameUser(
          AND ${participantCondition(1, now)}`,
     )
     .bind(userId, name, at);
-  const refused = async (): Promise<RenameResult> =>
-    short && !(await db.prepare(`SELECT ${shortNameAllowed("?1", "?2")} AS may`).bind(userId, now).first<{ may: number }>())?.may
-      ? { ok: false, reason: "plan" }
-      : { ok: false, reason: "too_soon" };
+  const refused = async (): Promise<RenameResult> => {
+    if (!short) return { ok: false, reason: "too_soon" };
+    const allowed = await db.prepare(`SELECT ${shortestNameSql("?1", "?2")} AS shortest`).bind(userId, at).first<{ shortest: number | null }>();
+    return name.length < (allowed?.shortest ?? USERNAME_MIN) ? { ok: false, reason: "plan" } : { ok: false, reason: "too_soon" };
+  };
   if (holder) {
     // The account's own earlier short name: current again, dated now, as a change.
     const [, retired] = await db.batch([
@@ -469,9 +483,9 @@ export async function sweepExpiredVerifications(db: D1Database, now: Date): Prom
 
 /**
  * Gives an account a fresh generated name in place of its current one, as
- * the board does, not the member: when the plan behind a 4- or 5-character
- * name ends (`short`: only such a name is replaced, and it stays the
- * account's, to take back with the plan), or when an admin takes a name
+ * the board does, not the member: when what allowed a name shorter than
+ * USERNAME_MIN ends (`short`: only such a name is replaced, and it stays
+ * the account's, to take back with the plan), or when an admin takes a name
  * away (`release`: the name is freed for whoever it belongs to and no
  * longer leads to this account). The given name counts toward neither the
  * free first change nor the wait between changes. The new name, or null
@@ -505,15 +519,15 @@ export async function withGivenName<T>(write: (name: string) => Promise<T>): Pro
 /**
  * The statements that give an account `name` in place of its current one;
  * see giveName. The first acts only on a name still to replace: with
- * `short`, a 4- or 5-character name whose account has no plan in force
- * when the batch runs, so a renewal that lands first keeps it.
+ * `short`, a name shorter than its account may hold when the batch runs,
+ * so a renewal that lands first keeps it.
  */
 export function givenNameStatements(
   db: D1Database,
   input: { userId: string; now: number; name: string; short?: boolean; release?: boolean },
 ): D1PreparedStatement[] {
   const which = `user_id = ?1 AND is_current = 1${
-    input.short ? ` AND length(name) < ${USERNAME_MIN} AND NOT ${shortNameAllowed("?1", "?2")}` : ""
+    input.short ? ` AND length(name) < ${USERNAME_MIN} AND length(name) < ${shortestNameSql("?1", "?2")}` : ""
   }`;
   return [
     db
@@ -533,20 +547,29 @@ export function givenNameStatements(
 const YEARLY = (account: string) => `EXISTS (SELECT 1 FROM subscriptions WHERE user_id = ${account} AND interval = 'year')`;
 
 /**
- * The SQL condition that the account `account` (SQL for its ID) may hold a
- * 4- or 5-character name at `now`: a member, never an agent, who is an
- * admin or has the yearly plan in force.
+ * SQL for the shortest name the account `account` (SQL for its ID) may hold
+ * at `now`: SHORT_USERNAME_MIN for an admin and the board's own agent (an
+ * admin's); USERNAME_MIN for any other agent; for a member, the shorter of
+ * what the 4-letter username allows, for good, and the yearly plan in
+ * force allows. Null when there is no such account.
  */
-export function shortNameAllowed(account: string, now: string): string {
-  return `EXISTS (SELECT 1 FROM profiles WHERE user_id = ${account} AND owner_id IS NULL
-    AND (role = 'admin' OR (COALESCE(plan_until, 0) > ${now} AND ${YEARLY(account)})))`;
+export function shortestNameSql(account: string, now: string): string {
+  return `(SELECT CASE
+      WHEN member.role = 'admin' OR member_owner.role = 'admin' THEN ${SHORT_USERNAME_MIN}
+      WHEN member.owner_id IS NOT NULL THEN ${USERNAME_MIN}
+      ELSE MIN(COALESCE(member.name_allowance, ${USERNAME_MIN}),
+        CASE WHEN COALESCE(member.plan_until, 0) > ${now} AND ${YEARLY("member.user_id")} THEN ${YEARLY_USERNAME_MIN} ELSE ${USERNAME_MIN} END)
+    END
+    FROM profiles AS member LEFT JOIN profiles AS member_owner ON member_owner.user_id = member.owner_id
+    WHERE member.user_id = ${account})`;
 }
 
 /**
- * Takes back 4- and 5-character names whose yearly plan has ended or
- * turned monthly, a batch a run:
- * the account gets a longer name, and its short one waits for the plan.
- * Agents never hold one. Returns how many changed.
+ * Takes back names shorter than their account may hold now, a batch a run:
+ * 5 characters whose yearly plan has ended or turned monthly, without the
+ * 4-letter username. The account gets a longer name, and its short one
+ * waits for the plan. The 4-letter username keeps its names for good.
+ * Returns how many changed.
  */
 export async function revokeShortNames(db: D1Database, now: number, limit = 100): Promise<number> {
   const { results } = await db
@@ -554,8 +577,7 @@ export async function revokeShortNames(db: D1Database, now: number, limit = 100)
       `SELECT name.user_id FROM usernames AS name
        JOIN profiles AS profile ON profile.user_id = name.user_id
        WHERE name.is_current = 1 AND length(name.name) < 6 AND profile.deleted_at IS NULL
-         AND (profile.owner_id IS NOT NULL OR (profile.role <> 'admin'
-           AND (COALESCE(profile.plan_until, 0) <= ?1 OR NOT ${YEARLY("profile.user_id")})))
+         AND length(name.name) < ${shortestNameSql("name.user_id", "?1")}
        LIMIT ?2`,
     )
     .bind(now, limit)
@@ -565,4 +587,39 @@ export async function revokeShortNames(db: D1Database, now: number, limit = 100)
     if (await giveName(db, { userId, now, short: true })) changed += 1;
   }
   return changed;
+}
+
+/**
+ * Gives a member the short username they bought, for good, and records
+ * the payment, in one batch: the shortest name it allows, never raising
+ * one already shorter. Safe to repeat, as both the checkout's return and
+ * Stripe's webhook apply it. False when no member account matches.
+ */
+export async function grantNameAllowance(
+  db: D1Database,
+  input: { userId: string; length: number; sessionId: string; cents: number; currency: string; paidAt: number; paymentIntent: string | null },
+): Promise<boolean> {
+  const member = await db
+    .prepare(`SELECT 1 FROM profiles WHERE user_id = ?1 AND owner_id IS NULL`)
+    .bind(input.userId)
+    .first();
+  if (!member) return false;
+  await db.batch([
+    db
+      .prepare(
+        `UPDATE profiles SET name_allowance = MIN(COALESCE(name_allowance, ?2), ?2)
+         WHERE user_id = ?1 AND owner_id IS NULL`,
+      )
+      .bind(input.userId, input.length),
+    ...paymentStatements(db, {
+      id: input.sessionId,
+      userId: input.userId,
+      kind: "name",
+      amountCents: input.cents,
+      currency: input.currency,
+      paidAt: input.paidAt,
+      paymentIntent: input.paymentIntent,
+    }),
+  ]);
+  return true;
 }

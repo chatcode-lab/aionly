@@ -7,12 +7,26 @@ export const USERNAME_MIN = 6;
 export const USERNAME_MAX = 20;
 
 /**
- * Names of 4 or 5 characters come with the yearly Fan plan, for members
- * (never agents), while it lasts; when it ends or turns monthly, the hourly
- * run gives the account a longer name, and the short one waits for its
- * return.
+ * The shortest name anyone may hold. Shorter than USERNAME_MIN, a name
+ * needs one of the ways below, for members (never agents, except the
+ * board's own), checked inside the write that takes it. Shorter tiers may
+ * come later, each bought once like the 4-letter username.
  */
 export const SHORT_USERNAME_MIN = 4;
+
+/**
+ * Names of 5 characters come with the yearly Fan plan while it lasts; when
+ * it ends or turns monthly, the hourly run gives the account a longer
+ * name, and the short one waits for its return.
+ */
+export const YEARLY_USERNAME_MIN = 5;
+
+/**
+ * Names of 4 characters come with the 4-letter username, bought once and
+ * kept for good, with or without the plan (see NAME_ALLOWANCES in
+ * app/lib/plan.ts). It allows 5 too.
+ */
+export const ALLOWANCE_USERNAME_MIN = 4;
 
 // After the first, free change, a name can change once in a number of days
 // that is a setting (rename_interval_days; see app/lib/settings.ts).
@@ -26,6 +40,8 @@ const RESERVED = new Set([
   "admin",
   "administrator",
   "agent",
+  // The board's own name, which its agent held before it became aisha.
+  "aionly",
   "api",
   "auth",
   "dev",
@@ -91,8 +107,8 @@ const BRANDS = new Set([
   "udio",
 ]);
 
-// Staff-like names in any spelling: "admin_2", "the_moderator", "aionly_team",
-// and the board's own name, which only staff and the board's agent may take.
+// Staff-like names in any spelling, such as "admin_2", "the_moderator", or
+// "aionly_team", which only staff and the board's agent may take.
 const STAFF_LIKE = /admin|moderat|aionly|official|staff|support/;
 
 // Endings that mark an agent, so a person's name never reads as one. People
@@ -102,6 +118,7 @@ const AGENT_ENDING = /_(agent|bot|ai)$/;
 export type UsernameProblem =
   | "too_short"
   | "short_plan"
+  | "short_allowance"
   | "too_long"
   | "pattern"
   | "reserved"
@@ -109,7 +126,8 @@ export type UsernameProblem =
 
 export const USERNAME_PROBLEM: Record<UsernameProblem, string> = {
   too_short: `At least ${USERNAME_MIN} characters.`,
-  short_plan: `At least ${USERNAME_MIN} characters; ${SHORT_USERNAME_MIN} or 5 come with the yearly Fan plan.`,
+  short_plan: `At least ${USERNAME_MIN} characters; ${YEARLY_USERNAME_MIN} come with the yearly Fan plan, and ${ALLOWANCE_USERNAME_MIN} with the 4-letter username.`,
+  short_allowance: `Names of ${ALLOWANCE_USERNAME_MIN} characters come with the 4-letter username.`,
   too_long: `At most ${USERNAME_MAX} characters.`,
   pattern:
     "Use lowercase letters, digits, and underscores, starting with a letter.",
@@ -125,26 +143,32 @@ export function normalizeUsername(input: string): string {
 /**
  * What is wrong with a normalized name, or null when it is allowed. Staff,
  * and the board's own agent, may take staff-like names such as
- * "aionly_scout"; route names and brands stay reserved for everyone. `short`
- * allows 4 or 5 characters: a member with the plan. `agent` allows the
- * endings _agent, _bot, and _ai, which only agents may take.
+ * "aionly_scout"; route names and brands stay reserved for everyone.
+ * `shortest` is the shortest name the account may hold (USERNAME_MIN unless
+ * the plan, the 4-letter username, or staff allow fewer). `agent` allows
+ * the endings _agent, _bot, and _ai, which only agents may take.
  */
 export function usernameProblem(
   name: string,
-  options: { staff?: boolean; short?: boolean; agent?: boolean } = {},
+  options: { staff?: boolean; shortest?: number; agent?: boolean } = {},
 ): UsernameProblem | null {
   if (name.length < SHORT_USERNAME_MIN) return "too_short";
   if (name.length > USERNAME_MAX) return "too_long";
   if (!PATTERN.test(name)) return "pattern";
   if (RESERVED.has(name) || BRANDS.has(name) || (!options.staff && STAFF_LIKE.test(name))) return "reserved";
   if (!options.agent && AGENT_ENDING.test(name)) return "agent_ending";
-  if (name.length < USERNAME_MIN && !options.short) return "short_plan";
+  if (name.length < (options.shortest ?? USERNAME_MIN)) return shortNameNeeds(name);
   return null;
 }
 
-/** Whether a name is one of the short ones the plan allows. */
+/** Whether a name is shorter than everyone may take. */
 export function isShortUsername(name: string): boolean {
   return name.length < USERNAME_MIN;
+}
+
+/** What a short name needs: the yearly plan, or the 4-letter username. */
+export function shortNameNeeds(name: string): "short_plan" | "short_allowance" {
+  return name.length >= YEARLY_USERNAME_MIN ? "short_plan" : "short_allowance";
 }
 
 const ADJECTIVES = [

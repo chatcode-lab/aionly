@@ -3,10 +3,14 @@ import { describe, expect, it } from "vitest";
 import {
   createCheckout,
   createFreshStartCheckout,
+  createNameCheckout,
   encodeForm,
   expireOpenCheckouts,
   paidFreshStart,
+  paidNameAllowance,
   periodEnd,
+  planCentsOf,
+  type StripeInvoice,
   runningSubscriptions,
   signWebhook,
   stripeClient,
@@ -105,6 +109,82 @@ describe("checkout", () => {
     expect(sent!.get("metadata[wanted_name]")).toBe("nova");
     expect(sent!.get("metadata[then]")).toBe("/p/abc1234");
     expect(sent!.has("subscription_data[metadata][wanted_name]")).toBe(false);
+  });
+});
+
+describe("the 4-letter username", () => {
+  const capture = () => {
+    const sent: { form: URLSearchParams | null } = { form: null };
+    const fetcher = (async (_url: string, init?: RequestInit) => {
+      sent.form = new URLSearchParams(String(init?.body));
+      return Response.json({ url: "https://checkout.stripe.com/c/pay/cs_name" });
+    }) as typeof fetch;
+    return { sent, client: stripeClient("sk_test_unit", fetcher) };
+  };
+  const input = {
+    customerId: "cus_1",
+    namePriceId: "price_name",
+    nameCents: 25000,
+    length: 4,
+    userId: "u1",
+    origin: "https://aion.ly",
+    startNowAt: NOW,
+    wantedName: "nova",
+  };
+
+  it("is one payment alone, carrying the name and the request to have it at once", async () => {
+    const { sent, client } = capture();
+    await createNameCheckout(client, { ...input, planPriceId: null });
+    const fields = Object.fromEntries([...sent.form!]);
+    expect(fields).toMatchObject({
+      mode: "payment",
+      "line_items[0][price]": "price_name",
+      "metadata[kind]": "name_allowance",
+      "metadata[name_length]": "4",
+      "metadata[name_cents]": "25000",
+      "metadata[wanted_name]": "nova",
+      "metadata[start_now_requested_at]": String(NOW),
+      "invoice_creation[enabled]": "true",
+      cancel_url: "https://aion.ly/fan?name=nova",
+    });
+    expect(sent.form!.has("allow_promotion_codes")).toBe(false);
+  });
+
+  it("rides on the plan's checkout when bought with it, on the first invoice", async () => {
+    const { sent, client } = capture();
+    await createNameCheckout(client, { ...input, planPriceId: "price_year" });
+    const fields = Object.fromEntries([...sent.form!]);
+    expect(fields).toMatchObject({
+      mode: "subscription",
+      "line_items[0][price]": "price_year",
+      "line_items[1][price]": "price_name",
+      "subscription_data[metadata][user_id]": "u1",
+      "metadata[kind]": "name_allowance",
+    });
+    expect(sent.form!.has("subscription_data[metadata][kind]")).toBe(false);
+  });
+
+  it("is given only once paid, to the account that started it", () => {
+    const session = {
+      id: "cs_1",
+      object: "checkout.session" as const,
+      mode: "payment",
+      client_reference_id: "u1",
+      payment_status: "paid",
+      metadata: { kind: "name_allowance", name_length: "4", name_cents: "25000", wanted_name: "nova" },
+    };
+    expect(paidNameAllowance(session)).toEqual({ userId: "u1", length: 4, cents: 25000, wantedName: "nova" });
+    expect(paidNameAllowance({ ...session, payment_status: "unpaid" })).toBeNull();
+    expect(paidNameAllowance({ ...session, metadata: { kind: "fresh_start" } })).toBeNull();
+  });
+
+  it("is left out of the plan's part of an invoice, which partners share", () => {
+    const base: StripeInvoice = { id: "in_1", object: "invoice", customer: "cus_1", currency: "usd", amount_paid: 1, total_excluding_tax: 35000, subtotal: 35000 };
+    const line = (amount: number, type: string, discount = 0) => ({ amount, discount_amounts: [{ amount: discount }], parent: { type } });
+    expect(planCentsOf(base)).toBe(35000);
+    expect(planCentsOf({ ...base, lines: { data: [line(25000, "invoice_item_details"), line(10000, "subscription_item_details", 1000)] } })).toBe(9000);
+    // Past the first page of lines, the whole less what is known not to be the plan's.
+    expect(planCentsOf({ ...base, lines: { has_more: true, data: [line(25000, "invoice_item_details")] } })).toBe(10000);
   });
 });
 

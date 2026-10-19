@@ -1,15 +1,17 @@
 import { newId } from "../ids";
+import type { PartnerStep } from "../partners";
 import type { PublicAuthor } from "../public-types";
 import { AUTHOR_COLUMNS, AUTHOR_JOINS, toPublicAuthor } from "./rows.server";
 import { settleKarma } from "./votes.server";
 
 /**
  * Partner links (see `../partners.ts`): made by admins for a partner's
- * account, each keeping the share and the months it was made with. A link
- * works while it is not revoked, not past its end, below its limit, and
- * its partner's account is live and not banned. A member who joins through
- * one is invited by the partner, as by an invitation, and their plan
- * payments in their first months count toward the partner's share.
+ * account, each keeping the share it was made with, in steps of months
+ * (`partner_link_steps`), and the free invitations of those who join. A
+ * link works while it is not revoked, not past its end, below its limit,
+ * and its partner's account is live and not banned. A member who joins
+ * through one is invited by the partner, as by an invitation, and their
+ * plan payments count toward the partner's share by the step they fall in.
  */
 
 const banned = (alias: string, now: string) =>
@@ -23,6 +25,10 @@ function openSql(link: string, now: string): string {
                 AND partner.deleted_at IS NULL AND partner.owner_id IS NULL AND NOT ${banned("partner", now)}))`;
 }
 
+/** The link `link`'s steps in order, as JSON: [{percent, months}], months null for good (SQL). */
+const STEPS_SQL = `(SELECT json_group_array(json_object('percent', share_percent, 'months', until_month - from_month))
+  FROM (SELECT * FROM partner_link_steps WHERE code = link.code ORDER BY from_month))`;
+
 export type PartnerLinkState = "open" | "full" | "ended" | "revoked" | "paused";
 
 /** A partner link as its page shows it, or null when there is none. */
@@ -30,10 +36,10 @@ export async function partnerLinkByCode(
   db: D1Database,
   code: string,
   now: number,
-): Promise<{ state: PartnerLinkState; partner: PublicAuthor; sharePercent: number; shareMonths: number } | null> {
+): Promise<{ state: PartnerLinkState; partner: PublicAuthor; steps: PartnerStep[] } | null> {
   const row = await db
     .prepare(
-      `SELECT link.revoked_at, link.ends_at, link.max_uses, link.share_percent, link.share_months,
+      `SELECT link.revoked_at, link.ends_at, link.max_uses, ${STEPS_SQL} AS steps,
               (SELECT COUNT(*) FROM partner_joins WHERE partner_joins.code = link.code) AS joined,
               ${openSql("link", "?2")} AS open, ${AUTHOR_COLUMNS}
        FROM (SELECT *, partner_id AS author_id FROM partner_links WHERE code = ?1) AS link
@@ -44,8 +50,7 @@ export async function partnerLinkByCode(
       revoked_at: number | null;
       ends_at: number | null;
       max_uses: number | null;
-      share_percent: number;
-      share_months: number;
+      steps: string;
       joined: number;
       open: number;
     }>();
@@ -59,7 +64,7 @@ export async function partnerLinkByCode(
         : row.max_uses !== null && row.joined >= row.max_uses
           ? "full"
           : "paused";
-  return { state, partner: toPublicAuthor(row), sharePercent: row.share_percent, shareMonths: row.share_months };
+  return { state, partner: toPublicAuthor(row), steps: JSON.parse(row.steps) as PartnerStep[] };
 }
 
 /**
@@ -81,15 +86,20 @@ export async function claimPartnerJoin(db: D1Database, input: { code: string; us
 
 /**
  * Gives the new account the partner it joined through as its inviter,
- * unless an invitation already named one, and settles the partner's karma,
- * as attachInvite does. Safe to repeat.
+ * unless an invitation already named one, a level below the partner in the
+ * invitation tree, with the free invitations the link gives, and settles
+ * the partner's karma, as attachInvite does. Safe to repeat.
  */
 export async function attachPartner(db: D1Database, input: { userId: string }): Promise<void> {
-  const partner = `SELECT link.partner_id FROM partner_joins AS joined JOIN partner_links AS link ON link.code = joined.code
+  const link = (column: string) => `SELECT link.${column} FROM partner_joins AS joined JOIN partner_links AS link ON link.code = joined.code
     WHERE joined.user_id = ?1 AND link.partner_id <> ?1`;
   await db.batch([
     db
-      .prepare(`UPDATE profiles SET invited_by = (${partner}) WHERE user_id = ?1 AND invited_by IS NULL AND EXISTS (${partner})`)
+      .prepare(
+        `UPDATE profiles SET invited_by = (${link("partner_id")}), free_invites = (${link("free_invites")}),
+           invite_depth = COALESCE((SELECT partner.invite_depth + 1 FROM profiles AS partner WHERE partner.user_id = (${link("partner_id")})), 1)
+         WHERE user_id = ?1 AND invited_by IS NULL AND EXISTS (${link("partner_id")})`,
+      )
       .bind(input.userId),
     ...settleKarma(db, `(SELECT invited_by FROM profiles WHERE user_id = ?1)`, input.userId),
   ]);
@@ -126,20 +136,29 @@ export async function sweepPartnerJoins(db: D1Database, now: number): Promise<nu
 }
 
 /**
- * What the members who joined through the link `link` paid for the plan in
- * their shared months, before tax, less refunds (SQL).
+ * What the members who joined through the step `step`'s link paid for the
+ * plan within its months of their joining, before tax, less refunds (SQL).
  */
-const REVENUE = `(SELECT COALESCE(SUM(payment.amount_cents - payment.refunded_cents), 0)
+const STEP_REVENUE = `(SELECT COALESCE(SUM(payment.amount_cents - payment.refunded_cents), 0)
   FROM partner_joins AS joined JOIN payments AS payment ON payment.user_id = joined.user_id AND payment.kind = 'plan'
-  WHERE joined.code = link.code AND payment.paid_at >= joined.joined_at
-    AND payment.paid_at < unixepoch(joined.joined_at, 'unixepoch', '+' || link.share_months || ' months'))`;
+  WHERE joined.code = step.code
+    AND payment.paid_at >= unixepoch(joined.joined_at, 'unixepoch', '+' || step.from_month || ' months')
+    AND (step.until_month IS NULL
+      OR payment.paid_at < unixepoch(joined.joined_at, 'unixepoch', '+' || step.until_month || ' months')))`;
+
+/** What the link `link`'s steps brought in, and the partner's share of it, by step (SQL). */
+const REVENUE = `(SELECT COALESCE(SUM(${STEP_REVENUE}), 0) FROM partner_link_steps AS step WHERE step.code = link.code)`;
+const EARNED = `(SELECT COALESCE(SUM(${STEP_REVENUE} * step.share_percent / 100), 0) FROM partner_link_steps AS step WHERE step.code = link.code)`;
+
 
 export interface PartnerLinkStats {
   code: string;
   partner: string;
   partnerId: string;
-  sharePercent: number;
-  shareMonths: number;
+  /** The share by months after joining. */
+  steps: PartnerStep[];
+  /** Free invitations each member who joins gets, or null for their level's. */
+  freeInvites: number | null;
   maxUses: number | null;
   endsAt: number | null;
   revokedAt: number | null;
@@ -167,19 +186,18 @@ export interface PartnerStanding {
 /**
  * Each link with what it brought, for an admin (every link) or a partner
  * (their own), and the partner's share earned and paid out. A payment
- * counts when it came after the member joined and before the link's
- * months from then ran out.
+ * counts at the share of the step its time since the member joined falls in.
  */
 export async function partnerLinks(db: D1Database, input: { partnerId?: string; now: number }): Promise<PartnerLinkStats[]> {
   const { results } = await db
     .prepare(
-      `SELECT link.code, link.partner_id, name.name AS partner, link.share_percent, link.share_months, link.max_uses,
+      `SELECT link.code, link.partner_id, name.name AS partner, ${STEPS_SQL} AS steps, link.free_invites, link.max_uses,
               link.ends_at, link.revoked_at, link.note, link.created_at,
               (SELECT COUNT(*) FROM partner_joins AS joined JOIN profiles AS member ON member.user_id = joined.user_id
                 WHERE joined.code = link.code AND member.deleted_at IS NULL) AS joined,
               (SELECT COUNT(*) FROM partner_joins AS joined JOIN profiles AS member ON member.user_id = joined.user_id
                 WHERE joined.code = link.code AND member.deleted_at IS NULL AND COALESCE(member.plan_until, 0) > ?2) AS fans,
-              ${REVENUE} AS revenue
+              ${REVENUE} AS revenue, ${EARNED} AS earned
        FROM partner_links AS link
        JOIN usernames AS name ON name.user_id = link.partner_id AND name.is_current = 1
        WHERE ?1 IS NULL OR link.partner_id = ?1
@@ -191,8 +209,8 @@ export async function partnerLinks(db: D1Database, input: { partnerId?: string; 
       code: string;
       partner_id: string;
       partner: string;
-      share_percent: number;
-      share_months: number;
+      steps: string;
+      free_invites: number | null;
       max_uses: number | null;
       ends_at: number | null;
       revoked_at: number | null;
@@ -201,13 +219,14 @@ export async function partnerLinks(db: D1Database, input: { partnerId?: string; 
       joined: number;
       fans: number;
       revenue: number;
+      earned: number;
     }>();
   return results.map((row) => ({
     code: row.code,
     partner: row.partner,
     partnerId: row.partner_id,
-    sharePercent: row.share_percent,
-    shareMonths: row.share_months,
+    steps: JSON.parse(row.steps) as PartnerStep[],
+    freeInvites: row.free_invites,
     maxUses: row.max_uses,
     endsAt: row.ends_at,
     revokedAt: row.revoked_at,
@@ -217,7 +236,7 @@ export async function partnerLinks(db: D1Database, input: { partnerId?: string; 
     joined: row.joined,
     fans: row.fans,
     revenueCents: row.revenue,
-    earnedCents: Math.floor((row.revenue * row.share_percent) / 100),
+    earnedCents: row.earned,
   }));
 }
 
@@ -230,7 +249,7 @@ async function ledger(db: D1Database, partnerId: string | null): Promise<Map<str
   const [earned, paid] = await db.batch([
     db
       .prepare(
-        `SELECT link.partner_id, SUM(${REVENUE} * link.share_percent / 100) AS earned
+        `SELECT link.partner_id, SUM(${EARNED}) AS earned
          FROM partner_links AS link WHERE ?1 IS NULL OR link.partner_id = ?1 GROUP BY link.partner_id`,
       )
       .bind(partnerId),
@@ -265,16 +284,19 @@ export async function partnerStanding(db: D1Database, partnerId: string, now: nu
 export type PartnerLinkProblem = "taken" | "no_partner";
 
 /**
- * Makes a partner link for a member's account, by an admin. Its terms are
- * fixed with it. Answers the problem, or null.
+ * Makes a partner link for a member's account, by an admin, with its
+ * share's steps in one batch. Its terms are fixed with it. The steps are
+ * checked by the caller (see partnerStepsProblem). Answers the problem, or
+ * null.
  */
 export async function createPartnerLink(
   db: D1Database,
   input: {
     code: string;
     partner: string;
-    sharePercent: number;
-    shareMonths: number;
+    steps: PartnerStep[];
+    /** Free invitations each member who joins gets, or null for their level's. */
+    freeInvites: number | null;
     maxUses: number | null;
     endsAt: number | null;
     note: string | null;
@@ -290,14 +312,26 @@ export async function createPartnerLink(
     .bind(input.partner.trim().replace(/^@/, "").toLowerCase())
     .first<{ user_id: string }>();
   if (!partner) return "no_partner";
+  let from = 0;
+  const steps = input.steps.map((step) => {
+    const row = { from, until: step.months === null ? null : from + step.months, percent: step.percent };
+    from = row.until ?? from;
+    return row;
+  });
   try {
-    await db
-      .prepare(
-        `INSERT INTO partner_links (code, partner_id, share_percent, share_months, max_uses, ends_at, note, created_by, created_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)`,
-      )
-      .bind(input.code, partner.user_id, input.sharePercent, input.shareMonths, input.maxUses, input.endsAt, input.note, input.actorId, input.now)
-      .run();
+    await db.batch([
+      db
+        .prepare(
+          `INSERT INTO partner_links (code, partner_id, free_invites, max_uses, ends_at, note, created_by, created_at)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
+        )
+        .bind(input.code, partner.user_id, input.freeInvites, input.maxUses, input.endsAt, input.note, input.actorId, input.now),
+      ...steps.map((step) =>
+        db
+          .prepare(`INSERT INTO partner_link_steps (code, from_month, until_month, share_percent) VALUES (?1, ?2, ?3, ?4)`)
+          .bind(input.code, step.from, step.until, step.percent),
+      ),
+    ]);
   } catch (error) {
     if (String(error).includes("UNIQUE")) return "taken";
     throw error;

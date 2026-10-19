@@ -11,6 +11,7 @@ import {
   renameUser,
   giveName,
   revokeShortNames,
+  grantNameAllowance,
 } from "../../app/lib/db/accounts.server";
 import { takeName } from "../../app/lib/db/moderation.server";
 import { DAY, db, NOW, reset, user } from "./fixtures";
@@ -130,7 +131,7 @@ describe("renameUser", () => {
 
 describe("short names and given names", () => {
   beforeEach(async () => {
-    await user("fan", "neon", { plan: "year" });
+    await user("fan", "comet", { plan: "year" });
     await user("monthly", "pulse", { plan: true });
     await user("past", "pixel");
     await db.prepare(`UPDATE profiles SET plan_until = ?1 WHERE user_id = 'past'`).bind(NOW - 1).run();
@@ -139,7 +140,7 @@ describe("short names and given names", () => {
 
   it("takes back a short name when the yearly plan ends or turns monthly, giving a longer one that counts as no change", async () => {
     expect(await revokeShortNames(db, NOW)).toBe(2);
-    expect(await currentName("fan")).toBe("neon");
+    expect(await currentName("fan")).toBe("comet");
     expect((await currentName("monthly"))!.length).toBeGreaterThanOrEqual(6);
     expect(await currentName("admin")).toBe("boss");
     const given = (await currentName("past"))!;
@@ -156,6 +157,36 @@ describe("short names and given names", () => {
     expect(await renameUser(db, "past", "pixel", NOW + 60)).toEqual({ ok: true });
     expect(await currentName("past")).toBe("pixel");
     expect(await revokeShortNames(db, NOW + 120)).toBe(0);
+  });
+
+  it("keeps 4 characters for the 4-letter username, bought once, for good, with or without the plan", async () => {
+    // The yearly plan allows 5 characters, not 4.
+    expect(await renameUser(db, "fan", "nova", NOW)).toEqual({ ok: false, reason: "plan" });
+    await user("old", "flux_fan", { plan: "year" });
+    await db.prepare(`UPDATE usernames SET name = 'zinc' WHERE user_id = 'old'`).run();
+    const bought = { userId: "past", length: 4, sessionId: "cs_name", cents: 25000, currency: "usd", paidAt: NOW, paymentIntent: "pi_name" };
+    expect(await grantNameAllowance(db, bought)).toBe(true);
+    // From the webhook as well as the return: recorded once, never shared with partners.
+    expect(await grantNameAllowance(db, bought)).toBe(true);
+    expect((await db.prepare(`SELECT kind, amount_cents FROM payments`).all()).results).toEqual([{ kind: "name", amount_cents: 25000 }]);
+    expect(await accountRecord(db, "past", NOW)).toMatchObject({ fan: false, shortestName: 4, nameAllowance: 4 });
+    expect(await renameUser(db, "past", "nova", NOW)).toEqual({ ok: true });
+    // Without a plan it stays; a yearly fan's 4 characters, the monthly plan's 5, do not.
+    expect(await revokeShortNames(db, NOW)).toBe(2);
+    expect(await currentName("past")).toBe("nova");
+    expect(await currentName("old")).not.toBe("zinc");
+    // Never an agent's, except the board's own, run by an admin.
+    await user("bot", "fan_agent");
+    await user("house", "aisha");
+    await db.batch([
+      db.prepare(`UPDATE profiles SET owner_id = 'fan' WHERE user_id = 'bot'`),
+      db.prepare(`UPDATE profiles SET owner_id = 'admin' WHERE user_id = 'house'`),
+    ]);
+    expect(await grantNameAllowance(db, { ...bought, userId: "bot", sessionId: "cs_bot" })).toBe(false);
+    expect(await revokeShortNames(db, NOW)).toBe(0);
+    expect(await currentName("house")).toBe("aisha");
+    expect(await accountRecord(db, "house", NOW)).toMatchObject({ shortestName: 4 });
+    expect(await renameUser(db, "house", "aion", NOW)).toEqual({ ok: true });
   });
 
   it("lets an admin take a name away, freeing it for its rightful owner", async () => {
@@ -196,7 +227,7 @@ describe("short names and given names", () => {
   it("leaves a short name alone when the plan was renewed before the replacement is written", async () => {
     // As the hourly run would, having picked the account before the renewal landed.
     expect(await giveName(db, { userId: "fan", now: NOW, short: true })).toBeNull();
-    expect(await currentName("fan")).toBe("neon");
+    expect(await currentName("fan")).toBe("comet");
     expect(await giveName(db, { userId: "past", now: NOW, short: true })).not.toBeNull();
   });
 });

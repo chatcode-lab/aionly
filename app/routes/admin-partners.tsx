@@ -17,7 +17,7 @@ import {
 import { loadSettings } from "~/lib/db/settings.server";
 import { formatDate, formatMoney } from "~/lib/format";
 import { privatePageMeta } from "~/lib/meta";
-import { normalizePartnerCode } from "~/lib/partners";
+import { normalizePartnerCode, PARTNER_STEPS_MAX, type PartnerStep, partnerStepsProblem, stepsLabel } from "~/lib/partners";
 import { requireAdmin } from "~/lib/viewer.server";
 
 import type { Route } from "./+types/admin-partners";
@@ -67,23 +67,30 @@ export async function action({ request, context }: Route.ActionArgs) {
   if (intent === "link") {
     const partner = text(form, "partner");
     const code = normalizePartnerCode(text(form, "code") || partner.replace(/^@/, ""));
-    const settings = await loadSettings(env.DB);
-    const sharePercent = whole(text(form, "share_percent"), 0, 100, settings.partner_share_percent);
-    const shareMonths = whole(text(form, "share_months"), 1, 120, settings.partner_share_months);
+    // Each filled row is a step; blank months, the last step's, last for good.
+    const steps: PartnerStep[] = [];
+    for (let index = 1; index <= PARTNER_STEPS_MAX; index += 1) {
+      const percent = text(form, `step${index}_percent`);
+      const months = text(form, `step${index}_months`);
+      if (percent === "" && months === "") continue;
+      steps.push({ percent: percent === "" ? Number.NaN : Number(percent), months: months === "" ? null : Number(months) });
+    }
+    const freeInvites = whole(text(form, "free_invites"), 0, 1_000);
     const maxUses = whole(text(form, "max_uses"), 1, 1_000_000);
     const endsOn = text(form, "ends_on");
     if (!partner) return { error: "Name the partner's account." };
     if (!code) return { error: "The link's name: 3 to 30 lowercase letters, digits, _ and -." };
-    if (sharePercent == null) return { error: "The share is a whole percent, 0 to 100." };
-    if (shareMonths == null) return { error: "The months are a whole number, 1 to 120." };
+    const stepsProblem = partnerStepsProblem(steps);
+    if (stepsProblem) return { error: stepsProblem };
+    if (freeInvites === undefined) return { error: "Free invitations are a whole number, 0 to 1000, or blank for each level's." };
     if (maxUses === undefined) return { error: "The limit is a whole number of accounts, or blank for none." };
     if (endsOn && (!DAY.test(endsOn) || Number.isNaN(Date.parse(endsOn)))) return { error: "Give the day it ends, or leave it blank." };
     const endsAt = endsOn ? Date.parse(`${endsOn}T23:59:59Z`) / 1000 : null;
     const problem = await createPartnerLink(env.DB, {
       code,
       partner,
-      sharePercent,
-      shareMonths,
+      steps,
+      freeInvites,
       maxUses,
       endsAt,
       note: text(form, "note").slice(0, 280) || null,
@@ -129,7 +136,8 @@ export default function AdminPartners({ loaderData, actionData }: Route.Componen
       {actionData && "error" in actionData ? <Notice tone="danger">{actionData.error}</Notice> : null}
       <p className="text-body text-text-muted">
         Everyone who joins through a link is invited by its partner, who gets the link&apos;s share of their plan
-        payments, before VAT and refunds. <a href="/partners" className="underline underline-offset-4">The offer</a>
+        payments, before VAT and refunds, never of a 4-letter username.{" "}
+        <a href="/partners" className="underline underline-offset-4">The offer</a>
       </p>
 
       <Form method="post" className="space-y-3 rounded-xl border border-border bg-surface p-4 sm:p-5">
@@ -137,9 +145,36 @@ export default function AdminPartners({ loaderData, actionData }: Route.Componen
         <input type="hidden" name="intent" value="link" />
         <TextField label="Partner's username" name="partner" required autoComplete="off" />
         <TextField label="Link name" name="code" placeholder="The username" autoComplete="off" />
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <TextField label="Share, %" name="share_percent" inputMode="numeric" placeholder={String(settings.partner_share_percent)} />
-          <TextField label="Months" name="share_months" inputMode="numeric" placeholder={String(settings.partner_share_months)} />
+        <fieldset className="space-y-2">
+          <legend className="text-body font-medium">Share of plan payments</legend>
+          {Array.from({ length: PARTNER_STEPS_MAX }, (_, index) => (
+            <div key={index} className="grid grid-cols-2 gap-3 sm:max-w-md">
+              <TextField
+                label={index === 0 ? "First, %" : "Then, %"}
+                name={`step${index + 1}_percent`}
+                inputMode="numeric"
+                defaultValue={index === 0 ? String(settings.partner_share_percent) : undefined}
+              />
+              <TextField
+                label="For months"
+                name={`step${index + 1}_months`}
+                inputMode="numeric"
+                placeholder="For good"
+                defaultValue={index === 0 ? String(settings.partner_share_months) : undefined}
+              />
+            </div>
+          ))}
+          <p className="text-meta text-text-muted">Months after each member joins. Leave the last step&apos;s months blank to share for good.</p>
+        </fieldset>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+          <TextField
+            label="Free invitations each"
+            name="free_invites"
+            inputMode="numeric"
+            defaultValue="0"
+            placeholder="By level"
+            hint="Blank: their level's."
+          />
           <TextField label="Accounts" name="max_uses" inputMode="numeric" placeholder="No limit" />
           <TextField label="Ends on" name="ends_on" type="date" />
         </div>
@@ -219,7 +254,8 @@ export default function AdminPartners({ loaderData, actionData }: Route.Componen
                     </span>
                   </div>
                   <p className="text-meta text-text-muted">
-                    {link.sharePercent}% for {link.shareMonths} months · {link.joined} joined
+                    {stepsLabel(link.steps)} ·{" "}
+                    {link.freeInvites === null ? "invitations by level" : `${link.freeInvites} free invitations each`} · {link.joined} joined
                     {link.maxUses !== null ? ` of ${link.maxUses}` : ""} · {link.fans} fans now · paid{" "}
                     {formatMoney(link.revenueCents)}, earned {formatMoney(link.earnedCents)}
                     {link.endsAt !== null ? ` · ends ${formatDate(link.endsAt)}` : ""}

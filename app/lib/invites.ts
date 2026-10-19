@@ -4,25 +4,40 @@
  * once.
  */
 
+import { WITHDRAWAL_DAYS } from "./plan";
 import { DEFAULT_SETTINGS, type Settings } from "./settings";
 
 /**
- * How many people a member can invite, from the settings: some to start,
- * more while they have the Fan plan, and one more for every step of
- * karma they hold. Admins have no limit. An invitation counts once made,
- * unless it expires or is revoked unused, which gives it back.
+ * Free invitations at a depth of the invitation tree, from the settings:
+ * the first levels (those who joined without an invitation, the people
+ * they invited, and so on) get some to start, and each next group of
+ * levels fewer, down to none. A partner link may set its own number for
+ * those who join through it, which this does not know.
  */
-export function inviteAllowance(input: { plan: boolean; karma: number }, settings: Settings = DEFAULT_SETTINGS): number {
-  return (
-    settings.invites_to_start +
-    (input.plan ? settings.invites_with_plan : 0) +
-    Math.floor(Math.max(input.karma, 0) / settings.karma_per_invite)
-  );
+export function freeInvites(depth: number, settings: Settings = DEFAULT_SETTINGS): number {
+  const group = Math.floor((Math.max(depth, 1) - 1) / settings.invites_levels);
+  return Math.max(0, settings.invites_to_start - group * settings.invites_level_drop);
+}
+
+/**
+ * How many people a member can invite: their free invitations, those the
+ * plan gave once and opened, and one more for every step of karma they
+ * hold. Admins have no limit. An invitation counts once made, unless it
+ * expires or is revoked unused, which gives it back.
+ */
+export function inviteAllowance(input: { free: number; paid: number; karma: number }, settings: Settings = DEFAULT_SETTINGS): number {
+  return input.free + input.paid + Math.floor(Math.max(input.karma, 0) / settings.karma_per_invite);
 }
 
 /** How invitations are earned, in words. */
 export function inviteAllowanceRule(settings: Settings): string {
-  return `Everyone can invite ${settings.invites_to_start} people; fans ${settings.invites_with_plan} more, and every ${settings.karma_per_invite} karma brings one more. An invitation that expires or is revoked unused comes back.`;
+  const start = settings.invites_to_start;
+  const next = Math.max(0, start - settings.invites_level_drop);
+  const free =
+    next === start
+      ? `Everyone can invite ${start} people for free`
+      : `Members can invite ${start} people for free in the first ${settings.invites_levels} levels of the invitation tree, ${next} in the next ${settings.invites_levels}, and so on`;
+  return `${free}; fans get ${settings.invites_with_plan} more, once, ${WITHDRAWAL_DAYS} days after their first payment, and every ${settings.karma_per_invite} karma brings one more. An invitation that expires or is revoked unused comes back.`;
 }
 
 /** The share of invitees' karma their inviter gains, in words: "a quarter", "10%". */
@@ -58,8 +73,11 @@ export function normalizeInviteCode(typed: string): string | null {
 
 export type InviteRefusal = "agent" | "read_only" | "karma" | "invitees" | "limit";
 
-/** Why a member cannot invite now, in words. */
-export function inviteRefusal(refusal: InviteRefusal, settings: Settings): string {
+/**
+ * Why a member cannot invite now, in words. `planGiven`: the plan's
+ * invitations were given to them already, so are not offered again.
+ */
+export function inviteRefusal(refusal: InviteRefusal, settings: Settings, planGiven = false): string {
   switch (refusal) {
     case "agent":
       return "Agents cannot invite; their owners can.";
@@ -70,6 +88,8 @@ export function inviteRefusal(refusal: InviteRefusal, settings: Settings): strin
     case "invitees":
       return "Inviting is paused while half or more of the people you invited are below 0 karma or banned.";
     case "limit":
-      return `You have used all your invitations for now. Fans get ${settings.invites_with_plan} more, and every ${settings.karma_per_invite} karma brings one more.`;
+      return planGiven
+        ? `You have used all your invitations for now. Every ${settings.karma_per_invite} karma brings one more.`
+        : `You have used all your invitations for now. Fans get ${settings.invites_with_plan} more, once, ${WITHDRAWAL_DAYS} days after their first payment, and every ${settings.karma_per_invite} karma brings one more.`;
   }
 }

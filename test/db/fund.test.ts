@@ -88,6 +88,51 @@ describe("payments and the fund", () => {
     expect(await db.prepare(`SELECT refunded_cents FROM payments WHERE id = 'in_1'`).first()).toEqual({ refunded_cents: 3500 });
   });
 
+  it("counts only the plan's lines of an invoice that also bills the 4-letter username, and gives the plan's invitations once", async () => {
+    await db.prepare(`UPDATE subscriptions SET customer_id = 'cus_fan' WHERE user_id = 'fan'`).run();
+    const line = (amount: number, type: string, discount = 0) => ({
+      amount,
+      discount_amounts: discount ? [{ amount: discount }] : [],
+      parent: { type },
+    });
+    await deliver("invoice.paid", {
+      id: "in_both",
+      object: "invoice",
+      customer: "cus_fan",
+      currency: "usd",
+      amount_paid: 38720,
+      total_excluding_tax: 32000,
+      subtotal: 32000,
+      status_transitions: { paid_at: NOW },
+      parent: { subscription_details: { subscription: "sub_fan" } },
+      lines: { has_more: false, data: [line(25000, "invoice_item_details"), line(10000, "subscription_item_details", 3000)] },
+    });
+    expect((await db.prepare(`SELECT id, kind, amount_cents FROM payments`).all()).results).toEqual([{ id: "in_both", kind: "plan", amount_cents: 7000 }]);
+    expect(await db.prepare(`SELECT paid_invites, paid_invites_at FROM profiles WHERE user_id = 'fan'`).first()).toEqual({
+      paid_invites: 5,
+      paid_invites_at: NOW + 14 * 86400,
+    });
+    // The name itself, from the completed checkout: alone or with the plan.
+    const session = {
+      id: "cs_name",
+      object: "checkout.session",
+      mode: "subscription",
+      client_reference_id: "fan",
+      payment_status: "paid",
+      payment_intent: null,
+      metadata: { kind: "name_allowance", user_id: "fan", name_length: "4", name_cents: "25000", wanted_name: "nova" },
+      currency: "usd",
+    };
+    await deliver("checkout.session.completed", { ...session, payment_status: "unpaid" });
+    expect(await db.prepare(`SELECT name_allowance FROM profiles WHERE user_id = 'fan'`).first()).toEqual({ name_allowance: null });
+    await deliver("checkout.session.completed", session);
+    await deliver("checkout.session.completed", session);
+    expect(await db.prepare(`SELECT name_allowance FROM profiles WHERE user_id = 'fan'`).first()).toEqual({ name_allowance: 4 });
+    expect((await db.prepare(`SELECT id, kind, amount_cents FROM payments WHERE kind = 'name'`).all()).results).toEqual([
+      { id: "cs_name", kind: "name", amount_cents: 25000 },
+    ]);
+  });
+
   it("keeps a refund that comes before its payment, and applies it when the payment comes (F66)", async () => {
     // A full refund of a fresh start, reported before its checkout is recorded.
     await recordRefund(db, { chargeId: "ch_early", paymentIntent: "pi_early", refunded: 2400, paid: 2400, now: NOW });
