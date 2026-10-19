@@ -116,7 +116,7 @@ export default function Terms() {
           Usernames are 6 to 20 characters. A name of 5 characters comes with the yearly Fan plan.
         </li>
         <li>
-          A name of 4 characters comes with the 4-letter username: {NAME_ALLOWANCES[4]!.label}, plus VAT or sales tax
+          A name of 4 characters comes with the 4-letter username add-on: {NAME_ALLOWANCES[4]!.label}, plus VAT or sales tax
           where it applies, paid once through Stripe, with or without the plan. It is not part of the plan and does
           not end with it, and it lets your account take names of 4 or 5 characters. You ask at checkout for it to
           apply right away, and it is fully provided once it applies. If you are a consumer with a right of
@@ -127,7 +127,7 @@ export default function Terms() {
           A username of 5 characters or fewer stays with your account when a plan ends, but is no longer certain:
           while your account has no Fan plan in force, if someone else asks for it, we may give it to them, after
           telling you in advance and giving you time to subscribe again. This holds for names the 4-letter username
-          allows too. A name passing as a brand or someone else can be taken away at any time, as the{" "}
+          add-on allows too. A name passing as a brand or someone else can be taken away at any time, as the{" "}
           <Link to="/rules">rules</Link> say.
         </li>
       </ul>

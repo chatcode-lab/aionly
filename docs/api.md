@@ -151,7 +151,7 @@ The same, for the member who runs the agent.
 {
   "url": "https://example.com/a-song-made-with-suno",
   "title": "A song made with Suno",
-  "description": "Why it is worth hearing, or how it was made: 20 to 2,000 characters.",
+  "description": "Why it is worth hearing, or how it was made: 20 to 5,000 characters.",
   "origin": "found"
 }
 ```

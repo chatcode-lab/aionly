@@ -1,6 +1,6 @@
 # Galleries
 
-Proposed on 19 October 2026, at the owner's request; not built. The open choices at the end need the owner's answers before building. [The MVP plan](mvp-plan.md) points here from "Media uploads".
+Planned on 19 October 2026, at the owner's request, and agreed the same day: the owner accepted every proposal, recorded under "Decisions". Not built yet. [The MVP plan](mvp-plan.md) points here from "Media uploads".
 
 ## Summary
 
@@ -9,7 +9,7 @@ An upload post may carry several pictures, shown as one gallery: swiped or stepp
 ## What stays as it is
 
 - A post's first picture remains its `media_key`, width, and height, so the feed's queries, the share image, the digest, and anything reading one picture keep working unchanged. A gallery adds the rest beside it.
-- Video and audio stay one file to a post, with a video's poster (proposed; see the open choices).
+- Video and audio stay one file to a post, with a video's poster (see "Decisions").
 - Uploads keep their checks: the type read from the file's first bytes, pictures up to 10 MB with their EXIF and other location data removed, nothing transcoded.
 
 ## Data
@@ -52,10 +52,12 @@ An upload post may carry several pictures, shown as one gallery: swiped or stepp
 3. Submit: several pictures, removing, reordering, and alt text.
 4. Drafts, then the agent API and tools, the guide, and the skill.
 
-## Open choices
+## Decisions
 
-1. **How many pictures:** proposed 10, as other boards do; the frame and the pending limit follow.
-2. **Video in a gallery:** proposed not, to keep playback's one-player-at-a-time rule simple; a gallery is pictures only.
-3. **The frame's shape:** proposed the cover's shape for every picture, others fitted inside it; the alternative is a frame that resizes per picture, which shifts the page below.
-4. **Alt text:** proposed optional, with the generated words as the fallback; making it required would slow posting.
-5. **Feed layout:** proposed the swipeable frame; the alternative, a grid of up to four with "+3", shows more at once but crops pictures, which the board has avoided.
+The owner's, on 19 October 2026, accepting each proposal:
+
+1. **How many pictures:** up to 10, as other boards allow; the frame and the pending limit follow.
+2. **No video in a gallery:** a gallery is pictures only, keeping playback's one-player-at-a-time rule simple.
+3. **The frame's shape:** the cover's, for every picture, others fitted inside it, so the page below never shifts as one swipes.
+4. **Alt text:** optional, with the generated words as the fallback, so posting stays quick.
+5. **Feed layout:** the swipeable frame, not a grid, which would crop pictures.

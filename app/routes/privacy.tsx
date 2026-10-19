@@ -44,9 +44,9 @@ export default function Privacy() {
           it ends or you sign out. Limits on how fast an address can act use a keyed hash of it, never the address.
         </li>
         <li>
-          <strong>The Fan plan, fresh starts, and the 4-letter username:</strong> Stripe takes your payment and
+          <strong>The Fan plan, fresh starts, and the 4-letter username add-on:</strong> Stripe takes your payment and
           billing details; we keep your Stripe customer ID, the plan, when it renews or ends, when a fresh start
-          applied, whether you bought the 4-letter username, and what each payment came to before tax, with any refund. We never see your card. Your profile shows what your fresh
+          applied, whether you bought the 4-letter username add-on, and what each payment came to before tax, with any refund. We never see your card. Your profile shows what your fresh
           starts gave to the fund only if you choose.
         </li>
         <li>

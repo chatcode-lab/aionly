@@ -311,14 +311,20 @@ export interface StripeCheckoutSession {
 /** Payment intent statuses of a payment still under way, which may yet succeed. */
 const PAYING = new Set(["processing", "requires_action", "requires_confirmation", "requires_capture", "succeeded"]);
 
-/** Subscription statuses of a first payment still under way, or just made. */
-const SUBSCRIBING = new Set(["incomplete", "active", "trialing", "past_due"]);
+/**
+ * Statuses of a bundled checkout's first invoice while its payment may yet
+ * go through. One that failed is voided, though the subscription it began
+ * can stay active (review F84).
+ */
+const INVOICE_PAYING = new Set(["draft", "open", "paid"]);
 
 /**
  * The customer's completed checkouts for a short username, each with where
  * its payment stands: `paid`; `pending`, a delayed payment Stripe is still
  * confirming; or `failed`, one that will not go through, which blocks
- * nothing (review F84). Read as Stripe has them now, so a member is not
+ * nothing (review F84). Bought alone, that is its payment intent's state;
+ * with the plan, its first invoice's, never the subscription's, which can
+ * outlive a failed first payment. Read as Stripe has them now, so a member is not
  * sold one they bought already, nor kept from buying after a failure
  * (review F81).
  */
@@ -327,23 +333,36 @@ export async function completedNameCheckouts(
   customerId: string,
 ): Promise<Array<{ session: StripeCheckoutSession; state: "paid" | "pending" | "failed" }>> {
   const all = await listAll<
-    Omit<StripeCheckoutSession, "payment_intent" | "subscription"> & {
+    Omit<StripeCheckoutSession, "payment_intent" | "subscription" | "invoice"> & {
       payment_intent?: { id: string; status: string } | string | null;
       subscription?: { id: string; status: string } | string | null;
+      invoice?: { id: string; status: string | null } | string | null;
     }
-  >(client, "/checkout/sessions", { customer: customerId, status: "complete", expand: ["data.payment_intent", "data.subscription"] });
+  >(client, "/checkout/sessions", {
+    customer: customerId,
+    status: "complete",
+    expand: ["data.payment_intent", "data.subscription", "data.invoice"],
+  });
   return all
     .filter((session) => session.metadata?.kind === NAME_ALLOWANCE_KIND)
     .map((listed) => {
       const intent = typeof listed.payment_intent === "object" ? listed.payment_intent : null;
       const subscription = typeof listed.subscription === "object" ? listed.subscription : null;
+      const invoice = typeof listed.invoice === "object" ? listed.invoice : null;
       const session: StripeCheckoutSession = {
         ...listed,
         payment_intent: intent?.id ?? (typeof listed.payment_intent === "string" ? listed.payment_intent : null),
         subscription: subscription?.id ?? (typeof listed.subscription === "string" ? listed.subscription : null),
+        invoice: invoice?.id ?? (typeof listed.invoice === "string" ? listed.invoice : null),
       };
       if (paidNameAllowance(session)) return { session, state: "paid" as const };
-      const paying = session.mode === "subscription" ? SUBSCRIBING.has(subscription?.status ?? "") : PAYING.has(intent?.status ?? "");
+      // Without its invoice, only a subscription still incomplete is waiting on its first payment.
+      const paying =
+        session.mode === "subscription"
+          ? invoice
+            ? INVOICE_PAYING.has(invoice.status ?? "")
+            : subscription?.status === "incomplete"
+          : PAYING.has(intent?.status ?? "");
       return { session, state: paying ? ("pending" as const) : ("failed" as const) };
     });
 }

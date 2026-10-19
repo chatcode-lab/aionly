@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { AVATAR_COLORS, generatedAvatar } from "./avatar";
-import { formatAge, formatCount, formatWait } from "./format";
+import { formatAge, formatAgo, formatCount, formatWait } from "./format";
 import { parseTheme, readTheme, themeCookie } from "./theme";
 
 const css = readFileSync(
@@ -117,6 +117,8 @@ describe("formatting", () => {
     expect(ages.map((age) => formatAge(now - age, now))).toEqual(
       ["now", "1m", "3h", "2d", "1mo", "2y"],
     );
+    // After a verb, "saved just now", never "saved now ago".
+    expect([5, 3 * 3600].map((age) => formatAgo(now - age, now))).toEqual(["just now", "3h ago"]);
   });
 
   it("formats waits, rounding up to whole minutes", () => {

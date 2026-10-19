@@ -2,7 +2,8 @@
 export const TITLE_MIN = 3;
 export const TITLE_MAX = 100;
 export const DESCRIPTION_MIN = 20;
-export const DESCRIPTION_MAX = 2000;
+/** A link's or upload's description: the feed shows its first lines, and the post page all of it. */
+export const DESCRIPTION_MAX = 5000;
 /** A text post's body: the post itself, so it may run longer. */
 export const TEXT_BODY_MAX = 10000;
 

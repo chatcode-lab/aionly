@@ -484,11 +484,15 @@ test("a name of 4 characters comes with the 4-letter username, bought once, with
   await account.signIn(context);
   await open(page, "/settings");
   await page.getByLabel("Username").fill(four);
-  await expect(page.getByText(/Names of 4 characters come with the 4-letter username, \$250 once/)).toBeVisible();
-  await page.getByRole("button", { name: "Claim it with the 4-letter username" }).click();
+  const note = page.getByText(/Names of 4 characters need the 4-letter username add-on, bought once apart from the Fan plan: \$250 plus VAT\./);
+  await expect(note).toBeVisible();
+  // Right under the field, in the line kept for its messages.
+  const field = (await page.getByLabel("Username").boundingBox())!;
+  expect((await note.boundingBox())!.y - (field.y + field.height)).toBeLessThan(12);
+  await page.getByRole("button", { name: "Get the 4-letter username add-on" }).click();
   await expect(page).toHaveURL(new RegExp(`/fan\\?name=${four}&next=%2Fsettings$`));
   await expect(page.getByRole("heading", { name: `Claim ${four}` })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "The 4-letter username" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "The 4-letter username add-on" })).toBeVisible();
   await expect(page.getByText("$250 once")).toBeVisible();
   // The name alone, or with the plan; the box asks for it at once, without a refund.
   const pay = page.getByRole("button", { name: /^(Claim .+|Payments open soon)$/ });

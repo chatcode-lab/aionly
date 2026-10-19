@@ -189,7 +189,7 @@ function NameForm({
   const [plan, setPlan] = useState<"none" | PlanInterval>("none");
   return (
     <Form method="post" action="/fan" className="space-y-3">
-      <h2 className="text-title font-semibold">The 4-letter username</h2>
+      <h2 className="text-title font-semibold">The 4-letter username add-on</h2>
       <input type="hidden" name="intent" value="name" />
       <input type="hidden" name="name" value={wanted} />
       <input type="hidden" name="with" value={plan} />
@@ -290,7 +290,7 @@ export default function Fan({ loaderData, actionData }: Route.ComponentProps) {
           {wanted && loaderData.nameAllowed
             ? `${wanted} is free, and you can take it in Settings.`
             : wanted && allowance
-            ? `${wanted} is free, and yours for good once you buy the 4-letter username.`
+            ? `${wanted} is free, and yours for good with the 4-letter username add-on, bought once, apart from the Fan plan.`
             : wanted
             ? `${wanted} is free, and yours as soon as you pay for the yearly plan.`
             : joined
@@ -307,7 +307,7 @@ export default function Fan({ loaderData, actionData }: Route.ComponentProps) {
       ) : null}
       {loaderData.bought ? (
         <Notice>
-          The 4-letter username is yours for good.
+          The 4-letter username add-on is yours for good.
           {loaderData.named ? ` Your name is now ${loaderData.named}.` : null}
         </Notice>
       ) : null}

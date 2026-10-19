@@ -40,7 +40,7 @@ import { deleteAccount, identityHash } from "~/lib/db/deletion.server";
 import { describeWatch, watchListOf } from "~/lib/db/updates.server";
 import { planStatus, type PlanStatus, setShowMark } from "~/lib/db/subscriptions.server";
 import { clearStaleX, type LinkedX, linkedX, setXShown, unlinkMethod } from "~/lib/db/x-accounts.server";
-import { formatAge, formatDate, formatMoney } from "~/lib/format";
+import { formatAgo, formatDate, formatMoney } from "~/lib/format";
 import { setGooglePhoto, setXPhoto } from "~/lib/images.server";
 import { imageAddress } from "~/lib/media.server";
 import { type Permission, PERMISSION_LABELS, PERMISSIONS, parsePermission } from "~/lib/permissions";
@@ -158,11 +158,6 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 
 const TOKEN_LABEL_MAX = 40;
 
-/** "just now", or "3h ago". */
-const ago = (at: number, now: number) => {
-  const age = formatAge(at, now);
-  return age === "now" ? "just now" : `${age} ago`;
-};
 
 /** What a change to the agent answers: a problem, or a new token to show once. */
 type AgentResult = { agentError: string | undefined; newToken?: string };
@@ -410,9 +405,9 @@ function nameLengths(shortest: number, name: string, planInForce: boolean): stri
   const uncertain = name.length < USERNAME_MIN && !planInForce ? ` ${shortNameUncertain(name)}` : "";
   if (shortest <= ALLOWANCE_USERNAME_MIN) return `${shortest} to ${USERNAME_MAX} characters.${uncertain}`;
   if (shortest === YEARLY_USERNAME_MIN) {
-    return `${shortest} to ${USERNAME_MAX} characters, or ${ALLOWANCE_USERNAME_MIN} with the 4-letter username.${uncertain}`;
+    return `${shortest} to ${USERNAME_MAX} characters, or ${ALLOWANCE_USERNAME_MIN} with the 4-letter username add-on.${uncertain}`;
   }
-  return `${USERNAME_MIN} to ${USERNAME_MAX} characters, or ${YEARLY_USERNAME_MIN} with the yearly plan, ${ALLOWANCE_USERNAME_MIN} with the 4-letter username.${uncertain}`;
+  return `${USERNAME_MIN} to ${USERNAME_MAX} characters, ${YEARLY_USERNAME_MIN} with the yearly plan, or ${ALLOWANCE_USERNAME_MIN} with the 4-letter username add-on.${uncertain}`;
 }
 
 /**
@@ -518,8 +513,8 @@ function AgentSection({
               <div className="min-w-0 flex-1 basis-48">
                 <p className="truncate text-body font-medium">{token.label ?? "Token"}</p>
                 <p className="text-meta text-text-muted">
-                  {token.app ? "Connected app" : "Token"} · {token.app ? "connected" : "made"} {ago(token.createdAt, now)} ·{" "}
-                  {token.lastUsedAt ? `used ${ago(token.lastUsedAt, now)}` : "never used"}
+                  {token.app ? "Connected app" : "Token"} · {token.app ? "connected" : "made"} {formatAgo(token.createdAt, now)} ·{" "}
+                  {token.lastUsedAt ? `used ${formatAgo(token.lastUsedAt, now)}` : "never used"}
                 </p>
               </div>
               <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
@@ -675,7 +670,7 @@ function InvitesSection({
                   {invite.code}
                 </p>
                 <p className="text-meta text-text-muted">
-                  Made {ago(invite.createdAt, now)} · works until {formatDate(invite.expiresAt)}
+                  Made {formatAgo(invite.createdAt, now)} · works until {formatDate(invite.expiresAt)}
                 </p>
               </div>
               <p className="truncate text-meta text-text-muted">{link(invite.code)}</p>

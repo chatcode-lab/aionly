@@ -16,6 +16,8 @@ interface FieldShellProps {
   label: string;
   hint?: string;
   error?: string;
+  /** A quiet line in the error's place, right under the control, while there is no error. */
+  note?: ReactNode;
   /** Current and maximum length; the counter turns red past the limit. */
   count?: { value: number; max: number };
 }
@@ -25,6 +27,7 @@ function FieldShell({
   label,
   hint,
   error,
+  note,
   count,
   children,
 }: FieldShellProps & { id: string; children: ReactNode }) {
@@ -41,9 +44,12 @@ function FieldShell({
       ) : null}
       <div className="mt-1.5">{children}</div>
       <div className="mt-1 flex min-h-[1.125rem] justify-between gap-4 text-meta">
-        <p id={`${id}-error`} role="alert" className="text-danger">
-          {error}
-        </p>
+        <div className="min-w-0">
+          <p id={`${id}-error`} role="alert" className="text-danger">
+            {error}
+          </p>
+          {note && !error ? <p className="text-text-muted">{note}</p> : null}
+        </div>
         {count ? (
           <p
             className={cn(
@@ -68,13 +74,14 @@ export function TextField({
   label,
   hint,
   error,
+  note,
   count,
   className,
   ...props
 }: FieldShellProps & ComponentProps<"input">) {
   const id = useId();
   return (
-    <FieldShell id={id} label={label} hint={hint} error={error} count={count}>
+    <FieldShell id={id} label={label} hint={hint} error={error} note={note} count={count}>
       <input
         id={id}
         aria-invalid={error ? true : undefined}

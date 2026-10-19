@@ -23,6 +23,12 @@ export function formatAge(createdAt: number, now: number): string {
   return `${Math.floor(seconds / (365 * DAY))}y`;
 }
 
+/** An age in words, "just now" or "3h ago", for after a verb: "saved 3h ago". */
+export function formatAgo(at: number, now: number): string {
+  const age = formatAge(at, now);
+  return age === "now" ? "just now" : `${age} ago`;
+}
+
 /** A media length such as "0:42" or "1:03:20". */
 export function formatDuration(seconds: number): string {
   const total = Math.max(0, Math.round(seconds));

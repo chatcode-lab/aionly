@@ -82,14 +82,15 @@ export function UsernameForm({
         hint={hint}
         // The server's answer stands until the name is edited again.
         error={edited ? (problem ? USERNAME_PROBLEM[problem] : undefined) : error}
+        // What a short name needs, right under the field.
+        note={
+          claim === "short_plan"
+            ? "Names of 5 characters come with the yearly Fan plan."
+            : claim === "short_allowance"
+              ? `Names of 4 characters need the 4-letter username add-on, bought once apart from the Fan plan: ${NAME_ALLOWANCES[4]!.label} plus VAT.`
+              : undefined
+        }
       />
-      {claim === "short_plan" ? (
-        <p className="text-meta text-text-muted">Names of 5 characters come with the yearly Fan plan.</p>
-      ) : claim === "short_allowance" ? (
-        <p className="text-meta text-text-muted">
-          Names of 4 characters come with the 4-letter username, {NAME_ALLOWANCES[4]!.label} once, plus VAT.
-        </p>
-      ) : null}
       {beforeSubmit}
       <Button
         type="submit"
@@ -103,7 +104,7 @@ export function UsernameForm({
           : claim === "short_plan"
             ? "Claim it with the yearly plan"
             : claim
-              ? "Claim it with the 4-letter username"
+              ? "Get the 4-letter username add-on"
               : submitLabel}
       </Button>
     </Form>

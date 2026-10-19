@@ -917,7 +917,7 @@ function SubmitFormSample() {
             ? "Write at least 20 characters."
             : undefined
         }
-        count={{ value: description.length, max: 2000 }}
+        count={{ value: description.length, max: 5000 }}
       />
       <fieldset className="flex flex-wrap gap-x-6">
         <legend className="sr-only">Where it came from</legend>

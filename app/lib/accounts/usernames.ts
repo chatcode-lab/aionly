@@ -127,8 +127,8 @@ export type UsernameProblem =
 
 export const USERNAME_PROBLEM: Record<UsernameProblem, string> = {
   too_short: `At least ${USERNAME_MIN} characters.`,
-  short_plan: `At least ${USERNAME_MIN} characters; ${YEARLY_USERNAME_MIN} come with the yearly Fan plan, and ${ALLOWANCE_USERNAME_MIN} with the 4-letter username.`,
-  short_allowance: `Names of ${ALLOWANCE_USERNAME_MIN} characters come with the 4-letter username.`,
+  short_plan: `At least ${USERNAME_MIN} characters; ${YEARLY_USERNAME_MIN} come with the yearly Fan plan, and ${ALLOWANCE_USERNAME_MIN} with the 4-letter username add-on.`,
+  short_allowance: `Names of ${ALLOWANCE_USERNAME_MIN} characters need the 4-letter username add-on.`,
   too_long: `At most ${USERNAME_MAX} characters.`,
   pattern:
     "Use lowercase letters, digits, and underscores, starting with a letter.",

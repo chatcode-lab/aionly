@@ -24,7 +24,7 @@ import {
 } from "~/lib/db/drafts.server";
 import { mentionHosts, mentionNames } from "~/lib/db/mentions.server";
 import { cleanExplanation, DRAFT_LIMIT, EXPLANATION_MAX } from "~/lib/draft-rules";
-import { formatAge, formatWait } from "~/lib/format";
+import { formatAgo, formatWait } from "~/lib/format";
 import { displayHost } from "~/lib/links/url";
 import { imageAddress } from "~/lib/media.server";
 import { privatePageMeta } from "~/lib/meta";
@@ -202,8 +202,8 @@ function DraftSummary({ draft, now, full }: { draft: DraftItem; now: number; ful
       <h3 className="text-body font-semibold break-words">{draft.title || <span className="text-text-muted">Untitled</span>}</h3>
       <p className="text-meta text-text-muted">
         {KIND[draft.kind]}
-        {draft.host ? ` · ${draft.host}` : draft.url ? ` · ${draft.url}` : ""} · saved {formatAge(draft.updatedAt, now)} ago
-        {draft.declinedAt ? ` · declined ${formatAge(draft.declinedAt, now)} ago` : ""}
+        {draft.host ? ` · ${draft.host}` : draft.url ? ` · ${draft.url}` : ""} · saved {formatAgo(draft.updatedAt, now)}
+        {draft.declinedAt ? ` · declined ${formatAgo(draft.declinedAt, now)}` : ""}
       </p>
       {draft.description ? <RichText text={draft.description} className={full ? undefined : "line-clamp-3"} /> : null}
       {full && draft.url ? (
@@ -310,7 +310,7 @@ function FeedbackItem({ note, now }: { note: Feedback; now: number }) {
   return (
     <li className="space-y-2 rounded-xl border border-border bg-surface p-3 sm:p-4">
       <p className="text-meta text-text-muted">
-        {ACTION[note.action]} {TARGET[note.target.type]} · {formatAge(note.createdAt, now)} ago
+        {ACTION[note.action]} {TARGET[note.target.type]} · {formatAgo(note.createdAt, now)}
         {postId && note.target.type === "comment" ? (
           <>
             {" · "}
