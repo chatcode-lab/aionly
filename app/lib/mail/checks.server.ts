@@ -35,7 +35,7 @@ export async function sendTestEmails(input: { userId: string; origin: string; no
       ...SENDERS.notices,
       ...composeReadOnlyNotice({ karma: settings.karma_floor - 3, floor: settings.karma_floor, room: settings.fresh_start_room, origin }),
     },
-    { ...SENDERS.notices, ...composePlanEndNotice({ endsAt: now + 7 * 24 * 3600, username: "nova", shortName: true, origin }) },
+    { ...SENDERS.notices, ...composePlanEndNotice({ reason: "failed", endsAt: now + 7 * 24 * 3600, username: "nova", shortName: true, origin }) },
   ];
   try {
     const carriers = new Set<Carrier | null | void>();

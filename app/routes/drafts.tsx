@@ -164,9 +164,11 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
   const gone = { draft: id, error: "This draft is gone." };
 
   if (intent === "publish") {
+    // An agent's draft, for its owner: a member's own goes through Submit.
     const result = await publishDraft(env.DB, {
       id,
       actorId: viewer.id,
+      as: "owner",
       revision,
       bucket: env.IMAGES,
       secret: env.BETTER_AUTH_SECRET,

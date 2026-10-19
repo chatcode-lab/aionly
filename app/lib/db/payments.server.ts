@@ -18,6 +18,8 @@ export interface PaymentInput {
   currency: string;
   paidAt: number;
   paymentIntent?: string | null;
+  /** The invoice it was billed on with others, as the 4-letter username with the plan. */
+  invoiceId?: string | null;
 }
 
 export async function recordPayment(db: D1Database, input: PaymentInput): Promise<void> {
@@ -34,11 +36,21 @@ export function paymentStatements(db: D1Database, input: PaymentInput): D1Prepar
   return [
     db
       .prepare(
-        `INSERT INTO payments (id, user_id, kind, amount_cents, currency, paid_at, payment_intent)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-         ON CONFLICT (id) DO UPDATE SET payment_intent = COALESCE(payments.payment_intent, excluded.payment_intent)`,
+        `INSERT INTO payments (id, user_id, kind, amount_cents, currency, paid_at, payment_intent, invoice_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT (id) DO UPDATE SET payment_intent = COALESCE(payments.payment_intent, excluded.payment_intent),
+           invoice_id = COALESCE(payments.invoice_id, excluded.invoice_id)`,
       )
-      .bind(input.id, input.userId, input.kind, amount, input.currency.toLowerCase(), input.paidAt, input.paymentIntent ?? null),
+      .bind(
+        input.id,
+        input.userId,
+        input.kind,
+        amount,
+        input.currency.toLowerCase(),
+        input.paidAt,
+        input.paymentIntent ?? null,
+        input.invoiceId ?? null,
+      ),
     // A refund that came first applies now.
     applyRefunds(db, input.id, input.paymentIntent ?? null),
     ...(input.kind === "plan" && amount > 0
@@ -55,18 +67,36 @@ export function paymentStatements(db: D1Database, input: PaymentInput): D1Prepar
 }
 
 /**
- * Sets the refunded part of the payments named by ID or payment intent from
- * the refunds kept for them: the largest share any of their charges was
- * refunded, applied to the amount before tax, and never lowered.
+ * Payments billed together, as SQL on `payments` (`alias`): one invoice's,
+ * by the invoice's ID, which a plan's payment is recorded under and a
+ * 4-letter username bought with it names; any other payment is its own.
+ */
+const BILLED = (alias: string) => `COALESCE(${alias}.invoice_id, ${alias}.id)`;
+
+/**
+ * Sets the refunded part of the payments named by ID, invoice, or payment
+ * intent, and of those billed with them, from the refunds kept for them:
+ * the largest share any of their charges was refunded, applied to their
+ * amount together, before tax, and given to the plan first, since the
+ * 4-letter username billed with it is not refundable (review F80). It
+ * follows the refunds kept, which never lower, so it is worked out afresh
+ * each time, whichever of a shared invoice's payments was recorded first.
  */
 function applyRefunds(db: D1Database, id: string | null, paymentIntent: string | null): D1PreparedStatement {
   return db
     .prepare(
-      `UPDATE payments SET refunded_cents = MAX(refunded_cents, MIN(amount_cents, COALESCE((
-         SELECT CAST(ROUND(payments.amount_cents * MAX(refund.refunded * 1.0 / refund.paid)) AS INTEGER)
-         FROM refunds AS refund
-         WHERE refund.payment_intent = payments.payment_intent OR refund.invoice_id = payments.id), 0)))
-       WHERE id = ?1 OR payment_intent = ?2`,
+      `UPDATE payments SET refunded_cents = MIN(amount_cents, MAX(0,
+         CAST(ROUND(
+           (SELECT SUM(member.amount_cents) FROM payments AS member WHERE ${BILLED("member")} = ${BILLED("payments")})
+           * COALESCE((SELECT MAX(refund.refunded * 1.0 / refund.paid) FROM refunds AS refund
+               WHERE refund.invoice_id = ${BILLED("payments")}
+                  OR refund.payment_intent IN (SELECT member.payment_intent FROM payments AS member
+                       WHERE ${BILLED("member")} = ${BILLED("payments")} AND member.payment_intent IS NOT NULL)), 0)) AS INTEGER)
+         - COALESCE((SELECT SUM(earlier.amount_cents) FROM payments AS earlier
+             WHERE ${BILLED("earlier")} = ${BILLED("payments")}
+               AND (earlier.kind <> 'plan', earlier.id) < (payments.kind <> 'plan', payments.id)), 0)))
+       WHERE ${BILLED("payments")} IN (SELECT ${BILLED("touched")} FROM payments AS touched
+         WHERE touched.id = ?1 OR touched.invoice_id = ?1 OR touched.payment_intent = ?2)`,
     )
     .bind(id, paymentIntent);
 }

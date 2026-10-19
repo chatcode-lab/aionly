@@ -12,6 +12,7 @@ import { wantedShortName } from "~/lib/accounts/wanted-name";
 import {
   AlreadyHasName,
   AlreadySubscribed,
+  NamePending,
   billingOpen,
   BUSY,
   CheckoutBusy,
@@ -133,6 +134,7 @@ export async function action({ request, context }: Route.ActionArgs) {
       return redirect(await nameCheckoutUrl(viewer, { length: wanted.length, wantedName: wanted, interval, origin, startNowAt: now, then }), 303);
     } catch (error) {
       if (error instanceof AlreadyHasName) return { error: `You have it already. Take ${wanted} in Settings.` };
+      if (error instanceof NamePending) return { error: "Your earlier payment for it is still being confirmed. Try again once it is." };
       if (error instanceof AlreadySubscribed) return { error: "You already have a plan. Buy the name alone." };
       if (error instanceof CheckoutBusy) return { error: BUSY };
       console.error("stripe name checkout", error);

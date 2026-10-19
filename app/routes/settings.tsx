@@ -853,7 +853,13 @@ function PlanSection({
         {plan.interval ? `${plan.interval === "year" ? "Yearly" : "Monthly"} plan` : "Your plan"}
         {plan.periodEnd ? (plan.cancelAtPeriodEnd ? `, ending on ${formatDate(plan.periodEnd)}.` : `, renewing on ${formatDate(plan.periodEnd)}.`) : "."}
       </p>
-      {plan.cancelAtPeriodEnd ? (
+      {plan.status === "past_due" ? (
+        <Notice tone="danger">
+          This period&apos;s payment did not go through, and Stripe will try again. Check your card under Manage billing:
+          if it stays unpaid, the plan ends, and from then on, {PLAN_END_STOPS}.
+          {username.length < USERNAME_MIN ? ` ${shortNameUncertain(username)}` : null}
+        </Notice>
+      ) : plan.cancelAtPeriodEnd ? (
         <Notice tone="warn">
           From then on, {PLAN_END_STOPS}.{username.length < USERNAME_MIN ? ` ${shortNameUncertain(username)}` : null}
         </Notice>

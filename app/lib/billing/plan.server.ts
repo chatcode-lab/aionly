@@ -23,6 +23,7 @@ import {
   createCheckout,
   createCustomer,
   createFreshStartCheckout,
+  completedNameCheckouts,
   createNameCheckout,
   createPortal,
   expireOpenCheckouts,
@@ -151,6 +152,9 @@ function planLookupKey(viewer: AccountRecord, interval: PlanInterval): string {
 /** The member has a short username already as short as the one asked for. */
 export class AlreadyHasName extends Error {}
 
+/** An earlier checkout for the name is complete, its payment still being confirmed. */
+export class NamePending extends Error {}
+
 /**
  * Stripe's checkout page for a short username, bought once for good, to
  * take `wantedName`: alone, or with the plan billed by `interval`, for a
@@ -172,6 +176,16 @@ export async function nameCheckoutUrl(
   if (planKey && !planPriceId) throw new Error(`no active Stripe price has the lookup key ${planKey}`);
   const customerId = await customerFor(viewer);
   return holdingCheckout(viewer.id, "plan", async (attempt) => {
+    // A checkout already paid, not yet applied, is applied now rather than
+    // sold again; one still being paid waits (review F81).
+    for (const done of await completedNameCheckouts(client(), customerId)) {
+      if (paidNameAllowance(done)) await settleNameAllowance(done);
+      else if (done.payment_status === "unpaid") throw new NamePending("an earlier checkout is being paid");
+    }
+    const bought = await env.DB.prepare(`SELECT name_allowance FROM profiles WHERE user_id = ?1`)
+      .bind(viewer.id)
+      .first<{ name_allowance: number | null }>();
+    if (bought?.name_allowance != null && bought.name_allowance <= input.length) throw new AlreadyHasName("bought already");
     if (planKey) {
       const running = await runningSubscriptions(client(), customerId);
       if (running.length > 0) {
@@ -200,20 +214,33 @@ export async function nameCheckoutUrl(
 /**
  * Gives the member the short username a paid checkout bought, whether the
  * member lands back here or Stripe's webhook comes first, with what it
- * came to before tax, after any promotion code. Whether one was.
+ * came to before tax, after any promotion code, and the invoice it shares
+ * with the plan. A second payment for a name already bought is refunded
+ * when it was paid alone; one billed with the plan is left to the
+ * operator, who refunds its line (review F81). Whether one was given.
  */
 async function settleNameAllowance(session: StripeCheckoutSession): Promise<boolean> {
   const bought = paidNameAllowance(session);
   if (!bought) return false;
-  return grantNameAllowance(env.DB, {
+  const cents = await nameCents(session, bought);
+  const result = await grantNameAllowance(env.DB, {
     userId: bought.userId,
     length: bought.length,
     sessionId: session.id,
-    cents: await nameCents(session, bought),
+    cents,
     currency: session.currency ?? "usd",
     paidAt: now(),
     paymentIntent: session.payment_intent ?? null,
+    invoiceId: session.mode === "subscription" ? (session.invoice ?? null) : null,
   });
+  if (result.duplicate && cents > 0) {
+    if (session.mode === "payment" && session.payment_intent) {
+      if (env.STRIPE_SECRET_KEY) await refundPayment(client(), session.payment_intent, "the 4-letter username was bought already");
+    } else {
+      console.error("4-letter username bought again with the plan: refund its line by hand", session.id);
+    }
+  }
+  return result.granted;
 }
 
 /**

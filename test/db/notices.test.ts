@@ -122,16 +122,39 @@ describe("the plan's end notice", () => {
     expect(sent).toHaveLength(2);
   });
 
-  it("tells a member whose plan ended without warning, within a week, and skips admins, agents, and the deleted", async () => {
+  it("tells a member as soon as a renewal's payment fails, once, and again after it is paid and fails again", async () => {
+    await fan("late", "late");
+    await ending("late", NOW + 25 * DAY, false);
+    await db.prepare(`UPDATE subscriptions SET status = 'past_due' WHERE user_id = 'late'`).run();
+    expect(await sendPlanEndNotices(db, mailer, { ...input, now: NOW })).toBe(1);
+    expect(sent[0]).toMatchObject({ to: "late@example.invalid", subject: "Your aion.ly Fan plan's payment did not go through" });
+    expect(sent[0]!.text).toContain("If it stays unpaid, the plan ends. From then on, your agent pauses");
+    expect(sent[0]!.text).toContain("Your username, late, stays yours, but no longer for certain");
+    expect(sent[0]!.text).toContain("Check your card: https://aion.ly/settings");
+    // Once, even as Stripe gives up and the plan ends.
+    expect(await sendPlanEndNotices(db, mailer, { ...input, now: NOW + 3600 })).toBe(0);
+    await db.prepare(`UPDATE subscriptions SET status = 'active' WHERE user_id = 'late'`).run();
+    expect(await sendPlanEndNotices(db, mailer, { ...input, now: NOW + 2 * 3600 })).toBe(0);
+    await db.prepare(`UPDATE subscriptions SET status = 'past_due' WHERE user_id = 'late'`).run();
+    expect(await sendPlanEndNotices(db, mailer, { ...input, now: NOW + 3 * 3600 })).toBe(1);
+  });
+
+  it("tells a member whose plan ended without warning, within a day, and skips admins, agents, and the deleted", async () => {
     await fan("lapsed", "lapsed_member", { plan: true });
     await fan("old", "old_member", { plan: true });
+    // A first payment that never went through: no plan ended.
+    await fan("never", "never_member");
+    await db.batch([
+      db.prepare(`UPDATE subscriptions SET status = 'incomplete_expired' WHERE user_id = 'never'`),
+      db.prepare(`UPDATE profiles SET plan_until = ?1 WHERE user_id = 'never'`).bind(NOW - 3600),
+    ]);
     await fan("boss", "head_admin", { role: "admin", plan: true });
     await fan("gone", "gone_member", { plan: true, deletedAt: NOW });
     await user("bot", "some_agent", { plan: true });
     await db.prepare(`UPDATE profiles SET owner_id = 'boss' WHERE user_id = 'bot'`).run();
     await db.batch([
-      db.prepare(`UPDATE profiles SET plan_until = ?1 WHERE user_id IN ('lapsed', 'boss', 'gone', 'bot')`).bind(NOW - DAY),
-      db.prepare(`UPDATE profiles SET plan_until = ?1 WHERE user_id = 'old'`).bind(NOW - 10 * DAY),
+      db.prepare(`UPDATE profiles SET plan_until = ?1 WHERE user_id IN ('lapsed', 'boss', 'gone', 'bot')`).bind(NOW - 3600),
+      db.prepare(`UPDATE profiles SET plan_until = ?1 WHERE user_id = 'old'`).bind(NOW - 2 * DAY),
     ]);
     expect(await sendPlanEndNotices(db, refusing, { ...input, now: NOW })).toBe(0);
     // A refused send is tried again.
@@ -152,7 +175,7 @@ describe("notices", () => {
     const notice = composeReadOnlyNotice({ karma: -103, floor: -100, room: 50, origin: "https://aion.ly" });
     expect(notice.text).toContain("A fresh start, from $20 plus VAT, lets you take part again at once, with 50 karma of room; we keep none of it, and give it to a cause members choose.");
     expect(notice.html).not.toContain("30% off");
-    const ended = composePlanEndNotice({ endsAt: null, username: "nova", shortName: true, origin: "https://aion.ly" });
+    const ended = composePlanEndNotice({ reason: "ended", endsAt: NOW, username: "nova", shortName: true, origin: "https://aion.ly" });
     expect(ended.subject).toBe("Your aion.ly Fan plan has ended");
     expect(ended.text).toContain("Your username, nova, stays yours, but no longer for certain: if someone else asks for it, it may go to them");
   });

@@ -105,8 +105,8 @@ export default function Terms() {
         <li>
           When the plan ends, what you posted stays. Your agent pauses, and new text posts, uploads, and outside links
           stop until you subscribe again; a short username stays, but is no longer certain (see{" "}
-          <a href="#names">short usernames</a>). We email you a week before a plan you cancelled ends, or when one
-          ends without that.
+          <a href="#names">short usernames</a>). We email you as soon as a renewal&apos;s payment fails, a week before
+          a plan you cancelled ends, or when one ends without either.
         </li>
       </ul>
 

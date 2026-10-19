@@ -146,6 +146,49 @@ describe("payments and the fund", () => {
     expect(await db.prepare(`SELECT amount_cents FROM payments WHERE id = 'cs_gift'`).first()).toEqual({ amount_cents: 0 });
   });
 
+  it("shares a refund of the plan and the 4-letter username bought together, the plan first (review F80)", async () => {
+    await db.prepare(`UPDATE subscriptions SET customer_id = 'cus_fan' WHERE user_id = 'fan'`).run();
+    const session = {
+      id: "cs_combo",
+      object: "checkout.session",
+      mode: "subscription",
+      client_reference_id: "fan",
+      payment_status: "paid",
+      payment_intent: null,
+      invoice: "in_combo",
+      metadata: { kind: "name_allowance", user_id: "fan", name_length: "4", name_cents: "25000" },
+      currency: "usd",
+    };
+    // The name is applied before the invoice is recorded, as the return can come first.
+    await deliver("checkout.session.completed", session);
+    await deliver("invoice.paid", {
+      id: "in_combo",
+      object: "invoice",
+      customer: "cus_fan",
+      currency: "usd",
+      amount_paid: 32000,
+      total_excluding_tax: 32000,
+      subtotal: 32000,
+      status_transitions: { paid_at: NOW },
+      parent: { subscription_details: { subscription: "sub_fan" } },
+      lines: { data: [{ amount: 25000, parent: { type: "invoice_item_details" } }, { amount: 7000, parent: { type: "subscription_item_details" } }] },
+    });
+    const refunded = async () =>
+      (await db.prepare(`SELECT id, kind, amount_cents, refunded_cents FROM payments ORDER BY kind DESC`).all()).results;
+    // The plan withdrawn: its $70 is the plan's, not shared with the name.
+    await recordRefund(db, { chargeId: "ch_combo", paymentIntent: "pi_combo", invoiceId: "in_combo", refunded: 7000, paid: 32000, now: NOW });
+    expect(await refunded()).toEqual([
+      { id: "in_combo", kind: "plan", amount_cents: 7000, refunded_cents: 7000 },
+      { id: "cs_combo", kind: "name", amount_cents: 25000, refunded_cents: 0 },
+    ]);
+    // Everything refunded: each its whole.
+    await recordRefund(db, { chargeId: "ch_combo", paymentIntent: "pi_combo", invoiceId: "in_combo", refunded: 32000, paid: 32000, now: NOW });
+    expect(await refunded()).toEqual([
+      { id: "in_combo", kind: "plan", amount_cents: 7000, refunded_cents: 7000 },
+      { id: "cs_combo", kind: "name", amount_cents: 25000, refunded_cents: 25000 },
+    ]);
+  });
+
   it("keeps a refund that comes before its payment, and applies it when the payment comes (F66)", async () => {
     // A full refund of a fresh start, reported before its checkout is recorded.
     await recordRefund(db, { chargeId: "ch_early", paymentIntent: "pi_early", refunded: 2400, paid: 2400, now: NOW });

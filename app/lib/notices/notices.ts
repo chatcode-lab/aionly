@@ -43,25 +43,53 @@ export function composeReadOnlyNotice(input: { karma: number; floor: number; roo
 }
 
 /**
- * That the member's Fan plan ends on `endsAt`, as they cancelled it, or has
- * ended (`endsAt` null), as when a payment failed: what stops, and that a
- * short name (`shortName`) is no longer certain.
+ * That the member's Fan plan is ending: on `endsAt`, as they cancelled it
+ * (`ending`); unless paid, as a renewal's payment failed (`failed`); or
+ * already (`ended`). What stops, and that a short name (`shortName`) is no
+ * longer certain.
  */
-export function composePlanEndNotice(input: { endsAt: number | null; username: string; shortName: boolean; origin: string }) {
-  const { endsAt, origin } = input;
-  const date = endsAt === null ? null : formatDate(endsAt);
+export function composePlanEndNotice(input: {
+  reason: "ending" | "failed" | "ended";
+  endsAt: number;
+  username: string;
+  shortName: boolean;
+  origin: string;
+}) {
+  const { reason, origin } = input;
+  const date = formatDate(input.endsAt);
+  const words = {
+    ending: {
+      subject: `Your aion.ly Fan plan ends on ${date}`,
+      preview: "Until then, everything stays as it is.",
+      heading: `Your Fan plan ends on ${date}`,
+      first: "It is set to end then, so it will not renew. Until then, everything stays as it is.",
+      when: "From then on",
+      button: { label: "Keep your plan", url: `${origin}/settings` },
+    },
+    failed: {
+      subject: "Your aion.ly Fan plan's payment did not go through",
+      preview: "Check your card to keep your plan.",
+      heading: "Your plan's payment did not go through",
+      first:
+        "Stripe could not take this period's payment, and will try again over the next days. To keep your plan, check your card under Manage billing in Settings.",
+      when: "If it stays unpaid, the plan ends. From then on",
+      button: { label: "Check your card", url: `${origin}/settings` },
+    },
+    ended: {
+      subject: "Your aion.ly Fan plan has ended",
+      preview: "What you posted stays.",
+      heading: "Your Fan plan has ended",
+      first: "Thank you for being a fan. What you posted stays, and reading, link posts, comments, votes, and saves stay free.",
+      when: "From now on",
+      button: { label: "Become a fan again", url: `${origin}/fan` },
+    },
+  }[reason];
   return composeLetter({
-    subject: date ? `Your aion.ly Fan plan ends on ${date}` : "Your aion.ly Fan plan has ended",
-    preview: date ? "Until then, everything stays as it is." : "What you posted stays.",
-    heading: date ? `Your Fan plan ends on ${date}` : "Your Fan plan has ended",
-    paragraphs: [
-      date
-        ? "It is set to end then, so it will not renew. Until then, everything stays as it is."
-        : "Thank you for being a fan. What you posted stays, and reading, link posts, comments, votes, and saves stay free.",
-      `From ${date ? "then" : "now"} on, ${PLAN_END_STOPS}.`,
-      ...(input.shortName ? [shortNameUncertain(input.username)] : []),
-    ],
-    button: date ? { label: "Keep your plan", url: `${origin}/settings` } : { label: "Become a fan again", url: `${origin}/fan` },
+    subject: words.subject,
+    preview: words.preview,
+    heading: words.heading,
+    paragraphs: [words.first, `${words.when}, ${PLAN_END_STOPS}.`, ...(input.shortName ? [shortNameUncertain(input.username)] : [])],
+    button: words.button,
     why: "You get this because your aion.ly Fan plan is ending. It comes once each time.",
     origin,
   });

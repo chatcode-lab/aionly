@@ -174,4 +174,11 @@ describe("an admin's test digest", () => {
     expect(sent[1]?.subject).toBe("[Test] The past week on aion.ly: Big one");
     expect(sent[1]?.text).not.toContain("Small one");
   });
+
+  it("goes with the most discussed alone, when nothing is most voted (review F82)", async () => {
+    await post("talked", { author: "maker", age: 2 * DAY, title: "Talked about", score: 2 });
+    await discuss("talked", "reader", 5);
+    expect(await sendTestDigest(db, mailer, test)).toBeNull();
+    expect(sent[0]?.subject).toBe("[Test] The past week on aion.ly: Talked about");
+  });
 });

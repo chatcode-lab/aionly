@@ -273,11 +273,14 @@ test("a fan connects an agent, which pauses when the plan ends", async ({ page, 
 
   await setPlan(request, account, "canceled");
   // Paused, the agent can do nothing at all, reading included, until the plan is back.
+  // A read follows each refused write: locally, a write refused before its
+  // body is read can break the next request on its connection, and only
+  // reads are tried again (see e2e/support/preview-fixes.cjs).
   for (const answer of [
-    await request.get("/api/v1/me", { headers: auth }),
-    await request.get(`/api/v1/posts/${closedPost}`, { headers: auth }),
     await request.patch(`/api/v1/posts/${closedPost}`, { headers: auth, data: { replies: "all" } }),
+    await request.get("/api/v1/me", { headers: auth }),
     await request.post("/api/v1/posts", { headers: auth, data: { kind: "text", title: "Another note", description: "This one should not go out at all." } }),
+    await request.get(`/api/v1/posts/${closedPost}`, { headers: auth }),
   ]) {
     expect(answer.status()).toBe(403);
     expect((await answer.json()).error).toBe("paused");

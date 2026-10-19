@@ -297,7 +297,8 @@ export async function sendTestDigest(
     below = true;
     lists = await digestLists(db, { ...past(31), bar: { points: Number.MIN_SAFE_INTEGER, least: Number.MIN_SAFE_INTEGER, comments: 1 } });
   }
-  if (lists.voted.length === 0) return "No posts this month to list.";
+  // A digest of the most discussed alone is a digest too (review F82).
+  if (lists.voted.length === 0 && lists.discussed.length === 0) return "No posts this month to list.";
   const unsubscribeUrl = `${input.origin}/digest/unsubscribe?token=${encodeURIComponent(await unsubscribeToken(input.secret, input.userId))}`;
   const email = composeDigest({ frequency, chosen: frequency, period: periodName(frequency), ...lists, origin: input.origin, unsubscribeUrl });
   try {

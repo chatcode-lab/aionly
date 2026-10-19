@@ -304,6 +304,17 @@ export interface StripeCheckoutSession {
   subscription?: StripeSubscription | string | null;
   /** Discounts and tax over the whole session, in the currency's smallest unit. */
   total_details?: { amount_discount?: number | null } | null;
+  /** The invoice it made: with a subscription, its first, which the plan's payment is recorded under. */
+  invoice?: string | null;
+}
+
+/**
+ * The customer's completed checkouts for a short username, paid or still
+ * being paid, so a member is not sold one they bought already (review F81).
+ */
+export async function completedNameCheckouts(client: StripeClient, customerId: string): Promise<StripeCheckoutSession[]> {
+  const all = await listAll<StripeCheckoutSession>(client, "/checkout/sessions", { customer: customerId, status: "complete" });
+  return all.filter((session) => session.metadata?.kind === NAME_ALLOWANCE_KIND);
 }
 
 /**

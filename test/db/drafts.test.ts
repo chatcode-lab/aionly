@@ -57,10 +57,12 @@ const complete: DraftFields = {
 const save = (authorId: string, fields: Partial<DraftFields> = {}, more: { id?: string; revision?: number | null } = {}) =>
   saveDraft(db, { authorId, fields: { ...complete, ...fields }, now: NOW, ...more });
 
-const publish = (id: string, actorId: string, revision: number | null = null, now = NOW) =>
+/** Publishes as the draft's author when the actor wrote it, else as its agent's owner. */
+const publish = async (id: string, actorId: string, revision: number | null = null, now = NOW, as?: "author" | "owner") =>
   publishDraft(db, {
     id,
     actorId,
+    as: as ?? ((await draftFor(db, id, actorId))?.as ?? "author"),
     revision,
     bucket: env.IMAGES,
     secret: env.BETTER_AUTH_SECRET,
@@ -128,6 +130,40 @@ describe("saving drafts", () => {
     await sent("owner", key("e"), { bytes: DRAFT_BYTES + 1 });
     expect(await save("owner", { kind: "upload", mediaKey: key("e") })).toEqual({ ok: false, reason: "too_large" });
     expect(await save("owner", { kind: "upload", mediaKey: "../etc/passwd" })).toEqual({ ok: false, reason: "file" });
+  });
+
+  it("counts the files a save would leave, so a replacement at the limit fits, and two saves at once cannot pass it (review F83)", async () => {
+    const quarter = DRAFT_BYTES / 4;
+    const ids: string[] = [];
+    for (const letter of ["m", "n", "o", "p"]) {
+      await sent("owner", key(letter), { bytes: quarter });
+      const saved = await save("owner", { kind: "upload", mediaKey: key(letter) });
+      if (!saved.ok) throw new Error(JSON.stringify(saved));
+      ids.push(saved.draft.id);
+    }
+    // At the limit, replacing one file with another as large leaves it there.
+    await sent("owner", key("q"), { bytes: quarter });
+    expect(await save("owner", { kind: "upload", mediaKey: key("q") }, { id: ids[0] })).toMatchObject({ ok: true, freed: [key("m")] });
+    // With three quarters held, two new drafts at once: only one fits.
+    await deleteDraft(db, { id: ids[1]!, authorId: "owner" });
+    await sent("owner", key("r"), { bytes: quarter });
+    await sent("owner", key("s", "png"), { kind: "post", bytes: Math.floor(DRAFT_BYTES / 100), type: "image/png" });
+    const both = await Promise.all([
+      save("owner", { kind: "upload", mediaKey: key("r") }),
+      save("owner", { kind: "upload", mediaKey: null, posterKey: key("s", "png") }),
+    ]);
+    expect(both.filter((result) => result.ok)).toHaveLength(1);
+    expect(both.filter((result) => !result.ok)).toEqual([{ ok: false, reason: "too_large" }]);
+    const held = await db.prepare(`SELECT SUM(bytes) AS bytes FROM images WHERE owner_id = 'owner' AND state = 'draft'`).first<{ bytes: number }>();
+    expect(held!.bytes).toBeLessThanOrEqual(DRAFT_BYTES);
+  });
+
+  it("writes nothing for an account deleted while its save was on the way (review F79)", async () => {
+    await db.prepare(`UPDATE profiles SET deleted_at = ?1 WHERE user_id = 'owner'`).bind(NOW).run();
+    // The owner's own save, and their agent's, after the owner's deletion.
+    expect(await save("owner")).toEqual({ ok: false, reason: "not_found" });
+    expect(await save(agentId)).toEqual({ ok: false, reason: "not_found" });
+    expect(await db.prepare(`SELECT COUNT(*) AS n FROM drafts`).first()).toEqual({ n: 0 });
   });
 
   it("changes at the revision the author saw, or says it changed", async () => {
@@ -211,6 +247,11 @@ describe("publishing drafts", () => {
     expect(await draftFor(db, agentDraft, "owner")).toMatchObject({ as: "owner" });
     expect(await publish(agentDraft, "other", 1)).toEqual({ ok: false, reason: "not_found" });
     expect(await publish(ownerDraft, agentId, 1)).toEqual({ ok: false, reason: "not_found" });
+    // The Drafts page publishes for an agent's owner alone: a member's own
+    // draft goes through Submit and its human check (review F78).
+    expect(await publish(ownerDraft, "owner", 1, NOW, "owner")).toEqual({ ok: false, reason: "not_found" });
+    // Nor does an agent publish its owner's draft as its author.
+    expect(await publish(agentDraft, "owner", 1, NOW, "author")).toEqual({ ok: false, reason: "not_found" });
     // An owner reviews, but never edits, the agent's work.
     expect(await save("owner", { title: "Owner's edit" }, { id: agentDraft })).toEqual({ ok: false, reason: "not_found" });
   });

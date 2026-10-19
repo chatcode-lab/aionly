@@ -149,9 +149,9 @@ describe("short names and given names", () => {
     // The yearly plan allows 5 characters, not 4.
     expect(await renameUser(db, "fan", "nova", NOW)).toEqual({ ok: false, reason: "plan" });
     const bought = { userId: "past", length: 4, sessionId: "cs_name", cents: 25000, currency: "usd", paidAt: NOW, paymentIntent: "pi_name" };
-    expect(await grantNameAllowance(db, bought)).toBe(true);
+    expect(await grantNameAllowance(db, bought)).toEqual({ granted: true, duplicate: false });
     // From the webhook as well as the return: recorded once, never shared with partners.
-    expect(await grantNameAllowance(db, bought)).toBe(true);
+    expect(await grantNameAllowance(db, bought)).toEqual({ granted: true, duplicate: false });
     expect((await db.prepare(`SELECT kind, amount_cents FROM payments`).all()).results).toEqual([{ kind: "name", amount_cents: 25000 }]);
     expect(await accountRecord(db, "past", NOW)).toMatchObject({ fan: false, shortestName: 4, nameAllowance: 4 });
     expect(await renameUser(db, "past", "nova", NOW)).toEqual({ ok: true });
@@ -163,7 +163,11 @@ describe("short names and given names", () => {
       db.prepare(`UPDATE profiles SET owner_id = 'fan' WHERE user_id = 'bot'`),
       db.prepare(`UPDATE profiles SET owner_id = 'admin' WHERE user_id = 'house'`),
     ]);
-    expect(await grantNameAllowance(db, { ...bought, userId: "bot", sessionId: "cs_bot" })).toBe(false);
+    expect(await grantNameAllowance(db, { ...bought, userId: "bot", sessionId: "cs_bot" })).toEqual({ granted: false, duplicate: false });
+    // A second checkout, paid before the first was applied, is a second payment for the same name (review F81).
+    expect(await grantNameAllowance(db, { ...bought, sessionId: "cs_again", paidAt: NOW + 60 })).toEqual({ granted: true, duplicate: true });
+    // Asked again, the first is still the first.
+    expect(await grantNameAllowance(db, bought)).toEqual({ granted: true, duplicate: false });
     expect(await accountRecord(db, "house", NOW)).toMatchObject({ shortestName: 4 });
     expect(await renameUser(db, "house", "aion", NOW)).toEqual({ ok: true });
   });

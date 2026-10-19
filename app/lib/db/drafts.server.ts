@@ -163,7 +163,6 @@ export async function saveDraft(
     { key: fields.posterKey, kind: "post", kept: current?.posterKey ?? null },
   ] as const;
   let mediaType: "image" | "video" | "audio" | null = null;
-  let adding = 0;
   for (const file of files) {
     if (file.key === null) continue;
     const row = await db
@@ -172,16 +171,16 @@ export async function saveDraft(
       .first<{ state: string; content_type: string; bytes: number }>();
     const usable = row && (row.state === "pending" || (row.state === "draft" && file.key === file.kept));
     if (!usable) return { ok: false, reason: "file" };
-    if (row.state === "pending") adding += row.bytes;
     if (file.kind === "media") mediaType = mediaTypeOf(row.content_type);
   }
-  if (adding > 0) {
-    const held = await db
-      .prepare(`SELECT COALESCE(SUM(bytes), 0) AS bytes FROM images WHERE owner_id = ?1 AND state = 'draft'`)
-      .bind(input.authorId)
+  // The author's draft files once this save lands, those it replaces left
+  // out; checked again inside the write, so two saves at once cannot pass it together.
+  const sizeAfter = () =>
+    db
+      .prepare(`SELECT ${bytesAfterSql(1, 2, 3, 4)} AS bytes`)
+      .bind(id, input.authorId, fields.mediaKey, fields.posterKey)
       .first<{ bytes: number }>();
-    if ((held?.bytes ?? 0) + adding > DRAFT_BYTES) return { ok: false, reason: "too_large" };
-  }
+  if (((await sizeAfter())?.bytes ?? 0) > DRAFT_BYTES) return { ok: false, reason: "too_large" };
 
   // The files' rule again, inside the write: a file displaced or used since
   // the check above leaves the draft as it was.
@@ -213,7 +212,8 @@ export async function saveDraft(
              media_key = ?9, media_type = ?10, media_width = ?11, media_height = ?12, media_duration = ?13,
              poster_key = ?14, updated_at = ?15, revision = revision + 1
            WHERE id = ?1 AND author_id = ?2 AND post_id IS NULL AND (?16 IS NULL OR revision = ?16)
-             AND ${fileHolds(9, "media", "media_key")} AND ${fileHolds(14, "post", "poster_key")}`,
+             AND ${fileHolds(9, "media", "media_key")} AND ${fileHolds(14, "post", "poster_key")}
+             AND ${bytesAfterSql(1, 2, 9, 14)} <= ${DRAFT_BYTES} AND ${LIVE_AUTHOR}`,
         )
         .bind(...values)
     : db
@@ -222,7 +222,8 @@ export async function saveDraft(
              media_key, media_type, media_width, media_height, media_duration, poster_key, created_at, updated_at)
            SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15
            WHERE (SELECT COUNT(*) FROM drafts WHERE author_id = ?2 AND post_id IS NULL) < ${DRAFT_LIMIT}
-             AND ${fileHolds(9, "media", "media_key")} AND ${fileHolds(14, "post", "poster_key")}`,
+             AND ${fileHolds(9, "media", "media_key")} AND ${fileHolds(14, "post", "poster_key")}
+             AND ${bytesAfterSql(1, 2, 9, 14)} <= ${DRAFT_BYTES} AND ${LIVE_AUTHOR}`,
         )
         // A new draft has no revision to match.
         .bind(...values.slice(0, 15));
@@ -240,6 +241,9 @@ export async function saveDraft(
   ]);
   const keys = ((freed!.results ?? []) as Array<{ key: string }>).map((row) => row.key);
   if (written!.meta.changes === 0) {
+    const live = await db.prepare(`SELECT ${LIVE_AUTHOR} AS live`).bind(null, input.authorId).first<{ live: number }>();
+    if (!live?.live) return { ok: false, reason: "not_found" };
+    if (((await sizeAfter())?.bytes ?? 0) > DRAFT_BYTES) return { ok: false, reason: "too_large" };
     if (!current) {
       const count = await db
         .prepare(`SELECT COUNT(*) AS n FROM drafts WHERE author_id = ?1 AND post_id IS NULL`)
@@ -257,6 +261,28 @@ export async function saveDraft(
   }
   const saved = await draftById(db, id);
   return saved ? { ok: true, draft: saved, freed: keys } : { ok: false, reason: "not_found" };
+}
+
+/**
+ * The author bound as `?{author}` is live, and so is the owner of an agent:
+ * a save that began before its account's deletion writes nothing after it
+ * (review F79). Banned accounts and those at the floor still keep drafts.
+ */
+const LIVE_AUTHOR = `EXISTS (SELECT 1 FROM profiles AS writer LEFT JOIN profiles AS writer_owner ON writer_owner.user_id = writer.owner_id
+  WHERE writer.user_id = ?2 AND writer.deleted_at IS NULL AND (writer.owner_id IS NULL OR writer_owner.deleted_at IS NULL))`;
+
+/**
+ * SQL for the bytes of the author's draft files once the draft `?{id}`
+ * holds the files `?{media}` and `?{poster}`: those, and every file the
+ * author's other unpublished drafts hold. A file this save replaces is
+ * left out, as it is deleted with the save (review F83).
+ */
+function bytesAfterSql(id: number, author: number, media: number, poster: number): string {
+  return `(SELECT COALESCE(SUM(file.bytes), 0) FROM images AS file WHERE file.owner_id = ?${author}
+    AND (file.key IN (?${media}, ?${poster})
+      OR (file.state = 'draft' AND EXISTS (SELECT 1 FROM drafts AS other
+        WHERE other.author_id = ?${author} AND other.post_id IS NULL AND other.id <> ?${id}
+          AND (other.media_key = file.key OR other.poster_key = file.key)))))`;
 }
 
 /**
@@ -301,7 +327,10 @@ function repliesOf(choice: PostChoice | null): { replies: PostReplies; closed: b
 /**
  * Publishes a draft as its author's post: by the author, or by the owner of
  * the agent that wrote it, who authorizes it so; either way the post is the
- * author's, under its plan, standing, and allowance. The publisher names
+ * author's, under its plan, standing, and allowance. `as` names which the
+ * caller acts as, and a draft the actor is not that to is not found: the
+ * site's Drafts page publishes an agent's draft for its owner, never a
+ * member's own, which goes through Submit and its human check. The publisher names
  * the revision they saw, unless the author publishes their own latest. A
  * link is checked and fetched again, as a new post's is. The draft is used
  * up in the same write as the post; asking again finds that post, and any
@@ -312,6 +341,8 @@ export async function publishDraft(
   input: {
     id: string;
     actorId: string;
+    /** The actor's relation to the draft: its author, or its agent's owner. */
+    as: "author" | "owner";
     revision: number | null;
     bucket: R2Bucket;
     secret: string;
@@ -322,7 +353,7 @@ export async function publishDraft(
   },
 ): Promise<PublishDraftResult> {
   const found = await draftFor(db, input.id, input.actorId);
-  if (!found) return { ok: false, reason: "not_found" };
+  if (!found || found.as !== input.as) return { ok: false, reason: "not_found" };
   const { draft } = found;
   if (draft.postId) return { ok: true, postId: draft.postId, title: draft.title, already: true };
   // An owner publishes only the version they reviewed.

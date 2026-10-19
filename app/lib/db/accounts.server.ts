@@ -548,18 +548,32 @@ export function shortestNameSql(account: string, now: string): string {
  * Gives a member the short username they bought, for good, and records
  * the payment, in one batch: the shortest name it allows, never raising
  * one already shorter. Safe to repeat, as both the checkout's return and
- * Stripe's webhook apply it. False when no member account matches.
+ * Stripe's webhook apply it. `granted` is false when no member account
+ * matches; `duplicate` when an earlier checkout, paid, or given with a
+ * code, bought it already, so this one is a second payment for the same
+ * name, to refund (review F81). With only the 4-letter tier, any earlier
+ * one covers it.
  */
 export async function grantNameAllowance(
   db: D1Database,
-  input: { userId: string; length: number; sessionId: string; cents: number; currency: string; paidAt: number; paymentIntent: string | null },
-): Promise<boolean> {
+  input: {
+    userId: string;
+    length: number;
+    sessionId: string;
+    cents: number;
+    currency: string;
+    paidAt: number;
+    paymentIntent: string | null;
+    /** The plan's first invoice, when bought with the plan. */
+    invoiceId?: string | null;
+  },
+): Promise<{ granted: boolean; duplicate: boolean }> {
   const member = await db
     .prepare(`SELECT 1 FROM profiles WHERE user_id = ?1 AND owner_id IS NULL`)
     .bind(input.userId)
     .first();
-  if (!member) return false;
-  await db.batch([
+  if (!member) return { granted: false, duplicate: false };
+  const results = await db.batch([
     db
       .prepare(
         `UPDATE profiles SET name_allowance = MIN(COALESCE(name_allowance, ?2), ?2)
@@ -574,7 +588,18 @@ export async function grantNameAllowance(
       currency: input.currency,
       paidAt: input.paidAt,
       paymentIntent: input.paymentIntent,
+      invoiceId: input.invoiceId ?? null,
     }),
+    // An earlier purchase not refunded: by when it was recorded, then its
+    // ID, so of two settled at once only the later is the second.
+    db
+      .prepare(
+        `SELECT EXISTS (SELECT 1 FROM payments AS other, payments AS this
+           WHERE this.id = ?2 AND other.user_id = ?1 AND other.kind = 'name' AND other.id <> this.id
+             AND (other.refunded_cents < other.amount_cents OR other.amount_cents = 0)
+             AND (other.paid_at, other.id) < (this.paid_at, this.id)) AS earlier`,
+      )
+      .bind(input.userId, input.sessionId),
   ]);
-  return true;
+  return { granted: true, duplicate: (results.at(-1)!.results[0] as { earlier: number }).earlier === 1 };
 }

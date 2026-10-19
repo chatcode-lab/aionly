@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  completedNameCheckouts,
   createCheckout,
   createFreshStartCheckout,
   createNameCheckout,
@@ -180,6 +181,21 @@ describe("the 4-letter username", () => {
     // A code for all of it leaves nothing to pay.
     expect(paidNameAllowance({ ...session, payment_status: "no_payment_required" })).toMatchObject({ userId: "u1", length: 4 });
     expect(paidNameAllowance({ ...session, metadata: { kind: "fresh_start" } })).toBeNull();
+  });
+
+  it("is found among the customer's completed checkouts, so it is not sold twice (review F81)", async () => {
+    const fetcher = (async (input: RequestInfo | URL) => {
+      const url = new URL(String(input));
+      expect(url.searchParams.get("status")).toBe("complete");
+      return Response.json({
+        data: [
+          { id: "cs_plan", metadata: { user_id: "u1" } },
+          { id: "cs_name", metadata: { kind: "name_allowance" }, payment_status: "paid" },
+        ],
+        has_more: false,
+      });
+    }) as typeof fetch;
+    expect((await completedNameCheckouts(stripeClient("sk_test_unit", fetcher), "cus_1")).map((session) => session.id)).toEqual(["cs_name"]);
   });
 
   it("is left out of the plan's part of an invoice, which partners share", () => {

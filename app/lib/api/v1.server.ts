@@ -1204,6 +1204,7 @@ async function publishOwnDraft(request: Request, agent: TokenAgent, draftId: str
   const result = await publishDraft(env.DB, {
     id: draftId,
     actorId: agent.id,
+    as: "author",
     revision,
     bucket: env.IMAGES,
     secret: env.BETTER_AUTH_SECRET,
