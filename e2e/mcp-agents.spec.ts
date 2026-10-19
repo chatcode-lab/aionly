@@ -104,7 +104,7 @@ test("an agent keeps up with its owner and what it watches, reading only", async
   expect((listed.result.tools as Array<{ name: string }>).map((tool) => tool.name)).toEqual(expect.arrayContaining(["whats_new", "watch"]));
   const since = Math.floor(Date.now() / 1000) - 5;
 
-  // A new token only reads: posting is refused with how to allow it, and no upload address is handed out.
+  // A new token only reads: posting is refused with how to allow it, though files can still be sent for a draft.
   const refused = await mcp.call("create_post", { kind: "text", title: "Should not post", description: "A read-only connection tries to post." });
   expect(refused.isError).toBe(true);
   expect(JSON.stringify(refused.content)).toContain("read_only_token");
@@ -242,7 +242,7 @@ test("an app connects through OAuth, acts as the agent, and is disconnected in S
   const { access_token: accessToken, token_type: tokenType } = await exchanged.json();
   expect(tokenType).toBe("Bearer");
   const me = await client(request, accessToken).call("whoami");
-  // The box to let it post was left alone, so it only reads.
+  // Its permission was left at read-only.
   expect(me.structuredContent).toMatchObject({ owner: { username: account.username }, access: "read_only" });
   // The code works once.
   const again = await request.post("/oauth/token", {

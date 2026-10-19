@@ -12,6 +12,8 @@ import { Segmented } from "~/components/ui/segmented";
 import { Notice } from "~/components/ui/states";
 import { type Uploaded, UploadPicker } from "~/components/upload-picker";
 import { agentOf } from "~/lib/db/agents.server";
+import { draftById, draftFor, saveDraft as saveServerDraft, type SaveResult } from "~/lib/db/drafts.server";
+import { DRAFT_BYTES, DRAFT_LIMIT } from "~/lib/draft-rules";
 import { linkMentions, mentionHosts } from "~/lib/db/mentions.server";
 import {
   type Existing,
@@ -22,11 +24,13 @@ import {
 } from "~/lib/db/submit.server";
 import { clearDraft, readDraft, saveDraft } from "~/lib/drafts";
 import { formatWait } from "~/lib/format";
+import { imageAddress } from "~/lib/media.server";
 import { newPostId } from "~/lib/ids";
 import type { Aspect, Provider } from "~/lib/links/types";
 import type { PostCardData } from "~/lib/public-types";
 import { verifyTurnstile } from "~/lib/security/turnstile.server";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
+import { ROW_ID } from "~/lib/security/body";
 import { postPath } from "~/lib/slug";
 import type { CheckedLink, CheckResult } from "~/lib/submit/check.server";
 import { readReceipt } from "~/lib/submit/receipt.server";
@@ -50,7 +54,9 @@ import { parsePostChoice, POST_CHOICES, type PostChoice } from "~/lib/replies";
 
 import type { Route } from "./+types/submit";
 
+// What is typed is kept in this browser as it is typed, apart for each saved draft.
 const DRAFT = "submit";
+const draftKey = (saved: { id: string } | null) => (saved ? `${DRAFT}-${saved.id}` : DRAFT);
 // The last check, kept for this tab so a reload shows the preview again.
 const CHECK_STORAGE = "submit-check";
 
@@ -58,10 +64,53 @@ export function meta({ matches, location }: Route.MetaArgs) {
   return privatePageMeta(matches, "Submit", location.pathname);
 }
 
+/** A saved draft, as the form picks it up again. */
+interface SavedDraft {
+  id: string;
+  revision: number;
+  kind: PostKind;
+  url: string;
+  origin: Origin | "";
+  title: string;
+  description: string;
+  replies: PostChoice;
+  upload: Omit<Uploaded, "preview"> & { url: string } | null;
+}
+
 export async function loader({ request, context }: Route.LoaderArgs) {
   const viewer = await requireAccount(request, context);
   const now = Math.floor(Date.now() / 1000);
+  // A saved draft of the viewer's own, picked up again from Drafts.
+  const asked = new URL(request.url).searchParams.get("draft");
+  const found = asked && ROW_ID.test(asked) ? await draftFor(env.DB, asked, viewer.id) : null;
+  const draft = found && found.as === "author" && !found.draft.postId ? found.draft : null;
+  const saved: SavedDraft | null = draft
+    ? {
+        id: draft.id,
+        revision: draft.revision,
+        kind: draft.kind,
+        url: draft.url ?? "",
+        origin: draft.origin ?? "",
+        title: draft.title,
+        description: draft.description,
+        replies: draft.replies ?? "all",
+        upload: draft.media
+          ? {
+              key: draft.media.key,
+              media: draft.media.type,
+              url: imageAddress(draft.media.key),
+              width: draft.media.width,
+              height: draft.media.height,
+              duration: draft.media.duration,
+              posterKey: draft.posterKey,
+            }
+          : null,
+      }
+    : null;
   return {
+    draft: saved,
+    // Just saved, from this form.
+    saved: new URL(request.url).searchParams.has("saved"),
     status: await postingStatus(env.DB, viewer, now),
     siteKey: env.TURNSTILE_SITE_KEY,
     now,
@@ -85,6 +134,25 @@ interface ActionResult {
 
 /** An upload's key, as the upload endpoint makes them. */
 const UPLOAD_KEY = /^[0-9A-Za-z]{24}\.[a-z0-9]{3,4}$/;
+
+/** Why a draft was not saved, in words. */
+function saveRefusal(result: Exclude<SaveResult, { ok: true }>): ActionResult {
+  switch (result.reason) {
+    case "invalid":
+      return { errors: result.fields as FieldErrors };
+    case "too_many":
+      return { errors: {}, message: `You keep at most ${DRAFT_LIMIT} drafts. Publish or delete one first.` };
+    case "too_large":
+      return { errors: {}, message: `Your drafts' files hold at most ${DRAFT_BYTES / 1024 / 1024} MB together. Delete a draft with a file first.` };
+    case "file":
+      return { errors: { upload: "That upload has expired. Upload the file again." } };
+    case "conflict":
+      return { errors: {}, message: "This draft changed in another window. Open it again from Drafts." };
+    case "not_found":
+    case "published":
+      return { errors: {}, message: "This draft is gone: published or deleted. Nothing was saved." };
+  }
+}
 
 /** A whole number from the form within bounds, or null. */
 function boundedInt(value: string, max: number): number | null {
@@ -111,12 +179,51 @@ function statusMessage(status: PostingStatus, now: number): string | null {
   }
 }
 
+/**
+ * Saves what the form holds as a draft, whatever the account's plan or
+ * standing: a new one, or the one it was opened from, at the revision it
+ * was opened at.
+ */
+async function saveAction(request: Request, context: Route.ActionArgs["context"], form: FormData): Promise<ActionResult | Response> {
+  const viewer = await requireAccount(request, context);
+  if (!(await withinLimits(request, "write", viewer.id))) return { errors: {}, message: RATE_LIMITED_MESSAGE };
+  const field = (name: string) => String(form.get(name) ?? "");
+  const id = ROW_ID.test(field("draft_id")) ? field("draft_id") : undefined;
+  const revision = boundedInt(field("draft_revision"), 1_000_000);
+  const result = await saveServerDraft(env.DB, {
+    authorId: viewer.id,
+    ...(id ? { id, revision } : {}),
+    fields: {
+      kind: parseKind(field("kind")),
+      url: field("url") || null,
+      origin: parseOrigin(field("origin")),
+      title: field("title"),
+      description: field("description"),
+      replies: parsePostChoice(field("replies")),
+      mediaKey: UPLOAD_KEY.test(field("upload_key")) ? field("upload_key") : null,
+      width: boundedInt(field("width"), 20000),
+      height: boundedInt(field("height"), 20000),
+      duration: boundedInt(field("duration"), 24 * 3600),
+      posterKey: UPLOAD_KEY.test(field("poster_key")) ? field("poster_key") : null,
+    },
+    now: Math.floor(Date.now() / 1000),
+  });
+  if (!result.ok) return saveRefusal(result);
+  if (result.freed.length > 0) await env.IMAGES.delete(result.freed);
+  throw redirect(`/submit?draft=${result.draft.id}&saved`);
+}
+
 export async function action({ request, context }: Route.ActionArgs): Promise<ActionResult | Response> {
+  const form = await request.formData();
+  if (form.get("intent") === "save-draft") return saveAction(request, context, form);
   const viewer = await requireParticipant(request, context);
   if (!(await withinLimits(request, "write", viewer.id))) return { errors: {}, message: RATE_LIMITED_MESSAGE };
   const now = Math.floor(Date.now() / 1000);
-  const form = await request.formData();
   const field = (name: string) => String(form.get(name) ?? "");
+  // Opened from a saved draft: publishing uses it up, at the revision opened.
+  const draftId = ROW_ID.test(field("draft_id")) ? field("draft_id") : null;
+  const draftRevision = boundedInt(field("draft_revision"), 1_000_000);
+  const fromDraft = draftId && draftRevision ? { draft: { id: draftId, revision: draftRevision } } : {};
   // An agent acting in its owner's browser says so: nothing is published,
   // nobody is penalized, and the page shows how agents post instead.
   if (field("agent") === "yes") return { errors: {}, agentPaywall: true };
@@ -172,6 +279,7 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
     description: storedDescription,
     replies: choice === "closed" ? ("all" as const) : choice,
     closed: choice === "closed",
+    ...fromDraft,
     now,
   };
   const draft = (): NewPost =>
@@ -208,6 +316,14 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
   if (result.ok) throw redirect(postPath({ id: result.id, title }));
   if (result.reason === "id_taken") return { errors: {}, message: "That did not publish. Try again." };
   if (result.reason === "duplicate") return { errors: {}, duplicate: result.existing };
+  if (draftId) {
+    // The draft was published or changed in another window meanwhile.
+    const now = await draftById(env.DB, draftId);
+    if (now?.postId) throw redirect(`/p/${now.postId}`);
+    if (now && now.authorId === viewer.id && now.revision !== draftRevision) {
+      return { errors: {}, message: "This draft changed in another window. Open it again from Drafts." };
+    }
+  }
   // The allowance changed between the check and the write, or the upload
   // is gone: it was replaced, or sat unpublished for a day.
   const again = statusMessage(await postingStatus(env.DB, viewer, now), now);
@@ -325,22 +441,30 @@ function AgentPaywall({ entitled, agentName, onBack }: { entitled: boolean; agen
 const KIND_LABEL: Record<PostKind, string> = { link: "Link", text: "Text", upload: "Upload" };
 
 export default function Submit({ loaderData, actionData }: Route.ComponentProps) {
+  // A saved draft opens in a form of its own.
+  return <Composer key={loaderData.draft ? `${loaderData.draft.id}-${loaderData.draft.revision}` : "new"} loaderData={loaderData} actionData={actionData} />;
+}
+
+function Composer({ loaderData, actionData }: Pick<Route.ComponentProps, "loaderData" | "actionData">) {
   const result = actionData as ActionResult | undefined;
   const navigation = useNavigation();
-  const { entitled } = loaderData;
-  const [source, setSource] = useState<PostKind>("link");
-  const [url, setUrl] = useState("");
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [origin, setOrigin] = useState<Origin | "">("");
-  const [replies, setReplies] = useState<PostChoice>("all");
+  const { entitled, draft: opened } = loaderData;
+  const storage = draftKey(opened);
+  const [source, setSource] = useState<PostKind>(opened?.kind ?? "link");
+  const [url, setUrl] = useState(opened?.url ?? "");
+  const [title, setTitle] = useState(opened?.title ?? "");
+  const [description, setDescription] = useState(opened?.description ?? "");
+  const [origin, setOrigin] = useState<Origin | "">(opened?.origin ?? "");
+  const [replies, setReplies] = useState<PostChoice>(opened?.replies ?? "all");
   const [attest, setAttest] = useState(false);
   const [agent, setAgent] = useState(false);
   const [token, setToken] = useState("");
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState<string | null>(null);
   const [checked, setChecked] = useState<Checked | null>(null);
-  const [uploaded, setUploaded] = useState<Uploaded | null>(null);
+  const [uploaded, setUploaded] = useState<Uploaded | null>(
+    opened?.upload ? { ...opened.upload, preview: opened.upload.url } : null,
+  );
   const [touched, setTouched] = useState(false);
   const restored = useRef(false);
   // A server answer that the agent box was ticked, before scripts ran.
@@ -348,11 +472,17 @@ export default function Submit({ loaderData, actionData }: Route.ComponentProps)
   useEffect(() => setAgentAnswered(Boolean(result?.agentPaywall)), [result]);
 
   const blocked = statusMessage(loaderData.status, loaderData.now);
-  const submitting = navigation.state === "submitting" && navigation.formAction === "/submit";
+  const submitting = navigation.state === "submitting" && navigation.formAction?.startsWith("/submit") === true;
+  const saving = submitting && navigation.formData?.get("intent") === "save-draft";
 
-  // Bring back the draft, and the check that went with it.
+  // Bring back what was typed, and the check that went with it. Just saved,
+  // the saved draft is what was typed: the copy in this browser goes.
   useEffect(() => {
-    const draft = readDraft(DRAFT);
+    if (loaderData.saved) {
+      clearDraft(DRAFT);
+      clearDraft(storage);
+    }
+    const draft = readDraft(storage);
     if (draft) {
       setUrl(draft.url ?? "");
       setTitle(draft.title ?? "");
@@ -367,20 +497,20 @@ export default function Submit({ loaderData, actionData }: Route.ComponentProps)
       // A missing or broken stored check only means checking again.
     }
     restored.current = true;
-  }, []);
+  }, [loaderData.saved, storage]);
 
   useEffect(() => {
     if (!restored.current) return;
-    saveDraft(DRAFT, { url, title, description, origin, kind: source === "link" ? "" : source });
-  }, [url, title, description, origin, source]);
+    saveDraft(storage, { url, title, description, origin, kind: source === "link" ? "" : source });
+  }, [url, title, description, origin, source, storage]);
 
   // Leaving for the new post: the draft is done with.
   useEffect(() => {
-    if (navigation.state === "loading" && navigation.formAction === "/submit" && navigation.location.pathname.startsWith("/p/")) {
-      clearDraft(DRAFT);
+    if (navigation.state === "loading" && navigation.formAction?.startsWith("/submit") && navigation.location.pathname.startsWith("/p/")) {
+      clearDraft(storage);
       sessionStorage.removeItem(CHECK_STORAGE);
     }
-  }, [navigation]);
+  }, [navigation, storage]);
 
   const check = async () => {
     setChecking(true);
@@ -427,6 +557,14 @@ export default function Submit({ loaderData, actionData }: Route.ComponentProps)
           Something made with AI, or news, research, and tools worth discussing.
         </p>
       </div>
+      {opened ? (
+        <Notice>
+          {loaderData.saved ? "Draft saved." : "A saved draft."}{" "}
+          <Link to="/drafts" className="font-medium underline underline-offset-4">
+            All drafts
+          </Link>
+        </Notice>
+      ) : null}
 
       {blocked && !loaderData.status.allowed ? (
         <Notice
@@ -467,6 +605,9 @@ export default function Submit({ loaderData, actionData }: Route.ComponentProps)
           options={(["link", "text", "upload"] as const).map((value) => ({ value, label: KIND_LABEL[value] }))}
         />
         <input type="hidden" name="kind" value={source} />
+        <input type="hidden" name="url" value={source === "link" ? url : ""} />
+        <input type="hidden" name="draft_id" value={opened?.id ?? ""} />
+        <input type="hidden" name="draft_revision" value={opened?.revision ?? ""} />
         {gated ? (
           source === "text" ? (
             <PlanPaywall feature="text" title="Text posts are for fans">
@@ -634,14 +775,18 @@ export default function Submit({ loaderData, actionData }: Route.ComponentProps)
             ) : null}
           </div>
 
-          <div className="flex items-center justify-end gap-3">
+          <div className="flex flex-wrap items-center justify-end gap-3">
             {source === "link" && !current?.receipt && !duplicate ? (
               <p className="text-meta text-text-muted">Check the link to publish.</p>
             ) : source === "upload" && !uploaded ? (
               <p className="text-meta text-text-muted">Upload a file to publish.</p>
             ) : null}
-            <Button variant="primary" type="submit" disabled={!canPublish}>
-              {submitting ? "Publishing…" : "Publish"}
+            {/* A draft may be unfinished: the browser's own checks wait for publishing. */}
+            <Button type="submit" name="intent" value="save-draft" formNoValidate disabled={submitting}>
+              {saving ? "Saving…" : "Save draft"}
+            </Button>
+            <Button variant="primary" type="submit" name="intent" value="publish" disabled={!canPublish}>
+              {submitting && !saving ? "Publishing…" : "Publish"}
             </Button>
           </div>
         </div>

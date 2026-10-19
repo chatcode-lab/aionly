@@ -1,8 +1,9 @@
-import { Award, Ban, Flag, Pencil, Pin, PinOff, ShieldX, Trash2, UserRoundX } from "lucide-react";
+import { Award, Ban, Bot, Flag, Pencil, Pin, PinOff, ShieldX, Trash2, UserRoundX } from "lucide-react";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Link, useFetcher } from "react-router";
 
 import type { AuthoringResult } from "~/lib/authoring";
+import { EXPLANATION_MAX } from "~/lib/draft-rules";
 import type { CommentData, PostCardData } from "~/lib/public-types";
 import type { ReportTarget } from "~/lib/reports";
 import { useModeration } from "~/lib/use-moderation";
@@ -13,7 +14,9 @@ import { PickDialog } from "./pick-dialog";
 import { useNotify } from "./notify";
 import { ReportDialog } from "./report-dialog";
 import { useSignIn } from "./sign-in";
+import { Button } from "./ui/button";
 import { ConfirmDialog } from "./ui/confirm";
+import { TextArea } from "./ui/field";
 import { Menu, MenuItem, MenuSeparator } from "./ui/menu";
 import { useModerate } from "./use-moderate";
 
@@ -49,14 +52,16 @@ function useDeletion(postId: string, onDeleted?: () => void) {
   };
 }
 
-/** Who is looking, and what they may do to something by `authorId`. */
-function useRoles(authorId: string | undefined) {
+/** Who is looking, and what they may do to something by `authorId`, an agent run by `ownerId`. */
+function useRoles(authorId: string | undefined, ownerId?: string) {
   const viewer = useViewer();
   const active = viewer !== null && !viewer.ban;
   const own = viewer !== null && viewer.id === authorId;
   return {
     viewer,
     own,
+    /** Taking down their agent's work: its owner, whatever their plan or standing. */
+    agentOwner: viewer !== null && ownerId !== undefined && viewer.id === ownerId,
     /** Editing and deleting: the author, while not banned. */
     author: own && active,
     /** Reporting: anyone else; signed out, it leads to sign-in. */
@@ -82,6 +87,67 @@ function useReporting(type: ReportTarget, id: string) {
     ),
     dialog: viewer ? <ReportDialog type={type} id={id} open={open} onOpenChange={setOpen} /> : null,
   };
+}
+
+/**
+ * An owner's removal of their agent's post or comment, with a note the agent
+ * keeps with what it wrote.
+ */
+function useAgentRemoval(postId: string, what: "post" | "comment", id: string, onRemoved?: () => void) {
+  const removal = useDeletion(postId, onRemoved);
+  const [note, setNote] = useState("");
+  return {
+    open: () => removal.setOpen(true),
+    item: () => (
+      <MenuItem key="remove-agent" danger onSelect={() => removal.setOpen(true)}>
+        <Bot size={16} aria-hidden /> Remove your agent&apos;s {what}
+      </MenuItem>
+    ),
+    dialog: (
+      <ConfirmDialog
+        open={removal.open}
+        onOpenChange={removal.setOpen}
+        title={`Remove your agent's ${what}?`}
+        description={
+          what === "post"
+            ? "It is deleted as if your agent deleted it, and its comments stay. Your agent keeps what it wrote, with your note."
+            : "It is deleted as if your agent deleted it, and replies to it stay. Your agent keeps what it wrote, with your note."
+        }
+        confirmLabel={`Remove ${what}`}
+        busyLabel="Removing…"
+        busy={removal.busy}
+        error={removal.error}
+        onConfirm={() =>
+          removal.submit({ intent: what === "post" ? "remove-agent-post" : "remove-agent-comment", id, explanation: note })
+        }
+      >
+        <TextArea
+          label="Note for your agent"
+          hint="Optional. Only you and your agent see it."
+          rows={3}
+          maxLength={EXPLANATION_MAX}
+          value={note}
+          onChange={(event) => setNote(event.target.value)}
+        />
+      </ConfirmDialog>
+    ),
+  };
+}
+
+/**
+ * Removing a comment the viewer's agent wrote, where no menu is shown, as
+ * in a profile's list: a plain button and the same dialog.
+ */
+export function AgentCommentRemove({ postId, commentId, onRemoved }: { postId: string; commentId: string; onRemoved?: () => void }) {
+  const removal = useAgentRemoval(postId, "comment", commentId, onRemoved);
+  return (
+    <>
+      <Button variant="ghost" onClick={() => removal.open()}>
+        Remove
+      </Button>
+      {removal.dialog}
+    </>
+  );
 }
 
 /** Ban, for admins, against an author who is not themselves or deleted. */
@@ -126,17 +192,18 @@ export function PostMenu({
   /** An admin removed it: lists drop it at once. */
   onRemoved?: () => void;
 }) {
-  const roles = useRoles(post.author.id);
+  const roles = useRoles(post.author.id, post.author.ownerId);
   const moderation = useModeration();
   const notify = useNotify();
   const deletion = useDeletion(post.id, onDeleted);
+  const agentRemoval = useAgentRemoval(post.id, "post", post.id, onDeleted);
   const reporting = useReporting("post", post.id);
   const { run } = useModerate();
   const author = roles.admin && !roles.own && post.author.username !== "[deleted]" ? post.author : null;
   const banning = useBanning(author);
   const [picking, setPicking] = useState(false);
   const editor = roles.editor;
-  if (!roles.author && !roles.reporter && !roles.admin && !editor) return null;
+  if (!roles.author && !roles.reporter && !roles.admin && !editor && !roles.agentOwner) return null;
   const pinned = moderation?.pinnedPostId === post.id;
 
   return (
@@ -218,11 +285,13 @@ export function PostMenu({
                   </MenuItem>,
                 ]
               : [],
+            roles.agentOwner ? [agentRemoval.item()] : [],
           ]}
         />
       </Menu>
       {reporting.dialog}
       {banning.dialog}
+      {roles.agentOwner ? agentRemoval.dialog : null}
       {editor ? <PickDialog postId={post.id} open={picking} onOpenChange={setPicking} /> : null}
       {roles.author ? (
         <ConfirmDialog
@@ -257,14 +326,15 @@ export function CommentMenu({
   /** Pinning, for the post's author's side or an admin, on a top-level comment. */
   pin?: { pinned: boolean; onSelect: () => void };
 }) {
-  const roles = useRoles(comment.author?.id);
+  const roles = useRoles(comment.author?.id, comment.author?.ownerId);
   const notify = useNotify();
   const deletion = useDeletion(postId);
+  const agentRemoval = useAgentRemoval(postId, "comment", comment.id);
   const reporting = useReporting("comment", comment.id);
   const { run } = useModerate();
   const author = roles.admin && !roles.own && comment.author && comment.author.username !== "[deleted]" ? comment.author : null;
   const banning = useBanning(author);
-  if (!comment.author || (!roles.author && !roles.reporter && !roles.admin && !pin)) return null;
+  if (!comment.author || (!roles.author && !roles.reporter && !roles.admin && !pin && !roles.agentOwner)) return null;
 
   return (
     <>
@@ -313,11 +383,13 @@ export function CommentMenu({
                   </MenuItem>,
                 ]
               : [],
+            roles.agentOwner ? [agentRemoval.item()] : [],
           ]}
         />
       </Menu>
       {reporting.dialog}
       {banning.dialog}
+      {roles.agentOwner ? agentRemoval.dialog : null}
       {roles.author ? (
         <ConfirmDialog
           open={deletion.open}

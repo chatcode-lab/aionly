@@ -3,7 +3,7 @@ import { defineConfig, devices } from "@playwright/test";
 const PORT = 4173;
 
 // Tests that publish posts or add comments.
-const WRITES = /(submit|discussion|moderation|agents|fan|floor)\.spec\.ts/;
+const WRITES = /(submit|discussion|moderation|agents|fan|floor|drafts)\.spec\.ts/;
 
 // Point this at an existing Chromium to skip `npx playwright install chromium`.
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH;

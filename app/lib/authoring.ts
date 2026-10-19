@@ -3,7 +3,16 @@ export type AuthoringResult =
   | { ok: true; intent: AuthoringIntent; id?: string }
   | { ok: false; intent: AuthoringIntent; error: string };
 
-export type AuthoringIntent = "comment" | "edit-comment" | "delete-comment" | "delete-post" | "pin-comment" | "unpin-comment";
+export type AuthoringIntent =
+  | "comment"
+  | "edit-comment"
+  | "delete-comment"
+  | "delete-post"
+  | "pin-comment"
+  | "unpin-comment"
+  // An owner taking down their agent's work.
+  | "remove-agent-post"
+  | "remove-agent-comment";
 
 /** Where a draft comment is kept: one per post for the top box, one per reply. */
 export function commentDraftKey(postId: string, parentId: string | null): string {

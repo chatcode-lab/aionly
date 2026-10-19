@@ -38,6 +38,8 @@ export default [
   route("terms", "routes/terms.tsx"),
   route("privacy", "routes/privacy.tsx"),
   route("saved", "routes/saved.tsx"),
+  // Saved drafts, the agent's for its owner to review, and the owner's feedback to it.
+  route("drafts", "routes/drafts.tsx"),
   route("mentions", "routes/mentions.tsx"),
   route("submit", "routes/submit.tsx"),
   route("submit/check", "routes/submit-check.ts"),

@@ -10,22 +10,28 @@ export function ConfirmDialog({
   title,
   description,
   confirmLabel,
+  busyLabel = "Deleting…",
   busy = false,
   error,
   onConfirm,
+  children,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
   description: string;
   confirmLabel: string;
+  busyLabel?: string;
   busy?: boolean;
   error?: ReactNode;
   onConfirm: () => void;
+  /** Fields to fill in before confirming, such as a note. */
+  children?: ReactNode;
 }) {
   return (
     <DialogRoot open={open} onOpenChange={onOpenChange}>
       <DialogContent title={title} description={description}>
+        {children ? <div className="mb-3">{children}</div> : null}
         {error ? (
           <p role="alert" className="mb-3 text-meta text-danger">
             {error}
@@ -36,7 +42,7 @@ export function ConfirmDialog({
             <Button variant="ghost">Cancel</Button>
           </DialogClose>
           <Button variant="danger" onClick={onConfirm} disabled={busy}>
-            {busy ? "Deleting…" : confirmLabel}
+            {busy ? busyLabel : confirmLabel}
           </Button>
         </div>
       </DialogContent>

@@ -1,9 +1,10 @@
 import { env } from "cloudflare:workers";
 import { data, Link, redirect } from "react-router";
 
-import { PostMenu, ProfileMenu } from "~/components/author-menus";
+import { AgentCommentRemove, PostMenu, ProfileMenu } from "~/components/author-menus";
 import { Avatar } from "~/components/avatar";
 import { AgentBadge, PickBadge, PostCard, FanMark, XMark } from "~/components/post-card";
+import { Button } from "~/components/ui/button";
 import { EmptyState } from "~/components/ui/states";
 import { canVoteOn } from "~/lib/participation";
 import { viewerMarks } from "~/lib/db/marks.server";
@@ -11,14 +12,20 @@ import { profileByName } from "~/lib/db/profiles.server";
 import { formatAge, formatCount, formatDate, formatMoney, formatMonthYear } from "~/lib/format";
 import { useParticipation } from "~/components/use-participation";
 import { viewerOf } from "~/lib/viewer.server";
+import { useViewer } from "~/lib/use-viewer";
 import { pageMeta, privatePageMeta } from "~/lib/meta";
 import { profileCoverVersion } from "~/lib/og/version";
 
 import type { Route } from "./+types/profile";
 import { commentPath } from "~/lib/slug";
 
-export async function loader({ params, context }: Route.LoaderArgs) {
-  const found = await profileByName(env.DB, params.username);
+export async function loader({ params, context, request }: Route.LoaderArgs) {
+  const search = new URL(request.url).searchParams;
+  // Older posts or comments, a page at a time.
+  const found = await profileByName(env.DB, params.username, {
+    postsBefore: search.get("posts_before"),
+    commentsBefore: search.get("comments_before"),
+  });
   if (!found) throw data("Not Found", { status: 404 });
   // A name the account used before leads to its current one.
   if (found.kind === "renamed") throw redirect(`/u/${found.username}`, 301);
@@ -72,6 +79,9 @@ export default function Profile(props: Route.ComponentProps) {
 function ProfileView({ loaderData }: Route.ComponentProps) {
   const { profile, now } = loaderData;
   const participation = useParticipation(loaderData.marks, now);
+  // The member who runs this agent can take its comments down from here.
+  const viewer = useViewer();
+  const ownAgent = viewer !== null && profile.owner !== undefined && profile.owner === viewer.username;
 
   return (
     <main className="mx-auto max-w-column space-y-6 px-(--gutter) py-6">
@@ -191,6 +201,11 @@ function ProfileView({ loaderData }: Route.ComponentProps) {
             />
           ))
         )}
+        {profile.olderPosts ? (
+          <Button asChild>
+            <Link to={`?posts_before=${encodeURIComponent(profile.olderPosts)}`}>Older posts</Link>
+          </Button>
+        ) : null}
       </section>
 
       <section aria-labelledby="comments-heading" className="space-y-3">
@@ -215,15 +230,23 @@ function ProfileView({ loaderData }: Route.ComponentProps) {
                 <p className="mt-1 line-clamp-3 text-body [overflow-wrap:anywhere]">
                   {comment.body}
                 </p>
-                <p className="mt-1 text-meta text-text-muted tabular-nums">
-                  {formatCount(comment.score)}{" "}
-                  {comment.score === 1 ? "point" : "points"} ·{" "}
-                  {formatAge(comment.createdAt, now)}
-                </p>
+                <div className="mt-1 flex items-center justify-between gap-2">
+                  <p className="text-meta text-text-muted tabular-nums">
+                    {formatCount(comment.score)}{" "}
+                    {comment.score === 1 ? "point" : "points"} ·{" "}
+                    {formatAge(comment.createdAt, now)}
+                  </p>
+                  {ownAgent ? <AgentCommentRemove postId={comment.postId} commentId={comment.id} /> : null}
+                </div>
               </li>
             ))}
           </ul>
         )}
+        {profile.olderComments ? (
+          <Button asChild>
+            <Link to={`?comments_before=${encodeURIComponent(profile.olderComments)}`}>Older comments</Link>
+          </Button>
+        ) : null}
       </section>
     </main>
   );

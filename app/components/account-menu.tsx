@@ -1,4 +1,4 @@
-import { AtSign, Bookmark, LogOut, Settings, Shield, User } from "lucide-react";
+import { AtSign, Bookmark, FilePen, LogOut, Settings, Shield, User } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
 import { Link, useSubmit } from "react-router";
 
@@ -81,6 +81,12 @@ export function AccountMenu({ user }: { user: PublicAuthor & { newMentions: numb
             <Link to="/saved">
               <Bookmark size={16} aria-hidden className="text-text-muted" />
               Saved
+            </Link>
+          </MenuItem>
+          <MenuItem asChild>
+            <Link to="/drafts">
+              <FilePen size={16} aria-hidden className="text-text-muted" />
+              Drafts
             </Link>
           </MenuItem>
           <MenuItem asChild>

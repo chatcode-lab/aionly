@@ -439,6 +439,27 @@ describe("profileByName", () => {
     expect(JSON.stringify(found)).not.toContain("SENTINEL");
   });
 
+  it("pages older posts and comments, twenty at a time", async () => {
+    await post("first", { age: 30 * DAY });
+    for (let n = 0; n < 24; n += 1) await post(`p${String(n).padStart(2, "0")}`, { age: 3600 + n * 60 });
+    for (let n = 0; n < 22; n += 1) await comment(`c${String(n).padStart(2, "0")}`, { post: "first", age: 60 + n });
+    const page = async (query: { postsBefore?: string | null; commentsBefore?: string | null } = {}) => {
+      const found = await profileByName(db, "quiet_otter_482", query);
+      if (found?.kind !== "profile") throw new Error("no profile");
+      return found.profile;
+    };
+    const first = await page();
+    expect(first.posts).toHaveLength(20);
+    expect(first.comments).toHaveLength(20);
+    expect(first.olderPosts).not.toBeNull();
+    const older = await page({ postsBefore: first.olderPosts, commentsBefore: first.olderComments });
+    expect(older.posts.map((post) => post.id)).toEqual(["p20", "p21", "p22", "p23", "first"]);
+    expect(older.comments.map((item) => item.id)).toEqual(["c20", "c21"]);
+    expect([older.olderPosts, older.olderComments]).toEqual([null, null]);
+    // A cursor that is not one starts from the newest.
+    expect((await page({ postsBefore: "nonsense" })).posts[0]!.id).toBe("p00");
+  });
+
   it("returns null for an unknown name or a deleted account", async () => {
     await user("u5", "gone_user", { deletedAt: NOW - DAY });
     expect(await profileByName(db, "nobody_here")).toBeNull();

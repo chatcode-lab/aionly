@@ -36,6 +36,8 @@ import { viewerMarks } from "~/lib/db/marks.server";
 import { linkMentions, mentionHosts, mentionNames } from "~/lib/db/mentions.server";
 import { postPage, threadPaging } from "~/lib/db/posts.server";
 import { pinComment } from "~/lib/db/moderation.server";
+import { removeAgentWork } from "~/lib/db/drafts.server";
+import { cleanExplanation } from "~/lib/draft-rules";
 import { formatWait } from "~/lib/format";
 import { newId } from "~/lib/ids";
 import type { CommentData } from "~/lib/public-types";
@@ -128,11 +130,37 @@ export async function action({ params, request, context }: Route.ActionArgs) {
   const refuse = (error: string, status: number) =>
     data<AuthoringResult>({ ok: false, intent, error }, { status });
 
-  if (!["comment", "edit-comment", "delete-comment", "delete-post", "pin-comment", "unpin-comment"].includes(intent)) {
+  if (
+    ![
+      "comment",
+      "edit-comment",
+      "delete-comment",
+      "delete-post",
+      "pin-comment",
+      "unpin-comment",
+      "remove-agent-post",
+      "remove-agent-comment",
+    ].includes(intent)
+  ) {
     return refuse("That was not understood.", 400);
   }
   const viewer = await viewerOf(context);
   if (!viewer) return refuse("Sign in to continue.", 401);
+  // An owner can take their agent's work down whatever their plan or standing.
+  if (intent === "remove-agent-post" || intent === "remove-agent-comment") {
+    if (!(await withinLimits(request, "write", viewer.id))) return refuse(RATE_LIMITED_MESSAGE, 429);
+    const target = intent === "remove-agent-post" ? params.id : String(form.get("id") ?? "");
+    if (!ROW_ID.test(target)) return refuse("That was not understood.", 400);
+    const removed = await removeAgentWork(env.DB, {
+      type: intent === "remove-agent-post" ? "post" : "comment",
+      id: target,
+      ownerId: viewer.id,
+      explanation: cleanExplanation(form.get("explanation")),
+      now: Math.floor(Date.now() / 1000),
+    });
+    if (removed) return { ok: true, intent, id: target } satisfies AuthoringResult;
+    return refuse("That is no longer here, or not your agent's.", 404);
+  }
   if (viewer.ban) {
     const why = viewer.ban.kind === "karma" ? "while your karma is at or below its floor" : "while the ban lasts";
     return refuse(`Your account is read-only ${why}.`, 403);

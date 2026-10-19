@@ -13,6 +13,16 @@ import {
 
 const LISTING_LIMIT = 20;
 
+/** A place in a profile's posts or comments, newest first: before this time and ID. */
+export function profileCursor(item: { createdAt: number; id: string }): string {
+  return `${item.createdAt}:${item.id}`;
+}
+
+function parseCursor(value: string | null | undefined): { at: number; id: string } | null {
+  const match = /^(\d{1,12}):([A-Za-z0-9_-]{1,32})$/.exec(value ?? "");
+  return match ? { at: Number(match[1]), id: match[2]! } : null;
+}
+
 export interface ProfileComment {
   id: string;
   body: string;
@@ -50,6 +60,9 @@ export interface PublicProfile {
   inviteKarma: number;
   posts: PostCardData[];
   comments: ProfileComment[];
+  /** Where older posts and comments start, when there are more. */
+  olderPosts: string | null;
+  olderComments: string | null;
 }
 
 export type ProfileLookup =
@@ -69,6 +82,8 @@ const X_SHOWN = `profile.x_shown = 1 AND (profile.role = 'admin' OR profile.plan
 export async function profileByName(
   db: D1Database,
   name: string,
+  /** Older posts or comments: what came before these places. */
+  page: { postsBefore?: string | null; commentsBefore?: string | null } = {},
 ): Promise<ProfileLookup | null> {
   const owner = await db
     .prepare(
@@ -116,6 +131,9 @@ export async function profileByName(
     return { kind: "renamed", username: owner.current_name };
   }
 
+  const postsBefore = parseCursor(page.postsBefore);
+  const commentsBefore = parseCursor(page.commentsBefore);
+  // One more than shown, to know whether there are older ones.
   const [posts, comments, invited] = await db.batch([
     db
       .prepare(
@@ -123,10 +141,11 @@ export async function profileByName(
          FROM posts AS post ${AUTHOR_JOINS("post")}
          WHERE post.author_id = ?1
            AND post.deleted_at IS NULL AND post.removed_batch_id IS NULL
+           AND (?3 IS NULL OR post.created_at < ?3 OR (post.created_at = ?3 AND post.id < ?4))
          ORDER BY post.created_at DESC, post.id DESC
          LIMIT ?2`,
       )
-      .bind(owner.user_id, LISTING_LIMIT),
+      .bind(owner.user_id, LISTING_LIMIT + 1, postsBefore?.at ?? null, postsBefore?.id ?? ""),
     // A comment is listed only while both it and its post are live.
     db
       .prepare(
@@ -137,10 +156,11 @@ export async function profileByName(
          WHERE comment.author_id = ?1
            AND comment.deleted_at IS NULL AND comment.removed_batch_id IS NULL
            AND post.deleted_at IS NULL AND post.removed_batch_id IS NULL
+           AND (?3 IS NULL OR comment.created_at < ?3 OR (comment.created_at = ?3 AND comment.id < ?4))
          ORDER BY comment.created_at DESC, comment.id DESC
          LIMIT ?2`,
       )
-      .bind(owner.user_id, LISTING_LIMIT),
+      .bind(owner.user_id, LISTING_LIMIT + 1, commentsBefore?.at ?? null, commentsBefore?.id ?? ""),
     // Those this member invited, by name; an agent shows its owner's.
     db
       .prepare(
@@ -153,11 +173,11 @@ export async function profileByName(
       .bind(owner.user_id),
   ]);
 
-  const cards = (posts.results as PostRow[]).map((row) => {
+  const cards = (posts.results as PostRow[]).slice(0, LISTING_LIMIT).map((row) => {
     const { description: _description, ...card } = toPublicPost(row);
     return card;
   });
-  const listed = (
+  const listedRows = (
     comments.results as Array<{
       id: string;
       body: string;
@@ -166,7 +186,8 @@ export async function profileByName(
       post_id: string;
       post_title: string;
     }>
-  ).map((row) => ({
+  ).slice(0, LISTING_LIMIT);
+  const listed = listedRows.map((row) => ({
     id: row.id,
     // Listed clamped to a few lines, without the markup.
     body: plainText(row.body),
@@ -196,6 +217,8 @@ export async function profileByName(
       inviteKarma: owner.karma - owner.vote_karma,
       posts: await withPlainMentions(db, cards, "excerpt"),
       comments: await withPlainMentions(db, listed, "body"),
+      olderPosts: posts.results.length > LISTING_LIMIT ? profileCursor(cards[cards.length - 1]!) : null,
+      olderComments: comments.results.length > LISTING_LIMIT ? profileCursor(listed[listed.length - 1]!) : null,
     },
   };
 }

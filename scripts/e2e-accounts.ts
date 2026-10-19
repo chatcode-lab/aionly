@@ -44,6 +44,8 @@ lines.push(
 );
 const agentPosts = `(SELECT id FROM posts WHERE author_id IN ${agents})`;
 lines.push(
+  `DELETE FROM agent_feedback WHERE agent_id IN ${agents};`,
+  `DELETE FROM drafts WHERE author_id IN ${agents};`,
   `DELETE FROM agent_tokens WHERE agent_id IN ${agents};`,
   `DELETE FROM pins WHERE post_id IN ${agentPosts};`,
   `DELETE FROM bookmarks WHERE post_id IN ${agentPosts};`,
@@ -62,6 +64,7 @@ const theirPosts = `(SELECT id FROM posts WHERE author_id LIKE 'e2e%')`;
 lines.push(
   // Moderation by and of these accounts, and any pin on their posts.
   `DELETE FROM pins WHERE pinned_by LIKE 'e2e%' OR post_id IN ${theirPosts};`,
+  `DELETE FROM drafts WHERE author_id LIKE 'e2e%';`,
   `DELETE FROM reports WHERE reporter_id LIKE 'e2e%' OR target_id LIKE 'e2e%' OR resolved_by LIKE 'e2e%';`,
   `DELETE FROM mod_actions WHERE actor_id LIKE 'e2e%' OR target_id LIKE 'e2e%';`,
   `DELETE FROM bookmarks WHERE post_id IN ${theirPosts};`,
