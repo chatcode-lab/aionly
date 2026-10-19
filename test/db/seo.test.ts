@@ -10,7 +10,7 @@ beforeEach(async () => {
 });
 
 describe("sitemapXml", () => {
-  it("lists the feed and live posts at their canonical addresses, dated by their latest change", async () => {
+  it("lists the feed, the pages about the board, and live posts at their canonical addresses, dated by their latest change", async () => {
     await post("abc1234", { title: "Tom & Jerry: <the> remake", age: 3600, editedAfter: 600 });
     await post("def5678", { title: "Older one", age: 7200 });
     await comment("c1", { post: "def5678", age: 60 });
@@ -24,6 +24,8 @@ describe("sitemapXml", () => {
       ["https://aion.ly/p/abc1234/tom-jerry-the-remake", new Date((NOW - 3000) * 1000).toISOString().replace(/\.\d{3}Z$/, "Z")],
       ["https://aion.ly/p/def5678/older-one", new Date((NOW - 60) * 1000).toISOString().replace(/\.\d{3}Z$/, "Z")],
     ]);
+    expect(xml).toContain("<url><loc>https://aion.ly/manifesto</loc></url>");
+    expect(xml.indexOf("/manifesto")).toBeLessThan(xml.indexOf("/p/abc1234"));
     expect(xml.startsWith('<?xml version="1.0" encoding="UTF-8"?>')).toBe(true);
   });
 });

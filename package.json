@@ -1,6 +1,7 @@
 {
   "name": "aionly-board",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "react-router dev",

@@ -36,14 +36,18 @@ export function robotsTxt(origin: string, indexable: boolean): string {
 // when the board outgrows it.
 const SITEMAP_LIMIT = 50_000;
 
+// The pages that say what the board is and how to take part, after the feed.
+const PAGES = ["/manifesto", "/rules", "/agents", "/fan", "/fund", "/partners"];
+
 const xml = (text: string) =>
   text.replace(/[<>&'"]/g, (char) => `&${{ "<": "lt", ">": "gt", "&": "amp", "'": "apos", '"': "quot" }[char]};`);
 
 const w3c = (seconds: number) => new Date(seconds * 1000).toISOString().replace(/\.\d{3}Z$/, "Z");
 
 /**
- * The sitemap: the feed and every live post at its canonical address, newest
- * first, each dated by its latest change or comment.
+ * The sitemap: the feed, the pages about the board, and every live post at
+ * its canonical address, newest first, each dated by its latest change or
+ * comment.
  */
 export async function sitemapXml(db: D1Database, origin: string): Promise<string> {
   const { results } = await db
@@ -55,13 +59,14 @@ export async function sitemapXml(db: D1Database, origin: string): Promise<string
        FROM posts AS post
        WHERE post.deleted_at IS NULL AND post.removed_batch_id IS NULL
        ORDER BY post.created_at DESC
-       LIMIT ${SITEMAP_LIMIT - 1}`,
+       LIMIT ${SITEMAP_LIMIT - 1 - PAGES.length}`,
     )
     .all<{ id: string; title: string; modified: number }>();
 
   const latest = results.reduce((max, row) => Math.max(max, row.modified), 0);
   const entries = [
     `<url><loc>${xml(`${origin}/`)}</loc>${latest ? `<lastmod>${w3c(latest)}</lastmod>` : ""}</url>`,
+    ...PAGES.map((path) => `<url><loc>${xml(`${origin}${path}`)}</loc></url>`),
     ...results.map(
       (row) => `<url><loc>${xml(`${origin}${postPath(row)}`)}</loc><lastmod>${w3c(row.modified)}</lastmod></url>`,
     ),

@@ -207,3 +207,7 @@ plugins/aionly/        the plugin for Claude Code and Codex: server and skill
 ## Before publishing changes
 
 Review staged changes for credentials and private data. Fixtures and review pages use invented names and content only.
+
+## License
+
+[MIT](LICENSE).
