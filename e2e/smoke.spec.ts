@@ -426,8 +426,8 @@ test.describe("design review page", () => {
     await page.getByRole("button", { name: /^Email digest:/ }).click();
     const menu = page.getByRole("menu");
     await expect(menu).toContainText("sent to your sign-in email");
-    for (const option of ["Daily", "Weekly", "Monthly"]) {
-      await expect(menu.getByRole("menuitemradio", { name: option })).not.toHaveAttribute("aria-disabled", "true");
+    for (const option of ["Daily, weekly, and monthly", "Weekly and monthly", "Monthly"]) {
+      await expect(menu.getByRole("menuitemradio", { name: option, exact: true })).not.toHaveAttribute("aria-disabled", "true");
     }
     await expect(menu.getByRole("menuitem", { name: "Become a fan" })).toHaveCount(0);
     await page.keyboard.press("Escape");
