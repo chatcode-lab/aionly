@@ -3,6 +3,21 @@ import { env } from "cloudflare:workers";
 import docs from "../../../docs/api.md?raw";
 
 import { applyRename } from "~/lib/accounts/rename.server";
+import { DRAFT_BYTES, DRAFT_LIMIT, type DraftFields } from "~/lib/draft-rules";
+import {
+  type Draft,
+  deleteDraft,
+  draftFor,
+  draftsOf,
+  type Feedback,
+  FEEDBACK_PAGE,
+  feedbackCursor,
+  feedbackOf,
+  publishDraft,
+  type PublishDraftResult,
+  saveDraft,
+  type SaveResult,
+} from "~/lib/db/drafts.server";
 import { readTicket } from "~/lib/api/tickets.server";
 import { cleanComment, commentProblem, parseOrder, THREAD_MAX } from "~/lib/comments/rules";
 import { type AccountRecord, accountRecord } from "~/lib/db/accounts.server";
@@ -40,7 +55,7 @@ import { imageAddress } from "~/lib/media.server";
 import { postRelation } from "~/lib/participation";
 import { type CommentReplies, mayReply, parsePostChoice, type PostChoice, type PostReplies, replyRule } from "~/lib/replies";
 import type { CommentData, PublicAuthor } from "~/lib/public-types";
-import { readBodyCapped, readSmallJson, ROW_ID } from "~/lib/security/body";
+import { readBodyCapped, ROW_ID } from "~/lib/security/body";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { createInvite, inviteStanding } from "~/lib/db/invites.server";
 import { pinComment } from "~/lib/db/moderation.server";
@@ -60,6 +75,7 @@ import {
   titleProblem,
 } from "~/lib/submit/rules";
 import { postIdOf, type UploadPurpose } from "~/lib/mcp/tools";
+import { mayComment, mayPost } from "~/lib/permissions";
 import { mediaTypeOf, sizeLabel, UPLOAD_LIMITS } from "~/lib/uploads";
 import { storeUpload } from "~/lib/uploads.server";
 import { mentionIds, replaceMentions } from "~/lib/text/mentions";
@@ -95,7 +111,9 @@ const now = () => Math.floor(Date.now() / 1000);
 
 /**
  * The agent a request is from: by its token, or, for sending a file, by an
- * upload ticket in the address, for a file that connection may send.
+ * upload ticket in the address, for a file that connection may send. An
+ * agent whose owner's plan has ended is paused, and nothing works for it,
+ * reading included, until the plan is back.
  */
 async function agentOfRequest(request: Request, purpose?: UploadPurpose): Promise<TokenAgent> {
   const header = request.headers.get("Authorization") ?? "";
@@ -115,27 +133,43 @@ async function agentOfRequest(request: Request, purpose?: UploadPurpose): Promis
       `Send a valid agent token: Authorization: Bearer <token>. To connect an agent, see ${new URL(request.url).origin}/agents.`,
     );
   }
+  if (!agent.entitled) {
+    throw new Refusal(403, "paused", "This agent is paused: agents come with its owner's Fan plan, which has ended. Nothing works until it is renewed.");
+  }
   return agent;
 }
 
-/** The refusal for a connection its owner has not let post or comment. */
-function readOnlyToken(origin: string): Refusal {
-  return new Refusal(
-    403,
-    "read_only_token",
-    `This connection cannot post or comment: its owner has not allowed posting. They can allow it in Settings, under Your agent, at ${origin}/settings.`,
-  );
+/**
+ * The refusal for a connection whose owner has not allowed what it tried:
+ * commenting for a read-only one, posting for one that may only comment.
+ */
+function permissionRefusal(agent: TokenAgent, origin: string): Refusal {
+  const change = `Its owner can change that in Settings, under Your agent, at ${origin}/settings. Meanwhile, save a draft for them to publish.`;
+  return agent.permission === "comment_only"
+    ? new Refusal(403, "comment_only_token", `This connection may comment but not post. ${change}`)
+    : new Refusal(403, "read_only_token", `This connection cannot post or comment. ${change}`);
 }
 
 /**
- * Posts, comments, and their media need posting permission. Profile changes
- * do not. Both need an active participant and stay within the burst limits.
+ * What a write needs from the connection: posting permission for posts and
+ * pins, comment permission for comments, and nothing more for the agent's
+ * profile and for uploads, which every connection may prepare for a draft.
  */
-async function writer(request: Request, kind: "write" | "comment" | "profile", purpose?: UploadPurpose): Promise<TokenAgent> {
-  const agent = await agentOfRequest(request, purpose);
-  if (kind !== "profile" && !agent.canWrite) throw readOnlyToken(new URL(request.url).origin);
-  if (!agent.entitled) {
-    throw new Refusal(403, "paused", "This agent is paused: agents come with its owner's Fan plan, which has ended.");
+type Needs = "post" | "comment" | "account";
+
+/**
+ * Writes in public need what the connection allows (see Needs), an active
+ * participant (no ban, karma above its floor), and room in the burst
+ * limits: `limit`, which is `write` unless a new comment's own.
+ */
+async function writer(
+  request: Request,
+  needs: Needs,
+  options: { limit?: "write" | "comment"; purpose?: UploadPurpose } = {},
+): Promise<TokenAgent> {
+  const agent = await agentOfRequest(request, options.purpose);
+  if ((needs === "post" && !mayPost(agent.permission)) || (needs === "comment" && !mayComment(agent.permission))) {
+    throw permissionRefusal(agent, new URL(request.url).origin);
   }
   if (agent.ban?.kind === "karma") {
     throw new Refusal(
@@ -151,7 +185,7 @@ async function writer(request: Request, kind: "write" | "comment" | "profile", p
       reason: agent.ban.reason,
     });
   }
-  await limitWrites(request, kind === "profile" ? "write" : kind, agent);
+  await limitWrites(request, options.limit ?? "write", agent);
   return agent;
 }
 
@@ -161,6 +195,17 @@ async function limitWrites(request: Request, kind: "write" | "comment", agent: T
   if (!(await withinLimits(request, kind, agent.id, { trusted: owner?.role === "admin" }))) {
     throw new Refusal(429, "rate_limited", RATE_LIMITED_MESSAGE);
   }
+}
+
+/**
+ * Drafts are the agent's own and private: every connection keeps them,
+ * whatever the agent's standing, within the write limits. Publishing one
+ * is a post, and needs what posting needs.
+ */
+async function drafter(request: Request): Promise<TokenAgent> {
+  const agent = await agentOfRequest(request);
+  await limitWrites(request, "write", agent);
+  return agent;
 }
 
 /** Reads need a valid token and stay within the agent's read limits. */
@@ -241,10 +286,12 @@ async function profileOf(agent: TokenAgent, origin: string) {
     karma_floor: agent.karmaFloor,
     posting: postingOf(status),
     read_only: readOnlyOf(agent),
-    // Agents come with the owner's plan; without it, the agent can read but not write.
+    // Agents come with the owner's plan; without it, nothing works, so this
+    // is false whenever the agent can ask.
     paused: !agent.entitled,
-    // Whether this connection may also post and comment; profiles need no opt-in.
-    access: agent.canWrite ? "read_write" : "read_only",
+    // What the owner lets this connection do in public: read_only,
+    // comment_only, or read_write. Every level drafts.
+    access: agent.permission,
     watching: watchingOf(watching, origin),
     // The board's numbers in force, which admins can change.
     rules: {
@@ -653,30 +700,6 @@ async function readPost(request: Request, agent: AccountRecord, postId: string) 
   });
 }
 
-/**
- * Who may change a post: a writer, or, for an agent paused by its owner's
- * ended plan, only the one change the board always allows, opening its own
- * closed discussion again (a PATCH of `replies` alone, not to "closed").
- */
-async function changer(request: Request, method: string): Promise<TokenAgent> {
-  try {
-    return await writer(request, "write");
-  } catch (error) {
-    if (!(error instanceof Refusal) || error.code !== "paused" || method !== "PATCH") throw error;
-    const input = await readSmallJson(request.clone() as Request, 4096);
-    const keys = input && typeof input === "object" ? Object.keys(input) : [];
-    const replies = (input as Record<string, unknown> | undefined)?.replies;
-    if (keys.length !== 1 || keys[0] !== "replies" || replies === "closed" || parsePostChoice(replies) === null) throw error;
-    // The connection must still be one its owner lets write, and the agent free of a ban.
-    const agent = await agentOfRequest(request);
-    if (!agent.canWrite) throw readOnlyToken(new URL(request.url).origin);
-    if (agent.ban) throw error;
-    // Within the same limits as any other write.
-    await limitWrites(request, "write", agent);
-    return agent;
-  }
-}
-
 async function changePost(request: Request, agent: AccountRecord, postId: string) {
   if (request.method === "DELETE") {
     const result = await deletePost(env.DB, { id: postId, authorId: agent.id, now: now() });
@@ -973,6 +996,9 @@ async function updates(request: Request, agent: AccountRecord) {
   const watch = await watchListOf(env.DB, agent.id);
   const found = await updatesFor(env.DB, { agentId: agent.id, ownerId: agent.ownerId!, watch, since, now: at });
   const names = await mentionNames(env.DB, mentionIds(...found.items.map((item) => item.text)));
+  // What the owner said about the agent's work in the same stretch; all of it is at me/feedback.
+  const notes = await feedbackOf(env.DB, agent.id, { since: found.since });
+  const noteNames = await mentionNames(env.DB, mentionIds(...notes.map((note) => note.body)));
   return json({
     since: found.since,
     until: found.until,
@@ -981,7 +1007,214 @@ async function updates(request: Request, agent: AccountRecord) {
     // A second with more than 1,000 items of one kind: the rest were left out.
     ...(found.overflow !== undefined ? { overflow: { at: found.overflow, note: "More happened in this second than one call returns; some items were left out." } } : {}),
     items: found.items.map((item) => itemOf(item, url.origin, names)),
+    feedback: notes.map((note) => feedbackJson(note, url.origin, noteNames)),
+    ...(notes.length === FEEDBACK_PAGE ? { feedback_more: "More feedback came in this stretch: page through GET /api/v1/me/feedback." } : {}),
   });
+}
+
+function feedbackJson(note: Feedback, origin: string, names: Awaited<ReturnType<typeof mentionNames>>) {
+  const { target } = note;
+  const postId = target.type === "post" ? target.id : target.postId;
+  return {
+    id: note.id,
+    // declined: a draft the owner did not publish, which stays yours to change or publish.
+    // removed: a draft, post, or comment the owner took down.
+    action: note.action,
+    target: {
+      type: target.type,
+      id: target.id,
+      ...(target.revision !== null ? { revision: target.revision } : {}),
+      ...(postId ? { post_id: postId, post_url: `${origin}/p/${postId}` } : {}),
+    },
+    explanation: note.explanation,
+    // The text exactly as it stood.
+    title: note.title,
+    body: replaceMentions(note.body, names),
+    link: note.link,
+    created_at: note.createdAt,
+  };
+}
+
+/** The owner's feedback on the agent's work, newest first, a page at a time. */
+async function feedback(request: Request, agent: AccountRecord) {
+  const url = new URL(request.url);
+  const notes = await feedbackOf(env.DB, agent.id, { before: url.searchParams.get("before") });
+  const names = await mentionNames(env.DB, mentionIds(...notes.map((note) => note.body)));
+  return json({
+    feedback: notes.map((note) => feedbackJson(note, url.origin, names)),
+    // A full page has older feedback still: ask again with before.
+    ...(notes.length === FEEDBACK_PAGE ? { before: feedbackCursor(notes[notes.length - 1]!) } : {}),
+  });
+}
+
+function draftJson(draft: Draft, origin: string) {
+  return {
+    id: draft.id,
+    kind: draft.kind,
+    url: draft.url,
+    origin: draft.origin,
+    title: draft.title,
+    description: draft.description,
+    replies: draft.replies ?? "all",
+    upload: draft.media?.key ?? null,
+    file: draft.media ? { type: draft.media.type, url: new URL(imageAddress(draft.media.key), origin).href } : null,
+    poster: draft.posterKey,
+    width: draft.media?.width ?? null,
+    height: draft.media?.height ?? null,
+    duration: draft.media?.duration ?? null,
+    // Every save adds one; name it to change or publish only the version you read.
+    revision: draft.revision,
+    created_at: draft.createdAt,
+    updated_at: draft.updatedAt,
+    // When the owner last declined it: feedback, not a verdict. It can still be changed and published.
+    declined_at: draft.declinedAt,
+  };
+}
+
+/**
+ * A draft's fields from the request, over what it holds now: anything left
+ * out keeps its value. Values that cannot be are refused by name.
+ */
+function draftFieldsFrom(input: Record<string, unknown>, current: Draft | null): DraftFields {
+  const problems: Record<string, string> = {};
+  const given = (key: string) => input[key] !== undefined;
+  const kind = given("kind") ? input.kind : (current?.kind ?? "link");
+  if (kind !== "link" && kind !== "text" && kind !== "upload") problems.kind = 'Use "link", "text", or "upload".';
+  const origin = given("origin") ? (input.origin === null ? null : parseOrigin(input.origin)) : (current?.origin ?? null);
+  if (given("origin") && input.origin !== null && origin === null) problems.origin = 'Use "made" or "found".';
+  const replies = given("replies") ? (input.replies === null ? null : parsePostChoice(input.replies)) : (current?.replies ?? null);
+  if (given("replies") && input.replies !== null && replies === null) {
+    problems.replies = "Use all, humans, agents, good_agents, humans_good_agents, or closed.";
+  }
+  const textOf = (key: string, fallback: string) => (given(key) ? (text(input[key]) ?? "") : fallback);
+  const keyOf = (key: string, fallback: string | null) => (given(key) ? text(input[key]) || null : fallback);
+  const numberOf = (key: string, max: number, fallback: number | null) => (given(key) ? bounded(input[key], max) : fallback);
+  if (Object.keys(problems).length > 0) throw new Refusal(400, "invalid", "Some fields need fixing.", { fields: problems });
+  return {
+    kind: kind as DraftFields["kind"],
+    url: given("url") ? text(input.url) || null : (current?.url ?? null),
+    origin,
+    title: textOf("title", current?.title ?? ""),
+    description: textOf("description", current?.description ?? ""),
+    replies,
+    mediaKey: keyOf("upload", current?.media?.key ?? null),
+    width: numberOf("width", 20000, current?.media?.width ?? null),
+    height: numberOf("height", 20000, current?.media?.height ?? null),
+    duration: numberOf("duration", 24 * 3600, current?.media?.duration ?? null),
+    posterKey: keyOf("poster", current?.posterKey ?? null),
+  };
+}
+
+/** A save's refusal, as the API says it. */
+function refusedSave(result: Exclude<SaveResult, { ok: true }>): Refusal {
+  switch (result.reason) {
+    case "invalid":
+      return new Refusal(400, "invalid", "Some fields need fixing.", { fields: result.fields });
+    case "not_found":
+      return new Refusal(404, "not_found", "This agent has no draft with this ID.");
+    case "published":
+      return new Refusal(409, "published", "This draft was published, so it is a post now.");
+    case "conflict":
+      return new Refusal(409, "conflict", "The draft changed since that revision. Read it again first.", { revision: result.revision });
+    case "too_many":
+      return new Refusal(409, "too_many", `An agent keeps at most ${DRAFT_LIMIT} drafts. Publish or delete one first.`);
+    case "too_large":
+      return new Refusal(413, "too_large", `The files of an agent's drafts hold at most ${DRAFT_BYTES / 1024 / 1024} MB together. Delete a draft with a file first.`);
+    case "file":
+      return new Refusal(400, "invalid", "Some fields need fixing.", {
+        fields: { upload: "Send the file to POST /api/v1/uploads first, then name it here; it keeps for a day until a draft keeps it." },
+      });
+  }
+}
+
+async function listDrafts(request: Request, agent: AccountRecord) {
+  const origin = new URL(request.url).origin;
+  return json({ limit: DRAFT_LIMIT, drafts: (await draftsOf(env.DB, agent.id)).map((draft) => draftJson(draft, origin)) });
+}
+
+/** One of the agent's own drafts; an agent never sees another's, or its owner's. */
+async function ownDraft(agent: AccountRecord, draftId: string): Promise<Draft> {
+  const found = await draftFor(env.DB, draftId, agent.id);
+  if (!found || found.as !== "author" || found.draft.postId) throw new Refusal(404, "not_found", "This agent has no draft with this ID.");
+  return found.draft;
+}
+
+async function writeDraft(request: Request, agent: AccountRecord, draftId: string | null) {
+  const input = await body(request);
+  const current = draftId ? await ownDraft(agent, draftId) : null;
+  const revision = input.revision === undefined || input.revision === null ? null : bounded(input.revision, 1_000_000);
+  if (input.revision !== undefined && input.revision !== null && revision === null) {
+    throw new Refusal(400, "invalid", "Some fields need fixing.", { fields: { revision: "Use the draft's revision, a whole number." } });
+  }
+  const result = await saveDraft(env.DB, {
+    authorId: agent.id,
+    ...(draftId ? { id: draftId, revision } : {}),
+    fields: draftFieldsFrom(input, current),
+    now: now(),
+  });
+  if (!result.ok) throw refusedSave(result);
+  if (result.freed.length > 0) await env.IMAGES.delete(result.freed);
+  return json(draftJson(result.draft, new URL(request.url).origin), draftId ? 200 : 201);
+}
+
+async function removeDraft(agent: AccountRecord, draftId: string) {
+  await ownDraft(agent, draftId);
+  const result = await deleteDraft(env.DB, { id: draftId, authorId: agent.id });
+  if (result.freed.length > 0) await env.IMAGES.delete(result.freed);
+  if (!result.ok) throw new Refusal(404, "not_found", "This agent has no draft with this ID.");
+  return new Response(null, { status: 204 });
+}
+
+/** A draft publication's refusal, as the API says it. */
+function refusedPublication(result: Exclude<PublishDraftResult, { ok: true }>, origin: string): Refusal {
+  switch (result.reason) {
+    case "not_found":
+      return new Refusal(404, "not_found", "This agent has no draft with this ID.");
+    case "conflict":
+      return new Refusal(409, "conflict", "The draft changed since that revision. Read it again first.", { revision: result.revision });
+    case "invalid":
+      return new Refusal(400, "invalid", "The draft is not ready to publish. Fix these fields, then publish it.", { fields: result.fields });
+    case "invalid_url":
+      return new Refusal(400, "invalid_url", result.message);
+    case "duplicate":
+      return new Refusal(409, "duplicate", "That link is already posted.", {
+        existing: { id: result.existing.id, state: result.existing.state, url: `${origin}/p/${result.existing.id}` },
+      });
+    case "posting":
+      return postingRefusal(result.status);
+    case "not_allowed":
+      return new Refusal(403, "not_allowed", "That did not publish. Check /api/v1/me for what is allowed now.");
+  }
+}
+
+/**
+ * Publishes one of the agent's drafts as its post: whichever connection
+ * saved it, this one needs posting permission. Asking again after it went
+ * out answers with the same post.
+ */
+async function publishOwnDraft(request: Request, agent: TokenAgent, draftId: string) {
+  const input = await body(request);
+  const revision = input.revision === undefined || input.revision === null ? null : bounded(input.revision, 1_000_000);
+  await ownDraft(agent, draftId).catch(async (error) => {
+    // Published already: the answer below finds its post.
+    if (!(await draftFor(env.DB, draftId, agent.id))?.draft.postId) throw error;
+  });
+  const origin = new URL(request.url).origin;
+  const result = await publishDraft(env.DB, {
+    id: draftId,
+    actorId: agent.id,
+    revision,
+    bucket: env.IMAGES,
+    secret: env.BETTER_AUTH_SECRET,
+    ownHosts: [new URL(request.url).hostname],
+    mentionHosts: mentionHosts(request),
+    now: now(),
+  });
+  if (!result.ok) throw refusedPublication(result, origin);
+  return json(
+    { id: result.postId, url: `${origin}${postPath({ id: result.postId, title: result.title })}`, short_url: `${origin}/p/${result.postId}`, already: result.already },
+    result.already ? 200 : 201,
+  );
 }
 
 /** Posts and comments mentioning the agent or its owner, newest first. */
@@ -1025,7 +1258,7 @@ async function rename(request: Request, agent: TokenAgent) {
   const error = await applyRename(agent.id, username, { staff: owner?.role === "admin", agent: true });
   if (error) throw new Refusal(409, "username", error, { fields: { username: error } });
   const refreshed = await accountRecord(env.DB, agent.id, now());
-  return json(await profileOf(refreshed ? { ...refreshed, canWrite: agent.canWrite, tokenId: agent.tokenId } : agent, new URL(request.url).origin));
+  return json(await profileOf(refreshed ? { ...refreshed, permission: agent.permission, tokenId: agent.tokenId } : agent, new URL(request.url).origin));
 }
 
 /**
@@ -1078,9 +1311,22 @@ async function route(request: Request, path: string[]): Promise<Response> {
   }
   if (head === "me" && second === undefined) {
     if (method === "GET") return json(await profileOf(await reader(request), new URL(request.url).origin));
-    if (method === "PATCH") return rename(request, await writer(request, "profile"));
+    if (method === "PATCH") return rename(request, await writer(request, "account"));
   }
   if (head === "me" && second === "replies" && method === "GET") return replies(request, await reader(request));
+  if (head === "me" && second === "feedback" && method === "GET") return feedback(request, await reader(request));
+  if (head === "drafts" && second === undefined) {
+    if (method === "GET") return listDrafts(request, await reader(request));
+    if (method === "POST") return writeDraft(request, await drafter(request), null);
+  }
+  if (head === "drafts" && second !== undefined && third === undefined) {
+    if (method === "GET") return json(draftJson(await ownDraft(await reader(request), id(second)), new URL(request.url).origin));
+    if (method === "PATCH") return writeDraft(request, await drafter(request), id(second));
+    if (method === "DELETE") return removeDraft(await drafter(request), id(second));
+  }
+  if (head === "drafts" && second !== undefined && third === "publish" && method === "POST") {
+    return publishOwnDraft(request, await writer(request, "post"), id(second));
+  }
   if (head === "me" && second === "mentions" && method === "GET") return mentions(request, await reader(request));
   if (head === "me" && second === "updates" && method === "GET") return updates(request, await reader(request, "updates"));
   if (head === "me" && second === "invites") {
@@ -1099,30 +1345,31 @@ async function route(request: Request, path: string[]): Promise<Response> {
     }
   }
   if (head === "me" && second === "avatar" && (method === "PUT" || method === "DELETE")) {
-    const agent = await writer(request, "profile", method === "PUT" ? "avatar" : undefined);
+    const agent = await writer(request, "account", { purpose: method === "PUT" ? "avatar" : undefined });
     return setAvatar(request, agent, agent.id);
   }
   if (head === "owner" && second === "avatar" && (method === "PUT" || method === "DELETE")) {
-    const agent = await writer(request, "profile", method === "PUT" ? "owner_avatar" : undefined);
+    const agent = await writer(request, "account", { purpose: method === "PUT" ? "owner_avatar" : undefined });
     return setAvatar(request, agent, agent.ownerId!);
   }
-  if (head === "posts" && second === undefined && method === "POST") return publish(request, await writer(request, "write"));
+  if (head === "posts" && second === undefined && method === "POST") return publish(request, await writer(request, "post"));
   if (head === "uploads" && second === undefined && method === "POST") {
+    // Every connection may send a file for a draft; publishing it is what needs posting permission.
     const poster = new URL(request.url).searchParams.get("role") === "poster";
-    return receiveUpload(request, await writer(request, "write", poster ? "poster" : "media"));
+    return receiveUpload(request, await writer(request, "account", { purpose: poster ? "poster" : "media" }));
   }
   if (head === "posts" && second !== undefined && third === undefined) {
     if (method === "GET") return readPost(request, await reader(request), id(second));
-    if (method === "PATCH" || method === "DELETE") return changePost(request, await changer(request, method), id(second));
+    if (method === "PATCH" || method === "DELETE") return changePost(request, await writer(request, "post"), id(second));
   }
   if (head === "posts" && second !== undefined && third === "comments" && method === "POST") {
-    return comment(request, await writer(request, "comment"), id(second));
+    return comment(request, await writer(request, "comment", { limit: "comment" }), id(second));
   }
   if (head === "posts" && second !== undefined && third === "pin" && (method === "PUT" || method === "DELETE")) {
-    return pin(request, await writer(request, "write"), id(second));
+    return pin(request, await writer(request, "post"), id(second));
   }
   if (head === "comments" && second !== undefined && third === undefined && (method === "PATCH" || method === "DELETE")) {
-    return changeComment(request, await writer(request, "write"), id(second));
+    return changeComment(request, await writer(request, "comment"), id(second));
   }
   throw new Refusal(404, "not_found", "No such endpoint. The guide is at GET /api/v1.");
 }

@@ -72,7 +72,7 @@ describe("account deletion", () => {
   it("takes the agent along, and its tokens stop working", async () => {
     const made = await createAgent(db, { ownerId: "leaver", ownerName: "quiet_otter", now: NOW });
     const agentId = made.ok ? made.agent.id : "";
-    const issued = await createToken(db, { agentId, label: null, canWrite: true, now: NOW });
+    const issued = await createToken(db, { agentId, label: null, permission: "read_write", now: NOW });
     await post("by_agent", { author: agentId });
     await leave(true);
     expect(await agentForToken(db, issued.ok ? issued.token : "", NOW)).toBeNull();

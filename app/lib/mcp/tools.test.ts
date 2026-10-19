@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { postIdOf, type ToolContext, TOOLS } from "./tools";
 
-function context(answers: Record<string, { status: number; body: unknown }> = {}, canWrite = true) {
+function context(answers: Record<string, { status: number; body: unknown }> = {}, paused = false) {
   const calls: Array<{ method: string; path: string; body?: Record<string, unknown> }> = [];
   const value: ToolContext = {
     origin: "https://board.test",
-    canWrite,
+    paused,
     api: async (method, path, body) => {
       calls.push({ method, path, body });
       return answers[`${method} ${path}`] ?? { status: 200, body: { ok: true } };
@@ -110,6 +110,34 @@ describe("the tools", () => {
     ]);
   });
 
+  it("keep drafts and read feedback through the API", async () => {
+    const { value, calls } = context();
+    await tool("list_drafts").run({}, value);
+    await tool("create_draft").run({ kind: "text", title: "Half a thought", description: "", unknown: "dropped" }, value);
+    await tool("read_draft").run({ draft_id: "d1" }, value);
+    await tool("edit_draft").run({ draft_id: "d1", revision: 2, title: "A whole thought" }, value);
+    await tool("publish_draft").run({ draft_id: "d1", revision: 3 }, value);
+    await tool("delete_draft").run({ draft_id: "d1" }, value);
+    await tool("list_feedback").run({ before: "1800000000:abc" }, value);
+    expect(calls).toEqual([
+      { method: "GET", path: "drafts", body: undefined },
+      { method: "POST", path: "drafts", body: { kind: "text", title: "Half a thought", description: "" } },
+      { method: "GET", path: "drafts/d1", body: undefined },
+      { method: "PATCH", path: "drafts/d1", body: { revision: 2, title: "A whole thought" } },
+      { method: "POST", path: "drafts/d1/publish", body: { revision: 3 } },
+      { method: "DELETE", path: "drafts/d1", body: undefined },
+      { method: "GET", path: "me/feedback?before=1800000000%3Aabc", body: undefined },
+    ]);
+    expect((await tool("read_draft").run({ draft_id: "../me" }, value)).isError).toBe(true);
+  });
+
+  it("point a connection that may not post to drafts", async () => {
+    const { value } = context({ "POST posts": { status: 403, body: { error: "comment_only_token", message: "This connection may comment but not post." } } });
+    const result = await tool("create_post").run({ description: "A find worth a look, in a few words." }, value);
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain("create_draft");
+  });
+
   it("hand out an upload address with a command to use it", async () => {
     const { value } = context();
     const result = await tool("prepare_upload").run({ purpose: "poster" }, value);
@@ -118,18 +146,18 @@ describe("the tools", () => {
     expect((await tool("prepare_upload").run({ purpose: "anything" }, value)).isError).toBe(true);
   });
 
-  it.each(["media", "poster"])("refuses a read-only connection's %s upload address", async (purpose) => {
-    const { value } = context({}, false);
-    const result = await tool("prepare_upload").run({ purpose }, value);
-    expect(result.isError).toBe(true);
-    expect(JSON.stringify(result.content)).toContain("read_only_token");
-    expect(JSON.stringify(result.content)).toContain("https://board.test/settings");
-  });
-
-  it.each(["avatar", "owner_avatar"])("prepares a read-only connection's %s upload address", async (purpose) => {
-    const { value } = context({}, false);
+  it.each(["media", "poster", "avatar", "owner_avatar"])("prepares a %s upload address at every permission level", async (purpose) => {
+    const { value } = context();
     const result = await tool("prepare_upload").run({ purpose }, value);
     expect(result.isError).toBeUndefined();
     expect(result.structuredContent).toMatchObject({ url: `https://board.test/api/v1/uploads?ticket=${purpose}` });
+  });
+
+  it("prepares nothing for a paused agent", async () => {
+    const { value } = context({}, true);
+    const result = await tool("prepare_upload").run({ purpose: "media" }, value);
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result.content)).toContain("paused");
+    expect(JSON.stringify(result.content)).toContain("https://board.test/fan");
   });
 });

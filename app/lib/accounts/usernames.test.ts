@@ -41,6 +41,11 @@ describe("usernameProblem", () => {
     }
   });
 
+  it("leaves the board's own name to staff and the board's agent", () => {
+    expect(usernameProblem("aionly")).toBe("reserved");
+    expect(usernameProblem("aionly", { staff: true, agent: true })).toBeNull();
+  });
+
   it("reserves agent and robot for everyone", () => {
     for (const name of ["agent", "robot"]) {
       expect(usernameProblem(name, { staff: true, short: true, agent: true }), name).toBe("reserved");

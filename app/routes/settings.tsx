@@ -5,6 +5,7 @@ import { Form, Link, redirect, useFetcher, useNavigation } from "react-router";
 import { Avatar } from "~/components/avatar";
 import { DIGEST_LABELS, DIGESTS, type Digest } from "~/components/digest-menu";
 import { PriceLine } from "~/components/plan-paywall";
+import { PermissionChoice } from "~/components/permission-choice";
 import { FanMark } from "~/components/post-card";
 import { CopyButton, XLogo } from "~/components/sign-in";
 import { RepliesField } from "~/components/replies-field";
@@ -19,7 +20,7 @@ import { wantedShortName } from "~/lib/accounts/wanted-name";
 import { authFor, xConfigured } from "~/lib/auth.server";
 import { cancelForDeletion } from "~/lib/billing/plan.server";
 import { type AccountRecord, nameFreeFor, renameStatus } from "~/lib/db/accounts.server";
-import { agentOf, createAgent, createToken, MAX_TOKENS, type OwnedAgent, revokeToken, setTokenWrite } from "~/lib/db/agents.server";
+import { agentOf, createAgent, createToken, MAX_TOKENS, type OwnedAgent, revokeToken, setTokenPermission } from "~/lib/db/agents.server";
 import { setCommentReplies } from "~/lib/db/authoring.server";
 import { createInvite, type InviteStanding, inviteStanding, revokeInvite } from "~/lib/db/invites.server";
 import { inviteAllowanceRule, inviteRefusal, inviteShareWords } from "~/lib/invites";
@@ -32,6 +33,7 @@ import { clearStaleX, type LinkedX, linkedX, setXShown, unlinkMethod } from "~/l
 import { formatAge, formatDate, formatMoney } from "~/lib/format";
 import { setGooglePhoto, setXPhoto } from "~/lib/images.server";
 import { imageAddress } from "~/lib/media.server";
+import { type Permission, PERMISSION_LABELS, PERMISSIONS, parsePermission } from "~/lib/permissions";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { requireAccount, requireParticipant } from "~/lib/viewer.server";
 import { useViewer } from "~/lib/use-viewer";
@@ -144,22 +146,26 @@ const ago = (at: number, now: number) => {
 type AgentResult = { agentError: string | undefined; newToken?: string };
 
 /**
- * Taking access away from the agent's tokens and apps: revoking one, or
- * making it read only. Allowed whatever the account's plan or standing, so
- * an owner can always rein their agent in.
+ * Revoking one of the agent's tokens or apps, or changing what it may do.
+ * Allowed whatever the account's plan or standing, so an owner can always
+ * rein their agent in; allowing more needs the plan and good standing,
+ * which setTokenPermission checks.
  */
 async function restrictAction(viewer: AccountRecord, form: FormData): Promise<AgentResult> {
   const now = Math.floor(Date.now() / 1000);
   const tokenId = String(form.get("token") ?? "");
-  if (form.get("intent") === "token-read") {
-    const changed = await setTokenWrite(env.DB, { ownerId: viewer.id, tokenId, canWrite: false, now: Math.floor(Date.now() / 1000) });
-    return { agentError: changed ? undefined : "That token is already gone." };
+  if (form.get("intent") === "token-permission") {
+    const permission = parsePermission(form.get("permission"));
+    if (!permission) return { agentError: "Choose what it may do." };
+    const changed = await setTokenPermission(env.DB, { ownerId: viewer.id, tokenId, permission, now });
+    if (changed) return { agentError: undefined };
+    return { agentError: viewer.entitled && !viewer.ban ? "That token is already gone." : "Allowing more comes with the Fan plan, in good standing." };
   }
   const revoked = await revokeToken(env.DB, { ownerId: viewer.id, tokenId, now });
   return { agentError: revoked ? undefined : "That token is already gone." };
 }
 
-/** Connecting the agent, making its tokens, and letting one write. */
+/** Connecting the agent, and making its tokens. */
 async function agentAction(viewer: AccountRecord, form: FormData): Promise<AgentResult> {
   if (!viewer.entitled) return { agentError: "Agents come with the Fan plan." };
   const now = Math.floor(Date.now() / 1000);
@@ -173,21 +179,16 @@ async function agentAction(viewer: AccountRecord, form: FormData): Promise<Agent
   if (!agent) return { agentError: "Connect an agent first." };
   if (intent === "token-create") {
     const label = String(form.get("label") ?? "").trim().slice(0, TOKEN_LABEL_MAX) || null;
-    // A token only reads unless the owner ticks the box.
-    const result = await createToken(env.DB, { agentId: agent.id, label, canWrite: form.get("write") === "yes", now });
+    // A token only reads unless the owner chooses more.
+    const permission = parsePermission(form.get("permission")) ?? "read_only";
+    const result = await createToken(env.DB, { agentId: agent.id, label, permission, now });
     if (result.ok) return { agentError: undefined, newToken: result.token };
     return {
       agentError:
         result.reason === "too_many" ? `An agent holds at most ${MAX_TOKENS} tokens. Revoke one first.` : "Your agent can't take a new token now.",
     };
   }
-  const changed = await setTokenWrite(env.DB, {
-    ownerId: viewer.id,
-    tokenId: String(form.get("token") ?? ""),
-    canWrite: true,
-    now: Math.floor(Date.now() / 1000),
-  });
-  return { agentError: changed ? undefined : "That token is already gone." };
+  return { agentError: "That was not understood." };
 }
 
 /**
@@ -212,6 +213,7 @@ async function deleteAccountAction(request: Request, viewer: AccountRecord, form
     console.error("stripe cancel on deletion", error);
     return { deleteError: "Your plan could not be cancelled just now, so nothing was deleted. Try again in a few minutes." };
   }
+  // Avatars and draft files, to delete from the bucket.
   let avatars: string[];
   let signedOut: Response;
   try {
@@ -268,7 +270,7 @@ export async function action({ request, context }: Route.ActionArgs) {
     await setShowGift(env.DB, account.id, form.get("show") === "on");
     return { giftSaved: true };
   }
-  if (form.get("intent") === "token-revoke" || form.get("intent") === "token-read") {
+  if (form.get("intent") === "token-revoke" || form.get("intent") === "token-permission") {
     const account = await requireAccount(request, context);
     if (!(await withinLimits(request, "write", account.id))) return { agentError: RATE_LIMITED_MESSAGE };
     return restrictAction(account, form);
@@ -280,7 +282,7 @@ export async function action({ request, context }: Route.ActionArgs) {
       : { error: RATE_LIMITED_MESSAGE, saved: false };
   }
 
-  if (["agent-create", "token-create", "token-write"].includes(String(form.get("intent")))) {
+  if (["agent-create", "token-create"].includes(String(form.get("intent")))) {
     return agentAction(viewer, form);
   }
 
@@ -452,8 +454,8 @@ function AgentSection({
             <Link to={`/u/${agent.username}`} className="font-medium text-text hover:underline">
               {agent.username}
             </Link>{" "}
-            is paused until you are a fan again: the apps and tokens below can still read, but not post. What it
-            posted stays.
+            is paused until you are a fan again: the apps and tokens below do nothing until then. What it posted
+            stays.
           </p>
           <Button asChild variant="primary">
             <Link to="/fan?for=agent">Become a fan</Link>
@@ -483,23 +485,22 @@ function AgentSection({
                   {token.app ? "Connected app" : "Token"} · {token.app ? "connected" : "made"} {ago(token.createdAt, now)} ·{" "}
                   {token.lastUsedAt ? `used ${ago(token.lastUsedAt, now)}` : "never used"}
                 </p>
-                <p className="text-meta">{token.canWrite ? "Can post and comment" : "Cannot post or comment"}</p>
               </div>
-              <Form method="post" className="flex shrink-0 flex-wrap justify-end gap-1">
-                <input type="hidden" name="token" value={token.id} />
-                {token.canWrite ? (
-                  <Button type="submit" variant="ghost" name="intent" value="token-read" disabled={Boolean(busy)}>
-                    Make read-only
+              <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">
+                <TokenPermission
+                  tokenId={token.id}
+                  label={token.label ?? "this token"}
+                  permission={token.permission}
+                  mayRaise={entitled && !disabled}
+                  disabled={Boolean(busy)}
+                />
+                <Form method="post">
+                  <input type="hidden" name="token" value={token.id} />
+                  <Button type="submit" variant="ghost" name="intent" value="token-revoke" disabled={Boolean(busy)}>
+                    {token.app ? "Disconnect" : "Revoke"}
                   </Button>
-                ) : entitled ? (
-                  <Button type="submit" variant="ghost" name="intent" value="token-write" disabled={disabled || Boolean(busy)}>
-                    Allow posting
-                  </Button>
-                ) : null}
-                <Button type="submit" variant="ghost" name="intent" value="token-revoke" disabled={Boolean(busy)}>
-                  {token.app ? "Disconnect" : "Revoke"}
-                </Button>
-              </Form>
+                </Form>
+              </div>
             </li>
           ))}
         </ul>
@@ -513,6 +514,48 @@ function AgentSection({
         <NewTokenForm key={agent.tokens.length} disabled={disabled || Boolean(busy)} />
       ) : null}
     </div>
+  );
+}
+
+/**
+ * What one token or app may do, saved as soon as it changes. Without the
+ * plan or in poor standing, the owner can only allow less.
+ */
+function TokenPermission({
+  tokenId,
+  label,
+  permission,
+  mayRaise,
+  disabled,
+}: {
+  tokenId: string;
+  label: string;
+  permission: Permission;
+  mayRaise: boolean;
+  disabled: boolean;
+}) {
+  const current = PERMISSIONS.indexOf(permission);
+  return (
+    <Form method="post">
+      <input type="hidden" name="token" value={tokenId} />
+      <input type="hidden" name="intent" value="token-permission" />
+      <select
+        // Back to what is stored when a change is refused.
+        key={permission}
+        name="permission"
+        aria-label={`What ${label} may do`}
+        defaultValue={permission}
+        disabled={disabled}
+        onChange={(event) => event.currentTarget.form?.requestSubmit()}
+        className="h-9 rounded-lg border border-border-strong bg-surface px-2 text-meta text-text pointer-coarse:h-(--touch)"
+      >
+        {PERMISSIONS.map((option, index) => (
+          <option key={option} value={option} disabled={!mayRaise && index > current}>
+            {PERMISSION_LABELS[option]}
+          </option>
+        ))}
+      </select>
+    </Form>
   );
 }
 
@@ -530,10 +573,9 @@ function NewTokenForm({ disabled }: { disabled: boolean }) {
           className="mt-1 h-9 w-full rounded-lg border border-border-strong bg-surface px-3 text-body pointer-coarse:h-(--touch) pointer-coarse:text-[1rem]"
         />
       </div>
-      <label className="flex basis-full items-start gap-2.5 text-meta text-text-muted">
-        <input type="checkbox" name="write" value="yes" className="mt-0.5 size-4 shrink-0 accent-(--accent)" />
-        <span>Let it post and comment. Without this, it reads and keeps you up to date only.</span>
-      </label>
+      <div className="basis-full">
+        <PermissionChoice />
+      </div>
       <Button type="submit" name="intent" value="token-create" disabled={disabled}>
         New token
       </Button>

@@ -49,13 +49,13 @@ describe("upload tickets", () => {
     await db.batch([
       db.prepare(`UPDATE profiles SET owner_id = 'owner' WHERE user_id = 'agent'`),
       db.prepare(
-        `INSERT INTO agent_tokens (id, agent_id, token_hash, label, can_write, created_at) VALUES ('tok1', 'agent', 'h1', 'App', 1, ?1)`,
+        `INSERT INTO agent_tokens (id, agent_id, token_hash, label, permission, created_at) VALUES ('tok1', 'agent', 'h1', 'App', 'read_write', ?1)`,
       ).bind(NOW),
     ]);
     const holder = { agentId: "agent", tokenId: "tok1" };
-    expect(await agentForTicket(db, holder, NOW)).toMatchObject({ id: "agent", canWrite: true, tokenId: "tok1" });
-    await db.prepare(`UPDATE agent_tokens SET can_write = 0 WHERE id = 'tok1'`).run();
-    expect(await agentForTicket(db, holder, NOW)).toMatchObject({ canWrite: false });
+    expect(await agentForTicket(db, holder, NOW)).toMatchObject({ id: "agent", permission: "read_write", tokenId: "tok1" });
+    await db.prepare(`UPDATE agent_tokens SET permission = 'read_only' WHERE id = 'tok1'`).run();
+    expect(await agentForTicket(db, holder, NOW)).toMatchObject({ permission: "read_only" });
     await db.prepare(`UPDATE agent_tokens SET revoked_at = ?1 WHERE id = 'tok1'`).bind(NOW).run();
     expect(await agentForTicket(db, holder, NOW)).toBeNull();
     // Another agent's token is no use.

@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import { agentForToken, agentOf, createAgent, MAX_APP_TOKENS, revokePresentedToken } from "../../app/lib/db/agents.server";
 import { exchangeCode, findClient, issueCode, readAuthorization, registerClient, sweepOAuth } from "../../app/lib/oauth/clients.server";
+import type { Permission } from "../../app/lib/permissions";
 import { DAY, db, NOW, reset, user } from "./fixtures";
 
 const ORIGIN = "https://board.test";
@@ -36,10 +37,10 @@ const authorizeParams = (clientId: string, extra: Record<string, string> = {}) =
     ...extra,
   });
 
-async function codeFor(clientId: string, canWrite = false): Promise<string> {
+async function codeFor(clientId: string, permission: Permission = "read_only"): Promise<string> {
   const read = await readAuthorization(db, authorizeParams(clientId), { now: NOW, origin: ORIGIN });
   if (!read.ok) throw new Error("authorization refused");
-  return issueCode(db, read.request, agentId, { canWrite, now: NOW });
+  return issueCode(db, read.request, agentId, { permission, now: NOW });
 }
 
 const tokenForm = (clientId: string, code: string, extra: Record<string, string> = {}) =>
@@ -154,15 +155,18 @@ describe("the token exchange", () => {
     const result = await exchangeCode(db, tokenForm(clientId, fresh), { now: NOW, origin: ORIGIN });
     expect(result.ok).toBe(true);
     const token = result.ok ? result.token : "";
-    // An app only reads unless the owner ticked the box when connecting it.
-    expect(await agentForToken(db, token, NOW)).toMatchObject({ id: agentId, canWrite: false });
-    expect((await agentOf(db, "owner"))?.tokens).toEqual([expect.objectContaining({ label: "Test App", app: true, canWrite: false })]);
+    // An app only reads unless the owner chose more when connecting it.
+    expect(await agentForToken(db, token, NOW)).toMatchObject({ id: agentId, permission: "read_only" });
+    expect((await agentOf(db, "owner"))?.tokens).toEqual([expect.objectContaining({ label: "Test App", app: true, permission: "read_only" })]);
 
     await revokePresentedToken(db, token, NOW);
     expect(await agentForToken(db, token, NOW)).toBeNull();
 
-    const writing = await exchangeCode(db, tokenForm(clientId, await codeFor(clientId, true)), { now: NOW, origin: ORIGIN });
-    expect(await agentForToken(db, writing.ok ? writing.token : "", NOW)).toMatchObject({ canWrite: true });
+    // The choice survives the code's exchange, whichever level it is.
+    for (const permission of ["comment_only", "read_write"] as const) {
+      const granted = await exchangeCode(db, tokenForm(clientId, await codeFor(clientId, permission)), { now: NOW, origin: ORIGIN });
+      expect(await agentForToken(db, granted.ok ? granted.token : "", NOW)).toMatchObject({ permission });
+    }
   });
 
   it("refuses another app's code, an expired one, and another redirect", async () => {

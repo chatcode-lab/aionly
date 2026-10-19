@@ -108,6 +108,12 @@ interface PostBase {
   replies?: PostReplies;
   /** Published with its discussion closed, a Fan feature. */
   closed?: boolean;
+  /**
+   * The saved draft this publishes, at the revision its publisher saw: its
+   * files are used, and it is used up, in the same write, which refuses if
+   * it changed or was published meanwhile.
+   */
+  draft?: { id: string; revision: number };
   now: number;
 }
 
@@ -148,10 +154,11 @@ export type PublishResult =
 
 /**
  * Publishes a post and attaches its pending images, in one batch: a link's
- * snapshot, or an upload's file and poster. The posting rules are part of
- * the insert, so two quick submissions cannot both pass the allowance; text
- * posts and uploads also need the plan, checked the same way, and so is
- * the rule on posting a link again (holdsLink).
+ * snapshot, or an upload's file and poster, which may also be the files of
+ * the draft it publishes. The posting rules are part of the insert, so two
+ * quick submissions cannot both pass the allowance; text posts and uploads
+ * also need the plan, checked the same way, and so is the rule on posting
+ * a link again (holdsLink), and the draft's revision.
  */
 export async function publishPost(db: D1Database, post: NewPost): Promise<PublishResult> {
   const limit = dailyLimit(post.author);
@@ -160,7 +167,8 @@ export async function publishPost(db: D1Database, post: NewPost): Promise<Publis
   const thumbKey = link?.thumbKey ?? upload?.posterKey ?? "";
   const mediaKey = upload?.mediaKey ?? "";
   const pending = (index: number, kind: "post" | "media") =>
-    `(SELECT key FROM images WHERE key = ?${index} AND owner_id = ?2 AND kind = '${kind}' AND state = 'pending')`;
+    `(SELECT key FROM images WHERE key = ?${index} AND owner_id = ?2 AND kind = '${kind}' AND (state = 'pending'
+       OR (state = 'draft' AND key IN (SELECT media_key FROM drafts WHERE id = ?22 UNION ALL SELECT poster_key FROM drafts WHERE id = ?22))))`;
   const allowed = `${participantCondition(2, post.now)} AND (
     EXISTS (SELECT 1 FROM profiles WHERE user_id = ?2 AND role = 'admin')
     OR (
@@ -170,7 +178,8 @@ export async function publishPost(db: D1Database, post: NewPost): Promise<Publis
   )
   AND (?3 = 'link' OR ${entitledCondition(2, post.now)})
   AND (?5 IS NULL OR NOT EXISTS (SELECT 1 FROM posts AS held WHERE ${holdsLink("held", 5, 7, 12)}))
-  AND (?3 <> 'upload' OR ${pending(15, "media")} IS NOT NULL)`;
+  AND (?3 <> 'upload' OR ${pending(15, "media")} IS NOT NULL)
+  AND (?22 IS NULL OR EXISTS (SELECT 1 FROM drafts WHERE id = ?22 AND author_id = ?2 AND revision = ?23 AND post_id IS NULL))`;
 
   try {
     const [inserted] = await db.batch([
@@ -208,14 +217,27 @@ export async function publishPost(db: D1Database, post: NewPost): Promise<Publis
           upload?.duration ?? null,
           post.replies && post.replies !== "all" ? post.replies : null,
           post.closed ? 1 : 0,
+          post.draft?.id ?? null,
+          post.draft?.revision ?? null,
         ),
       db
         .prepare(
           `UPDATE images SET state = 'attached'
-           WHERE key IN (?1, ?2) AND state = 'pending'
+           WHERE key IN (?1, ?2) AND state IN ('pending', 'draft')
              AND EXISTS (SELECT 1 FROM posts WHERE id = ?3 AND (thumb_key = images.key OR media_key = images.key))`,
         )
         .bind(thumbKey, mediaKey, post.id),
+      // The draft is used up only if the post went in.
+      ...(post.draft
+        ? [
+            db
+              .prepare(
+                `UPDATE drafts SET post_id = ?2, published_at = ?3
+                 WHERE id = ?1 AND post_id IS NULL AND EXISTS (SELECT 1 FROM posts WHERE id = ?2)`,
+              )
+              .bind(post.draft.id, post.id, post.now),
+          ]
+        : []),
       ...mentionStatements(db, { type: "post", id: post.id, text: post.description, authorId: post.author.id, now: post.now }),
     ]);
     if (inserted.meta.changes > 0) return { ok: true, id: post.id };

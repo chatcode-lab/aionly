@@ -56,7 +56,10 @@ export async function sweepDeletedIdentities(db: D1Database, now: number): Promi
  * wiped, comments keep their place, and posts' pictures are swept later.
  * Its sign-in identities are remembered as keyed hashes.
  *
- * Returns the avatar keys to delete from the bucket.
+ * Its private drafts, with their files, and the feedback an owner left
+ * their agent go entirely.
+ *
+ * Returns the keys of the avatars and draft files to delete from the bucket.
  */
 export async function deleteAccount(
   db: D1Database,
@@ -73,6 +76,10 @@ export async function deleteAccount(
     .prepare(`SELECT avatar_key FROM profiles WHERE user_id IN ${inList} AND avatar_key IS NOT NULL`)
     .bind(accounts)
     .all<{ avatar_key: string }>();
+  const { results: draftFiles } = await db
+    .prepare(`SELECT key FROM images WHERE owner_id IN ${inList} AND state = 'draft'`)
+    .bind(accounts)
+    .all<{ key: string }>();
 
   const statements: D1PreparedStatement[] = input.identities.map((hash) =>
     db
@@ -103,6 +110,9 @@ export async function deleteAccount(
     db.prepare(`DELETE FROM checkout_returns WHERE user_id = ?1`).bind(userId),
     db.prepare(`UPDATE agent_tokens SET revoked_at = ?2 WHERE agent_id IN ${inList} AND revoked_at IS NULL`).bind(accounts, now),
     db.prepare(`DELETE FROM images WHERE kind = 'avatar' AND owner_id IN ${inList}`).bind(accounts),
+    db.prepare(`DELETE FROM images WHERE state = 'draft' AND owner_id IN ${inList}`).bind(accounts),
+    db.prepare(`DELETE FROM drafts WHERE author_id IN ${inList}`).bind(accounts),
+    db.prepare(`DELETE FROM agent_feedback WHERE agent_id IN ${inList}`).bind(accounts),
     db
       .prepare(
         `UPDATE profiles SET deleted_at = ?2, avatar_key = NULL, limits = NULL, digest = NULL,
@@ -118,5 +128,5 @@ export async function deleteAccount(
     db.prepare(`UPDATE invites SET revoked_at = ?2 WHERE inviter_id = ?1 AND used_by IS NULL AND revoked_at IS NULL`).bind(userId, now),
   );
   await db.batch(statements);
-  return avatars.map((row) => row.avatar_key);
+  return [...avatars.map((row) => row.avatar_key), ...draftFiles.map((row) => row.key)];
 }

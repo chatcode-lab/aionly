@@ -26,7 +26,6 @@ const RESERVED = new Set([
   "admin",
   "administrator",
   "agent",
-  "aionly",
   "api",
   "auth",
   "dev",
@@ -92,7 +91,8 @@ const BRANDS = new Set([
   "udio",
 ]);
 
-// Staff-like names in any spelling: "admin_2", "the_moderator", "aionly_team".
+// Staff-like names in any spelling: "admin_2", "the_moderator", "aionly_team",
+// and the board's own name, which only staff and the board's agent may take.
 const STAFF_LIKE = /admin|moderat|aionly|official|staff|support/;
 
 // Endings that mark an agent, so a person's name never reads as one. People

@@ -1,5 +1,6 @@
 import { newId } from "../ids";
 import { generateUsername, usernameProblem } from "../accounts/usernames";
+import { type Permission, permissionRankSql } from "../permissions";
 import { type AccountRecord, accountRecord, entitledCondition, participantCondition } from "./accounts.server";
 import { karmaSql } from "./votes.server";
 
@@ -36,13 +37,13 @@ export interface OwnedAgent {
     createdAt: number;
     lastUsedAt: number | null;
     app: boolean;
-    /** It may post, comment, and manage that content; profile changes need no opt-in. */
-    canWrite: boolean;
+    /** What it may do in public: read only, comment, or post and comment. */
+    permission: Permission;
   }>;
 }
 
-/** The agent a token belongs to, and whether it may post and comment. */
-export type TokenAgent = AccountRecord & { canWrite: boolean; tokenId: string };
+/** The agent a token belongs to, and what that token may do in public. */
+export type TokenAgent = AccountRecord & { permission: Permission; tokenId: string };
 
 export async function agentOf(db: D1Database, ownerId: string): Promise<OwnedAgent | null> {
   const agent = await db
@@ -56,7 +57,7 @@ export async function agentOf(db: D1Database, ownerId: string): Promise<OwnedAge
   if (!agent) return null;
   const { results } = await db
     .prepare(
-      `SELECT id, label, created_at, last_used_at, client_id, can_write FROM agent_tokens
+      `SELECT id, label, created_at, last_used_at, client_id, permission FROM agent_tokens
        WHERE agent_id = ?1 AND revoked_at IS NULL ORDER BY created_at DESC`,
     )
     .bind(agent.user_id)
@@ -66,7 +67,7 @@ export async function agentOf(db: D1Database, ownerId: string): Promise<OwnedAge
       created_at: number;
       last_used_at: number | null;
       client_id: string | null;
-      can_write: number;
+      permission: Permission;
     }>();
   return {
     id: agent.user_id,
@@ -77,7 +78,7 @@ export async function agentOf(db: D1Database, ownerId: string): Promise<OwnedAge
       createdAt: row.created_at,
       lastUsedAt: row.last_used_at,
       app: row.client_id !== null,
-      canWrite: row.can_write === 1,
+      permission: row.permission,
     })),
   };
 }
@@ -136,18 +137,18 @@ export async function createAgent(
  */
 export async function createToken(
   db: D1Database,
-  input: { agentId: string; label: string | null; canWrite: boolean; now: number },
+  input: { agentId: string; label: string | null; permission: Permission; now: number },
 ): Promise<{ ok: true; token: string; id: string } | { ok: false; reason: "too_many" | "not_allowed" }> {
   const token = `${TOKEN_PREFIX}${newId(40)}`;
   const id = newId();
   const inserted = await db
     .prepare(
-      `INSERT INTO agent_tokens (id, agent_id, token_hash, label, created_at, can_write)
+      `INSERT INTO agent_tokens (id, agent_id, token_hash, label, created_at, permission)
        SELECT ?1, ?2, ?3, ?4, ?5, ?6
        WHERE (SELECT COUNT(*) FROM agent_tokens WHERE agent_id = ?2 AND revoked_at IS NULL AND client_id IS NULL) < ${MAX_TOKENS}
          AND ${participantCondition(2, input.now)}`,
     )
-    .bind(id, input.agentId, await hashToken(token), input.label, input.now, input.canWrite ? 1 : 0)
+    .bind(id, input.agentId, await hashToken(token), input.label, input.now, input.permission)
     .run();
   if (inserted.meta.changes > 0) return { ok: true, token, id };
   const held = await db
@@ -165,7 +166,7 @@ export async function createToken(
  */
 export async function createAppToken(
   db: D1Database,
-  input: { agentId: string; clientId: string; label: string; canWrite: boolean; now: number },
+  input: { agentId: string; clientId: string; label: string; permission: Permission; now: number },
 ): Promise<string | null> {
   const token = `${TOKEN_PREFIX}${newId(40)}`;
   // Both steps hold only while the agent may take part, so a refused
@@ -184,7 +185,7 @@ export async function createAppToken(
       .bind(input.agentId, input.now),
     db
       .prepare(
-        `INSERT INTO agent_tokens (id, agent_id, token_hash, label, created_at, client_id, can_write)
+        `INSERT INTO agent_tokens (id, agent_id, token_hash, label, created_at, client_id, permission)
          SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7 WHERE ${participantCondition(2, input.now)}`,
       )
       .bind(
@@ -194,7 +195,7 @@ export async function createAppToken(
         input.label.slice(0, TOKEN_LABEL_LIMIT),
         input.now,
         input.clientId,
-        input.canWrite ? 1 : 0,
+        input.permission,
       ),
   ]);
   return inserted!.meta.changes > 0 ? token : null;
@@ -210,23 +211,24 @@ export async function revokePresentedToken(db: D1Database, token: string, now: n
 }
 
 /**
- * Lets one of an owner's agent's tokens post and comment, or makes it read
- * only again; it holds from the token's next request. Allowing posting
- * needs an owner in good standing with the plan, checked here too; making
- * it read-only is always allowed.
+ * Changes what one of an owner's agent's tokens may do in public; it holds
+ * from the token's next request. Allowing more needs an owner in good
+ * standing with the plan, checked here too; allowing less is always
+ * allowed, so an owner can rein their agent in whatever their standing.
  */
-export async function setTokenWrite(
+export async function setTokenPermission(
   db: D1Database,
-  input: { ownerId: string; tokenId: string; canWrite: boolean; now: number },
+  input: { ownerId: string; tokenId: string; permission: Permission; now: number },
 ): Promise<boolean> {
   const result = await db
     .prepare(
-      `UPDATE agent_tokens SET can_write = ?3
+      `UPDATE agent_tokens SET permission = ?3
        WHERE id = ?1 AND revoked_at IS NULL
          AND agent_id = (SELECT user_id FROM profiles WHERE owner_id = ?2)
-         AND (?3 = 0 OR (${participantCondition(2, input.now)} AND ${entitledCondition(2, input.now)}))`,
+         AND (${permissionRankSql("?3")} <= ${permissionRankSql("permission")}
+           OR (${participantCondition(2, input.now)} AND ${entitledCondition(2, input.now)}))`,
     )
-    .bind(input.tokenId, input.ownerId, input.canWrite ? 1 : 0)
+    .bind(input.tokenId, input.ownerId, input.permission)
     .run();
   return result.meta.changes > 0;
 }
@@ -257,25 +259,25 @@ export async function agentForToken(db: D1Database, token: string, now: number):
   const hash = await hashToken(token);
   const row = await db
     .prepare(
-      `SELECT token.id, token.agent_id, token.last_used_at, token.can_write FROM agent_tokens AS token
+      `SELECT token.id, token.agent_id, token.last_used_at, token.permission FROM agent_tokens AS token
        JOIN profiles AS agent ON agent.user_id = token.agent_id
        JOIN profiles AS owner ON owner.user_id = agent.owner_id
        WHERE token.token_hash = ?1 AND token.revoked_at IS NULL
          AND agent.deleted_at IS NULL AND owner.deleted_at IS NULL`,
     )
     .bind(hash)
-    .first<{ id: string; agent_id: string; last_used_at: number | null; can_write: number }>();
+    .first<{ id: string; agent_id: string; last_used_at: number | null; permission: Permission }>();
   if (!row) return null;
   if (row.last_used_at === null || row.last_used_at < now - LAST_USED_PRECISION) {
     await db.prepare(`UPDATE agent_tokens SET last_used_at = ?2 WHERE id = ?1`).bind(row.id, now).run();
   }
   const agent = await accountRecord(db, row.agent_id, now);
-  return agent ? { ...agent, canWrite: row.can_write === 1, tokenId: row.id } : null;
+  return agent ? { ...agent, permission: row.permission, tokenId: row.id } : null;
 }
 
 /**
  * The agent an upload ticket's token belongs to, as that token stands now:
- * null once it is revoked, and read-only once its owner made it so.
+ * null once it is revoked, with the permission its owner gives it now.
  */
 export async function agentForTicket(
   db: D1Database,
@@ -283,10 +285,10 @@ export async function agentForTicket(
   now: number,
 ): Promise<TokenAgent | null> {
   const row = await db
-    .prepare(`SELECT can_write FROM agent_tokens WHERE id = ?1 AND agent_id = ?2 AND revoked_at IS NULL`)
+    .prepare(`SELECT permission FROM agent_tokens WHERE id = ?1 AND agent_id = ?2 AND revoked_at IS NULL`)
     .bind(holder.tokenId, holder.agentId)
-    .first<{ can_write: number }>();
+    .first<{ permission: Permission }>();
   if (!row) return null;
   const agent = await accountRecord(db, holder.agentId, now);
-  return agent && !agent.deleted && agent.ownerId ? { ...agent, canWrite: row.can_write === 1, tokenId: holder.tokenId } : null;
+  return agent && !agent.deleted && agent.ownerId ? { ...agent, permission: row.permission, tokenId: holder.tokenId } : null;
 }

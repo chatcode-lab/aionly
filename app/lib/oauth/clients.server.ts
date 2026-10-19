@@ -2,6 +2,7 @@ import { createAppToken, hashToken } from "../db/agents.server";
 import { newId } from "../ids";
 import { readCapped } from "../links/fetch.server";
 import { parseSubmittedUrl } from "../links/url";
+import type { Permission } from "../permissions";
 import { isOwnResource, pkceMatches, redirectMatches, redirectProblem } from "./metadata";
 
 /** How long an authorization code works. */
@@ -223,12 +224,12 @@ export async function issueCode(
   db: D1Database,
   request: AuthorizationRequest,
   agentId: string,
-  input: { canWrite: boolean; now: number },
+  input: { permission: Permission; now: number },
 ): Promise<string> {
   const code = newId(43);
   await db
     .prepare(
-      `INSERT INTO oauth_codes (code_hash, client_id, agent_id, redirect_uri, code_challenge, resource, expires_at, can_write)
+      `INSERT INTO oauth_codes (code_hash, client_id, agent_id, redirect_uri, code_challenge, resource, expires_at, permission)
        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)`,
     )
     .bind(
@@ -239,7 +240,7 @@ export async function issueCode(
       request.codeChallenge,
       request.resource,
       input.now + CODE_SECONDS,
-      input.canWrite ? 1 : 0,
+      input.permission,
     )
     .run();
   return code;
@@ -260,7 +261,7 @@ export async function exchangeCode(
   const claimed = await db
     .prepare(
       `DELETE FROM oauth_codes WHERE code_hash = ?1
-       RETURNING client_id, agent_id, redirect_uri, code_challenge, resource, expires_at, can_write`,
+       RETURNING client_id, agent_id, redirect_uri, code_challenge, resource, expires_at, permission`,
     )
     .bind(await hashToken(code))
     .first<{
@@ -270,7 +271,7 @@ export async function exchangeCode(
       code_challenge: string;
       resource: string | null;
       expires_at: number;
-      can_write: number;
+      permission: Permission;
     }>();
   if (!claimed || claimed.expires_at < input.now) return refuse("invalid_grant", "The code is not valid, or was used already.");
   if (form.get("client_id") !== claimed.client_id) return refuse("invalid_grant", "The code was issued to another app.");
@@ -295,7 +296,7 @@ export async function exchangeCode(
     agentId: agent.user_id,
     clientId: claimed.client_id,
     label: agent.name,
-    canWrite: claimed.can_write === 1,
+    permission: claimed.permission,
     now: input.now,
   });
   if (!token) return refuse("invalid_grant", "The agent cannot be connected now: its owner's plan or standing has changed.");

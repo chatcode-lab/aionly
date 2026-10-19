@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { agentForToken, agentOf, createAgent, createToken, MAX_TOKENS, revokeToken, setTokenWrite } from "../../app/lib/db/agents.server";
+import { agentForToken, agentOf, createAgent, createToken, MAX_TOKENS, revokeToken, setTokenPermission } from "../../app/lib/db/agents.server";
 import { addComment } from "../../app/lib/db/authoring.server";
 import { castVote } from "../../app/lib/db/votes.server";
 import { db, NOW, post, reset, user } from "./fixtures";
@@ -36,7 +36,7 @@ describe("tokens", () => {
   it("authenticates by token, keeps only a hash, and stops at revocation", async () => {
     const made = await make();
     const agentId = made.ok ? made.agent.id : "";
-    const issued = await createToken(db, { agentId, label: "gatherer", canWrite: false, now: NOW });
+    const issued = await createToken(db, { agentId, label: "gatherer", permission: "read_only", now: NOW });
     expect(issued.ok).toBe(true);
     const token = issued.ok ? issued.token : "";
     expect(token).toMatch(/^aionly_[0-9A-Za-z]{40}$/);
@@ -46,13 +46,16 @@ describe("tokens", () => {
     expect(await agentForToken(db, `${token}x`, NOW)).toBeNull();
     expect(await agentForToken(db, "not a token", NOW)).toBeNull();
     expect((await agentOf(db, "owner"))?.tokens).toEqual([
-      { id: issued.ok ? issued.id : "", label: "gatherer", createdAt: NOW, lastUsedAt: NOW, app: false, canWrite: false },
+      { id: issued.ok ? issued.id : "", label: "gatherer", createdAt: NOW, lastUsedAt: NOW, app: false, permission: "read_only" },
     ]);
-    // It only reads until its owner lets it write; then it may, from its next request.
-    expect((await agentForToken(db, token, NOW))?.canWrite).toBe(false);
-    expect(await setTokenWrite(db, { ownerId: "other", tokenId: issued.ok ? issued.id : "", canWrite: true, now: NOW })).toBe(false);
-    expect(await setTokenWrite(db, { ownerId: "owner", tokenId: issued.ok ? issued.id : "", canWrite: true, now: NOW })).toBe(true);
-    expect((await agentForToken(db, token, NOW))?.canWrite).toBe(true);
+    // It only reads until its owner allows more; then it may, from its next request.
+    expect((await agentForToken(db, token, NOW))?.permission).toBe("read_only");
+    const tokenId = issued.ok ? issued.id : "";
+    expect(await setTokenPermission(db, { ownerId: "other", tokenId, permission: "read_write", now: NOW })).toBe(false);
+    expect(await setTokenPermission(db, { ownerId: "owner", tokenId, permission: "comment_only", now: NOW })).toBe(true);
+    expect((await agentForToken(db, token, NOW))?.permission).toBe("comment_only");
+    expect(await setTokenPermission(db, { ownerId: "owner", tokenId, permission: "read_write", now: NOW })).toBe(true);
+    expect((await agentForToken(db, token, NOW))?.permission).toBe("read_write");
 
     // Only the owner revokes; then the token is dead.
     expect(await revokeToken(db, { ownerId: "other", tokenId: issued.ok ? issued.id : "", now: NOW })).toBe(false);
@@ -63,14 +66,14 @@ describe("tokens", () => {
   it("caps the live tokens an agent holds", async () => {
     const made = await make();
     const agentId = made.ok ? made.agent.id : "";
-    for (let n = 0; n < MAX_TOKENS; n += 1) expect((await createToken(db, { agentId, label: null, canWrite: true, now: NOW })).ok).toBe(true);
-    expect(await createToken(db, { agentId, label: null, canWrite: true, now: NOW })).toEqual({ ok: false, reason: "too_many" });
+    for (let n = 0; n < MAX_TOKENS; n += 1) expect((await createToken(db, { agentId, label: null, permission: "read_write", now: NOW })).ok).toBe(true);
+    expect(await createToken(db, { agentId, label: null, permission: "read_write", now: NOW })).toEqual({ ok: false, reason: "too_many" });
   });
 
   it("stops working when the owner is deleted, and carries the owner's ban", async () => {
     const made = await make();
     const agentId = made.ok ? made.agent.id : "";
-    const issued = await createToken(db, { agentId, label: null, canWrite: true, now: NOW });
+    const issued = await createToken(db, { agentId, label: null, permission: "read_write", now: NOW });
     const token = issued.ok ? issued.token : "";
     await db.prepare(`UPDATE profiles SET banned_at = ?1, ban_reason = 'spam' WHERE user_id = 'owner'`).bind(NOW).run();
     expect((await agentForToken(db, token, NOW))?.ban).toEqual({ kind: "ban", reason: "spam", until: null });
@@ -78,18 +81,21 @@ describe("tokens", () => {
     expect(await agentForToken(db, token, NOW)).toBeNull();
   });
 
-  it("lets a token write only for an owner in good standing with the plan, and always back to reading", async () => {
+  it("allows more only for an owner in good standing with the plan, and less always", async () => {
     const made = await make();
     const agentId = made.ok ? made.agent.id : "";
-    const issued = await createToken(db, { agentId, label: null, canWrite: false, now: NOW });
+    const issued = await createToken(db, { agentId, label: null, permission: "read_only", now: NOW });
     const tokenId = issued.ok ? issued.id : "";
     // Banned after the page was checked, the write itself refuses.
     await db.prepare(`UPDATE profiles SET banned_at = ?1, ban_reason = 'spam' WHERE user_id = 'owner'`).bind(NOW).run();
-    expect(await setTokenWrite(db, { ownerId: "owner", tokenId, canWrite: true, now: NOW })).toBe(false);
+    expect(await setTokenPermission(db, { ownerId: "owner", tokenId, permission: "comment_only", now: NOW })).toBe(false);
     await db.prepare(`UPDATE profiles SET banned_at = NULL, plan_until = ?1 WHERE user_id = 'owner'`).bind(NOW - 1).run();
-    expect(await setTokenWrite(db, { ownerId: "owner", tokenId, canWrite: true, now: NOW })).toBe(false);
-    await db.prepare(`UPDATE agent_tokens SET can_write = 1 WHERE id = ?1`).bind(tokenId).run();
-    expect(await setTokenWrite(db, { ownerId: "owner", tokenId, canWrite: false, now: NOW })).toBe(true);
+    expect(await setTokenPermission(db, { ownerId: "owner", tokenId, permission: "read_write", now: NOW })).toBe(false);
+    await db.prepare(`UPDATE agent_tokens SET permission = 'read_write' WHERE id = ?1`).bind(tokenId).run();
+    // Less is always allowed, a step at a time or all the way.
+    expect(await setTokenPermission(db, { ownerId: "owner", tokenId, permission: "comment_only", now: NOW })).toBe(true);
+    expect(await setTokenPermission(db, { ownerId: "owner", tokenId, permission: "read_write", now: NOW })).toBe(false);
+    expect(await setTokenPermission(db, { ownerId: "owner", tokenId, permission: "read_only", now: NOW })).toBe(true);
   });
 });
 
@@ -105,7 +111,7 @@ describe("the plan", () => {
     // Nor can a member without the plan make an agent or a token.
     await user("free", "free_member");
     expect(await createAgent(db, { ownerId: "free", ownerName: "free_member", now: NOW })).toEqual({ ok: false, reason: "not_allowed" });
-    expect((await createToken(db, { agentId, label: null, canWrite: false, now: NOW })).ok).toBe(false);
+    expect((await createToken(db, { agentId, label: null, permission: "read_only", now: NOW })).ok).toBe(false);
   });
 });
 

@@ -36,7 +36,7 @@ test("an admin connects an agent, which posts, comments, and edits through the A
   await section.getByRole("button", { name: "Connect an agent" }).click();
   await expect(section.getByRole("link", { name: "e2e_admin_agent" })).toBeVisible();
   await section.getByLabel("Label, such as where it runs").fill("e2e run");
-  await section.getByRole("checkbox", { name: /Let it post and comment/ }).check();
+  await section.getByRole("radio", { name: /Post & comment/ }).check();
   await section.getByRole("button", { name: "New token" }).click();
   const token = (await section.locator("code").textContent())!.trim();
   expect(token).toMatch(/^aionly_[0-9A-Za-z]{40}$/);

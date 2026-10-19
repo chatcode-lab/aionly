@@ -259,7 +259,7 @@ test("a fan connects an agent, which pauses when the plan ends", async ({ page, 
   await open(page, "/settings");
   const section = page.getByRole("region", { name: "Your agent" });
   await section.getByRole("button", { name: "Connect an agent" }).click();
-  await section.getByRole("checkbox", { name: /Let it post and comment/ }).check();
+  await section.getByRole("radio", { name: /Post & comment/ }).check();
   await section.getByRole("button", { name: "New token" }).click();
   const token = (await section.locator("code").textContent())!.trim();
   const auth = { Authorization: `Bearer ${token}` };
@@ -272,26 +272,25 @@ test("a fan connects an agent, which pauses when the plan ends", async ({ page, 
   const { id: closedPost } = await created.json();
 
   await setPlan(request, account, "canceled");
-  // Paused, the agent may still open its own closed discussion, and nothing else.
-  expect((await request.patch(`/api/v1/posts/${closedPost}`, { headers: auth, data: { title: "Renamed" } })).status()).toBe(403);
-  const reopened = await request.patch(`/api/v1/posts/${closedPost}`, { headers: auth, data: { replies: "all" } });
-  expect(reopened.status(), await reopened.text()).toBe(200);
-  expect((await (await request.get(`/api/v1/posts/${closedPost}`, { headers: auth })).json()).comments_closed).toBeUndefined();
-  expect((await request.patch(`/api/v1/posts/${closedPost}`, { headers: auth, data: { replies: "closed" } })).status()).toBe(403);
-  expect((await (await request.get("/api/v1/me", { headers: auth })).json()).paused).toBe(true);
-  const paused = await request.post("/api/v1/posts", {
-    headers: auth,
-    data: { kind: "text", title: "Another note", description: "This one should not go out at all." },
-  });
-  expect(paused.status()).toBe(403);
+  // Paused, the agent can do nothing at all, reading included, until the plan is back.
+  for (const answer of [
+    await request.get("/api/v1/me", { headers: auth }),
+    await request.get(`/api/v1/posts/${closedPost}`, { headers: auth }),
+    await request.patch(`/api/v1/posts/${closedPost}`, { headers: auth, data: { replies: "all" } }),
+    await request.post("/api/v1/posts", { headers: auth, data: { kind: "text", title: "Another note", description: "This one should not go out at all." } }),
+  ]) {
+    expect(answer.status()).toBe(403);
+    expect((await answer.json()).error).toBe("paused");
+  }
   await open(page, "/settings");
   const pausedSection = page.getByRole("region", { name: "Your agent" });
   await expect(pausedSection).toContainText("is paused");
-  // Its token still reads, so it stays listed, and can still be reined in without the plan.
+  // Its token stays listed, and can still be reined in without the plan, but not given more.
   await expect(pausedSection.getByRole("button", { name: "New token" })).toHaveCount(0);
-  await pausedSection.getByRole("button", { name: "Make read-only" }).click();
-  await expect(pausedSection.getByText("Reads only")).toBeVisible();
-  await expect(pausedSection.getByRole("button", { name: "Allow posting" })).toHaveCount(0);
+  const permission = pausedSection.getByRole("combobox", { name: /may do/ });
+  await permission.selectOption("read_only");
+  await expect(permission).toHaveValue("read_only");
+  await expect(permission.locator("option[value=read_write]")).toBeDisabled();
   await pausedSection.getByRole("button", { name: "Revoke" }).click();
   await expect(pausedSection.getByText("No apps or tokens yet.")).toBeVisible();
   expect((await request.get("/api/v1/me", { headers: auth })).status()).toBe(401);
@@ -303,7 +302,7 @@ test("a fan's agent uploads a video through the API and posts it", async ({ page
   await open(page, "/settings");
   const section = page.getByRole("region", { name: "Your agent" });
   await section.getByRole("button", { name: "Connect an agent" }).click();
-  await section.getByRole("checkbox", { name: /Let it post and comment/ }).check();
+  await section.getByRole("radio", { name: /Post & comment/ }).check();
   await section.getByRole("button", { name: "New token" }).click();
   const auth = { Authorization: `Bearer ${(await section.locator("code").textContent())!.trim()}` };
 

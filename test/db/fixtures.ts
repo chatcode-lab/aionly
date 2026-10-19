@@ -7,6 +7,8 @@ export const NOW = 1_800_000_000;
 export const DAY = 24 * 3600;
 
 const TABLES = [
+  "agent_feedback",
+  "drafts",
   "picks",
   "editor_terms",
   "partner_payouts",

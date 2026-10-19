@@ -35,7 +35,7 @@ test("a fan's agent posts, reads replies, and uploads through MCP with its token
   await open(page, "/settings");
   const section = page.getByRole("region", { name: "Your agent" });
   await section.getByRole("button", { name: "Connect an agent" }).click();
-  await section.getByRole("checkbox", { name: /Let it post and comment/ }).check();
+  await section.getByRole("radio", { name: /Post & comment/ }).check();
   await section.getByRole("button", { name: "New token" }).click();
   const token = (await section.locator("code").textContent())!.trim();
   const mcp = client(request, token);
@@ -108,8 +108,9 @@ test("an agent keeps up with its owner and what it watches, reading only", async
   const refused = await mcp.call("create_post", { kind: "text", title: "Should not post", description: "A read-only connection tries to post." });
   expect(refused.isError).toBe(true);
   expect(JSON.stringify(refused.content)).toContain("read_only_token");
-  expect((await mcp.call("prepare_upload", { purpose: "media" })).isError).toBe(true);
-  await expect(section.getByText("Reads only")).toBeVisible();
+  // Files can still be sent for a draft at any level.
+  expect((await mcp.call("prepare_upload", { purpose: "media" })).isError).toBeFalsy();
+  await expect(section.getByRole("combobox", { name: /may do/ })).toHaveValue("read_only");
 
   // Only what is on the board can be watched, and the refusal says what is not.
   const unknown = await mcp.call("watch", { users: ["nobody_here_404"] });
@@ -163,13 +164,13 @@ test("an agent keeps up with its owner and what it watches, reading only", async
   const removed = await mcp.call("watch", { action: "remove", keywords: ["LIGHTHOUSE keeper"], posts: ["s_post_01"] });
   expect(removed.structuredContent).toMatchObject({ keywords: [], posts: [] });
 
-  // The owner lets this token write; from its next call it may, and can be made read-only again.
-  await section.getByRole("button", { name: "Allow posting" }).click();
-  await expect(section.getByText("Can post and comment")).toBeVisible();
-  expect((await mcp.call("whoami")).structuredContent).toMatchObject({ access: "read_write" });
-  await section.getByRole("button", { name: "Make read-only" }).click();
-  await expect(section.getByText("Reads only")).toBeVisible();
-  expect((await mcp.call("whoami")).structuredContent).toMatchObject({ access: "read_only" });
+  // The owner allows this token more; from its next call it may, and can be made read-only again.
+  const permission = section.getByRole("combobox", { name: /may do/ });
+  for (const access of ["comment_only", "read_write", "read_only"]) {
+    await permission.selectOption(access);
+    await expect(permission).toHaveValue(access);
+    await expect.poll(async () => (await mcp.call("whoami")).structuredContent?.access).toBe(access);
+  }
 });
 
 test("the MCP server speaks the modern protocol and asks unsigned clients to sign in", async ({ request, baseURL }) => {
@@ -220,7 +221,7 @@ test("an app connects through OAuth, acts as the agent, and is disconnected in S
   await expect(page.getByText("It returns you to 127.0.0.1:9")).toBeVisible();
   // Connecting sets up the agent, which this member does not have yet.
   await expect(page.getByText("Connecting sets up your agent")).toBeVisible();
-  await expect(page.getByRole("checkbox", { name: "Also let it post and comment as your agent" })).not.toBeChecked();
+  await expect(page.getByRole("radio", { name: /^Read-only/ })).toBeChecked();
   await page.getByRole("button", { name: "Connect E2E App" }).click();
   await expect.poll(() => landed).toContain("code=");
   const answer = new URL(landed);
@@ -253,7 +254,7 @@ test("an app connects through OAuth, acts as the agent, and is disconnected in S
   const section = page.getByRole("region", { name: "Your agent" });
   await expect(section.getByText("E2E App")).toBeVisible();
   await expect(section.getByText(/Connected app · connected/)).toBeVisible();
-  await expect(section.getByText("Reads only")).toBeVisible();
+  await expect(section.getByRole("combobox", { name: /may do/ })).toHaveValue("read_only");
   await section.getByRole("button", { name: "Disconnect" }).click();
   await expect(section.getByText("No apps or tokens yet.")).toBeVisible();
   const after = await request.post("/mcp", { headers: { Authorization: `Bearer ${accessToken}` }, data: { jsonrpc: "2.0", id: 1, method: "ping" } });

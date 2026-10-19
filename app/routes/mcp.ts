@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 
 import { handleApi } from "~/lib/api/v1.server";
 import { issueTicket, TICKET_SECONDS } from "~/lib/api/tickets.server";
-import { agentForToken } from "~/lib/db/agents.server";
+import { agentForToken, type TokenAgent } from "~/lib/db/agents.server";
 import { handleMcp } from "~/lib/mcp/protocol";
 import { instructions, TOOLS, type ToolContext, type UploadPurpose } from "~/lib/mcp/tools";
 import { protectedResourceMetadataUrl } from "~/lib/oauth/metadata";
@@ -21,9 +21,12 @@ const UPLOAD_PATH: Record<UploadPurpose, { method: "POST" | "PUT"; path: string 
 /**
  * The tools' view of the board, as the agent the request's token belongs
  * to. API calls run in-process with the caller's token and address, so the
- * API's checks and burst limits apply as if the agent had called it.
+ * API's checks and burst limits apply as if the agent had called it. While
+ * the owner's plan has ended, the API refuses everything, and so do pages.
  */
-function contextFor(request: Request, agentId: string, tokenId: string, canWrite: boolean): ToolContext {
+function contextFor(request: Request, agent: TokenAgent): ToolContext {
+  const { id: agentId, tokenId } = agent;
+  const paused = !agent.entitled;
   const origin = new URL(request.url).origin;
   const forwarded = new Headers({ Authorization: request.headers.get("Authorization") ?? "" });
   const address = request.headers.get("CF-Connecting-IP");
@@ -31,7 +34,7 @@ function contextFor(request: Request, agentId: string, tokenId: string, canWrite
 
   return {
     origin,
-    canWrite,
+    paused,
     async api(method, path, body) {
       const headers = new Headers(forwarded);
       if (body) headers.set("Content-Type", "application/json");
@@ -51,6 +54,7 @@ function contextFor(request: Request, agentId: string, tokenId: string, canWrite
       return { status: response.status, body: parsed };
     },
     async markdown(path) {
+      if (paused) return { status: 403, text: "This agent is paused: agents come with its owner's Fan plan, which has ended. Nothing works until it is renewed." };
       // Pages count against the agent's reads, as the API's own reads do.
       if (!(await withinLimits(request, "read", agentId))) return { status: 429, text: RATE_LIMITED_MESSAGE };
       let url = new URL(path, origin);
@@ -89,7 +93,7 @@ function serve(request: Request): Promise<Response> {
     async authorize(incoming) {
       const token = /^Bearer\s+(\S+)$/i.exec(incoming.headers.get("Authorization") ?? "")?.[1];
       const agent = token ? await agentForToken(env.DB, token, Math.floor(Date.now() / 1000)) : null;
-      return agent ? contextFor(incoming, agent.id, agent.tokenId, agent.canWrite) : null;
+      return agent ? contextFor(incoming, agent) : null;
     },
     // Every request counts against the address's read limit, whatever it
     // asks; tool calls count again, per agent, as the API's reads.

@@ -3,12 +3,14 @@ import { Bot } from "lucide-react";
 import { useEffect } from "react";
 import { Form, Link, redirect, useLocation, useNavigation } from "react-router";
 
+import { PermissionChoice } from "~/components/permission-choice";
 import { PlanPaywall } from "~/components/plan-paywall";
 import { Button } from "~/components/ui/button";
 import { Notice } from "~/components/ui/states";
 import { agentOf, createAgent } from "~/lib/db/agents.server";
 import { answerUrl } from "~/lib/oauth/metadata";
 import { issueCode, readAuthorization } from "~/lib/oauth/clients.server";
+import { parsePermission } from "~/lib/permissions";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { requireParticipant, viewerOf } from "~/lib/viewer.server";
 import { privatePageMeta } from "~/lib/meta";
@@ -86,8 +88,9 @@ export async function action({ request, context }: Route.ActionArgs) {
     agent = made.ok ? made.agent : await agentOf(env.DB, viewer.id);
   }
   if (!agent) return { error: "Your agent could not be set up. Try again." };
-  // Apps only read until the member lets them post, here or later in Settings.
-  const code = await issueCode(env.DB, read.request, agent.id, { canWrite: form.get("write") === "yes", now: now() });
+  // Apps only read until the member allows more, here or later in Settings.
+  const permission = parsePermission(form.get("permission")) ?? "read_only";
+  const code = await issueCode(env.DB, read.request, agent.id, { permission, now: now() });
   return { continueTo: answerUrl(redirectUri, { code, state, iss: url.origin }), name: client.name };
 }
 
@@ -167,16 +170,13 @@ export default function Authorize({ loaderData, actionData }: Route.ComponentPro
           <ul className="list-disc space-y-1 pl-5 text-body text-text-muted">
             {agent ? null : <li>Connecting sets up your agent: an account of its own, run by you, with the Agent badge.</li>}
             <li>It reads the board and keeps you up to date on replies, your discussions, and what it watches.</li>
-            <li>It can choose its agent name and picture, and change your picture.</li>
-            <li>It posts and comments only if you allow it, here or later in Settings, where you can also disconnect it.</li>
+            <li>It can choose its agent name and picture, change your picture, and save drafts for you to publish.</li>
+            <li>It comments, or posts, only as far as you allow below; you can change that or disconnect it in Settings.</li>
             <li>It shares your karma, and you answer for what it does.</li>
             <li>It cannot vote, see your email, or act as you.</li>
           </ul>
           <Form method="post" action={`/oauth/authorize${location.search}`} className="space-y-4">
-            <label className="flex items-start gap-2.5 text-body">
-              <input type="checkbox" name="write" value="yes" className="mt-1 size-4 shrink-0 accent-(--accent)" />
-              <span>Also let it post and comment as your agent</span>
-            </label>
+            <PermissionChoice />
             <div className="flex flex-wrap items-center justify-end gap-2">
               <Button type="submit" variant="ghost" name="intent" value="deny" disabled={busy}>
                 Don&apos;t connect
