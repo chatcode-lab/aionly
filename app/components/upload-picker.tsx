@@ -4,7 +4,12 @@ import { useEffect, useId, useRef, useState } from "react";
 import { formatDuration } from "~/lib/format";
 import { type MediaType, mediaTypeOf, sizeLabel, UPLOAD_ACCEPT, UPLOAD_LIMITS } from "~/lib/uploads";
 
+import { cn } from "~/lib/cn";
+
 import { Button } from "./ui/button";
+
+/** Whether a drag carries files, rather than text or a link. */
+const carriesFiles = (event: { dataTransfer: DataTransfer | null }) => event.dataTransfer?.types.includes("Files") === true;
 
 /** An upload the server has kept, ready to publish with. */
 export interface Uploaded {
@@ -84,7 +89,9 @@ function probe(file: File, media: MediaType, url: string) {
 
 /**
  * Picks a picture, video, or audio file and uploads it at once, with its
- * poster frame for a video, so Publish only has to name it.
+ * poster frame for a video, so Publish only has to name it. A file can be
+ * chosen or dropped on it; one dropped elsewhere on the page is ignored,
+ * rather than opened in place of the form.
  */
 export function UploadPicker({
   value,
@@ -99,6 +106,22 @@ export function UploadPicker({
   const hintId = useId();
   const [progress, setProgress] = useState<number | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [over, setOver] = useState(false);
+
+  // A file dropped beside the picker would replace the page, and what was typed.
+  useEffect(() => {
+    const ignore = (event: DragEvent) => {
+      if (!carriesFiles(event)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "none";
+    };
+    window.addEventListener("dragover", ignore);
+    window.addEventListener("drop", ignore);
+    return () => {
+      window.removeEventListener("dragover", ignore);
+      window.removeEventListener("drop", ignore);
+    };
+  }, []);
 
   // The preview is the uploader's own file; let it go when replaced.
   useEffect(() => () => (value ? URL.revokeObjectURL(value.preview) : undefined), [value]);
@@ -153,17 +176,40 @@ export function UploadPicker({
   }
 
   return (
-    <div>
+    <div
+      // Handled here, as a disabled button gets no drag events while a file uploads.
+      onDragOver={(event) => {
+        if (!carriesFiles(event)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = progress === null ? "copy" : "none";
+        setOver(progress === null);
+      }}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOver(false);
+      }}
+      onDrop={(event) => {
+        if (!carriesFiles(event)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        setOver(false);
+        const file = event.dataTransfer.files[0];
+        if (file && progress === null) void choose(file);
+      }}
+    >
       <button
         type="button"
         onClick={() => input.current?.click()}
         disabled={progress !== null}
         aria-describedby={hintId}
-        className="flex w-full flex-col items-center rounded-xl border border-dashed border-border-strong px-4 py-6 text-center hover:bg-surface-2 disabled:opacity-70"
+        className={cn(
+          "flex w-full flex-col items-center rounded-xl border border-dashed border-border-strong px-4 py-6 text-center hover:bg-surface-2 disabled:opacity-70",
+          over && "border-accent bg-accent-soft",
+        )}
       >
         <FileUp size={24} aria-hidden className="text-text-faint" />
         <span className="mt-2 text-body font-medium">
-          {progress === null ? "Choose a picture, video, or audio file" : `Uploading… ${Math.round(progress * 100)}%`}
+          {progress === null ? "Choose or drop a picture, video, or audio file" : `Uploading… ${Math.round(progress * 100)}%`}
         </span>
         <span id={hintId} className="mt-1 max-w-sm text-meta text-text-muted">
           Pictures up to {sizeLabel(UPLOAD_LIMITS.image)}, audio up to {sizeLabel(UPLOAD_LIMITS.audio)}, video up to{" "}

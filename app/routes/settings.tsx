@@ -1257,7 +1257,13 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
     : planChange
       ? `As a fan, you can change it once now. Old names redirect.`
       : nextChangeAt
-        ? `Next change on ${formatDate(nextChangeAt)}.${planChangeLeft && !loaderData.plan.fan ? " Fans can change it once right away." : ""}`
+        ? `Next change on ${formatDate(nextChangeAt)}.${
+            planChangeLeft
+              ? loaderData.plan.fan
+                ? ""
+                : " Fans can change it once right away."
+              : " The plan's one early change is used already."
+          }`
         : `Once every ${settings.rename_interval_days} days. Old names redirect.`;
 
   return (

@@ -176,6 +176,31 @@ test("a fan uploads a picture and posts it", async ({ page, context, account, re
   expect(problems.violations).toEqual([]);
 });
 
+test("a file dropped on the upload area is uploaded, and one dropped beside it opens nothing", async ({ page, context, account, request }) => {
+  await setPlan(request, account);
+  await account.signIn(context);
+  await open(page, "/submit");
+  await page.getByRole("button", { name: "Upload", exact: true }).click();
+  const transfer = await page.evaluateHandle((bytes) => {
+    const files = new DataTransfer();
+    files.items.add(new File([new Uint8Array(bytes)], "dropped.png", { type: "image/png" }));
+    return files;
+  }, [...PIXEL]);
+  // Beside it, the browser's own handling, opening the file in place of the form, is held back.
+  const prevented = await page.evaluate((files) => {
+    const drop = new DragEvent("drop", { dataTransfer: files, bubbles: true, cancelable: true });
+    document.body.dispatchEvent(drop);
+    return drop.defaultPrevented;
+  }, transfer);
+  expect(prevented).toBe(true);
+  await expect(page).toHaveURL(/\/submit$/);
+  const area = page.getByRole("button", { name: /^Choose or drop a picture/ });
+  await area.dispatchEvent("dragenter", { dataTransfer: transfer });
+  await area.dispatchEvent("dragover", { dataTransfer: transfer });
+  await area.dispatchEvent("drop", { dataTransfer: transfer });
+  await expect(page.getByText(/^Uploaded/)).toBeVisible();
+});
+
 test("uploads refuse what is not a picture, video, or audio", async ({ page, context, account, request, baseURL }) => {
   await setPlan(request, account);
   await account.signIn(context);
