@@ -41,7 +41,10 @@ test("an admin makes a partner link that shares in steps and gives no free invit
   expect(await top("Accounts")).toBe(await top("Free invitations each"));
   await form.getByRole("button", { name: "Make the link" }).click();
   await expect(page.getByText(`Made /join/${code}.`)).toBeVisible();
-  await expect(page.getByRole("listitem").filter({ hasText: `/join/${code}` })).toContainText(
-    "100% for 12 months, then 50% for good · 0 free invitations each",
-  );
+  const item = page.getByRole("listitem").filter({ hasText: `/join/${code}` });
+  await expect(item).toContainText("100% for 12 months, then 50% for good · 0 free invitations each");
+  // Its buttons stay within the list's width.
+  const row = (await item.boundingBox())!;
+  const revoke = (await item.getByRole("button", { name: "Revoke" }).boundingBox())!;
+  expect(revoke.x + revoke.width).toBeLessThanOrEqual(row.x + row.width + 1);
 });

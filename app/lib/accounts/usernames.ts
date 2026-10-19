@@ -194,9 +194,18 @@ const ANIMALS = [
   "wombat", "wren", "yak", "zebra",
 ];
 
+/**
+ * A whole number from 0 below `limit`, each equally likely: a draw past the
+ * last whole run of `limit`s is drawn again, as taking it modulo `limit`
+ * would favor the smallest numbers.
+ */
 function randomBelow(limit: number): number {
-  const [value] = crypto.getRandomValues(new Uint32Array(1));
-  return value % limit;
+  const range = 2 ** 32;
+  const usable = range - (range % limit);
+  for (;;) {
+    const [value] = crypto.getRandomValues(new Uint32Array(1));
+    if (value < usable) return value % limit;
+  }
 }
 
 /**

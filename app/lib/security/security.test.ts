@@ -51,9 +51,8 @@ describe("buildSitePolicy", () => {
 
   it("never admits the site itself as a frame", () => {
     expect(policy["frame-src"]).not.toContain("'self'");
-    expect(policy["frame-src"].some((source) => source.startsWith(SITE))).toBe(
-      false,
-    );
+    const hosts = policy["frame-src"].filter((source) => /^https?:\/\//.test(source)).map((source) => new URL(source).host);
+    expect(hosts).not.toContain(new URL(SITE).host);
   });
 
   it("forbids framing the site and rebasing its URLs", () => {

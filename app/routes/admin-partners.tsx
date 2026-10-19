@@ -238,7 +238,7 @@ export default function AdminPartners({ loaderData, actionData }: Route.Componen
                       {link.live ? null : <span className="text-text-muted"> · {link.revokedAt !== null ? "revoked" : "ended"}</span>}
                     </span>
                     <span className="flex gap-2">
-                      <CopyButton text={`${origin}/join/${link.code}`} label="Copy link" done="Link copied" />
+                      <CopyButton text={`${origin}/join/${link.code}`} label="Copy link" done="Link copied" className="" />
                       {link.revokedAt === null ? (
                         <Form method="post">
                           <input type="hidden" name="intent" value="revoke" />

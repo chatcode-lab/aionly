@@ -1,3 +1,4 @@
+import { removeAll } from "../text/remove-all";
 import { fetchPublic, readCapped, readPrefix } from "./fetch.server";
 import type { MediaLink, PageLink } from "./types";
 import { parseSubmittedUrl } from "./url";
@@ -154,10 +155,10 @@ function postText(html: string | undefined): string | undefined {
   const paragraph = html?.match(/<p[^>]*>([\s\S]*?)<\/p>/i)?.[1];
   if (!paragraph) return undefined;
   return cleanText(
-    paragraph
-      .replace(/<br\s*\/?>/gi, " ")
-      .replace(/<a[^>]*>(?:https?:\/\/)?t\.co\/[^<]*<\/a>/gi, "")
-      .replace(/<[^>]+>/g, ""),
+    removeAll(
+      paragraph.replace(/<br\s*\/?>/gi, " ").replace(/<a[^>]*>(?:https?:\/\/)?t\.co\/[^<]*<\/a>/gi, ""),
+      /<[^>]+>/g,
+    ),
   );
 }
 

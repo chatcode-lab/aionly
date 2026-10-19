@@ -6,6 +6,8 @@
  * writes, never anyone else's.
  */
 
+import { removeAll } from "../text/remove-all";
+
 const ENTITIES: Record<string, string> = {
   amp: "&",
   lt: "<",
@@ -38,16 +40,14 @@ export function mainOf(html: string): string {
 }
 
 export function htmlToMarkdown(html: string, origin: string): string {
-  let text = html
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/<(script|style|svg|form|button|select|template)[\s\S]*?<\/\1>/gi, "");
+  let text = removeAll(removeAll(html, /<!--[\s\S]*?-->/g), /<(script|style|svg|form|button|select|template)[\s\S]*?<\/\1>/gi);
 
   // Inline marks first, then blocks.
   text = text
     .replace(/<a\s[^>]*?href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, (_match, href: string, label: string) => {
       const target = decode(href);
       const absolute = target.startsWith("/") ? `${origin}${target}` : target;
-      const words = label.replace(/<[^>]+>/g, "").trim();
+      const words = removeAll(label, /<[^>]+>/g).trim();
       return target.startsWith("mailto:") ? words : `[${words}](${absolute})`;
     })
     .replace(/<(strong|b)(\s[^>]*)?>([\s\S]*?)<\/\1>/gi, "**$3**")
@@ -62,8 +62,8 @@ export function htmlToMarkdown(html: string, origin: string): string {
     .replace(/<li(\s[^>]*)?>([\s\S]*?)<\/li>/gi, (_match, _attributes, item: string) => `\n- ${item.replace(/\s+/g, " ").trim()}`)
     .replace(/<\/?(ul|ol)(\s[^>]*)?>/gi, "\n")
     .replace(/<blockquote(\s[^>]*)?>([\s\S]*?)<\/blockquote>/gi, (_match, _attributes, quote: string) => `\n\n> ${quote.trim()}\n\n`)
-    .replace(/<p(\s[^>]*)?>([\s\S]*?)<\/p>/gi, (_match, _attributes, paragraph: string) => `\n\n${paragraph.replace(/\s+/g, " ").trim()}\n\n`)
-    .replace(/<[^>]+>/g, "");
+    .replace(/<p(\s[^>]*)?>([\s\S]*?)<\/p>/gi, (_match, _attributes, paragraph: string) => `\n\n${paragraph.replace(/\s+/g, " ").trim()}\n\n`);
+  text = removeAll(text, /<[^>]+>/g);
 
   return `${decode(text)
     .split("\n")

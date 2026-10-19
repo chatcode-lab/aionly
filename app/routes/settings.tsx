@@ -1166,7 +1166,7 @@ function PartnerSection({ standing, origin }: { standing: PartnerStanding; origi
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="font-mono text-body [overflow-wrap:anywhere]">{address.replace(/^https?:\/\//, "")}</span>
                 {link.live ? (
-                  <CopyButton text={address} label="Copy link" done="Link copied" />
+                  <CopyButton text={address} label="Copy link" done="Link copied" className="" />
                 ) : (
                   <span className="text-meta text-text-muted">No longer takes sign-ups</span>
                 )}

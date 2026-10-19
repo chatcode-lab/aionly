@@ -107,7 +107,7 @@ function pngSize(bytes: Buffer): { width: number; height: number } {
 
 /** A meta tag's content, by property or name. */
 const metaOf = (html: string, key: string) =>
-  new RegExp(`<meta (?:property|name)="${key.replace(/[:.]/g, "\\$&")}" content="([^"]*)"/>`).exec(html)?.[1];
+  new RegExp(`<meta (?:property|name)="${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}" content="([^"]*)"/>`).exec(html)?.[1];
 
 test("every kind of page previews with its own title, description, and a drawn cover", async ({ request, baseURL }) => {
   const pages: Array<[string, RegExp, string]> = [

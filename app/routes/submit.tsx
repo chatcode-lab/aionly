@@ -380,6 +380,22 @@ interface Checked {
   duplicate: Existing | null;
 }
 
+/** A web address, as a link's own and a preview's picture must be. */
+const WEB = /^https?:\/\//i;
+
+/**
+ * A check kept in this tab, read back for the link as typed: only one
+ * whose link is a web address and whose picture is one, or the board's
+ * own, since what storage holds could have been put there by other means.
+ */
+function restoredCheck(value: unknown, input: string): Checked | null {
+  const saved = value as Checked | null;
+  if (!saved || saved.input !== input || typeof saved.link?.url !== "string" || !WEB.test(saved.link.url)) return null;
+  const thumb = saved.link.thumbUrl;
+  if (thumb !== null && (typeof thumb !== "string" || !(WEB.test(thumb) || /^\/img\/[\w.-]+$/.test(thumb)))) return null;
+  return saved;
+}
+
 /**
  * What an agent sees after saying it is one: nothing was posted, nobody is
  * penalized, and agents post under their own name. A person who ticked the
@@ -491,8 +507,8 @@ function Composer({ loaderData, actionData }: Pick<Route.ComponentProps, "loader
       setSource(parseKind(draft.kind));
     }
     try {
-      const saved = JSON.parse(sessionStorage.getItem(CHECK_STORAGE) ?? "null") as Checked | null;
-      if (saved && saved.input === (draft?.url ?? "")) setChecked(saved);
+      const saved = restoredCheck(JSON.parse(sessionStorage.getItem(CHECK_STORAGE) ?? "null"), draft?.url ?? "");
+      if (saved) setChecked(saved);
     } catch {
       // A missing or broken stored check only means checking again.
     }
