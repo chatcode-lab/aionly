@@ -16,7 +16,7 @@ import { requireAdmin } from "~/lib/viewer.server";
 import type { Route } from "./+types/admin-fund";
 
 export function meta({ matches, location }: Route.MetaArgs) {
-  return privatePageMeta(matches, "Fund · Moderation", location.pathname);
+  return privatePageMeta(matches, "Fund · Admin", location.pathname);
 }
 
 export async function loader({ request, context }: Route.LoaderArgs) {

@@ -2,7 +2,7 @@ import { useModeration } from "~/lib/use-moderation";
 
 import { LinkTabs } from "./ui/tabs";
 
-/** The moderation pages' title and tabs, with the queue's size. */
+/** The admin pages' title and tabs, with the report queue's size. */
 export function AdminHeader({
   current,
 }: {
@@ -12,11 +12,11 @@ export function AdminHeader({
   const open = moderation?.openReports ?? 0;
   return (
     <div className="space-y-3">
-      <h1 className="text-display font-semibold">Moderation</h1>
+      <h1 className="text-display font-semibold">Admin</h1>
       {/* More tabs than a phone is wide: they scroll, not the page. */}
       <div className="overflow-x-auto">
         <LinkTabs
-          label="Moderation"
+          label="Admin"
           current={current}
           className="w-max"
           tabs={[

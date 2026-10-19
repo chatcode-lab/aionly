@@ -93,10 +93,11 @@
 	"env": {
 		"staging": {
 			"name": "aionly-board-staging",
-			// Runs the Worker near the database when that is measurably faster:
-			// a page makes several queries in a row, and each would otherwise
-			// cross the distance. Static assets and media stay at the edge.
-			"placement": { "mode": "smart" },
+			// Runs the Worker beside its database, in Madrid (WEUR): a page makes
+			// several queries in a row, and each would otherwise cross the
+			// distance. Static assets and media stay at the edge. Smart
+			// Placement never moved it, for want of traffic.
+			"placement": { "region": "gcp:europe-southwest1" },
 			"workers_dev": true,
 			"preview_urls": false,
 			"vars": {
@@ -149,7 +150,8 @@
 		},
 		"production": {
 			"name": "aionly-board",
-			"placement": { "mode": "smart" },
+			// Beside its database, served from Ashburn (ENAM, IAD): see staging's.
+			"placement": { "region": "aws:us-east-1" },
 			// aion.ly since the switch on 2026-10-16, by a route: the zone's
 			// proxied record for aion.ly stays, and the Worker answers first.
 			"workers_dev": false,

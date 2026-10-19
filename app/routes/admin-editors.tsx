@@ -14,7 +14,7 @@ import { requireAdmin } from "~/lib/viewer.server";
 import type { Route } from "./+types/admin-editors";
 
 export function meta({ matches, location }: Route.MetaArgs) {
-  return privatePageMeta(matches, "Editors · Moderation", location.pathname);
+  return privatePageMeta(matches, "Editors · Admin", location.pathname);
 }
 
 export async function loader({ request, context }: Route.LoaderArgs) {

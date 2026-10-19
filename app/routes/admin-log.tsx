@@ -14,7 +14,7 @@ import { privatePageMeta } from "~/lib/meta";
 import type { Route } from "./+types/admin-log";
 
 export function meta({ matches, location }: Route.MetaArgs) {
-  return privatePageMeta(matches, "Log · Moderation", location.pathname);
+  return privatePageMeta(matches, "Log · Admin", location.pathname);
 }
 
 export async function loader({ request, context }: Route.LoaderArgs) {

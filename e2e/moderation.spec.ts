@@ -210,7 +210,7 @@ test("an admin tunes the board's numbers, checked before saving and logged", asy
   const admin = await as(browser, adminAccount);
   try {
     await open(admin, "/admin/settings");
-    await expect(admin.getByRole("navigation", { name: "Moderation" }).getByRole("link", { name: "Settings" })).toHaveAttribute("aria-current", "page");
+    await expect(admin.getByRole("navigation", { name: "Admin" }).getByRole("link", { name: "Settings" })).toHaveAttribute("aria-current", "page");
     for (const group of ["Karma", "Invitations", "Limits", "Discussions"]) {
       await expect(admin.getByRole("heading", { name: group, level: 2 })).toBeVisible();
     }

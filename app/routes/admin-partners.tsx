@@ -23,7 +23,7 @@ import { requireAdmin } from "~/lib/viewer.server";
 import type { Route } from "./+types/admin-partners";
 
 export function meta({ matches, location }: Route.MetaArgs) {
-  return privatePageMeta(matches, "Partners · Moderation", location.pathname);
+  return privatePageMeta(matches, "Partners · Admin", location.pathname);
 }
 
 export async function loader({ request, context }: Route.LoaderArgs) {

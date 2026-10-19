@@ -99,7 +99,7 @@ export function AccountMenu({ user }: { user: PublicAuthor & { newMentions: numb
             <MenuItem asChild>
               <Link to="/admin">
                 <Shield size={16} aria-hidden className="text-text-muted" />
-                Moderation
+                Admin
                 {waiting > 0 ? <Count value={waiting} label="open" /> : null}
               </Link>
             </MenuItem>
