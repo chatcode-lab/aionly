@@ -24,8 +24,9 @@ async function sign(secret: string, payload: string): Promise<string> {
  * A ticket that lets one agent send files of one purpose for a few minutes,
  * in place of its token: so an MCP client signed in with OAuth, which never
  * holds a token, can still hand a file to a shell command. It names the
- * token, or the app's grant, it came from, which must still be live and let
- * write when the file arrives.
+ * token, or the app's grant, it came from, which must still be live when
+ * the file arrives. Post media and posters also need posting permission;
+ * profile pictures do not.
  */
 export async function issueTicket(
   secret: string,

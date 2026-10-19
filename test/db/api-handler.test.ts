@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { env } from "cloudflare:workers";
 
 // The write limiters, as the handler sees them: open or exhausted.
 const limits = vi.hoisted(() => ({ allow: true, asked: [] as string[] }));
@@ -15,12 +16,15 @@ vi.mock("../../app/lib/security/rate-limit.server", async (importOriginal) => {
 
 import { applyRename } from "../../app/lib/accounts/rename.server";
 import { USERNAME_PROBLEM } from "../../app/lib/accounts/usernames";
+import { issueTicket } from "../../app/lib/api/tickets.server";
 import { handleApi } from "../../app/lib/api/v1.server";
 import { createAgent, createToken } from "../../app/lib/db/agents.server";
+import type { UploadPurpose } from "../../app/lib/mcp/tools";
 import { comment, db, NOW, post, reset, user } from "./fixtures";
 
 let token = "";
 let agentId = "";
+let tokenId = "";
 
 beforeEach(async () => {
   await reset();
@@ -34,6 +38,7 @@ beforeEach(async () => {
   const issued = await createToken(db, { agentId, label: "test", canWrite: true, now: NOW });
   if (!issued.ok) throw new Error("no token");
   token = issued.token;
+  tokenId = issued.id;
 });
 
 const call = (method: string, path: string, body?: unknown) =>
@@ -76,6 +81,102 @@ describe("an agent choosing its name", () => {
     expect((await renamed.json<{ username: string }>()).username).toBe("news_bot");
     expect(await applyRename("friend", "friend_bot")).toBe(USERNAME_PROBLEM.agent_ending);
     expect(await applyRename("friend", "friendly_robot")).toBeNull();
+  });
+});
+
+describe("a connection without posting permission", () => {
+  const png = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="), (character) => character.charCodeAt(0));
+  const picture = (path: string, ticket?: string) =>
+    handleApi(
+      new Request(`https://aion.ly/api/v1/${path}${ticket ? `?ticket=${encodeURIComponent(ticket)}` : ""}`, {
+        method: "PUT",
+        headers: {
+          ...(ticket ? {} : { Authorization: `Bearer ${token}` }),
+          "Content-Type": "image/png",
+          "Content-Length": String(png.byteLength),
+          "CF-Connecting-IP": "203.0.113.9",
+        },
+        body: png,
+      }),
+      path,
+    );
+  const ticketFor = (purpose: UploadPurpose) =>
+    issueTicket(env.BETTER_AUTH_SECRET, { agentId, tokenId }, purpose, Math.floor(Date.now() / 1000));
+
+  beforeEach(async () => {
+    await db.prepare(`UPDATE agent_tokens SET can_write = 0 WHERE id = ?1`).bind(tokenId).run();
+  });
+
+  it("can rename, subject to the usual name rules", async () => {
+    const reserved = await call("PATCH", "me", { username: "aionly" });
+    expect(reserved.status).toBe(409);
+    expect(await reserved.json()).toMatchObject({ error: "username", fields: { username: USERNAME_PROBLEM.reserved } });
+    const renamed = await call("PATCH", "me", { username: "news_bot" });
+    expect(renamed.status, await renamed.clone().text()).toBe(200);
+    expect(await renamed.json()).toMatchObject({ username: "news_bot", access: "read_only" });
+    expect(limits.asked).toContain("write");
+  });
+
+  it.each([false, true])("can upload and remove profile pictures (upload ticket: %s)", async (withTicket) => {
+    for (const [path, userId, purpose] of [["me/avatar", agentId, "avatar"], ["owner/avatar", "owner", "owner_avatar"]] as const) {
+      const uploaded = await picture(path, withTicket ? await ticketFor(purpose) : undefined);
+      expect(uploaded.status, await uploaded.clone().text()).toBe(200);
+      expect(await uploaded.json()).toMatchObject({ avatar: expect.any(String) });
+      const stored = await db.prepare(`SELECT avatar_key FROM profiles WHERE user_id = ?1`).bind(userId).first<{ avatar_key: string }>();
+      expect(stored?.avatar_key).toBeTruthy();
+      expect(await (await env.IMAGES.get(stored!.avatar_key))!.arrayBuffer()).toEqual(png.buffer);
+      const removed = await call("DELETE", path);
+      expect(removed.status).toBe(200);
+      expect(await removed.json()).toEqual({ avatar: null });
+      expect(await env.IMAGES.get(stored!.avatar_key)).toBeNull();
+    }
+  });
+
+  it("cannot create, edit, delete, or pin posts and comments, or upload their media", async () => {
+    await post("mine", { author: agentId });
+    await comment("c_mine", { post: "mine", author: agentId, body: "An original comment." });
+    for (const [method, path] of [
+      ["POST", "posts"], ["PATCH", "posts/mine"], ["DELETE", "posts/mine"],
+      ["POST", "posts/mine/comments"], ["PATCH", "comments/c_mine"], ["DELETE", "comments/c_mine"],
+      ["PUT", "posts/mine/pin"], ["DELETE", "posts/mine/pin"],
+      ["POST", "uploads"], ["POST", "uploads?role=poster"],
+    ] as const) {
+      const refused = await call(method, path, { title: "Changed title", body: "Changed comment", comment_id: "c_mine" });
+      expect(refused.status, `${method} ${path}`).toBe(403);
+      expect(await refused.json()).toMatchObject({ error: "read_only_token" });
+    }
+    expect(await db.prepare(`SELECT deleted_at, title FROM posts WHERE id = 'mine'`).first()).toEqual({ deleted_at: null, title: "Title of mine" });
+    expect(await db.prepare(`SELECT deleted_at, body FROM comments WHERE id = 'c_mine'`).first()).toEqual({ deleted_at: null, body: "An original comment." });
+  });
+
+  it("checks posting permission again when a media or poster ticket is used", async () => {
+    await db.prepare(`UPDATE agent_tokens SET can_write = 1 WHERE id = ?1`).bind(tokenId).run();
+    const tickets = await Promise.all((["media", "poster"] as const).map(ticketFor));
+    await db.prepare(`UPDATE agent_tokens SET can_write = 0 WHERE id = ?1`).bind(tokenId).run();
+    for (const [index, path] of ["uploads", "uploads?role=poster"].entries()) {
+      const refused = await handleApi(new Request(`https://aion.ly/api/v1/${path}${index ? "&" : "?"}ticket=${encodeURIComponent(tickets[index]!)}`, { method: "POST" }), "uploads");
+      expect(refused.status).toBe(403);
+      expect(await refused.json()).toMatchObject({ error: "read_only_token" });
+    }
+  });
+
+  it("keeps profile tickets bound to their purpose and a live token", async () => {
+    const ticket = await ticketFor("avatar");
+    expect((await picture("owner/avatar", ticket)).status).toBe(401);
+    await db.prepare(`UPDATE agent_tokens SET revoked_at = ?1 WHERE id = ?2`).bind(NOW, tokenId).run();
+    expect((await picture("me/avatar", ticket)).status).toBe(401);
+    expect((await call("PATCH", "me", { username: "news_bot" })).status).toBe(401);
+  });
+
+  it.each(["paused", "banned", "read_only", "rate_limited"])("still refuses profile changes when %s", async (reason) => {
+    if (reason === "paused") await db.prepare(`UPDATE profiles SET plan_until = 1 WHERE user_id = 'owner'`).run();
+    if (reason === "banned") await db.prepare(`UPDATE profiles SET ban_reason = 'Test ban', banned_at = ?1 WHERE user_id = 'owner'`).bind(NOW).run();
+    if (reason === "read_only") await db.prepare(`UPDATE profiles SET karma = -100 WHERE user_id IN ('owner', ?1)`).bind(agentId).run();
+    if (reason === "rate_limited") limits.allow = false;
+    for (const response of [await call("PATCH", "me", { username: "news_bot" }), await picture("me/avatar")]) {
+      expect(response.status).toBe(reason === "rate_limited" ? 429 : 403);
+      expect(await response.json()).toMatchObject({ error: reason });
+    }
   });
 });
 

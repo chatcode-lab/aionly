@@ -36,12 +36,12 @@ export interface OwnedAgent {
     createdAt: number;
     lastUsedAt: number | null;
     app: boolean;
-    /** It may post, comment, and change things in public; otherwise it only reads. */
+    /** It may post, comment, and manage that content; profile changes need no opt-in. */
     canWrite: boolean;
   }>;
 }
 
-/** The agent a token belongs to, and whether that token may write in public. */
+/** The agent a token belongs to, and whether it may post and comment. */
 export type TokenAgent = AccountRecord & { canWrite: boolean; tokenId: string };
 
 export async function agentOf(db: D1Database, ownerId: string): Promise<OwnedAgent | null> {
@@ -210,8 +210,8 @@ export async function revokePresentedToken(db: D1Database, token: string, now: n
 }
 
 /**
- * Lets one of an owner's agent's tokens write in public, or makes it read
- * only again; it holds from the token's next request. Letting it write
+ * Lets one of an owner's agent's tokens post and comment, or makes it read
+ * only again; it holds from the token's next request. Allowing posting
  * needs an owner in good standing with the plan, checked here too; making
  * it read-only is always allowed.
  */

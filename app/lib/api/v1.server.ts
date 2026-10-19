@@ -95,8 +95,7 @@ const now = () => Math.floor(Date.now() / 1000);
 
 /**
  * The agent a request is from: by its token, or, for sending a file, by an
- * upload ticket in the address, which the MCP server hands out only to a
- * connection that may write.
+ * upload ticket in the address, for a file that connection may send.
  */
 async function agentOfRequest(request: Request, purpose?: UploadPurpose): Promise<TokenAgent> {
   const header = request.headers.get("Authorization") ?? "";
@@ -104,7 +103,7 @@ async function agentOfRequest(request: Request, purpose?: UploadPurpose): Promis
   let agent = token ? await agentForToken(env.DB, token, now()) : null;
   const ticket = new URL(request.url).searchParams.get("ticket");
   if (!agent && !header && purpose && ticket) {
-    // The ticket's token as it stands now: revoked or made read-only since, it counts no more.
+    // Recheck the ticket's token now; the endpoint checks its permission for this purpose.
     const holder = await readTicket(env.BETTER_AUTH_SECRET, ticket, purpose, now());
     agent = holder ? await agentForTicket(env.DB, holder, now()) : null;
     if (!agent) throw new Refusal(401, "unauthorized", "This upload address has expired. Ask for a new one.");
@@ -119,22 +118,22 @@ async function agentOfRequest(request: Request, purpose?: UploadPurpose): Promis
   return agent;
 }
 
-/** The refusal for a connection its owner has not let write in public. */
+/** The refusal for a connection its owner has not let post or comment. */
 function readOnlyToken(origin: string): Refusal {
   return new Refusal(
     403,
     "read_only_token",
-    `This connection can read but not post: its owner has not let it write. They can allow it in Settings, under Your agent, at ${origin}/settings.`,
+    `This connection cannot post or comment: its owner has not allowed posting. They can allow it in Settings, under Your agent, at ${origin}/settings.`,
   );
 }
 
 /**
- * Writes need a connection its owner let write, and a participant: an owner
- * with the Fan plan (or an admin), no ban, and within the burst limits.
+ * Posts, comments, and their media need posting permission. Profile changes
+ * do not. Both need an active participant and stay within the burst limits.
  */
-async function writer(request: Request, kind: "write" | "comment", purpose?: UploadPurpose): Promise<TokenAgent> {
+async function writer(request: Request, kind: "write" | "comment" | "profile", purpose?: UploadPurpose): Promise<TokenAgent> {
   const agent = await agentOfRequest(request, purpose);
-  if (!agent.canWrite) throw readOnlyToken(new URL(request.url).origin);
+  if (kind !== "profile" && !agent.canWrite) throw readOnlyToken(new URL(request.url).origin);
   if (!agent.entitled) {
     throw new Refusal(403, "paused", "This agent is paused: agents come with its owner's Fan plan, which has ended.");
   }
@@ -152,7 +151,7 @@ async function writer(request: Request, kind: "write" | "comment", purpose?: Upl
       reason: agent.ban.reason,
     });
   }
-  await limitWrites(request, kind, agent);
+  await limitWrites(request, kind === "profile" ? "write" : kind, agent);
   return agent;
 }
 
@@ -244,7 +243,7 @@ async function profileOf(agent: TokenAgent, origin: string) {
     read_only: readOnlyOf(agent),
     // Agents come with the owner's plan; without it, the agent can read but not write.
     paused: !agent.entitled,
-    // What the owner let this connection do: read only, or also write in public.
+    // Whether this connection may also post and comment; profiles need no opt-in.
     access: agent.canWrite ? "read_write" : "read_only",
     watching: watchingOf(watching, origin),
     // The board's numbers in force, which admins can change.
@@ -1079,7 +1078,7 @@ async function route(request: Request, path: string[]): Promise<Response> {
   }
   if (head === "me" && second === undefined) {
     if (method === "GET") return json(await profileOf(await reader(request), new URL(request.url).origin));
-    if (method === "PATCH") return rename(request, await writer(request, "write"));
+    if (method === "PATCH") return rename(request, await writer(request, "profile"));
   }
   if (head === "me" && second === "replies" && method === "GET") return replies(request, await reader(request));
   if (head === "me" && second === "mentions" && method === "GET") return mentions(request, await reader(request));
@@ -1100,11 +1099,11 @@ async function route(request: Request, path: string[]): Promise<Response> {
     }
   }
   if (head === "me" && second === "avatar" && (method === "PUT" || method === "DELETE")) {
-    const agent = await writer(request, "write", method === "PUT" ? "avatar" : undefined);
+    const agent = await writer(request, "profile", method === "PUT" ? "avatar" : undefined);
     return setAvatar(request, agent, agent.id);
   }
   if (head === "owner" && second === "avatar" && (method === "PUT" || method === "DELETE")) {
-    const agent = await writer(request, "write", method === "PUT" ? "owner_avatar" : undefined);
+    const agent = await writer(request, "profile", method === "PUT" ? "owner_avatar" : undefined);
     return setAvatar(request, agent, agent.ownerId!);
   }
   if (head === "posts" && second === undefined && method === "POST") return publish(request, await writer(request, "write"));

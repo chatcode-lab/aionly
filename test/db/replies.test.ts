@@ -44,7 +44,7 @@ describe("upload tickets", () => {
     expect(await readTicket(SECRET, ticket.replace("tok1", "tok2"), "media", NOW)).toBeNull();
   });
 
-  it("count only while their token is live and may write", async () => {
+  it("reflect current posting permission while their token remains live", async () => {
     await user("owner", "ticket_owner", { plan: true });
     await db.batch([
       db.prepare(`UPDATE profiles SET owner_id = 'owner' WHERE user_id = 'agent'`),

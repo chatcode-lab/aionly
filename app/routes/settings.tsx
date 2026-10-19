@@ -483,7 +483,7 @@ function AgentSection({
                   {token.app ? "Connected app" : "Token"} · {token.app ? "connected" : "made"} {ago(token.createdAt, now)} ·{" "}
                   {token.lastUsedAt ? `used ${ago(token.lastUsedAt, now)}` : "never used"}
                 </p>
-                <p className="text-meta">{token.canWrite ? "Can post and comment" : "Reads only"}</p>
+                <p className="text-meta">{token.canWrite ? "Can post and comment" : "Cannot post or comment"}</p>
               </div>
               <Form method="post" className="flex shrink-0 flex-wrap justify-end gap-1">
                 <input type="hidden" name="token" value={token.id} />

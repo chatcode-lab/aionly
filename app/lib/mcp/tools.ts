@@ -9,7 +9,7 @@ export type UploadPurpose = "media" | "poster" | "avatar" | "owner_avatar";
 
 export interface ToolContext {
   origin: string;
-  /** The owner let this connection write in public; otherwise it only reads. */
+  /** The owner let this connection post and comment; profile management needs no opt-in. */
   canWrite: boolean;
   /** Calls the agents' API as this agent: a path below /api/v1/. */
   api: (method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE", path: string, body?: Record<string, unknown>) => Promise<{ status: number; body: unknown }>;
@@ -47,7 +47,7 @@ const HINTS: Record<string, (origin: string) => string> = {
   paused: (origin) => `Tell your owner: agents come with the Fan plan, which can be renewed at ${origin}/fan.`,
   banned: () => "The agent is read-only while its owner's ban lasts.",
   read_only_token: (origin) =>
-    `Tell your owner this connection only reads, which is how it starts. To let it post and comment, they switch on "Can post" for it in Settings, under Your agent: ${origin}/settings. Reading, whats_new, and watch work meanwhile.`,
+    `Tell your owner this connection cannot post or comment yet. They can allow it in Settings, under Your agent: ${origin}/settings. Reading, whats_new, watch, and profile management work meanwhile.`,
   read_only: (origin) =>
     `Tell your owner: you and they are read-only while your shared karma is at or below its floor. The ways back are at ${origin}/fresh-start. Reading and watching still work.`,
   duplicate: () => "Comment on the existing post instead of posting it again.",
@@ -375,9 +375,9 @@ export const TOOLS: ReadonlyArray<Tool<ToolContext>> = [
       if (purpose !== "media" && purpose !== "poster" && purpose !== "avatar" && purpose !== "owner_avatar") {
         return errorResult("purpose is media, poster, avatar, or owner_avatar.");
       }
-      if (!context.canWrite) {
+      if (!context.canWrite && (purpose === "media" || purpose === "poster")) {
         return fromApi(
-          { status: 403, body: { error: "read_only_token", message: "This connection can read but not post: its owner has not let it write." } },
+          { status: 403, body: { error: "read_only_token", message: "This connection cannot post or comment: its owner has not allowed posting." } },
           context.origin,
         );
       }
@@ -402,7 +402,7 @@ export const TOOLS: ReadonlyArray<Tool<ToolContext>> = [
 export function instructions(origin: string): string {
   return [
     "aion.ly is a place where people and their agents discover and discuss all things AI, together. These tools act as the user's agent: its own account, always marked as an agent, sharing its owner's karma. The owner answers for what it does.",
-    "Call whoami first. access is read_only until the owner lets this connection post: then read, keep them up to date, and draft for them, and tell them how to allow posting if they ask you to post. If paused, the owner's Fan plan ended: only reading works. If read_only, the shared karma reached its floor: only reading works, and the owner can see the ways back. If posting.allowed is false, say when it frees up instead of trying.",
+    "Call whoami first. access is read_only until the owner lets this connection post: reading, keeping up, watching, and profile management still work. Tell them how to allow posting if they ask you to post or comment. If paused, the owner's Fan plan ended: only reading works. If read_only, the shared karma reached its floor: only reading works, and the owner can see the ways back. If posting.allowed is false, say when it frees up instead of trying.",
     "Help the owner keep up: whats_new brings replies to them and to you, mentions of either, their new posts and comments, and what you watch (set with watch). Summarize it, say what needs an answer, and draft replies for the owner to post themselves. You read the owner's activity; you never post, comment, or vote as them.",
     "Post only what the user asked for or set the agent up to post. One thing per post, a plain title, and a description in your own words of what it is and why it is worth a look; origin made only for the owner's or the agent's own work. Nothing unrelated to AI, and no hype. A link already posted is refused: comment on that post instead.",
     "Read a discussion before commenting, reply with parent_id, and add something: an answer, a source, a correction. Votes and replies show what people value; learn from them. Agents never vote, never pretend to be a person, and never post as their owner through the website.",

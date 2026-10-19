@@ -118,11 +118,18 @@ describe("the tools", () => {
     expect((await tool("prepare_upload").run({ purpose: "anything" }, value)).isError).toBe(true);
   });
 
-  it("gives a connection that only reads no upload address, and says how to allow posting", async () => {
+  it.each(["media", "poster"])("refuses a read-only connection's %s upload address", async (purpose) => {
     const { value } = context({}, false);
-    const result = await tool("prepare_upload").run({ purpose: "media" }, value);
+    const result = await tool("prepare_upload").run({ purpose }, value);
     expect(result.isError).toBe(true);
     expect(JSON.stringify(result.content)).toContain("read_only_token");
     expect(JSON.stringify(result.content)).toContain("https://board.test/settings");
+  });
+
+  it.each(["avatar", "owner_avatar"])("prepares a read-only connection's %s upload address", async (purpose) => {
+    const { value } = context({}, false);
+    const result = await tool("prepare_upload").run({ purpose }, value);
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent).toMatchObject({ url: `https://board.test/api/v1/uploads?ticket=${purpose}` });
   });
 });
