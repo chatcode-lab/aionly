@@ -10,16 +10,18 @@ export const DIGESTS = ["off", "daily", "weekly", "monthly"] as const;
 
 export type Digest = (typeof DIGESTS)[number];
 
+// A daily digest brings the weekly and monthly ones, and a weekly one the
+// monthly, so each choice names what it brings.
 export const DIGEST_LABELS: Record<Digest, string> = {
   off: "Off",
-  daily: "Daily",
-  weekly: "Weekly",
+  daily: "Daily, weekly, and monthly",
+  weekly: "Weekly and monthly",
   monthly: "Monthly",
 };
 
 /**
- * The top-bar menu for the email digest of top posts, free for every
- * member: how often it comes, or off.
+ * The top-bar menu for the email digest of the most voted and discussed
+ * posts, free for every member: how often it comes, or off.
  */
 export function DigestMenu({ value }: { value: Digest }) {
   const focus = useMenuFocus();
@@ -39,7 +41,7 @@ export function DigestMenu({ value }: { value: Digest }) {
         <DropdownMenu.Content align="end" sideOffset={4} className={`${MENU_CONTENT} w-64`} {...focus.content}>
           <div className="px-2.5 pt-2 pb-1.5">
             <p className="text-body font-semibold">Email digest</p>
-            <p className="mt-0.5 text-meta text-text-muted">The top posts, sent to your sign-in email.</p>
+            <p className="mt-0.5 text-meta text-text-muted">The most voted and discussed posts, sent to your sign-in email.</p>
           </div>
           <DropdownMenu.RadioGroup value={current} onValueChange={(next) => choose(next as Digest)}>
             {DIGESTS.map((option) => (

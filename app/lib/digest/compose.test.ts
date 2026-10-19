@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { composeDigest, periodStart, SEND_HOUR_UTC } from "./compose";
+import { composeDigest, periodName, periodStart, periodWindow, SEND_HOUR_UTC } from "./compose";
 
 const at = (iso: string) => Date.parse(iso) / 1000;
 
@@ -15,15 +15,49 @@ describe("the digest email", () => {
     excerpt: "Made <b>with</b> care",
   };
 
+  const base = { origin: "https://aion.ly", unsubscribeUrl: "https://aion.ly/digest/unsubscribe?token=t" };
+
   it("escapes everything people wrote, and carries the unsubscribe link", () => {
-    const email = composeDigest({ frequency: "weekly", posts: [post], origin: "https://aion.ly", unsubscribeUrl: "https://aion.ly/digest/unsubscribe?token=t" });
-    expect(email.subject).toBe('Top of aion.ly this week: A <song> & "more"');
+    const email = composeDigest({ ...base, frequency: "weekly", chosen: "weekly", period: "last week", voted: [post], discussed: [] });
+    expect(email.subject).toBe('Last week on aion.ly: A <song> & "more"');
     expect(email.html).not.toContain("<song>");
     expect(email.html).not.toContain("<b>with</b>");
     expect(email.html).toContain("A &#60;song&#62; &#38; &#34;more&#34;");
     expect(email.html).toContain("https://aion.ly/digest/unsubscribe?token=t");
     expect(email.text).toContain("12 points · 1 comment · by quiet_otter");
     expect(email.text).toContain("Unsubscribe: https://aion.ly/digest/unsubscribe?token=t");
+    expect(email.text).toContain("You get this because you turned on the weekly digest.");
+  });
+
+  it("lists the most voted and the most discussed under their own headings, leaving out an empty one", () => {
+    const talked = { ...post, title: "Talked about", comments: 9 };
+    const both = composeDigest({ ...base, frequency: "monthly", chosen: "daily", period: "October", voted: [post], discussed: [talked] });
+    expect(both.subject).toBe('October on aion.ly: A <song> & "more"');
+    expect(both.text.indexOf("MOST VOTED")).toBeLessThan(both.text.indexOf("MOST DISCUSSED"));
+    expect(both.text.indexOf("MOST DISCUSSED")).toBeLessThan(both.text.indexOf("Talked about"));
+    expect(both.text).toContain("It comes with the daily digest you turned on.");
+    const discussedOnly = composeDigest({ ...base, frequency: "daily", chosen: "daily", period: "the past day", voted: [], discussed: [talked] });
+    expect(discussedOnly.subject).toBe("The past day on aion.ly: Talked about");
+    expect(discussedOnly.html).not.toContain("Most voted");
+  });
+});
+
+describe("what a digest covers", () => {
+  it("is the period before the one just begun, so periods of a kind never overlap", () => {
+    const now = at("2026-10-15T09:00:00Z");
+    expect(periodWindow("daily", now)).toEqual({ from: at("2026-10-14T07:00:00Z"), to: at("2026-10-15T07:00:00Z") });
+    expect(periodWindow("weekly", now)).toEqual({ from: at("2026-10-05T07:00:00Z"), to: at("2026-10-12T07:00:00Z") });
+    expect(periodWindow("monthly", now)).toEqual({ from: at("2026-09-01T07:00:00Z"), to: at("2026-10-01T07:00:00Z") });
+    expect(periodWindow("monthly", at("2026-01-01T08:00:00Z"))).toEqual({ from: at("2025-12-01T07:00:00Z"), to: at("2026-01-01T07:00:00Z") });
+    // The next one starts where this one ends.
+    expect(periodWindow("weekly", at("2026-10-19T07:00:00Z")).from).toBe(periodWindow("weekly", now).to);
+  });
+
+  it("is named by its kind, and a month by its name", () => {
+    expect(periodName("daily", { from: 0 })).toBe("the past day");
+    expect(periodName("weekly", { from: 0 })).toBe("last week");
+    expect(periodName("monthly", { from: at("2026-09-01T07:00:00Z") })).toBe("September");
+    expect(periodName("monthly")).toBe("the past month");
   });
 });
 

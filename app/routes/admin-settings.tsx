@@ -64,7 +64,7 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Sa
   return { kind: "saved", saved: result.changed.map((key) => settingSpec(key).label) };
 }
 
-const GROUPS: SettingGroup[] = ["Karma", "Invitations", "Limits", "Discussions", "Partners", "Editors", "Fund"];
+const GROUPS: SettingGroup[] = ["Karma", "Invitations", "Limits", "Discussions", "Partners", "Editors", "Fund", "Digest"];
 
 /**
  * The board's numbers, for admins to tune: each with what it does and its

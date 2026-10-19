@@ -1,15 +1,29 @@
 import { participantCondition } from "../db/accounts.server";
+import { postsByIds } from "../db/feed.server";
+import { LIVE } from "../db/rows.server";
+import { settingsInForce } from "../db/settings.server";
 import type { Mailer } from "../mail/mailers.server";
 import { SENDERS } from "../mail/senders";
-import { postsByIds, topSnapshot } from "../db/feed.server";
-import type { Range } from "../feed";
 import { plainText } from "../text/markdown";
-import { composeDigest, DIGEST_SIZE, type DigestPost, type Frequency, FREQUENCIES, periodStart } from "./compose";
+import {
+  CHOSEN_WITH,
+  composeDigest,
+  type DigestPost,
+  type Frequency,
+  FREQUENCIES,
+  LIST_SIZE,
+  periodName,
+  periodStart,
+  periodWindow,
+} from "./compose";
 
 /** Accounts sent to in one hourly run, per frequency; the next run carries on. */
 const BATCH = 100;
 
-const RANGE: Record<Frequency, Range> = { daily: "day", weekly: "week", monthly: "month" };
+/** When each kind of digest last went to an account. */
+const SENT_AT: Record<Frequency, string> = { daily: "daily_digest_at", weekly: "weekly_digest_at", monthly: "monthly_digest_at" };
+
+const chosenWith = (frequency: Frequency) => JSON.stringify(CHOSEN_WITH[frequency]);
 
 const encoder = new TextEncoder();
 
@@ -41,67 +55,134 @@ export async function readUnsubscribeToken(secret: string, token: string): Promi
 }
 
 /**
- * Turns the digest on, at a frequency, or off: free for every member.
- * Turning it on counts as sent now, so the first one comes when the next
- * period begins.
+ * Turns the digest on, at a frequency, or off: free for every member. Each
+ * kind of digest the choice newly brings counts as sent now, so its first
+ * comes when its next period begins.
  */
 export async function setDigest(db: D1Database, userId: string, digest: Frequency | null, now: number): Promise<void> {
+  // Each column reads the row as it was, so "newly" compares with the old choice.
+  const sentAt = FREQUENCIES.map((frequency, index) => {
+    const brings = `(SELECT value FROM json_each(?${index + 4}))`;
+    return `${SENT_AT[frequency]} = CASE WHEN ?2 IN ${brings} AND (digest IS NULL OR digest NOT IN ${brings}) THEN ?3 ELSE ${SENT_AT[frequency]} END`;
+  });
   await db
     .prepare(
-      `UPDATE profiles SET digest = ?2,
-         digest_sent_at = CASE WHEN ?2 IS NULL OR digest IS ?2 THEN digest_sent_at ELSE ?3 END
+      `UPDATE profiles SET digest = ?2, ${sentAt.join(", ")}
        WHERE user_id = ?1
          -- Turning it on is a participant's, checked here too; turning it off
          -- is always allowed.
          AND (?2 IS NULL OR ${participantCondition(1, now)})`,
     )
-    .bind(userId, digest, now)
+    .bind(userId, digest, now, ...FREQUENCIES.map(chosenWith))
     .run();
 }
 
 export interface Recipient {
   userId: string;
   email: string;
+  /** The digest they turned on, which brings this one. */
+  chosen: Frequency;
 }
 
 /**
- * Accounts due this period's digest: turned on, with a sign-in email, and
- * nothing sent since the period began.
+ * Accounts due this period's digest of a kind: with a choice that brings
+ * it, a sign-in email, and none of that kind sent since the period began.
  */
 export async function dueRecipients(db: D1Database, frequency: Frequency, now: number, limit = BATCH): Promise<Recipient[]> {
+  const sentAt = `profile.${SENT_AT[frequency]}`;
   const { results } = await db
     .prepare(
-      `SELECT profile.user_id, account."email" FROM profiles AS profile
+      `SELECT profile.user_id, account."email", profile.digest FROM profiles AS profile
        JOIN "user" AS account ON account."id" = profile.user_id
-       WHERE profile.digest = ?1 AND (profile.digest_sent_at IS NULL OR profile.digest_sent_at < ?2)
+       WHERE profile.digest IN (SELECT value FROM json_each(?1)) AND (${sentAt} IS NULL OR ${sentAt} < ?2)
          AND profile.deleted_at IS NULL AND profile.owner_id IS NULL
        LIMIT ?3`,
     )
-    .bind(frequency, periodStart(frequency, now), limit)
-    .all<{ user_id: string; email: string }>();
-  return results.map((row) => ({ userId: row.user_id, email: row.email }));
-}
-
-/** The period's top posts, as the digest lists them. */
-export async function digestPosts(db: D1Database, frequency: Frequency, origin: string, now: number): Promise<DigestPost[]> {
-  const ids = (await topSnapshot(db, RANGE[frequency], now)).slice(0, DIGEST_SIZE);
-  const cards = await postsByIds(db, ids);
-  return cards.map((card) => ({
-    title: card.title,
-    url: `${origin}${card.path}`,
-    source: card.host ?? (card.media.kind === "text" ? "Text post" : "Upload"),
-    score: card.score,
-    comments: card.commentCount,
-    author: card.author.username,
-    excerpt: plainText(card.excerpt).slice(0, 200),
-  }));
+    .bind(chosenWith(frequency), periodStart(frequency, now), limit)
+    .all<{ user_id: string; email: string; digest: Frequency }>();
+  return results.map((row) => ({ userId: row.user_id, email: row.email, chosen: row.digest }));
 }
 
 /**
- * Sends every digest that is due, a batch per frequency per run. A quiet
- * period with no posts sends nothing, and still counts as sent. Each
- * address gets its own message, with its own unsubscribe link. Recipients
- * are claimed before anything is sent, so two runs at once never send one
+ * How notable a post must be to be listed: `points` for the most voted;
+ * for the most discussed, at least `least` points and `comments` from
+ * people other than its author and the author's agent or owner.
+ */
+interface Bar {
+  points: number;
+  least: number;
+  comments: number;
+}
+
+export interface DigestLists {
+  voted: DigestPost[];
+  discussed: DigestPost[];
+}
+
+/**
+ * The posts made in a period that clear the bar: the most voted, then the
+ * most discussed of the rest, so a post is listed once. Both may be empty.
+ */
+export async function digestLists(
+  db: D1Database,
+  input: { from: number; to: number; bar: Bar; origin: string },
+): Promise<DigestLists> {
+  const { from, to, bar } = input;
+  const { results: voted } = await db
+    .prepare(
+      `SELECT id FROM posts INDEXED BY posts_new
+       WHERE ${LIVE} AND created_at >= ?1 AND created_at < ?2 AND score >= ?3
+       ORDER BY score DESC, created_at DESC, id DESC
+       LIMIT ?4`,
+    )
+    .bind(from, to, bar.points, LIST_SIZE)
+    .all<{ id: string }>();
+  // comment_count, which counts every comment, rules out most posts before
+  // the comments by others are counted.
+  const { results: discussed } = await db
+    .prepare(
+      `SELECT id FROM (
+         SELECT post.id, post.score, post.created_at,
+           (SELECT COUNT(*) FROM comments AS comment
+            JOIN profiles AS commenter ON commenter.user_id = comment.author_id
+            WHERE comment.post_id = post.id AND comment.deleted_at IS NULL AND comment.removed_batch_id IS NULL
+              AND COALESCE(commenter.owner_id, commenter.user_id) <> COALESCE(author.owner_id, author.user_id)) AS others
+         FROM posts AS post INDEXED BY posts_new
+         JOIN profiles AS author ON author.user_id = post.author_id
+         WHERE post.deleted_at IS NULL AND post.removed_batch_id IS NULL
+           AND post.created_at >= ?1 AND post.created_at < ?2 AND post.score >= ?3 AND post.comment_count >= ?4
+           AND post.id NOT IN (SELECT value FROM json_each(?5))
+       )
+       WHERE others >= ?4
+       ORDER BY others DESC, score DESC, created_at DESC, id DESC
+       LIMIT ?6`,
+    )
+    .bind(from, to, bar.least, bar.comments, JSON.stringify(voted.map((row) => row.id)), LIST_SIZE)
+    .all<{ id: string }>();
+  const cards = async (rows: Array<{ id: string }>) =>
+    (await postsByIds(db, rows.map((row) => row.id))).map((card) => ({
+      title: card.title,
+      url: `${input.origin}${card.path}`,
+      source: card.host ?? (card.media.kind === "text" ? "Text post" : "Upload"),
+      score: card.score,
+      comments: card.commentCount,
+      author: card.author.username,
+      excerpt: plainText(card.excerpt).slice(0, 200),
+    }));
+  return { voted: await cards(voted), discussed: await cards(discussed) };
+}
+
+/** The bar a post must clear for the digests, from the settings in force. */
+async function digestBar(db: D1Database): Promise<Bar> {
+  const settings = await settingsInForce(db);
+  return { points: settings.digest_points, least: 1, comments: settings.digest_comments };
+}
+
+/**
+ * Sends every digest that is due, a batch per kind per run. A period with
+ * nothing notable sends nothing, and still counts as sent. Each address
+ * gets its own message, with its own unsubscribe link. Recipients are
+ * claimed before anything is sent, so two runs at once never send one
  * twice; a refused send is released and tried again next run, and a run
  * cut short after its claim sends nothing more that period rather than risk
  * sending twice.
@@ -112,50 +193,60 @@ export async function sendDigests(
   input: { origin: string; secret: string; from: string; now: number },
 ): Promise<number> {
   let sent = 0;
+  let bar: Bar | null = null;
   for (const frequency of FREQUENCIES) {
     const due = await dueRecipients(db, frequency, input.now);
     if (due.length === 0) continue;
+    const sentAt = SENT_AT[frequency];
     const { results: claimed } = await db
       .prepare(
-        `UPDATE profiles SET digest_sent_at = ?3
-         WHERE user_id IN (SELECT value FROM json_each(?1)) AND digest = ?4
-           AND (digest_sent_at IS NULL OR digest_sent_at < ?2)
+        `UPDATE profiles SET ${sentAt} = ?3
+         WHERE user_id IN (SELECT value FROM json_each(?1)) AND digest IN (SELECT value FROM json_each(?4))
+           AND (${sentAt} IS NULL OR ${sentAt} < ?2)
          RETURNING user_id`,
       )
-      .bind(JSON.stringify(due.map((recipient) => recipient.userId)), periodStart(frequency, input.now), input.now, frequency)
+      .bind(JSON.stringify(due.map((recipient) => recipient.userId)), periodStart(frequency, input.now), input.now, chosenWith(frequency))
       .all<{ user_id: string }>();
     const mine = new Set(claimed.map((row) => row.user_id));
     const recipients = due.filter((recipient) => mine.has(recipient.userId));
     if (recipients.length === 0) continue;
-    const posts = await digestPosts(db, frequency, input.origin, input.now);
+    bar ??= await digestBar(db);
+    const window = periodWindow(frequency, input.now);
+    const lists = await digestLists(db, { ...window, bar, origin: input.origin });
+    if (lists.voted.length === 0 && lists.discussed.length === 0) continue;
     const failed: string[] = [];
     for (const recipient of recipients) {
-      if (posts.length > 0) {
-        const unsubscribeUrl = `${input.origin}/digest/unsubscribe?token=${encodeURIComponent(await unsubscribeToken(input.secret, recipient.userId))}`;
-        const email = composeDigest({ frequency, posts, origin: input.origin, unsubscribeUrl });
-        try {
-          await mailer.send({
-            from: { name: "aion.ly", email: input.from },
-            replyTo: SENDERS.digest.replyTo,
-            to: recipient.email,
-            subject: email.subject,
-            html: email.html,
-            text: email.text,
-            headers: {
-              "List-Unsubscribe": `<${unsubscribeUrl}>`,
-              "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-            },
-          });
-          sent += 1;
-        } catch (error) {
-          console.error("digest send", frequency, error);
-          failed.push(recipient.userId);
-        }
+      const unsubscribeUrl = `${input.origin}/digest/unsubscribe?token=${encodeURIComponent(await unsubscribeToken(input.secret, recipient.userId))}`;
+      const email = composeDigest({
+        frequency,
+        chosen: recipient.chosen,
+        period: periodName(frequency, window),
+        ...lists,
+        origin: input.origin,
+        unsubscribeUrl,
+      });
+      try {
+        await mailer.send({
+          from: { name: "aion.ly", email: input.from },
+          replyTo: SENDERS.digest.replyTo,
+          to: recipient.email,
+          subject: email.subject,
+          html: email.html,
+          text: email.text,
+          headers: {
+            "List-Unsubscribe": `<${unsubscribeUrl}>`,
+            "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+          },
+        });
+        sent += 1;
+      } catch (error) {
+        console.error("digest send", frequency, error);
+        failed.push(recipient.userId);
       }
     }
     if (failed.length > 0) {
       await db
-        .prepare(`UPDATE profiles SET digest_sent_at = NULL WHERE user_id IN (SELECT value FROM json_each(?1)) AND digest_sent_at = ?2`)
+        .prepare(`UPDATE profiles SET ${sentAt} = NULL WHERE user_id IN (SELECT value FROM json_each(?1)) AND ${sentAt} = ?2`)
         .bind(JSON.stringify(failed), input.now)
         .run();
     }
@@ -165,8 +256,10 @@ export async function sendDigests(
 
 /**
  * A digest as a member would get it, marked as a test, to an admin's own
- * sign-in email: this week's top posts, or this month's when the week has
- * none. Answers what went wrong, or null.
+ * sign-in email: the past week's notable posts, or the past month's when
+ * the week has none. When nothing clears the bar, which means members get
+ * no digest, the month's top posts are sent anyway so the email can be
+ * checked, and the subject says so. Answers what went wrong, or null.
  */
 export async function sendTestDigest(
   db: D1Database,
@@ -175,21 +268,28 @@ export async function sendTestDigest(
 ): Promise<string | null> {
   const account = await db.prepare(`SELECT "email" FROM "user" WHERE "id" = ?1`).bind(input.userId).first<{ email: string }>();
   if (!account) return "Your account has no sign-in email.";
+  const bar = await digestBar(db);
+  const past = (days: number) => ({ from: input.now - days * 24 * 3600, to: input.now + 1, origin: input.origin });
   let frequency: Frequency = "weekly";
-  let posts = await digestPosts(db, frequency, input.origin, input.now);
-  if (posts.length === 0) {
+  let lists = await digestLists(db, { ...past(7), bar });
+  let below = false;
+  if (lists.voted.length === 0 && lists.discussed.length === 0) {
     frequency = "monthly";
-    posts = await digestPosts(db, frequency, input.origin, input.now);
+    lists = await digestLists(db, { ...past(31), bar });
   }
-  if (posts.length === 0) return "No posts this month to list.";
+  if (lists.voted.length === 0 && lists.discussed.length === 0) {
+    below = true;
+    lists = await digestLists(db, { ...past(31), bar: { points: Number.MIN_SAFE_INTEGER, least: Number.MIN_SAFE_INTEGER, comments: 1 } });
+  }
+  if (lists.voted.length === 0) return "No posts this month to list.";
   const unsubscribeUrl = `${input.origin}/digest/unsubscribe?token=${encodeURIComponent(await unsubscribeToken(input.secret, input.userId))}`;
-  const email = composeDigest({ frequency, posts, origin: input.origin, unsubscribeUrl });
+  const email = composeDigest({ frequency, chosen: frequency, period: periodName(frequency), ...lists, origin: input.origin, unsubscribeUrl });
   try {
     await mailer.send({
       from: { name: "aion.ly", email: input.from },
       replyTo: SENDERS.digest.replyTo,
       to: account.email,
-      subject: `[Test] ${email.subject}`,
+      subject: `[${below ? "Test, nothing notable: members get none" : "Test"}] ${email.subject}`,
       html: email.html,
       text: email.text,
       headers: { "List-Unsubscribe": `<${unsubscribeUrl}>`, "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },

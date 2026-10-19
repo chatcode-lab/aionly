@@ -154,7 +154,8 @@ describe("the digest", () => {
     expect((await dueRecipients(db, "weekly", NOW)).map((row) => row.userId)).toEqual(["fan"]);
     expect(await db.prepare(`SELECT digest FROM profiles WHERE user_id = 'free'`).first()).toEqual({ digest: "monthly" });
 
-    await post("p1", { author: "free", age: 3600, score: 5 });
+    // Last week's, as NOW is a Friday.
+    await post("p1", { author: "free", age: 6 * DAY, score: 5 });
     const input = { origin: "https://aion.ly", secret: "s", from: "digest@aion.ly", now: NOW };
     expect(await sendDigests(db, mailer, input)).toBe(1);
     expect(sent[0]).toMatchObject({
@@ -178,14 +179,15 @@ describe("the digest", () => {
 
   it("sends once even when two runs overlap, and tries a refused send again next run", async () => {
     await setDigest(db, "fan", "weekly", NOW - 8 * DAY);
-    await post("p1", { author: "free", age: 3600, score: 5 });
+    await post("p1", { author: "free", age: 6 * DAY, score: 5 });
+    await post("p2", { author: "free", age: DAY, score: 5 });
     const input = { origin: "https://aion.ly", secret: "s", from: "digest@aion.ly", now: NOW };
     const [first, second] = await Promise.all([sendDigests(db, mailer, input), sendDigests(db, mailer, input)]);
     expect(first + second).toBe(1);
     expect(sent).toHaveLength(1);
 
     await setDigest(db, "fan", "daily", NOW - 2 * DAY);
-    await db.prepare(`UPDATE profiles SET digest_sent_at = NULL WHERE user_id = 'fan'`).run();
+    await db.prepare(`UPDATE profiles SET daily_digest_at = NULL WHERE user_id = 'fan'`).run();
     const refusing = { send: async () => Promise.reject(new Error("refused")) } as unknown as Mailer;
     expect(await sendDigests(db, refusing, input)).toBe(0);
     expect((await dueRecipients(db, "daily", NOW)).map((row) => row.userId)).toEqual(["fan"]);

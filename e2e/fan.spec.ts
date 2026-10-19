@@ -199,10 +199,10 @@ test("any member turns the digest on from the top bar, and its link unsubscribes
   await page.getByRole("button", { name: "Email digest: Off" }).click();
   await Promise.all([
     page.waitForResponse((response) => new URL(response.url()).pathname.startsWith("/api/digest")),
-    page.getByRole("menuitemradio", { name: "Weekly" }).click(),
+    page.getByRole("menuitemradio", { name: "Weekly and monthly" }).click(),
   ]);
   await open(page, "/");
-  await expect(page.getByRole("button", { name: "Email digest: Weekly" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Email digest: Weekly and monthly" })).toBeVisible();
 
   // The address in the email, opened in a browser that is not signed in.
   const stranger = await browser.newPage();
@@ -232,7 +232,7 @@ test("Settings chooses the emails, and an offer's one-click link turns offers of
     page.waitForResponse((response) => new URL(response.url()).pathname.startsWith("/api/digest")),
     email.getByLabel("Digest of top posts").selectOption("weekly"),
   ]);
-  await expect(page.getByRole("button", { name: "Email digest: Weekly" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Email digest: Weekly and monthly" })).toBeVisible();
   // Offers are on until the member turns them off, and on again whenever they say.
   await expect(email).toContainText("On: a new member's offer");
   await email.getByRole("button", { name: "Turn off" }).click();

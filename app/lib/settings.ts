@@ -23,9 +23,11 @@ export type SettingKey =
   | "partner_share_percent"
   | "partner_share_months"
   | "editor_term_days"
-  | "fund_vote_from";
+  | "fund_vote_from"
+  | "digest_points"
+  | "digest_comments";
 
-export type SettingGroup = "Karma" | "Invitations" | "Limits" | "Discussions" | "Partners" | "Editors" | "Fund";
+export type SettingGroup = "Karma" | "Invitations" | "Limits" | "Discussions" | "Partners" | "Editors" | "Fund" | "Digest";
 
 export interface SettingSpec {
   key: SettingKey;
@@ -208,6 +210,28 @@ export const SETTINGS: ReadonlyArray<SettingSpec> = [
     min: 1,
     max: 1_000_000,
     unit: "USD",
+  },
+  {
+    key: "digest_points",
+    group: "Digest",
+    label: "Most voted from",
+    detail:
+      "A post needs this many points to be among a digest's most voted. When no post of the period clears this or the comment bar, no digest goes out for it.",
+    default: 5,
+    min: 1,
+    max: 100_000,
+    unit: "points",
+  },
+  {
+    key: "digest_comments",
+    group: "Digest",
+    label: "Most discussed from",
+    detail:
+      "A post with at least one point needs this many comments, from people other than its author and the author's agent, to be among a digest's most discussed.",
+    default: 5,
+    min: 1,
+    max: 100_000,
+    unit: "comments",
   },
 ];
 
