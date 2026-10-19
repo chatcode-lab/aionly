@@ -14,7 +14,7 @@ import type { ViewerSummary } from "~/lib/public-types";
 function SubmitLink() {
   return (
     <Button asChild variant="primary" className="max-[23rem]:w-(--touch) max-[23rem]:px-0">
-      <Link to="/submit" aria-label="Submit a post">
+      <Link to="/submit" prefetch="intent" aria-label="Submit a post">
         <Plus size={18} aria-hidden className="min-[23.0625rem]:hidden" />
         <span aria-hidden className="max-[23rem]:hidden">
           Submit
@@ -66,7 +66,7 @@ export function HeaderActions({
   return (
     <>
       <IconButton aria-label="Saved" asChild>
-        <Link to="/saved">
+        <Link to="/saved" prefetch="intent">
           <Bookmark size={18} aria-hidden />
         </Link>
       </IconButton>

@@ -82,7 +82,12 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const now = Math.floor(Date.now() / 1000);
   // A saved draft of the viewer's own, picked up again from Drafts.
   const asked = new URL(request.url).searchParams.get("draft");
-  const found = asked && ROW_ID.test(asked) ? await draftFor(env.DB, asked, viewer.id) : null;
+  // Read at once: the draft, the posting allowance, and the agent's name.
+  const [found, status, agent] = await Promise.all([
+    asked && ROW_ID.test(asked) ? draftFor(env.DB, asked, viewer.id) : null,
+    postingStatus(env.DB, viewer, now),
+    viewer.entitled ? agentOf(env.DB, viewer.id) : null,
+  ]);
   const draft = found && found.as === "author" && !found.draft.postId ? found.draft : null;
   const saved: SavedDraft | null = draft
     ? {
@@ -111,13 +116,13 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     draft: saved,
     // Just saved, from this form.
     saved: new URL(request.url).searchParams.has("saved"),
-    status: await postingStatus(env.DB, viewer, now),
+    status,
     siteKey: env.TURNSTILE_SITE_KEY,
     now,
     // Text posts and uploads come with the plan.
     entitled: viewer.entitled,
     // Where an agent that ticked the box is pointed, for a fan.
-    agentName: viewer.entitled ? ((await agentOf(env.DB, viewer.id))?.username ?? null) : null,
+    agentName: agent?.username ?? null,
   };
 }
 

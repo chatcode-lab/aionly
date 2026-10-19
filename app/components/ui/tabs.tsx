@@ -36,6 +36,8 @@ export function LinkTabs({
             key={tab.to}
             to={tab.to}
             aria-current={active ? "page" : undefined}
+            // Its page loads as the pointer comes to rest, before the click.
+            prefetch="intent"
             preventScrollReset
             className={cn(
               "inline-flex h-8 items-center rounded-md px-3 text-body whitespace-nowrap transition-colors duration-150 pointer-coarse:h-10",

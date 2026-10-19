@@ -129,6 +129,7 @@ export function AuthorLine({
       />
       <Link
         to={`/u/${author.username}`}
+        prefetch="intent"
         className="font-medium text-text hover:underline"
       >
         {author.username}
@@ -138,7 +139,7 @@ export function AuthorLine({
       {author.agent && relation !== "agent" ? <AgentBadge /> : null}
       {relation ? <PostRelationBadge relation={relation} /> : null}
       <span aria-hidden>·</span>
-      <Link to={permalink} className="hover:underline">
+      <Link to={permalink} prefetch="intent" className="hover:underline">
         <time dateTime={new Date(createdAt * 1000).toISOString()}>
           {formatAge(createdAt, now)}
         </time>
@@ -254,7 +255,7 @@ export function PostCard({
               </span>
             </>
           ) : (
-            <Link to={permalink} className="hover:underline">
+            <Link to={permalink} prefetch="intent" className="hover:underline">
               {post.title}
             </Link>
           )}
@@ -310,6 +311,7 @@ export function PostCard({
           </div>
           <Link
             to={permalink}
+            prefetch="intent"
             className="inline-flex h-9 items-center gap-1.5 rounded-lg px-2 text-meta font-medium text-text-muted hover:bg-surface-2 focus-visible:-outline-offset-2 hover:text-text max-sm:px-1.5 pointer-coarse:h-(--touch)"
           >
             <MessageSquare size={16} aria-hidden />

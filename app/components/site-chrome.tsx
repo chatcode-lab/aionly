@@ -20,6 +20,7 @@ export function SiteHeader({
       <div className="mx-auto flex max-w-column flex-wrap items-center gap-x-3 px-(--gutter)">
         <Link
           to="/"
+          prefetch="intent"
           // The wordmark is split for its colored dot, so name it in one piece.
           aria-label="aion.ly home"
           className="flex h-13 items-center rounded-md text-title font-bold tracking-tight"

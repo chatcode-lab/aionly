@@ -65,7 +65,7 @@ export function AccountMenu({ user }: { user: PublicAuthor & { newMentions: numb
             {user.username}
           </p>
           <MenuItem asChild>
-            <Link to={`/u/${user.username}`}>
+            <Link to={`/u/${user.username}`} prefetch="intent">
               <User size={16} aria-hidden className="text-text-muted" />
               Profile
             </Link>
@@ -78,26 +78,26 @@ export function AccountMenu({ user }: { user: PublicAuthor & { newMentions: numb
             </Link>
           </MenuItem>
           <MenuItem asChild>
-            <Link to="/saved">
+            <Link to="/saved" prefetch="intent">
               <Bookmark size={16} aria-hidden className="text-text-muted" />
               Saved
             </Link>
           </MenuItem>
           <MenuItem asChild>
-            <Link to="/drafts">
+            <Link to="/drafts" prefetch="intent">
               <FilePen size={16} aria-hidden className="text-text-muted" />
               Drafts
             </Link>
           </MenuItem>
           <MenuItem asChild>
-            <Link to="/settings">
+            <Link to="/settings" prefetch="intent">
               <Settings size={16} aria-hidden className="text-text-muted" />
               Settings
             </Link>
           </MenuItem>
           {moderation ? (
             <MenuItem asChild>
-              <Link to="/admin">
+              <Link to="/admin" prefetch="intent">
                 <Shield size={16} aria-hidden className="text-text-muted" />
                 Admin
                 {waiting > 0 ? <Count value={waiting} label="open" /> : null}

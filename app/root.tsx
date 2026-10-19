@@ -47,6 +47,20 @@ export const clientMiddleware: Route.ClientMiddlewareFunction[] = [
 
 export async function loader({ request, context }: Route.LoaderArgs) {
   const account = await viewerOf(context);
+  // What else every page needs, read at once rather than one after another.
+  // What admins need on every page: the queue's size for the menu, and the
+  // pinned post, so its menu offers Unpin. Nobody else pays for the query.
+  const [term, moderation, fund, settings] = await Promise.all([
+    account ? currentEditor(env.DB, Math.floor(Date.now() / 1000)) : null,
+    account?.role === "admin"
+      ? env.DB.prepare(
+          `SELECT (SELECT COUNT(*) FROM reports WHERE status = 'open') AS open_reports,
+                  (SELECT post_id FROM pins WHERE slot = 'announcement') AS pinned`,
+        ).first<{ open_reports: number; pinned: string | null }>()
+      : null,
+    fundStarted(env.DB),
+    loadSettings(env.DB),
+  ]);
   const viewer: ViewerSummary | null = account
     ? {
         id: account.id,
@@ -59,22 +73,13 @@ export async function loader({ request, context }: Route.LoaderArgs) {
         digest: account.digest,
         newMentions: account.newMentions,
         ...(account.fan && account.showMark ? { fan: true } : {}),
-        ...((await currentEditor(env.DB, Math.floor(Date.now() / 1000)))?.userId === account.id ? { editor: true } : {}),
+        ...(term?.userId === account.id ? { editor: true } : {}),
         // A new member's prices, while they last, for every paywall to show.
         ...(!account.entitled && !account.ownerId && Date.now() / 1000 < introEndsAt(account.createdAt)
           ? { introUntil: introEndsAt(account.createdAt) }
           : {}),
       }
     : null;
-  // What admins need on every page: the queue's size for the menu, and the
-  // pinned post, so its menu offers Unpin. Nobody else pays for the query.
-  const moderation =
-    account?.role === "admin"
-      ? await env.DB.prepare(
-          `SELECT (SELECT COUNT(*) FROM reports WHERE status = 'open') AS open_reports,
-                  (SELECT post_id FROM pins WHERE slot = 'announcement') AS pinned`,
-        ).first<{ open_reports: number; pinned: string | null }>()
-      : null;
   return {
     moderation: moderation ? { openReports: moderation.open_reports, pinnedPostId: moderation.pinned } : null,
     // Links to this host in posts and comments are followed in the app.
@@ -84,10 +89,10 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     theme: readTheme(request.headers.get("Cookie")),
     reviewPages: appEnvironment() !== "production",
     // The fund, in the footer once a fresh start has been paid for.
-    fund: await fundStarted(env.DB),
+    fund,
     inAppBrowser: detectInAppBrowser(request.headers.get("User-Agent") ?? ""),
     // The numbers admins tune, for every page's words and rules.
-    settings: await loadSettings(env.DB),
+    settings,
     // Whether a new account needs an invitation, for the sign-in screen.
     openSignup: !invitesRequired(),
     // Whether members may sign in with a linked X account.

@@ -48,18 +48,21 @@ export function meta({ matches }: Route.MetaArgs) {
 
 export async function loader({ request, context }: Route.LoaderArgs) {
   const url = new URL(request.url);
-  const viewer = await viewerOf(context);
   const now = Math.floor(Date.now() / 1000);
   const sort = parseSort(url.searchParams.get("sort"));
   const picked = parseRange(url.searchParams.get("range"));
-  // With no range in the URL, the board picks the narrowest one that can
-  // fill a first screen.
-  const range = picked ?? (await defaultRange(env.DB, now));
-  // The announcement sits above the feed and is not repeated in it. A reader
-  // who collapsed this pin gets it collapsed from the server, with no shift.
-  const pin = await announcement(env.DB);
-  // The guest editor of the running term, with their focus and latest pick.
-  const editor = await editorPick(env.DB, now);
+  // Read at once, as none waits on another. With no range in the URL, the
+  // board picks the narrowest one that can fill a first screen. The
+  // announcement sits above the feed and is not repeated in it; a reader
+  // who collapsed this pin gets it collapsed from the server, with no
+  // shift. The guest editor of the running term comes with their focus and
+  // latest pick.
+  const [viewer, range, pin, editor] = await Promise.all([
+    viewerOf(context),
+    picked ?? defaultRange(env.DB, now),
+    announcement(env.DB),
+    editorPick(env.DB, now),
+  ]);
   const pickedId = editor?.post?.id === pin?.post.id ? null : (editor?.post?.id ?? null);
   const cookies = request.headers.get("Cookie") ?? "";
   const collapsedOf = (name: string, id: string | null) =>

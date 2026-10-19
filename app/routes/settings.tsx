@@ -85,23 +85,39 @@ function linkErrorMessage(code: string): string {
 
 export async function loader({ request, context }: Route.LoaderArgs) {
   const viewer = await requireAccount(request, context);
-  const status = await renameStatus(env.DB, viewer.id);
   const url = new URL(request.url);
+  const now = Math.floor(Date.now() / 1000);
   const linkError = url.searchParams.get("link") === "error" ? (url.searchParams.get("error") ?? "") : null;
-  // The one page that shows the account's email, and only to its owner.
-  const google = await env.DB.prepare(
-    `SELECT "email", "image" IS NOT NULL AS has_photo,
-       (SELECT offers_off_at FROM profiles WHERE user_id = "user"."id") AS offers_off_at
-     FROM "user" WHERE "id" = ?1`,
-  )
-    .bind(viewer.id)
-    .first<{ email: string; has_photo: number; offers_off_at: number | null }>();
+  // Every section's state, read at once rather than one after another.
+  const [status, google, invites, agent, linked, gift, editing, partner, billing] = await Promise.all([
+    renameStatus(env.DB, viewer.id),
+    // The one page that shows the account's email, and only to its owner.
+    env.DB.prepare(
+      `SELECT "email", "image" IS NOT NULL AS has_photo,
+         (SELECT offers_off_at FROM profiles WHERE user_id = "user"."id") AS offers_off_at
+       FROM "user" WHERE "id" = ?1`,
+    )
+      .bind(viewer.id)
+      .first<{ email: string; has_photo: number; offers_off_at: number | null }>(),
+    inviteStanding(env.DB, viewer.id, now),
+    agentOf(env.DB, viewer.id).then(async (agent) =>
+      agent ? { ...agent, watching: await describeWatch(env.DB, await watchListOf(env.DB, agent.id)) } : null,
+    ),
+    // Details left from an account no longer linked are forgotten first.
+    clearStaleX(env.DB, viewer.id).then(() => linkedX(env.DB, viewer.id)),
+    giftStanding(env.DB, viewer.id),
+    currentEditor(env.DB, now).then(async (term) =>
+      term && term.userId === viewer.id ? { term, picks: await picksOfTerm(env.DB, term.id) } : null,
+    ),
+    partnerStanding(env.DB, viewer.id, now),
+    planStatus(env.DB, viewer.id),
+  ]);
   return {
     id: viewer.id,
     username: viewer.username,
     email: google?.email ?? "",
     theme: readTheme(request.headers.get("Cookie")),
-    invites: await inviteStanding(env.DB, viewer.id, Math.floor(Date.now() / 1000)),
+    invites,
     origin: url.origin,
     photoUrl: viewer.avatarKey ? imageAddress(viewer.avatarKey) : undefined,
     hasGooglePhoto: google?.has_photo === 1,
@@ -118,29 +134,24 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     // Connecting an agent comes with the plan; admins need no plan. An
     // agent kept from a lapsed plan is shown, paused.
     canHaveAgent: viewer.entitled,
-    agent: await agentOf(env.DB, viewer.id).then(async (agent) =>
-      agent ? { ...agent, watching: await describeWatch(env.DB, await watchListOf(env.DB, agent.id)) } : null,
-    ),
+    agent,
     x: {
       configured: xConfigured(),
-      // Details left from an account no longer linked are forgotten first.
-      linked: await clearStaleX(env.DB, viewer.id).then(() => linkedX(env.DB, viewer.id)),
+      linked,
       error: linkError === null ? undefined : linkErrorMessage(linkError),
     },
     commentReplies: viewer.replyPolicy,
     // What the member's fresh starts gave to the fund, and whether it shows.
-    gift: await giftStanding(env.DB, viewer.id),
+    gift,
     // The running term, for its guest editor: the focus, and the picks.
-    editing: await currentEditor(env.DB, Math.floor(Date.now() / 1000)).then(async (term) =>
-      term && term.userId === viewer.id ? { term, picks: await picksOfTerm(env.DB, term.id) } : null,
-    ),
+    editing,
     // A partner's links, what they brought, and the share earned and paid.
-    partner: await partnerStanding(env.DB, viewer.id, Math.floor(Date.now() / 1000)),
+    partner,
     plan: {
       fan: viewer.fan,
       admin: viewer.role === "admin",
       showMark: viewer.showMark,
-      ...(await planStatus(env.DB, viewer.id)),
+      ...billing,
     },
   };
 }
