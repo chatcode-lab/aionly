@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { createRequestHandler, RouterContextProvider } from "react-router";
 
 import { nonceContext, viewerContext, waitUntilContext } from "../app/context";
-import { revokeShortNames, sweepExpiredVerifications } from "../app/lib/db/accounts.server";
+import { sweepExpiredVerifications } from "../app/lib/db/accounts.server";
 import { sweepInviteClaims } from "../app/lib/db/invites.server";
 import { sweepPartnerJoins } from "../app/lib/db/partners.server";
 import { sweepDeletedIdentities } from "../app/lib/db/deletion.server";
@@ -10,7 +10,7 @@ import { sweepPublishedDrafts } from "../app/lib/db/drafts.server";
 import { sendDigests } from "../app/lib/digest/digest.server";
 import { bulkMailer, transactionalMailer } from "../app/lib/mail/mailers.server";
 import { SENDERS } from "../app/lib/mail/senders";
-import { sendReadOnlyNotices, sweepSignInLinkSends } from "../app/lib/notices/notices.server";
+import { sendPlanEndNotices, sendReadOnlyNotices, sweepSignInLinkSends } from "../app/lib/notices/notices.server";
 import { sendOfferEmails } from "../app/lib/offers/offers.server";
 import { sweepDeletedUploads } from "../app/lib/uploads.server";
 import { sweepDeletedPostImages, sweepPendingImages } from "../app/lib/images.server";
@@ -242,8 +242,7 @@ export default {
     ctx.waitUntil(sweepDeletedUploads(workerEnv.DB, workerEnv.IMAGES));
     ctx.waitUntil(sweepOAuth(workerEnv.DB, Math.floor(Date.now() / 1000)));
     ctx.waitUntil(sweepPublishedDrafts(workerEnv.DB, Math.floor(Date.now() / 1000)));
-    // Short names whose plan ended, and invitation and partner claims whose sign-up never finished.
-    ctx.waitUntil(revokeShortNames(workerEnv.DB, Math.floor(Date.now() / 1000)));
+    // Invitation and partner claims whose sign-up never finished.
     ctx.waitUntil(sweepInviteClaims(workerEnv.DB, Math.floor(Date.now() / 1000)));
     ctx.waitUntil(sweepPartnerJoins(workerEnv.DB, Math.floor(Date.now() / 1000)));
     // Digests that are due: each period's, for whoever has not had it yet.
@@ -273,6 +272,8 @@ export default {
       // Members whose karma reached the floor: that they are read-only, and
       // the ways back. Through SES, or Cloudflare where SES cannot.
       ctx.waitUntil(sendReadOnlyNotices(workerEnv.DB, transactionalMailer(workerEnv.EMAIL), { origin, now: Math.floor(Date.now() / 1000) }));
+      // Members whose plan is ending: what stops, and that a short name is no longer certain.
+      ctx.waitUntil(sendPlanEndNotices(workerEnv.DB, transactionalMailer(workerEnv.EMAIL), { origin, now: Math.floor(Date.now() / 1000) }));
     }
   },
 } satisfies ExportedHandler<Env>;

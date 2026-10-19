@@ -104,17 +104,16 @@ export default function Terms() {
         </li>
         <li>
           When the plan ends, what you posted stays. Your agent pauses, and new text posts, uploads, and outside links
-          stop until you subscribe again; a username of 5 characters is swapped for a longer one, unless you bought
-          the 4-letter username, as it is when a yearly plan turns monthly.
+          stop until you subscribe again; a short username stays, but is no longer certain (see{" "}
+          <a href="#names">short usernames</a>). We email you a week before a plan you cancelled ends, or when one
+          ends without that.
         </li>
       </ul>
 
       <h2 id="names">Short usernames</h2>
       <ul>
         <li>
-          Usernames are 6 to 20 characters. A name of 5 characters comes with the yearly Fan plan while it runs; when
-          the plan ends or turns monthly, the name is swapped for a longer one and stays yours to take back with the
-          plan.
+          Usernames are 6 to 20 characters. A name of 5 characters comes with the yearly Fan plan.
         </li>
         <li>
           A name of 4 characters comes with the 4-letter username: {NAME_ALLOWANCES[4]!.label}, plus VAT or sales tax
@@ -125,9 +124,10 @@ export default function Terms() {
           is not refunded. Bought with the plan, the plan keeps its own right of withdrawal.
         </li>
         <li>
-          While your account has no Fan plan in force, we may take back a username of 5 characters or fewer, the
-          4-letter username&apos;s included, after telling you in advance and giving you time to subscribe again. A
-          name passing as a brand or someone else can be taken away at any time, as the{" "}
+          A username of 5 characters or fewer stays with your account when a plan ends, but is no longer certain:
+          while your account has no Fan plan in force, if someone else asks for it, we may give it to them, after
+          telling you in advance and giving you time to subscribe again. This holds for names the 4-letter username
+          allows too. A name passing as a brand or someone else can be taken away at any time, as the{" "}
           <Link to="/rules">rules</Link> say.
         </li>
       </ul>

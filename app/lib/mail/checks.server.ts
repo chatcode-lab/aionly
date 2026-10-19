@@ -3,7 +3,7 @@ import { env } from "cloudflare:workers";
 import type { Check } from "../billing/check.server";
 import { settingsInForce } from "../db/settings.server";
 import { sendTestDigest } from "../digest/digest.server";
-import { composeReadOnlyNotice, composeSignInLink } from "../notices/notices";
+import { composePlanEndNotice, composeReadOnlyNotice, composeSignInLink } from "../notices/notices";
 import { sendTestOfferEmails } from "../offers/offers.server";
 import { bulkMailer, type Carrier, transactionalMailer } from "./mailers.server";
 import { SENDERS } from "./senders";
@@ -16,7 +16,8 @@ const NO_SES = "Amazon SES is not set up here (AWS_ACCESS_KEY_ID and AWS_SECRET_
  * Every email the board sends, as samples marked as tests, to an admin's
  * own sign-in email, each kind with the service that carried it: the
  * notices (a sign-in link, to the sign-in page rather than a working one,
- * and the read-only notice), through SES or Cloudflare as the backup; the
+ * the read-only notice, and the plan's end), through SES or Cloudflare as
+ * the backup; the
  * offer emails; and a digest, through SES alone.
  */
 export async function sendTestEmails(input: { userId: string; origin: string; now: number }): Promise<Check[]> {
@@ -34,13 +35,14 @@ export async function sendTestEmails(input: { userId: string; origin: string; no
       ...SENDERS.notices,
       ...composeReadOnlyNotice({ karma: settings.karma_floor - 3, floor: settings.karma_floor, room: settings.fresh_start_room, origin }),
     },
+    { ...SENDERS.notices, ...composePlanEndNotice({ endsAt: now + 7 * 24 * 3600, username: "nova", shortName: true, origin }) },
   ];
   try {
     const carriers = new Set<Carrier | null | void>();
     for (const sample of samples) carriers.add(await transactional.send({ ...sample, to: account.email, subject: `[Test] ${sample.subject}` }));
     const ses = carriers.size === 1 && carriers.has("ses");
     checks.push({
-      label: "Sign-in link and read-only notice",
+      label: "Sign-in link and notices",
       ok: ses,
       detail: ses
         ? "Sent through Amazon SES."
@@ -48,7 +50,7 @@ export async function sendTestEmails(input: { userId: string; origin: string; no
     });
   } catch (error) {
     console.error("test notices", error);
-    checks.push({ label: "Sign-in link and read-only notice", ok: false, detail: `Not sent: ${message(error)}` });
+    checks.push({ label: "Sign-in link and notices", ok: false, detail: `Not sent: ${message(error)}` });
   }
 
   const bulk = bulkMailer();

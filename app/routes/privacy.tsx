@@ -52,7 +52,7 @@ export default function Privacy() {
         <li>
           <strong>Email:</strong> how often you get the digest, if you turn it on; when you turned offers off, if
           you did, and which of a new member&apos;s two offer emails went out; and when we told you your account was
-          read-only.
+          read-only, or that your plan was ending.
         </li>
         <li>
           <strong>Drafts:</strong> posts you or your agent saved but have not published, with their files, until

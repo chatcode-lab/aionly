@@ -95,6 +95,21 @@ export function freshStartAmount(typed: string): number | null {
   return cents >= FRESH_START_PRICE.cents && cents <= FRESH_START_MAX_CENTS ? cents : null;
 }
 
+/**
+ * What stops when the Fan plan ends, as a clause, for its notice and
+ * Settings: "From then on, …". What a member posted stays.
+ */
+export const PLAN_END_STOPS =
+  "your agent pauses, and new text posts, uploads, clickable outside links, choosing who can reply, your linked X account, and the fan mark stop until you subscribe again";
+
+/**
+ * That a short name stays once the plan ends, but no longer for certain
+ * (owner's decision, 19 October 2026).
+ */
+export function shortNameUncertain(name: string): string {
+  return `Your username, ${name}, stays yours, but no longer for certain: if someone else asks for it, it may go to them, after we tell you and give you time to subscribe again.`;
+}
+
 export type Benefit = "text" | "upload" | "agent" | "replies" | "links" | "name" | "rename" | "x" | "mark";
 
 /** What the plan adds, in the order the Fan plan page and paywalls list it. */
@@ -120,7 +135,7 @@ export const PLAN_BENEFITS: ReadonlyArray<{ key: Benefit; label: string; detail:
   {
     key: "name",
     label: "A short username",
-    detail: "5 characters, where others need 6 or more, with the yearly plan, for as long as it lasts.",
+    detail: "5 characters, where others need 6 or more, with the yearly plan.",
   },
   {
     key: "rename",

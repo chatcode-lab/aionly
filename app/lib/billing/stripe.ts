@@ -221,7 +221,8 @@ const NAME_ALLOWANCE_KIND = "name_allowance";
  * the plan's checkout with the name's price on its first invoice. The
  * member asked for the name at once, which ends the right of withdrawal
  * for it once it is theirs; the time is kept with the payment. Promotion
- * codes are left out, so the name's part is its price exactly.
+ * codes are taken, so an admin can give the name away, as to a guest
+ * editor, with a code for all of it.
  */
 export async function createNameCheckout(
   client: StripeClient,
@@ -257,6 +258,7 @@ export async function createNameCheckout(
     customer_update: { address: "auto", name: "auto" },
     tax_id_collection: { enabled: true },
     billing_address_collection: "auto",
+    allow_promotion_codes: true,
     metadata: { ...metadata, ...name },
     success_url: `${input.origin}/fan/done?session={CHECKOUT_SESSION_ID}`,
     cancel_url: `${input.origin}/fan?${new URLSearchParams({ name: input.wantedName })}`,
@@ -300,17 +302,21 @@ export interface StripeCheckoutSession {
   currency?: string | null;
   /** The subscription it made, when expanded. */
   subscription?: StripeSubscription | string | null;
+  /** Discounts and tax over the whole session, in the currency's smallest unit. */
+  total_details?: { amount_discount?: number | null } | null;
 }
 
 /**
  * Whether a session paid for a short username, and for whom, with the
- * shortest name it allows and its amount before tax: alone or with the
- * plan, once its payment has gone through.
+ * shortest name it allows and its price before tax: alone or with the
+ * plan, once its payment has gone through, or when a promotion code left
+ * nothing to pay.
  */
 export function paidNameAllowance(
   session: StripeCheckoutSession,
 ): { userId: string; length: number; cents: number; wantedName: string | null } | null {
-  if (session.metadata?.kind !== NAME_ALLOWANCE_KIND || session.payment_status !== "paid") return null;
+  if (session.metadata?.kind !== NAME_ALLOWANCE_KIND) return null;
+  if (session.payment_status !== "paid" && session.payment_status !== "no_payment_required") return null;
   const userId = session.client_reference_id ?? session.metadata?.user_id ?? null;
   const length = Number(session.metadata?.name_length);
   const cents = Number(session.metadata?.name_cents);
@@ -387,6 +393,18 @@ export async function invoiceOfPaymentIntent(client: StripeClient, paymentIntent
     limit: 1,
   });
   return data[0]?.invoice ?? null;
+}
+
+/**
+ * What a session charged for the price with this lookup key, before tax and
+ * after discounts, or null when it has no such line.
+ */
+export async function lineCents(client: StripeClient, sessionId: string, lookupKey: string): Promise<number | null> {
+  const { data } = await client.request<{
+    data: Array<{ amount_subtotal: number; amount_discount: number; price: { lookup_key: string | null } | null }>;
+  }>("GET", `/checkout/sessions/${encodeURIComponent(sessionId)}/line_items`, { limit: 10 });
+  const line = data.find((item) => item.price?.lookup_key === lookupKey);
+  return line ? line.amount_subtotal - line.amount_discount : null;
 }
 
 export function getCheckoutSession(client: StripeClient, id: string, expand: string[] = []): Promise<StripeCheckoutSession> {

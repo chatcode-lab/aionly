@@ -359,7 +359,8 @@ const PLAN_IN_FORCE = (account: string, now: string) =>
 
 /**
  * Whether the account could take this name: nobody has it, or it is the
- * account's own earlier short name, which the plan returns. Checked again
+ * account's own earlier short name, one a plan's end took back before
+ * short names stayed with their accounts (19 October 2026). Checked again
  * when the name is written.
  */
 export async function nameFreeFor(db: D1Database, name: string, userId: string): Promise<boolean> {
@@ -393,7 +394,7 @@ export async function renameUser(
   if (holder && holder.user_id !== userId) return { ok: false, reason: "taken" };
   if (holder?.is_current === 1) return { ok: false, reason: "same" };
   // An account's own earlier names stay retired, except a short one, which
-  // the plan's end took back and the plan returns.
+  // a plan's end took back while it still did, to be taken again.
   if (holder && name.length >= USERNAME_MIN) return { ok: false, reason: "taken" };
 
   const at = Math.floor(now);
@@ -482,26 +483,6 @@ export async function sweepExpiredVerifications(db: D1Database, now: Date): Prom
 }
 
 /**
- * Gives an account a fresh generated name in place of its current one, as
- * the board does, not the member: when what allowed a name shorter than
- * USERNAME_MIN ends (`short`: only such a name is replaced, and it stays
- * the account's, to take back with the plan), or when an admin takes a name
- * away (`release`: the name is freed for whoever it belongs to and no
- * longer leads to this account). The given name counts toward neither the
- * free first change nor the wait between changes. The new name, or null
- * when there was nothing to replace.
- */
-export async function giveName(
-  db: D1Database,
-  input: { userId: string; now: number; short?: boolean; release?: boolean },
-): Promise<string | null> {
-  return withGivenName(async (name) => {
-    const [replaced] = await db.batch(givenNameStatements(db, { ...input, name }));
-    return replaced!.meta.changes > 0 ? name : null;
-  });
-}
-
-/**
  * Runs `write` with generated names until one is free: a write that finds
  * its name taken has undone itself, as a batch does, and draws again.
  */
@@ -517,22 +498,21 @@ export async function withGivenName<T>(write: (name: string) => Promise<T>): Pro
 }
 
 /**
- * The statements that give an account `name` in place of its current one;
- * see giveName. The first acts only on a name still to replace: with
- * `short`, a name shorter than its account may hold when the batch runs,
- * so a renewal that lands first keeps it.
+ * The statements that give an account `name` in place of its current one,
+ * as the board does, not the member: when an admin takes a name away
+ * (`release`: the name is freed for whoever it belongs to and no longer
+ * leads to this account). The given name counts toward neither the free
+ * first change nor the wait between changes.
  */
 export function givenNameStatements(
   db: D1Database,
-  input: { userId: string; now: number; name: string; short?: boolean; release?: boolean },
+  input: { userId: string; now: number; name: string; release?: boolean },
 ): D1PreparedStatement[] {
-  const which = `user_id = ?1 AND is_current = 1${
-    input.short ? ` AND length(name) < ${USERNAME_MIN} AND length(name) < ${shortestNameSql("?1", "?2")}` : ""
-  }`;
+  const which = `user_id = ?1 AND is_current = 1`;
   return [
     db
       .prepare(input.release ? `DELETE FROM usernames WHERE ${which}` : `UPDATE usernames SET is_current = 0 WHERE ${which}`)
-      .bind(...(input.short ? [input.userId, input.now] : [input.userId])),
+      .bind(input.userId),
     // Only once the old name stepped aside, so the account never holds two.
     db
       .prepare(
@@ -562,31 +542,6 @@ export function shortestNameSql(account: string, now: string): string {
     END
     FROM profiles AS member LEFT JOIN profiles AS member_owner ON member_owner.user_id = member.owner_id
     WHERE member.user_id = ${account})`;
-}
-
-/**
- * Takes back names shorter than their account may hold now, a batch a run:
- * 5 characters whose yearly plan has ended or turned monthly, without the
- * 4-letter username. The account gets a longer name, and its short one
- * waits for the plan. The 4-letter username keeps its names for good.
- * Returns how many changed.
- */
-export async function revokeShortNames(db: D1Database, now: number, limit = 100): Promise<number> {
-  const { results } = await db
-    .prepare(
-      `SELECT name.user_id FROM usernames AS name
-       JOIN profiles AS profile ON profile.user_id = name.user_id
-       WHERE name.is_current = 1 AND length(name.name) < 6 AND profile.deleted_at IS NULL
-         AND length(name.name) < ${shortestNameSql("name.user_id", "?1")}
-       LIMIT ?2`,
-    )
-    .bind(now, limit)
-    .all<{ user_id: string }>();
-  let changed = 0;
-  for (const { user_id: userId } of results) {
-    if (await giveName(db, { userId, now, short: true })) changed += 1;
-  }
-  return changed;
 }
 
 /**

@@ -34,7 +34,7 @@ import { inviteRefusal, inviteShareWords } from "~/lib/invites";
 import { shareWords } from "~/lib/partners";
 import { loadSettings } from "~/lib/db/settings.server";
 import { useSettings } from "~/lib/use-settings";
-import { WITHDRAWAL_DAYS } from "~/lib/plan";
+import { PLAN_END_STOPS, shortNameUncertain, WITHDRAWAL_DAYS } from "~/lib/plan";
 import type { Settings } from "~/lib/settings";
 import { deleteAccount, identityHash } from "~/lib/db/deletion.server";
 import { describeWatch, watchListOf } from "~/lib/db/updates.server";
@@ -390,13 +390,18 @@ export async function action({ request, context }: Route.ActionArgs) {
   return error ? { error, saved: false } : { error: undefined, saved: true };
 }
 
-/** The lengths a member's name may take, by the shortest they may hold now. */
-function nameLengths(shortest: number): string {
-  if (shortest <= ALLOWANCE_USERNAME_MIN) return `${shortest} to ${USERNAME_MAX} characters.`;
+/**
+ * The lengths a member's name may take, by the shortest they may hold now,
+ * and, for a short name held without a plan in force, that it is no
+ * longer certain.
+ */
+function nameLengths(shortest: number, name: string, planInForce: boolean): string {
+  const uncertain = name.length < USERNAME_MIN && !planInForce ? ` ${shortNameUncertain(name)}` : "";
+  if (shortest <= ALLOWANCE_USERNAME_MIN) return `${shortest} to ${USERNAME_MAX} characters.${uncertain}`;
   if (shortest === YEARLY_USERNAME_MIN) {
-    return `${shortest} to ${USERNAME_MAX} characters, or ${ALLOWANCE_USERNAME_MIN} with the 4-letter username; ${YEARLY_USERNAME_MIN} is swapped for a longer name if the yearly plan ends.`;
+    return `${shortest} to ${USERNAME_MAX} characters, or ${ALLOWANCE_USERNAME_MIN} with the 4-letter username.${uncertain}`;
   }
-  return `${USERNAME_MIN} to ${USERNAME_MAX} characters, or ${YEARLY_USERNAME_MIN} with the yearly plan, ${ALLOWANCE_USERNAME_MIN} with the 4-letter username.`;
+  return `${USERNAME_MIN} to ${USERNAME_MAX} characters, or ${YEARLY_USERNAME_MIN} with the yearly plan, ${ALLOWANCE_USERNAME_MIN} with the 4-letter username.${uncertain}`;
 }
 
 /**
@@ -801,12 +806,18 @@ function PhotoForm({
   );
 }
 
-/** The Fan plan: its state and billing, and the mark beside the name. */
+/**
+ * The Fan plan: its state and billing, and the mark beside the name. A plan
+ * set to end says what stops then, and that a short name is no longer
+ * certain.
+ */
 function PlanSection({
   plan,
+  username,
   disabled,
 }: {
   plan: PlanStatus & { fan: boolean; admin: boolean; showMark: boolean };
+  username: string;
   disabled: boolean;
 }) {
   const navigation = useNavigation();
@@ -842,6 +853,11 @@ function PlanSection({
         {plan.interval ? `${plan.interval === "year" ? "Yearly" : "Monthly"} plan` : "Your plan"}
         {plan.periodEnd ? (plan.cancelAtPeriodEnd ? `, ending on ${formatDate(plan.periodEnd)}.` : `, renewing on ${formatDate(plan.periodEnd)}.`) : "."}
       </p>
+      {plan.cancelAtPeriodEnd ? (
+        <Notice tone="warn">
+          From then on, {PLAN_END_STOPS}.{username.length < USERNAME_MIN ? ` ${shortNameUncertain(username)}` : null}
+        </Notice>
+      ) : null}
       {plan.customerId ? (
         <Form method="post" action="/fan">
           <Button type="submit" name="intent" value="portal">
@@ -1261,7 +1277,7 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
             shortest={loaderData.shortestName}
             // A member may claim a shorter name with the yearly plan or the 4-letter username.
             claimShort={loaderData.shortestName > SHORT_USERNAME_MIN && !banned}
-            hint={`${nameLengths(loaderData.shortestName)} ${hint}`}
+            hint={`${nameLengths(loaderData.shortestName, username, loaderData.plan.fan || loaderData.plan.admin)} ${hint}`}
             error={renamed?.error}
             submitLabel="Save name"
             disabled={banned || nextChangeAt !== null}
@@ -1279,7 +1295,7 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
       </Section>
 
       <Section title="Fan plan">
-        <PlanSection plan={loaderData.plan} disabled={banned} />
+        <PlanSection plan={loaderData.plan} username={username} disabled={banned} />
         {actionData && "markSaved" in actionData ? <Notice>Saved.</Notice> : null}
       </Section>
 

@@ -166,17 +166,14 @@ export default function AdminPartners({ loaderData, actionData }: Route.Componen
           ))}
           <p className="text-meta text-text-muted">Months after each member joins. Leave the last step&apos;s months blank to share for good.</p>
         </fieldset>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-          <TextField
-            label="Free invitations each"
-            name="free_invites"
-            inputMode="numeric"
-            defaultValue="0"
-            placeholder="By level"
-            hint="Blank: their level's."
-          />
-          <TextField label="Accounts" name="max_uses" inputMode="numeric" placeholder="No limit" />
-          <TextField label="Ends on" name="ends_on" type="date" />
+        <div className="space-y-2">
+          {/* Inputs line up even where a label wraps. */}
+          <div className="grid grid-cols-2 items-end gap-3 sm:grid-cols-3">
+            <TextField label="Free invitations each" name="free_invites" inputMode="numeric" defaultValue="0" placeholder="By level" />
+            <TextField label="Accounts" name="max_uses" inputMode="numeric" placeholder="No limit" />
+            <TextField label="Ends on" name="ends_on" type="date" />
+          </div>
+          <p className="text-meta text-text-muted">Leave free invitations blank to give each member their level&apos;s.</p>
         </div>
         <TextField label="Note for admins" name="note" maxLength={280} placeholder="What was agreed" />
         <Button type="submit" variant="primary" disabled={busy}>

@@ -2,7 +2,8 @@ import { loadSettings } from "../db/settings.server";
 import { settingSql } from "../db/setting-sql.server";
 import type { Mailer } from "../mail/mailers.server";
 import { SENDERS } from "../mail/senders";
-import { composeReadOnlyNotice, composeSignInLink } from "./notices";
+import { USERNAME_MIN } from "../accounts/usernames";
+import { composePlanEndNotice, composeReadOnlyNotice, composeSignInLink } from "./notices";
 
 /** A notice sent, then karma back above the floor: after this long, the next fall sends another. */
 const REARM_SECONDS = 7 * 24 * 3600;
@@ -67,6 +68,81 @@ export async function sendReadOnlyNotices(db: D1Database, mailer: Mailer, input:
     } catch (error) {
       console.error("read-only notice", error);
       await db.prepare(`UPDATE profiles SET floor_emailed_at = NULL WHERE user_id = ?1 AND floor_emailed_at = ?2`).bind(row.user_id, now).run();
+    }
+  }
+  return sent;
+}
+
+/** How long before a cancelled plan's end it is told, and how long after a plan's end an unwarned one still is. */
+const PLAN_END_NOTICE_SECONDS = 7 * 24 * 3600;
+
+/** Subscriptions in force, as SQL on `subscriptions` (`as`, its alias, with a dot). */
+const inForce = (as: string) => `${as}status IN ('active', 'trialing', 'past_due')`;
+
+/**
+ * Who is told their plan is ending, as SQL on `profiles`: a member's own
+ * account, live, not an admin's (who needs no plan), with a sign-in email,
+ * not told yet this time, whose plan is set to end within a week, or ended
+ * in the last week without being told, as when a payment failed.
+ */
+function duePlanEnd(as: string, now: number): string {
+  return `${as}plan_end_emailed_at IS NULL AND ${as}owner_id IS NULL AND ${as}role = 'user' AND ${as}deleted_at IS NULL
+    AND ${as}plan_until > ${now - PLAN_END_NOTICE_SECONDS}
+    AND (${as}plan_until <= ${now} OR EXISTS (
+      SELECT 1 FROM subscriptions AS ending WHERE ending.user_id = ${as}user_id AND ending.cancel_at_period_end = 1
+        AND ${inForce("ending.")} AND ending.period_end <= ${now + PLAN_END_NOTICE_SECONDS}))
+    AND EXISTS (SELECT 1 FROM "user" WHERE "user"."id" = ${as}user_id)`;
+}
+
+/**
+ * Tells members their Fan plan is ending: a week before the end of one
+ * they cancelled, or once one ended without that, with what stops and that
+ * a short name is no longer certain. Once each ending: a plan in force and
+ * no longer set to end is told again the next time. Each is claimed before
+ * it is sent; a refused send is released for the next run.
+ */
+export async function sendPlanEndNotices(db: D1Database, mailer: Mailer, input: { origin: string; now: number }): Promise<number> {
+  const { now } = input;
+  await db
+    .prepare(
+      `UPDATE profiles SET plan_end_emailed_at = NULL
+       WHERE plan_end_emailed_at IS NOT NULL AND plan_until > ?1
+         AND NOT EXISTS (SELECT 1 FROM subscriptions AS ending WHERE ending.user_id = profiles.user_id
+           AND ending.cancel_at_period_end = 1 AND ${inForce("ending.")})`,
+    )
+    .bind(now)
+    .run();
+  const { results } = await db
+    .prepare(
+      `SELECT profile.user_id, profile.plan_until, name.name AS username,
+              (SELECT period_end FROM subscriptions WHERE user_id = profile.user_id) AS period_end
+       FROM profiles AS profile JOIN usernames AS name ON name.user_id = profile.user_id AND name.is_current = 1
+       WHERE ${duePlanEnd("profile.", now)}
+       ORDER BY profile.plan_until
+       LIMIT ${BATCH}`,
+    )
+    .all<{ user_id: string; plan_until: number; username: string; period_end: number | null }>();
+  let sent = 0;
+  for (const row of results) {
+    const claimed = await db
+      .prepare(`UPDATE profiles SET plan_end_emailed_at = ?2 WHERE user_id = ?1 AND ${duePlanEnd("", now)}`)
+      .bind(row.user_id, now)
+      .run();
+    if (claimed.meta.changes === 0) continue;
+    const account = await db.prepare(`SELECT "email" FROM "user" WHERE "id" = ?1`).bind(row.user_id).first<{ email: string }>();
+    if (!account) continue;
+    const email = composePlanEndNotice({
+      endsAt: row.plan_until > now ? (row.period_end ?? row.plan_until) : null,
+      username: row.username,
+      shortName: row.username.length < USERNAME_MIN,
+      origin: input.origin,
+    });
+    try {
+      await mailer.send({ ...SENDERS.notices, to: account.email, ...email });
+      sent += 1;
+    } catch (error) {
+      console.error("plan end notice", error);
+      await db.prepare(`UPDATE profiles SET plan_end_emailed_at = NULL WHERE user_id = ?1 AND plan_end_emailed_at = ?2`).bind(row.user_id, now).run();
     }
   }
   return sent;

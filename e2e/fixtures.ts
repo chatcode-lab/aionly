@@ -138,17 +138,19 @@ async function hmacHex(secret: string, message: string): Promise<string> {
 /**
  * Gives an account the Fan plan the way Stripe does: a signed webhook
  * saying its subscription is active for a month, or with `status`, that it
- * changed; billed monthly, or yearly with `interval`. Nothing reaches Stripe.
+ * changed; billed monthly, or yearly with `interval`; with `ending`, set to
+ * end at the period's close, as cancelling does. Nothing reaches Stripe.
  */
 export async function setPlan(
   request: APIRequestContext,
   account: TestAccount,
   status: "active" | "canceled" = "active",
   interval: "month" | "year" = "month",
+  ending = false,
 ): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
   const payload = JSON.stringify({
-    id: `evt_${account.id}_${status}_${interval}`,
+    id: `evt_${account.id}_${status}_${interval}${ending ? "_ending" : ""}`,
     type: status === "active" ? "customer.subscription.created" : "customer.subscription.deleted",
     created: now,
     data: {
@@ -157,7 +159,7 @@ export async function setPlan(
         object: "subscription",
         customer: `cus_${account.id}`,
         status,
-        cancel_at_period_end: false,
+        cancel_at_period_end: ending,
         metadata: { user_id: account.id },
         items: {
           data: [

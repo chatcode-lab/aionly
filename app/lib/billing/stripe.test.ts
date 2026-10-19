@@ -147,7 +147,8 @@ describe("the 4-letter username", () => {
       "invoice_creation[enabled]": "true",
       cancel_url: "https://aion.ly/fan?name=nova",
     });
-    expect(sent.form!.has("allow_promotion_codes")).toBe(false);
+    // Promotion codes are taken, so a code can give the name away.
+    expect(fields.allow_promotion_codes).toBe("true");
   });
 
   it("rides on the plan's checkout when bought with it, on the first invoice", async () => {
@@ -160,6 +161,7 @@ describe("the 4-letter username", () => {
       "line_items[1][price]": "price_name",
       "subscription_data[metadata][user_id]": "u1",
       "metadata[kind]": "name_allowance",
+      allow_promotion_codes: "true",
     });
     expect(sent.form!.has("subscription_data[metadata][kind]")).toBe(false);
   });
@@ -175,6 +177,8 @@ describe("the 4-letter username", () => {
     };
     expect(paidNameAllowance(session)).toEqual({ userId: "u1", length: 4, cents: 25000, wantedName: "nova" });
     expect(paidNameAllowance({ ...session, payment_status: "unpaid" })).toBeNull();
+    // A code for all of it leaves nothing to pay.
+    expect(paidNameAllowance({ ...session, payment_status: "no_payment_required" })).toMatchObject({ userId: "u1", length: 4 });
     expect(paidNameAllowance({ ...session, metadata: { kind: "fresh_start" } })).toBeNull();
   });
 

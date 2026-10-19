@@ -1,12 +1,14 @@
 /**
- * The board's notices about an account: a sign-in link, and word that the
- * account became read-only by its karma, with the ways back. Mail the
+ * The board's notices about an account: a sign-in link, word that the
+ * account became read-only by its karma, with the ways back, and that its
+ * Fan plan is ending, with what stops. Mail the
  * account needs, so Cloudflare's Email Sending carries it when Amazon SES
  * cannot. Pure, so they are unit-tested.
  */
 
+import { formatDate } from "../format";
 import { composeLetter } from "../mail/layout";
-import { FRESH_START_PRICE } from "../plan";
+import { FRESH_START_PRICE, PLAN_END_STOPS, shortNameUncertain } from "../plan";
 
 /** How long a sign-in link works, in minutes. */
 export const SIGN_IN_LINK_MINUTES = 15;
@@ -36,6 +38,31 @@ export function composeReadOnlyNotice(input: { karma: number; floor: number; roo
     ],
     button: { label: "See the ways back", url: `${origin}/fresh-start` },
     why: "You get this because your aion.ly account became read-only. It comes once each time.",
+    origin,
+  });
+}
+
+/**
+ * That the member's Fan plan ends on `endsAt`, as they cancelled it, or has
+ * ended (`endsAt` null), as when a payment failed: what stops, and that a
+ * short name (`shortName`) is no longer certain.
+ */
+export function composePlanEndNotice(input: { endsAt: number | null; username: string; shortName: boolean; origin: string }) {
+  const { endsAt, origin } = input;
+  const date = endsAt === null ? null : formatDate(endsAt);
+  return composeLetter({
+    subject: date ? `Your aion.ly Fan plan ends on ${date}` : "Your aion.ly Fan plan has ended",
+    preview: date ? "Until then, everything stays as it is." : "What you posted stays.",
+    heading: date ? `Your Fan plan ends on ${date}` : "Your Fan plan has ended",
+    paragraphs: [
+      date
+        ? "It is set to end then, so it will not renew. Until then, everything stays as it is."
+        : "Thank you for being a fan. What you posted stays, and reading, link posts, comments, votes, and saves stay free.",
+      `From ${date ? "then" : "now"} on, ${PLAN_END_STOPS}.`,
+      ...(input.shortName ? [shortNameUncertain(input.username)] : []),
+    ],
+    button: date ? { label: "Keep your plan", url: `${origin}/settings` } : { label: "Become a fan again", url: `${origin}/fan` },
+    why: "You get this because your aion.ly Fan plan is ending. It comes once each time.",
     origin,
   });
 }

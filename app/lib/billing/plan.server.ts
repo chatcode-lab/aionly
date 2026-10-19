@@ -31,6 +31,7 @@ import {
   invoiceOfPaymentIntent,
   invoiceSubscription,
   isRunning,
+  lineCents,
   priceByLookupKey,
   paidFreshStart,
   paidNameAllowance,
@@ -198,7 +199,8 @@ export async function nameCheckoutUrl(
 
 /**
  * Gives the member the short username a paid checkout bought, whether the
- * member lands back here or Stripe's webhook comes first. Whether one was.
+ * member lands back here or Stripe's webhook comes first, with what it
+ * came to before tax, after any promotion code. Whether one was.
  */
 async function settleNameAllowance(session: StripeCheckoutSession): Promise<boolean> {
   const bought = paidNameAllowance(session);
@@ -207,11 +209,25 @@ async function settleNameAllowance(session: StripeCheckoutSession): Promise<bool
     userId: bought.userId,
     length: bought.length,
     sessionId: session.id,
-    cents: bought.cents,
+    cents: await nameCents(session, bought),
     currency: session.currency ?? "usd",
     paidAt: now(),
     paymentIntent: session.payment_intent ?? null,
   });
+}
+
+/**
+ * What a short username's checkout charged for it, before tax, after any
+ * promotion code: the whole session's, alone, or its own line's, with the
+ * plan. Without a Stripe key, as in tests, its price as the session carried it.
+ */
+async function nameCents(session: StripeCheckoutSession, bought: { length: number; cents: number }): Promise<number> {
+  if (session.mode === "payment" && session.amount_subtotal != null) {
+    return session.amount_subtotal - (session.total_details?.amount_discount ?? 0);
+  }
+  const lookupKey = NAME_ALLOWANCES[bought.length]?.lookupKey;
+  if (!env.STRIPE_SECRET_KEY || !lookupKey) return bought.cents;
+  return (await lineCents(client(), session.id, lookupKey)) ?? bought.cents;
 }
 
 /**

@@ -15,9 +15,10 @@ export const USERNAME_MAX = 20;
 export const SHORT_USERNAME_MIN = 4;
 
 /**
- * Names of 5 characters come with the yearly Fan plan while it lasts; when
- * it ends or turns monthly, the hourly run gives the account a longer
- * name, and the short one waits for its return.
+ * Names of 5 characters come with the yearly Fan plan. A short name stays
+ * with its account when the plan ends, but is no longer certain: without a
+ * plan in force, it may go to someone who asks for it, after notice and
+ * time to subscribe again (owner's decision, 19 October 2026; not built).
  */
 export const YEARLY_USERNAME_MIN = 5;
 

@@ -242,8 +242,8 @@ function NameForm({
               : `Claim ${wanted} and become a fan`}
       </Button>
       <p className="text-meta text-text-muted">
-        Through Stripe. Without a plan in force, a name of 5 characters or fewer may one day be asked back, with notice
-        and time to renew the plan.{" "}
+        Through Stripe. Without a plan in force, a name of 5 characters or fewer is no longer certain: it may go to
+        someone who asks for it, after notice and time to renew.{" "}
         <Link to="/terms#names" className="underline underline-offset-4">
           Terms
         </Link>

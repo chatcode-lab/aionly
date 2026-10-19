@@ -36,6 +36,9 @@ test("an admin makes a partner link that shares in steps and gives no free invit
   await form.getByLabel("First, %").fill("100");
   await form.getByLabel("For months").first().fill("12");
   await form.getByLabel("Then, %").first().fill("50");
+  // The row's inputs line up, wherever a label wraps.
+  const top = async (label: string) => (await form.getByLabel(label).boundingBox())!.y;
+  expect(await top("Accounts")).toBe(await top("Free invitations each"));
   await form.getByRole("button", { name: "Make the link" }).click();
   await expect(page.getByText(`Made /join/${code}.`)).toBeVisible();
   await expect(page.getByRole("listitem").filter({ hasText: `/join/${code}` })).toContainText(

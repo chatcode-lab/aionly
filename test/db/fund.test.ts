@@ -131,6 +131,19 @@ describe("payments and the fund", () => {
     expect((await db.prepare(`SELECT id, kind, amount_cents FROM payments WHERE kind = 'name'`).all()).results).toEqual([
       { id: "cs_name", kind: "name", amount_cents: 25000 },
     ]);
+    // Given away with a promotion code for all of it: nothing to pay, nothing earned.
+    await deliver("checkout.session.completed", {
+      ...session,
+      id: "cs_gift",
+      mode: "payment",
+      client_reference_id: "low",
+      payment_status: "no_payment_required",
+      metadata: { ...session.metadata, user_id: "low" },
+      amount_subtotal: 25000,
+      total_details: { amount_discount: 25000 },
+    });
+    expect(await db.prepare(`SELECT name_allowance FROM profiles WHERE user_id = 'low'`).first()).toEqual({ name_allowance: 4 });
+    expect(await db.prepare(`SELECT amount_cents FROM payments WHERE id = 'cs_gift'`).first()).toEqual({ amount_cents: 0 });
   });
 
   it("keeps a refund that comes before its payment, and applies it when the payment comes (F66)", async () => {

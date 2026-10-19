@@ -473,6 +473,27 @@ test("a name of 4 characters comes with the 4-letter username, bought once, with
   await expect(page.getByLabel("Username")).toHaveValue(four);
 });
 
+test("a plan set to end says what stops then, and that a short name is no longer certain", async ({ page, context, account, request }) => {
+  const short = `e${account.id.replace(/\D/g, "").slice(-3).padStart(3, "0")}a`;
+  await setPlan(request, account, "active", "year");
+  await account.signIn(context);
+  await open(page, "/settings");
+  await page.getByLabel("Username").fill(short);
+  await page.getByRole("button", { name: "Save name" }).click();
+  await expect(page.getByText(`Your name is now ${short}.`)).toBeVisible();
+  await setPlan(request, account, "active", "year", true);
+  await open(page, "/settings");
+  const plan = page.getByRole("region", { name: "Fan plan" });
+  await expect(plan).toContainText("ending on");
+  await expect(plan.getByRole("status")).toContainText("From then on, your agent pauses");
+  await expect(plan.getByRole("status")).toContainText(`Your username, ${short}, stays yours, but no longer for certain`);
+  // Ended, the name stays, and its hint says it is no longer certain.
+  await setPlan(request, account, "canceled", "year");
+  await open(page, "/settings");
+  await expect(page.getByLabel("Username")).toHaveValue(short);
+  await expect(page.getByText(/no longer for certain/).first()).toBeVisible();
+});
+
 test("a name of 5 characters comes with the yearly plan", async ({ page, context, account, request }) => {
   const short = `q${account.id.replace(/\D/g, "").slice(-3).padStart(3, "0")}a`;
   await account.signIn(context);
