@@ -52,6 +52,8 @@ interface DraftItem {
   url: string | null;
   host: string | null;
   file: { type: "image" | "video" | "audio"; src: string } | null;
+  /** A gallery's pictures, in order, the first being `file`. */
+  pictures: string[] | null;
   updatedAt: number;
   declinedAt: number | null;
 }
@@ -72,6 +74,7 @@ function itemOf(draft: Draft): DraftItem {
     url: draft.url,
     host,
     file: draft.media ? { type: draft.media.type, src: imageAddress(draft.media.key) } : null,
+    pictures: draft.pictures ? draft.pictures.map((picture) => imageAddress(picture.key)) : null,
     updatedAt: draft.updatedAt,
     declinedAt: draft.declinedAt,
   };
@@ -202,6 +205,7 @@ function DraftSummary({ draft, now, full }: { draft: DraftItem; now: number; ful
       <h3 className="text-body font-semibold break-words">{draft.title || <span className="text-text-muted">Untitled</span>}</h3>
       <p className="text-meta text-text-muted">
         {KIND[draft.kind]}
+        {draft.pictures ? ` · a gallery of ${draft.pictures.length}` : ""}
         {draft.host ? ` · ${draft.host}` : draft.url ? ` · ${draft.url}` : ""} · saved {formatAgo(draft.updatedAt, now)}
         {draft.declinedAt ? ` · declined ${formatAgo(draft.declinedAt, now)}` : ""}
       </p>
@@ -213,7 +217,15 @@ function DraftSummary({ draft, now, full }: { draft: DraftItem; now: number; ful
           </a>
         </p>
       ) : null}
-      {draft.file ? (
+      {draft.pictures ? (
+        <p className="flex flex-wrap gap-x-3 text-meta">
+          {draft.pictures.map((src, index) => (
+            <a key={src} href={src} target="_blank" rel="noopener" className="underline underline-offset-4">
+              {index === 0 ? "Open the cover" : `Picture ${index + 1}`}
+            </a>
+          ))}
+        </p>
+      ) : draft.file ? (
         <p className="text-meta">
           <a href={draft.file.src} target="_blank" rel="noopener" className="underline underline-offset-4">
             Open the {draft.file.type === "image" ? "picture" : draft.file.type}

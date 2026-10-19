@@ -3,7 +3,8 @@ import { env } from "cloudflare:workers";
 import { imageAddress } from "~/lib/media.server";
 import { rateLimited, withinLimits } from "~/lib/security/rate-limit.server";
 import { UPLOAD_LIMITS, sizeLabel } from "~/lib/uploads";
-import { storeUpload } from "~/lib/uploads.server";
+import { GALLERY_MAX, UPLOAD_SET } from "~/lib/gallery";
+import { releaseUpload, storeUpload } from "~/lib/uploads.server";
 import { requireParticipant } from "~/lib/viewer.server";
 
 import type { Route } from "./+types/submit-upload";
@@ -12,25 +13,35 @@ const refuse = (status: number, error: string) => Response.json({ ok: false, err
 
 /**
  * Takes an upload for the submit form: the file itself as the body, or with
- * `?role=poster`, a video's poster frame. It is kept pending, as the
- * account's one upload, until a post is published with it. Fans only.
+ * `?role=poster`, a video's poster frame. It is kept pending until a post
+ * is published with it: the account's one upload, or, sent with the
+ * form's `?set=`, one picture of its gallery. `DELETE ?key=` lets go of a
+ * pending upload taken out of the form. Fans only.
  */
 export async function action({ request, context }: Route.ActionArgs) {
   const viewer = await requireParticipant(request, context);
   if (!viewer.entitled) return refuse(403, "Uploads come with the Fan plan.");
   if (!(await withinLimits(request, "write", viewer.id))) return rateLimited();
+  const params = new URL(request.url).searchParams;
+  if (request.method === "DELETE") {
+    const key = params.get("key") ?? "";
+    return Response.json({ ok: await releaseUpload(env.DB, env.IMAGES, { ownerId: viewer.id, key }) });
+  }
   const length = Number(request.headers.get("Content-Length"));
   if (!request.body || !Number.isInteger(length) || length <= 0) return refuse(411, "Send the file as the request body.");
-  const role = new URL(request.url).searchParams.get("role") === "poster" ? "poster" : "media";
+  const role = params.get("role") === "poster" ? "poster" : "media";
+  const set = params.get("set");
   const result = await storeUpload(env.DB, env.IMAGES, {
     ownerId: viewer.id,
     body: request.body,
     length,
     role,
+    set: set && UPLOAD_SET.test(set) ? set : null,
     now: Math.floor(Date.now() / 1000),
   });
   if (!result.ok) {
     if (result.reason === "not_allowed") return refuse(403, "Uploads come with the Fan plan, for an account that can take part.");
+    if (result.reason === "too_many") return refuse(409, `A gallery holds at most ${GALLERY_MAX} pictures.`);
     if (result.reason === "too_large") {
       return refuse(
         413,

@@ -76,6 +76,8 @@ function contextFor(request: Request, agent: TokenAgent): ToolContext {
       const target = UPLOAD_PATH[purpose];
       const url = new URL(target.path, origin);
       url.searchParams.set("ticket", ticket);
+      // Pictures sent to one address gather into one gallery, up to ten.
+      if (purpose === "media") url.searchParams.set("set", crypto.randomUUID());
       return { method: target.method, url: url.href, expiresAt: now + TICKET_SECONDS };
     },
   };

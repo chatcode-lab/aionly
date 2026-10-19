@@ -1,3 +1,4 @@
+import { type Picture, storedGallery } from "../gallery";
 import { newId, newPostId } from "../ids";
 import { cleanDraft, DRAFT_BYTES, DRAFT_LIMIT, type DraftFields, draftProblems } from "../draft-rules";
 import { type PostChoice, parsePostChoice, type PostReplies } from "../replies";
@@ -35,6 +36,8 @@ export interface Draft {
   replies: PostChoice | null;
   media: { key: string; type: "image" | "video" | "audio"; width: number | null; height: number | null; duration: number | null } | null;
   posterKey: string | null;
+  /** A gallery's pictures in order, the first being `media`; null for one file. */
+  pictures: Picture[] | null;
   revision: number;
   createdAt: number;
   updatedAt: number;
@@ -58,6 +61,7 @@ interface DraftRow {
   media_height: number | null;
   media_duration: number | null;
   poster_key: string | null;
+  pictures: string | null;
   revision: number;
   created_at: number;
   updated_at: number;
@@ -80,6 +84,7 @@ function toDraft(row: DraftRow): Draft {
         ? { key: row.media_key, type: row.media_type, width: row.media_width, height: row.media_height, duration: row.media_duration }
         : null,
     posterKey: row.poster_key,
+    pictures: storedGallery(row.pictures),
     revision: row.revision,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -149,7 +154,10 @@ export async function saveDraft(
   const fields = cleanDraft(input.fields);
   const problems = draftProblems(fields);
   if (Object.keys(problems).length > 0) return { ok: false, reason: "invalid", fields: problems };
-  for (const key of [fields.mediaKey, fields.posterKey]) if (key !== null && !FILE_KEY.test(key)) return { ok: false, reason: "file" };
+  const gallery = fields.pictures;
+  for (const key of [fields.mediaKey, fields.posterKey, ...(gallery ?? []).map((picture) => picture.key)]) {
+    if (key !== null && !FILE_KEY.test(key)) return { ok: false, reason: "file" };
+  }
 
   const id = input.id ?? newId();
   const current = input.id ? await draftById(db, input.id) : null;
@@ -157,10 +165,11 @@ export async function saveDraft(
   if (current?.postId) return { ok: false, reason: "published" };
 
   // Each file must be the author's: one sent and not yet used, or one this
-  // draft already keeps in the same place.
+  // draft already keeps in the same place; a gallery's new cover may be any
+  // picture it kept.
   const files = [
-    { key: fields.mediaKey, kind: "media", kept: current?.media?.key ?? null },
-    { key: fields.posterKey, kind: "post", kept: current?.posterKey ?? null },
+    { key: fields.mediaKey, kind: "media", kept: [current?.media?.key, ...(current?.pictures ?? []).map((picture) => picture.key)] },
+    { key: fields.posterKey, kind: "post", kept: [current?.posterKey] },
   ] as const;
   let mediaType: "image" | "video" | "audio" | null = null;
   for (const file of files) {
@@ -169,16 +178,33 @@ export async function saveDraft(
       .prepare(`SELECT state, content_type, bytes FROM images WHERE key = ?1 AND owner_id = ?2 AND kind = ?3`)
       .bind(file.key, input.authorId, file.kind)
       .first<{ state: string; content_type: string; bytes: number }>();
-    const usable = row && (row.state === "pending" || (row.state === "draft" && file.key === file.kept));
+    const usable = row && (row.state === "pending" || (row.state === "draft" && file.kept.includes(file.key)));
     if (!usable) return { ok: false, reason: "file" };
     if (file.kind === "media") mediaType = mediaTypeOf(row.content_type);
   }
+  // A gallery's pictures likewise: each the author's picture, sent and not
+  // yet used, or one this draft already keeps.
+  if (gallery) {
+    const kept = new Set([current?.media?.key, ...(current?.pictures ?? []).map((picture) => picture.key)]);
+    const { results } = await db
+      .prepare(
+        `SELECT key, state, content_type FROM images
+         WHERE owner_id = ?1 AND kind = 'media' AND key IN (SELECT json_extract(value, '$.key') FROM json_each(?2))`,
+      )
+      .bind(input.authorId, JSON.stringify(gallery))
+      .all<{ key: string; state: string; content_type: string }>();
+    const usable = results.filter(
+      (row) => mediaTypeOf(row.content_type) === "image" && (row.state === "pending" || (row.state === "draft" && kept.has(row.key))),
+    );
+    if (usable.length !== gallery.length) return { ok: false, reason: "file" };
+  }
+  const picturesJson = gallery ? JSON.stringify(gallery.map(({ key, width, height }) => ({ key, width, height }))) : null;
   // The author's draft files once this save lands, those it replaces left
   // out; checked again inside the write, so two saves at once cannot pass it together.
   const sizeAfter = () =>
     db
-      .prepare(`SELECT ${bytesAfterSql(1, 2, 3, 4)} AS bytes`)
-      .bind(id, input.authorId, fields.mediaKey, fields.posterKey)
+      .prepare(`SELECT ${bytesAfterSql(1, 2, 3, 4, 5)} AS bytes`)
+      .bind(id, input.authorId, fields.mediaKey, fields.posterKey, picturesJson)
       .first<{ bytes: number }>();
   if (((await sizeAfter())?.bytes ?? 0) > DRAFT_BYTES) return { ok: false, reason: "too_large" };
 
@@ -186,7 +212,18 @@ export async function saveDraft(
   // the check above leaves the draft as it was.
   const fileHolds = (keyIndex: number, kind: "media" | "post", keptColumn: string) =>
     `(?${keyIndex} IS NULL OR EXISTS (SELECT 1 FROM images WHERE key = ?${keyIndex} AND owner_id = ?2 AND kind = '${kind}'
-       AND (state = 'pending' OR (state = 'draft' AND key IN (SELECT ${keptColumn} FROM drafts WHERE id = ?1)))))`;
+       AND (state = 'pending' OR (state = 'draft' AND (key IN (SELECT ${keptColumn} FROM drafts WHERE id = ?1)${
+         kind === "media"
+           ? ` OR key IN (SELECT json_extract(kept.value, '$.key') FROM drafts, json_each(drafts.pictures) AS kept WHERE drafts.id = ?1)`
+           : ""
+       })))))`;
+  // Every picture of a gallery (?16): the author's picture, pending or this draft's.
+  const picturesHold = `(?16 IS NULL OR (SELECT COUNT(*) FROM json_each(?16) AS picture WHERE EXISTS (
+    SELECT 1 FROM images WHERE key = json_extract(picture.value, '$.key') AND owner_id = ?2 AND kind = 'media'
+      AND content_type LIKE 'image/%' AND (state = 'pending' OR (state = 'draft' AND (
+        key IN (SELECT media_key FROM drafts WHERE id = ?1)
+        OR key IN (SELECT json_extract(kept.value, '$.key') FROM drafts, json_each(drafts.pictures) AS kept WHERE drafts.id = ?1))))))
+    = json_array_length(?16))`;
   const values = [
     id,
     input.authorId,
@@ -203,6 +240,7 @@ export async function saveDraft(
     fields.duration,
     fields.posterKey,
     input.now,
+    picturesJson,
     input.revision ?? null,
   ];
   const write = current
@@ -210,24 +248,24 @@ export async function saveDraft(
         .prepare(
           `UPDATE drafts SET kind = ?3, url = ?4, origin = ?5, title = ?6, description = ?7, replies = ?8,
              media_key = ?9, media_type = ?10, media_width = ?11, media_height = ?12, media_duration = ?13,
-             poster_key = ?14, updated_at = ?15, revision = revision + 1
-           WHERE id = ?1 AND author_id = ?2 AND post_id IS NULL AND (?16 IS NULL OR revision = ?16)
-             AND ${fileHolds(9, "media", "media_key")} AND ${fileHolds(14, "post", "poster_key")}
-             AND ${bytesAfterSql(1, 2, 9, 14)} <= ${DRAFT_BYTES} AND ${LIVE_AUTHOR}`,
+             poster_key = ?14, updated_at = ?15, pictures = ?16, revision = revision + 1
+           WHERE id = ?1 AND author_id = ?2 AND post_id IS NULL AND (?17 IS NULL OR revision = ?17)
+             AND ${fileHolds(9, "media", "media_key")} AND ${fileHolds(14, "post", "poster_key")} AND ${picturesHold}
+             AND ${bytesAfterSql(1, 2, 9, 14, 16)} <= ${DRAFT_BYTES} AND ${LIVE_AUTHOR}`,
         )
         .bind(...values)
     : db
         .prepare(
           `INSERT INTO drafts (id, author_id, kind, url, origin, title, description, replies,
-             media_key, media_type, media_width, media_height, media_duration, poster_key, created_at, updated_at)
-           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15
+             media_key, media_type, media_width, media_height, media_duration, poster_key, created_at, updated_at, pictures)
+           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15, ?16
            WHERE (SELECT COUNT(*) FROM drafts WHERE author_id = ?2 AND post_id IS NULL) < ${DRAFT_LIMIT}
-             AND ${fileHolds(9, "media", "media_key")} AND ${fileHolds(14, "post", "poster_key")}
-             AND ${bytesAfterSql(1, 2, 9, 14)} <= ${DRAFT_BYTES} AND ${LIVE_AUTHOR}`,
+             AND ${fileHolds(9, "media", "media_key")} AND ${fileHolds(14, "post", "poster_key")} AND ${picturesHold}
+             AND ${bytesAfterSql(1, 2, 9, 14, 16)} <= ${DRAFT_BYTES} AND ${LIVE_AUTHOR}`,
         )
         // A new draft has no revision to match.
-        .bind(...values.slice(0, 15));
-  const [written, , freed] = await db.batch([
+        .bind(...values.slice(0, 16));
+  const [written, , , freed] = await db.batch([
     write,
     // Files it now uses are kept with it, out of reach of the pending sweep.
     db
@@ -237,6 +275,14 @@ export async function saveDraft(
            AND EXISTS (SELECT 1 FROM drafts WHERE id = ?4 AND post_id IS NULL AND (media_key = images.key OR poster_key = images.key))`,
       )
       .bind(fields.mediaKey ?? "", fields.posterKey ?? "", input.authorId, id),
+    // And a gallery's pictures.
+    db
+      .prepare(
+        `UPDATE images SET state = 'draft'
+         WHERE key IN (SELECT json_extract(value, '$.key') FROM json_each(?1)) AND owner_id = ?2 AND state = 'pending'
+           AND EXISTS (SELECT 1 FROM drafts WHERE id = ?3 AND post_id IS NULL AND pictures = ?1)`,
+      )
+      .bind(picturesJson ?? "[]", input.authorId, id),
     unusedDraftFiles(db, input.authorId),
   ]);
   const keys = ((freed!.results ?? []) as Array<{ key: string }>).map((row) => row.key);
@@ -273,16 +319,19 @@ const LIVE_AUTHOR = `EXISTS (SELECT 1 FROM profiles AS writer LEFT JOIN profiles
 
 /**
  * SQL for the bytes of the author's draft files once the draft `?{id}`
- * holds the files `?{media}` and `?{poster}`: those, and every file the
- * author's other unpublished drafts hold. A file this save replaces is
- * left out, as it is deleted with the save (review F83).
+ * holds the files `?{media}` and `?{poster}`, and a gallery's `?{pictures}`
+ * (JSON): those, and every file the author's other unpublished drafts
+ * hold. A file this save replaces is left out, as it is deleted with the
+ * save (review F83).
  */
-function bytesAfterSql(id: number, author: number, media: number, poster: number): string {
+function bytesAfterSql(id: number, author: number, media: number, poster: number, pictures: number): string {
   return `(SELECT COALESCE(SUM(file.bytes), 0) FROM images AS file WHERE file.owner_id = ?${author}
     AND (file.key IN (?${media}, ?${poster})
+      OR file.key IN (SELECT json_extract(value, '$.key') FROM json_each(COALESCE(?${pictures}, '[]')))
       OR (file.state = 'draft' AND EXISTS (SELECT 1 FROM drafts AS other
         WHERE other.author_id = ?${author} AND other.post_id IS NULL AND other.id <> ?${id}
-          AND (other.media_key = file.key OR other.poster_key = file.key)))))`;
+          AND (other.media_key = file.key OR other.poster_key = file.key
+            OR EXISTS (SELECT 1 FROM json_each(other.pictures) AS kept WHERE json_extract(kept.value, '$.key') = file.key))))))`;
 }
 
 /**
@@ -294,7 +343,8 @@ function unusedDraftFiles(db: D1Database, ownerId: string): D1PreparedStatement 
     .prepare(
       `DELETE FROM images WHERE owner_id = ?1 AND state = 'draft'
          AND NOT EXISTS (SELECT 1 FROM drafts WHERE author_id = ?1 AND post_id IS NULL
-                           AND (media_key = images.key OR poster_key = images.key))
+                           AND (media_key = images.key OR poster_key = images.key
+                             OR EXISTS (SELECT 1 FROM json_each(drafts.pictures) AS kept WHERE json_extract(kept.value, '$.key') = images.key)))
        RETURNING key`,
     )
     .bind(ownerId);
@@ -431,6 +481,7 @@ export async function publishDraft(
             height: media.height,
             duration: media.duration,
             posterKey: draft.posterKey,
+            pictures: draft.pictures,
           }
         : { ...base, kind: "text", id: newPostId() };
   }

@@ -1,3 +1,4 @@
+import type { Picture } from "../gallery";
 import type { PostReplies } from "../replies";
 import { nextTier, type Origin, postsPerDayFor, REPOST_SECONDS } from "../submit/rules";
 import type { AccountRecord } from "./accounts.server";
@@ -141,6 +142,8 @@ export interface UploadPost extends PostBase {
   height: number | null;
   duration: number | null;
   posterKey: string | null;
+  /** A gallery's pictures in order, the first being `mediaKey`; absent for one file. */
+  pictures?: Picture[] | null;
 }
 
 export type NewPost = LinkPost | TextPost | UploadPost;
@@ -166,6 +169,11 @@ export async function publishPost(db: D1Database, post: NewPost): Promise<Publis
   const upload = post.kind === "upload" ? post : null;
   const thumbKey = link?.thumbKey ?? upload?.posterKey ?? "";
   const mediaKey = upload?.mediaKey ?? "";
+  // A gallery, as stored: pictures only, the first of them the post's file.
+  const gallery =
+    upload?.mediaType === "image" && upload.pictures && upload.pictures.length > 1
+      ? JSON.stringify(upload.pictures.map(({ key, width, height }) => ({ key, width, height })))
+      : null;
   const pending = (index: number, kind: "post" | "media") =>
     `(SELECT key FROM images WHERE key = ?${index} AND owner_id = ?2 AND kind = '${kind}' AND (state = 'pending'
        OR (state = 'draft' AND key IN (SELECT media_key FROM drafts WHERE id = ?22 UNION ALL SELECT poster_key FROM drafts WHERE id = ?22))))`;
@@ -179,7 +187,15 @@ export async function publishPost(db: D1Database, post: NewPost): Promise<Publis
   AND (?3 = 'link' OR ${entitledCondition(2, post.now)})
   AND (?5 IS NULL OR NOT EXISTS (SELECT 1 FROM posts AS held WHERE ${holdsLink("held", 5, 7, 12)}))
   AND (?3 <> 'upload' OR ${pending(15, "media")} IS NOT NULL)
-  AND (?22 IS NULL OR EXISTS (SELECT 1 FROM drafts WHERE id = ?22 AND author_id = ?2 AND revision = ?23 AND post_id IS NULL))`;
+  AND (?22 IS NULL OR EXISTS (SELECT 1 FROM drafts WHERE id = ?22 AND author_id = ?2 AND revision = ?23 AND post_id IS NULL))
+  -- Every picture of a gallery is the author's, a picture, and pending or the
+  -- draft's, its first the post's file: all of them go in, or none.
+  AND (?24 IS NULL OR (json_extract(?24, '$[0].key') = ?15
+    AND (SELECT COUNT(*) FROM json_each(?24) AS picture WHERE EXISTS (
+      SELECT 1 FROM images WHERE key = json_extract(picture.value, '$.key') AND owner_id = ?2 AND kind = 'media'
+        AND content_type LIKE 'image/%' AND (state = 'pending' OR (state = 'draft' AND key IN (
+          SELECT json_extract(kept.value, '$.key') FROM drafts, json_each(drafts.pictures) AS kept WHERE drafts.id = ?22)))))
+      = json_array_length(?24)))`;
 
   try {
     const [inserted] = await db.batch([
@@ -187,12 +203,13 @@ export async function publishPost(db: D1Database, post: NewPost): Promise<Publis
         .prepare(
           `INSERT INTO posts (id, author_id, kind, url, canonical_key, provider, origin,
              title, description, page_title, thumb_key, aspect, created_at,
-             media_key, media_type, media_width, media_height, media_duration, reply_policy, comments_closed_at)
+             media_key, media_type, media_width, media_height, media_duration, reply_policy, comments_closed_at, pictures)
            SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ${pending(11, "post")}, ?14, ?12,
              ${pending(15, "media")}, ?16, ?17, ?18, ?19,
              -- Choosing who may comment is the plan's; without it, everyone may.
              CASE WHEN ${entitledCondition(2, post.now)} THEN ?20 ELSE NULL END,
-             CASE WHEN ?21 AND ${entitledCondition(2, post.now)} THEN ?12 ELSE NULL END
+             CASE WHEN ?21 AND ${entitledCondition(2, post.now)} THEN ?12 ELSE NULL END,
+             ?24
            WHERE ${allowed}`,
         )
         .bind(
@@ -219,6 +236,7 @@ export async function publishPost(db: D1Database, post: NewPost): Promise<Publis
           post.closed ? 1 : 0,
           post.draft?.id ?? null,
           post.draft?.revision ?? null,
+          gallery,
         ),
       db
         .prepare(
@@ -227,6 +245,18 @@ export async function publishPost(db: D1Database, post: NewPost): Promise<Publis
              AND EXISTS (SELECT 1 FROM posts WHERE id = ?3 AND (thumb_key = images.key OR media_key = images.key))`,
         )
         .bind(thumbKey, mediaKey, post.id),
+      // A gallery's other pictures, likewise.
+      ...(gallery
+        ? [
+            db
+              .prepare(
+                `UPDATE images SET state = 'attached'
+                 WHERE key IN (SELECT json_extract(value, '$.key') FROM json_each(?2)) AND state IN ('pending', 'draft')
+                   AND EXISTS (SELECT 1 FROM posts WHERE id = ?1 AND pictures = ?2)`,
+              )
+              .bind(post.id, gallery),
+          ]
+        : []),
       // The draft is used up only if the post went in.
       ...(post.draft
         ? [

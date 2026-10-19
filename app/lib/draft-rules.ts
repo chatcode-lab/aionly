@@ -1,3 +1,4 @@
+import type { Picture } from "./gallery";
 import type { PostChoice } from "./replies";
 import { cleanDescription, cleanTitle, DESCRIPTION_MAX, length, type Origin, type PostKind, TEXT_BODY_MAX, TITLE_MAX } from "./submit/rules";
 
@@ -35,22 +36,28 @@ export interface DraftFields {
   duration: number | null;
   /** A video's poster frame, kept with the draft. */
   posterKey: string | null;
+  /** A gallery's pictures in order, the first being `mediaKey`; null for one file. */
+  pictures: Picture[] | null;
 }
 
 /** The fields as stored: cleaned, with what the kind has no use for left out. */
 export function cleanDraft(fields: DraftFields): DraftFields {
   const upload = fields.kind === "upload";
+  // A gallery is its pictures alone: its first is the file, with its size.
+  const gallery = upload && fields.pictures && fields.pictures.length > 1 ? fields.pictures : null;
+  const cover = gallery?.[0];
   return {
     ...fields,
     url: fields.kind === "link" ? fields.url?.trim() || null : null,
     origin: fields.kind === "text" ? "made" : fields.origin,
     title: cleanTitle(fields.title),
     description: cleanDescription(fields.description),
-    mediaKey: upload ? fields.mediaKey : null,
-    width: upload ? fields.width : null,
-    height: upload ? fields.height : null,
-    duration: upload ? fields.duration : null,
-    posterKey: upload ? fields.posterKey : null,
+    mediaKey: cover ? cover.key : upload ? fields.mediaKey : null,
+    width: cover ? cover.width : upload ? fields.width : null,
+    height: cover ? cover.height : upload ? fields.height : null,
+    duration: upload && !gallery ? fields.duration : null,
+    posterKey: upload && !gallery ? fields.posterKey : null,
+    pictures: gallery,
   };
 }
 

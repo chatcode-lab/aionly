@@ -1,6 +1,14 @@
 # Galleries
 
-Planned on 19 October 2026, at the owner's request, and agreed the same day: the owner accepted every proposal, recorded under "Decisions". Not built yet. [The MVP plan](mvp-plan.md) points here from "Media uploads".
+Planned on 19 October 2026, at the owner's request, agreed the same day (see "Decisions"), and built on 20 October 2026, without descriptions of each picture, which the owner left out for now. "As built" says where the build differs from the plan below. [The MVP plan](mvp-plan.md) points here from "Media uploads".
+
+## As built
+
+- **Storage:** a JSON column, `posts.pictures` and `drafts.pictures` ([{"key", "width", "height"}], migration 0037), not the `post_pictures` and `draft_pictures` tables planned: ten at most need no join, existing posts need no back-fill, and claiming them in one write reads them with `json_each`. It is null for one file.
+- **Gathering uploads:** each form, and each `prepare_upload` address, names a `set` (`images.upload_set`); a picture sent with it joins the pictures pending in that set, ten at most, and any other file replaces them, as one upload replaced the last before. Taking a picture out of the form lets go of its file (`DELETE /submit/upload?key=`), so it no longer counts. There is no separate 60 MB limit on pending pictures: ten of 10 MB at most.
+- **Uploads go one after another** in the browser, with "Uploading 2 of 5… 40%", rather than two at a time.
+- **No alt text of one's own:** each picture is described as "<title>, picture 2 of 5" (owner's decision, 20 October 2026).
+- **Moving pictures** is by buttons on each tile (earlier, later, remove), on phones two tiles to a row.
 
 ## Summary
 
@@ -15,7 +23,7 @@ An upload post may carry several pictures, shown as one gallery: swiped or stepp
 ## Data
 
 - **`post_pictures`** (migration): `post_id`, `position` (0 for the first, which is also `posts.media_key`), `image_key`, `width`, `height`, `alt` (nullable), primary key `(post_id, position)`. A single picture has one row, so readers have one shape; existing upload posts are back-filled with their one picture.
-- **Pending uploads:** an account holds one pending media upload today (`images_one_pending_media`). It becomes up to 10 pending pictures, or one pending video or audio file, checked inside the insert by count, and by 60 MB of pending pictures. The day-old sweep is unchanged.
+- **Pending uploads:** an account held one pending media upload (`images_one_pending_media`). It becomes up to 10 pending pictures, or one pending video or audio file, checked inside the insert by count. The day-old sweep is unchanged.
 - **Publishing** names the pictures in order and claims every one inside the post's write, as one claims its file now: each must be the author's, pending (or the draft's), and a picture. The post goes in with all of them or none.
 - **Drafts:** a draft keeps its ordered pictures in `draft_pictures` (same columns, keyed by draft), its files in state `draft`. The 20-draft and 200 MB limits stay, counted over every file.
 - **Removal and deletion:** a moderator's removal keeps every picture for restoring; the author's deletion, and account deletion, sweep them all, as one is swept now.
@@ -24,7 +32,7 @@ An upload post may carry several pictures, shown as one gallery: swiped or stepp
 
 - The upload area takes several pictures at once, by choosing or dropping, or one video or audio file. Pictures upload two at a time, each with its own progress, and appear as a row of thumbnails as they finish.
 - Each thumbnail can be removed and moved left or right (buttons, so it works by touch and keyboard; dragging may come later). The first is the cover: it is the share image and what a feed shows first.
-- Optional words for each picture, for people who cannot see it (`alt`); without them, a picture is described as "<title>, picture 2 of 5".
+- Each picture is described as "<title>, picture 2 of 5", for people who cannot see it; words of one's own for each are left out for now.
 - Adding more than 10, or a video among pictures, is refused at once, with the reason.
 
 ## Showing a gallery
@@ -59,5 +67,5 @@ The owner's, on 19 October 2026, accepting each proposal:
 1. **How many pictures:** up to 10, as other boards allow; the frame and the pending limit follow.
 2. **No video in a gallery:** a gallery is pictures only, keeping playback's one-player-at-a-time rule simple.
 3. **The frame's shape:** the cover's, for every picture, others fitted inside it, so the page below never shifts as one swipes.
-4. **Alt text:** optional, with the generated words as the fallback, so posting stays quick.
+4. **Alt text:** agreed as optional, then left out for now (20 October 2026): the generated words alone.
 5. **Feed layout:** the swipeable frame, not a grid, which would crop pictures.

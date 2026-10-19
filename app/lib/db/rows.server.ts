@@ -1,3 +1,4 @@
+import { storedGallery } from "../gallery";
 import { type Aspect, PROVIDERS, type Provider } from "../links/types";
 import { displayHost } from "../links/url";
 import { imageAddress } from "../media.server";
@@ -86,7 +87,7 @@ export const POST_COLUMNS = `
   post.id, post.kind, post.url, post.provider, post.origin, post.title, post.description,
   post.page_title, post.thumb_key, post.aspect, post.score, post.comment_count,
   post.created_at, post.edited_at, post.media_key, post.media_type, post.media_width,
-  post.media_height, post.media_duration,
+  post.media_height, post.media_duration, post.pictures,
   EXISTS (SELECT 1 FROM picks WHERE picks.post_id = post.id) AS picked,${AUTHOR_COLUMNS}`;
 
 export interface PostRow extends AuthorRow {
@@ -99,6 +100,8 @@ export interface PostRow extends AuthorRow {
   media_width: number | null;
   media_height: number | null;
   media_duration: number | null;
+  /** A gallery's pictures as stored JSON, or null for one file (see ../gallery.ts). */
+  pictures?: string | null;
   provider: string | null;
   origin: "made" | "found";
   title: string;
@@ -132,8 +135,18 @@ function mediaOf(row: PostRow, thumbUrl: string | undefined): PostMedia {
     const src = imageAddress(row.media_key);
     const duration = row.media_duration ?? undefined;
     switch (row.media_type) {
-      case "image":
-        return { kind: "image", src, width: row.media_width ?? 1200, height: row.media_height ?? 900 };
+      case "image": {
+        const gallery = storedGallery(row.pictures ?? null);
+        return {
+          kind: "image",
+          src,
+          width: row.media_width ?? 1200,
+          height: row.media_height ?? 900,
+          ...(gallery
+            ? { pictures: gallery.map((picture) => ({ src: imageAddress(picture.key), width: picture.width, height: picture.height })) }
+            : {}),
+        };
+      }
       case "video": {
         const tall = (row.media_height ?? 0) > (row.media_width ?? 0);
         return { kind: "video", aspect: tall ? "9:16" : "16:9", src, thumbUrl, duration };

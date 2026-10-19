@@ -1,3 +1,4 @@
+import { GALLERY_MAX, readGallery } from "~/lib/gallery";
 import { env } from "cloudflare:workers";
 import { useEffect, useRef, useState } from "react";
 import { Form, Link, redirect, useNavigation } from "react-router";
@@ -74,7 +75,8 @@ interface SavedDraft {
   title: string;
   description: string;
   replies: PostChoice;
-  upload: Omit<Uploaded, "preview"> & { url: string } | null;
+  /** Its files: one, or a gallery's pictures in order. */
+  uploads: Array<Omit<Uploaded, "preview"> & { url: string }>;
 }
 
 export async function loader({ request, context }: Route.LoaderArgs) {
@@ -99,17 +101,29 @@ export async function loader({ request, context }: Route.LoaderArgs) {
         title: draft.title,
         description: draft.description,
         replies: draft.replies ?? "all",
-        upload: draft.media
-          ? {
-              key: draft.media.key,
-              media: draft.media.type,
-              url: imageAddress(draft.media.key),
-              width: draft.media.width,
-              height: draft.media.height,
-              duration: draft.media.duration,
-              posterKey: draft.posterKey,
-            }
-          : null,
+        uploads: draft.pictures
+          ? draft.pictures.map((picture) => ({
+              key: picture.key,
+              media: "image" as const,
+              url: imageAddress(picture.key),
+              width: picture.width,
+              height: picture.height,
+              duration: null,
+              posterKey: null,
+            }))
+          : draft.media
+            ? [
+                {
+                  key: draft.media.key,
+                  media: draft.media.type,
+                  url: imageAddress(draft.media.key),
+                  width: draft.media.width,
+                  height: draft.media.height,
+                  duration: draft.media.duration,
+                  posterKey: draft.posterKey,
+                },
+              ]
+            : [],
       }
     : null;
   return {
@@ -210,6 +224,7 @@ async function saveAction(request: Request, context: Route.ActionArgs["context"]
       height: boundedInt(field("height"), 20000),
       duration: boundedInt(field("duration"), 24 * 3600),
       posterKey: UPLOAD_KEY.test(field("poster_key")) ? field("poster_key") : null,
+      pictures: readGallery(field("pictures")),
     },
     now: Math.floor(Date.now() / 1000),
   });
@@ -241,8 +256,11 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
   const errors: FieldErrors = {};
   const receipt = kind === "link" ? await readReceipt(field("receipt"), env.BETTER_AUTH_SECRET, viewer.id, now) : null;
   if (kind === "link" && !receipt) errors.url = "Check the link before publishing.";
-  const uploadKey = field("upload_key");
-  const mediaType = field("media_type");
+  // A gallery's pictures, the first of them the file; else one file.
+  const gallery = kind === "upload" && field("pictures") ? readGallery(field("pictures")) : null;
+  if (kind === "upload" && field("pictures") && !gallery) errors.upload = `A gallery holds 2 to ${GALLERY_MAX} pictures.`;
+  const uploadKey = gallery ? gallery[0]!.key : field("upload_key");
+  const mediaType = gallery ? "image" : field("media_type");
   if (kind === "upload" && (!UPLOAD_KEY.test(uploadKey) || !["image", "video", "audio"].includes(mediaType))) {
     errors.upload = "Upload a file before publishing.";
   }
@@ -307,10 +325,11 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
             id: newPostId(),
             mediaKey: uploadKey,
             mediaType: mediaType as "image" | "video" | "audio",
-            width: boundedInt(field("width"), 20000),
-            height: boundedInt(field("height"), 20000),
-            duration: boundedInt(field("duration"), 24 * 3600),
-            posterKey: UPLOAD_KEY.test(field("poster_key")) ? field("poster_key") : null,
+            width: gallery ? gallery[0]!.width : boundedInt(field("width"), 20000),
+            height: gallery ? gallery[0]!.height : boundedInt(field("height"), 20000),
+            duration: gallery ? null : boundedInt(field("duration"), 24 * 3600),
+            posterKey: !gallery && UPLOAD_KEY.test(field("poster_key")) ? field("poster_key") : null,
+            pictures: gallery,
           }
         : { ...base, kind: "text", id: newPostId() };
   // Short IDs can clash, rarely; a clash is tried again with a new one.
@@ -483,9 +502,8 @@ function Composer({ loaderData, actionData }: Pick<Route.ComponentProps, "loader
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState<string | null>(null);
   const [checked, setChecked] = useState<Checked | null>(null);
-  const [uploaded, setUploaded] = useState<Uploaded | null>(
-    opened?.upload ? { ...opened.upload, preview: opened.upload.url } : null,
-  );
+  const [uploaded, setUploaded] = useState<Uploaded[]>(() => (opened?.uploads ?? []).map((upload) => ({ ...upload, preview: upload.url })));
+  const cover = uploaded[0] ?? null;
   const [touched, setTouched] = useState(false);
   const restored = useRef(false);
   // A server answer that the agent box was ticked, before scripts ran.
@@ -567,7 +585,7 @@ function Composer({ loaderData, actionData }: Pick<Route.ComponentProps, "loader
   const titleError = touched || result ? titleProblem(title) : null;
   const descriptionError = touched || result ? descriptionProblem(description, bodyMax) : null;
   const ready =
-    source === "link" ? Boolean(current?.receipt) && !duplicate : source === "upload" ? uploaded !== null : true;
+    source === "link" ? Boolean(current?.receipt) && !duplicate : source === "upload" ? uploaded.length > 0 : true;
   const canPublish = ready && !gated && !blocked && token && !submitting;
 
   return (
@@ -642,12 +660,22 @@ function Composer({ loaderData, actionData }: Pick<Route.ComponentProps, "loader
         ) : source === "upload" ? (
           <>
             <UploadPicker value={uploaded} onChange={setUploaded} error={result?.errors.upload} />
-            <input type="hidden" name="upload_key" value={uploaded?.key ?? ""} />
-            <input type="hidden" name="media_type" value={uploaded?.media ?? ""} />
-            <input type="hidden" name="poster_key" value={uploaded?.posterKey ?? ""} />
-            <input type="hidden" name="width" value={uploaded?.width ?? ""} />
-            <input type="hidden" name="height" value={uploaded?.height ?? ""} />
-            <input type="hidden" name="duration" value={uploaded?.duration ?? ""} />
+            <input type="hidden" name="upload_key" value={cover?.key ?? ""} />
+            <input type="hidden" name="media_type" value={cover?.media ?? ""} />
+            <input type="hidden" name="poster_key" value={cover?.posterKey ?? ""} />
+            <input type="hidden" name="width" value={cover?.width ?? ""} />
+            <input type="hidden" name="height" value={cover?.height ?? ""} />
+            <input type="hidden" name="duration" value={cover?.duration ?? ""} />
+            {/* A gallery: every picture, in order, the first being the cover. */}
+            <input
+              type="hidden"
+              name="pictures"
+              value={
+                uploaded.length > 1
+                  ? JSON.stringify(uploaded.map((upload) => ({ key: upload.key, width: upload.width, height: upload.height })))
+                  : ""
+              }
+            />
           </>
         ) : source === "link" ? (
           <>
@@ -799,7 +827,7 @@ function Composer({ loaderData, actionData }: Pick<Route.ComponentProps, "loader
           <div className="flex flex-wrap items-center justify-end gap-3">
             {source === "link" && !current?.receipt && !duplicate ? (
               <p className="text-meta text-text-muted">Check the link to publish.</p>
-            ) : source === "upload" && !uploaded ? (
+            ) : source === "upload" && uploaded.length === 0 ? (
               <p className="text-meta text-text-muted">Upload a file to publish.</p>
             ) : null}
             {/* A draft may be unfinished: the browser's own checks wait for publishing. */}

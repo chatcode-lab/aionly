@@ -1,9 +1,10 @@
-import { ArrowUpRight, Music, Play, X } from "lucide-react";
+import { ArrowUpRight, ChevronLeft, ChevronRight, Music, Play, X } from "lucide-react";
 import { Dialog } from "radix-ui";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { cn } from "~/lib/cn";
 import { formatDuration } from "~/lib/format";
+import { type PictureView, pictureAlt } from "~/lib/gallery";
 import { type Aspect, PROVIDER_LABEL, type Provider } from "~/lib/links/types";
 
 /** Outbound links never pass ranking credit and never get a window handle. */
@@ -155,28 +156,38 @@ export function MediaPoster({
   );
 }
 
+/** How tall a post's picture or gallery may stand: the frame keeps its shape below this. */
+const PICTURE_CAP = "min(70vh, 35rem)";
+
 /**
- * A picture the board hosts, in its own shape, capped in height. A tap
- * opens it as large as the screen allows, on its own, and a tap anywhere,
- * Escape, or Close shuts it.
+ * A picture the board hosts, in its own shape, capped in height, or a
+ * gallery of them (`pictures`): one frame in its cover's shape, swiped or
+ * stepped through, with a count in a corner. A tap opens the picture as
+ * large as the screen allows, a gallery to step through there too; a tap
+ * anywhere else, Escape, or Close shuts it.
  */
 export function UploadedImage({
   src,
   width,
   height,
   alt,
+  pictures,
 }: {
   src: string;
   width: number;
   height: number;
   alt: string;
+  pictures?: PictureView[];
 }) {
-  const [open, setOpen] = useState(false);
+  const all = pictures && pictures.length > 1 ? pictures : [{ src, width, height }];
+  const [open, setOpen] = useState<number | null>(null);
   return (
-    <Dialog.Root open={open} onOpenChange={setOpen}>
-      <div className="flex justify-center overflow-hidden rounded-xl bg-surface-2">
-        <Dialog.Trigger asChild>
-          <button type="button" aria-label={`See the picture full size: ${alt}`} className="block cursor-zoom-in">
+    <Dialog.Root open={open !== null} onOpenChange={(next) => setOpen(next ? 0 : null)}>
+      {all.length > 1 ? (
+        <GalleryFrame pictures={all} alt={alt} onOpen={setOpen} />
+      ) : (
+        <div className="flex justify-center overflow-hidden rounded-xl bg-surface-2">
+          <button type="button" aria-label={`See the picture full size: ${alt}`} className="block cursor-zoom-in" onClick={() => setOpen(0)}>
             <img
               src={src}
               width={width}
@@ -187,26 +198,163 @@ export function UploadedImage({
               className="h-auto max-h-[min(70vh,35rem)] w-auto max-w-full object-contain"
             />
           </button>
-        </Dialog.Trigger>
-      </div>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/90" />
-        <Dialog.Content
-          aria-describedby={undefined}
-          onClick={() => setOpen(false)}
-          className="fixed inset-0 z-50 flex cursor-zoom-out items-center justify-center p-2 sm:p-6"
-        >
-          <Dialog.Title className="sr-only">{alt}</Dialog.Title>
-          <img src={src} width={width} height={height} alt={alt} className="max-h-full max-w-full object-contain" />
-          <Dialog.Close
-            aria-label="Close"
-            className="absolute top-3 right-3 inline-flex size-10 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70"
-          >
-            <X size={20} aria-hidden />
-          </Dialog.Close>
-        </Dialog.Content>
-      </Dialog.Portal>
+        </div>
+      )}
+      {open !== null ? <FullSize pictures={all} alt={alt} index={open} onStep={setOpen} onClose={() => setOpen(null)} /> : null}
     </Dialog.Root>
+  );
+}
+
+/**
+ * A gallery in the feed or on its post: the pictures side by side in a
+ * frame of the cover's shape, each fitted inside it, snapping into place as
+ * they are swiped, with previous and next where a pointer can hover.
+ */
+function GalleryFrame({ pictures, alt, onOpen }: { pictures: PictureView[]; alt: string; onOpen: (index: number) => void }) {
+  const strip = useRef<HTMLDivElement>(null);
+  const [current, setCurrent] = useState(0);
+  const cover = pictures[0]!;
+  const step = (by: -1 | 1) => {
+    const element = strip.current;
+    if (element) element.scrollTo({ left: (current + by) * element.clientWidth, behavior: "smooth" });
+  };
+  return (
+    <div
+      role="group"
+      aria-roledescription="gallery"
+      aria-label={alt}
+      className="relative mx-auto w-full overflow-hidden rounded-xl bg-surface-2"
+      // The cover's shape, never taller than a picture may stand.
+      style={{ aspectRatio: `${cover.width} / ${cover.height}`, maxWidth: `calc(${PICTURE_CAP} * ${cover.width / cover.height})` }}
+    >
+      <div
+        ref={strip}
+        onScroll={(event) => {
+          const element = event.currentTarget;
+          setCurrent(Math.round(element.scrollLeft / Math.max(element.clientWidth, 1)));
+        }}
+        className="flex size-full snap-x snap-mandatory overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      >
+        {pictures.map((picture, index) => (
+          <button
+            key={picture.src}
+            type="button"
+            aria-label={`See the picture full size: ${pictureAlt(alt, index, pictures.length)}`}
+            onClick={() => onOpen(index)}
+            className="size-full shrink-0 cursor-zoom-in snap-center"
+          >
+            <img
+              src={picture.src}
+              width={picture.width}
+              height={picture.height}
+              alt={pictureAlt(alt, index, pictures.length)}
+              // The first loads with the page; the rest as they come near.
+              loading={index === 0 ? undefined : "lazy"}
+              decoding="async"
+              className="size-full object-contain"
+            />
+          </button>
+        ))}
+      </div>
+      <span
+        aria-live="polite"
+        className="pointer-events-none absolute top-2 right-2 rounded-full bg-overlay px-2 py-0.5 text-meta font-medium text-on-overlay tabular-nums"
+      >
+        {current + 1} / {pictures.length}
+      </span>
+      {current > 0 ? (
+        <StepButton side="left" label="Previous picture" onClick={() => step(-1)} />
+      ) : null}
+      {current < pictures.length - 1 ? (
+        <StepButton side="right" label="Next picture" onClick={() => step(1)} />
+      ) : null}
+    </div>
+  );
+}
+
+function StepButton({ side, label, onClick }: { side: "left" | "right"; label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+      className={cn(
+        "absolute top-1/2 inline-flex size-9 -translate-y-1/2 items-center justify-center rounded-full bg-overlay text-on-overlay hover:bg-scrim pointer-coarse:hidden",
+        side === "left" ? "left-2" : "right-2",
+      )}
+    >
+      {side === "left" ? <ChevronLeft size={20} aria-hidden /> : <ChevronRight size={20} aria-hidden />}
+    </button>
+  );
+}
+
+/**
+ * The picture as large as the screen allows, on its own. In a gallery the
+ * arrows, the keyboard's arrow keys, and a swipe step through it.
+ */
+function FullSize({
+  pictures,
+  alt,
+  index,
+  onStep,
+  onClose,
+}: {
+  pictures: PictureView[];
+  alt: string;
+  index: number;
+  onStep: (index: number) => void;
+  onClose: () => void;
+}) {
+  const picture = pictures[index] ?? pictures[0]!;
+  const many = pictures.length > 1;
+  const go = (by: -1 | 1) => onStep(Math.min(pictures.length - 1, Math.max(0, index + by)));
+  const touch = useRef<number | null>(null);
+  const label = pictureAlt(alt, index, pictures.length);
+  return (
+    <Dialog.Portal>
+      <Dialog.Overlay className="fixed inset-0 z-50 bg-scrim" />
+      <Dialog.Content
+        aria-describedby={undefined}
+        onClick={onClose}
+        onKeyDown={(event) => {
+          if (!many) return;
+          if (event.key === "ArrowLeft") go(-1);
+          if (event.key === "ArrowRight") go(1);
+        }}
+        onTouchStart={(event) => {
+          touch.current = event.touches[0]?.clientX ?? null;
+        }}
+        onTouchEnd={(event) => {
+          const start = touch.current;
+          const end = event.changedTouches[0]?.clientX;
+          touch.current = null;
+          if (!many || start === null || end === undefined || Math.abs(end - start) < 50) return;
+          go(end < start ? 1 : -1);
+        }}
+        className="fixed inset-0 z-50 flex cursor-zoom-out items-center justify-center p-2 sm:p-6"
+      >
+        <Dialog.Title className="sr-only">{label}</Dialog.Title>
+        <img key={picture.src} src={picture.src} width={picture.width} height={picture.height} alt={label} className="max-h-full max-w-full object-contain" />
+        {many ? (
+          <>
+            <span className="absolute top-4 left-4 rounded-full bg-overlay px-2.5 py-1 text-meta font-medium text-on-overlay tabular-nums">
+              {index + 1} / {pictures.length}
+            </span>
+            {index > 0 ? <StepButton side="left" label="Previous picture" onClick={() => go(-1)} /> : null}
+            {index < pictures.length - 1 ? <StepButton side="right" label="Next picture" onClick={() => go(1)} /> : null}
+          </>
+        ) : null}
+        <Dialog.Close
+          aria-label="Close"
+          className="absolute top-3 right-3 inline-flex size-10 items-center justify-center rounded-full bg-overlay text-on-overlay hover:bg-scrim"
+        >
+          <X size={20} aria-hidden />
+        </Dialog.Close>
+      </Dialog.Content>
+    </Dialog.Portal>
   );
 }
 

@@ -182,6 +182,46 @@ test("a fan uploads a picture and posts it", async ({ page, context, account, re
   expect(problems.violations).toEqual([]);
 });
 
+test("a fan posts a gallery: pictures in an order, swiped through and seen full size", async ({ page, context, account, request }) => {
+  await setPlan(request, account);
+  await account.signIn(context);
+  await open(page, "/submit");
+  await page.getByRole("button", { name: "Upload", exact: true }).click();
+  const file = (name: string) => ({ name, mimeType: "image/png", buffer: PIXEL });
+  await page.getByLabel("Upload a file").setInputFiles([file("one.png"), file("two.png"), file("three.png")]);
+  await expect(page.getByText("A gallery of 3, the first its cover.")).toBeVisible();
+  const order = page.getByRole("list", { name: "Pictures, in order" });
+  const sources = () => order.locator("img").evaluateAll((images) => images.map((image) => (image as HTMLImageElement).src));
+  const [a, b] = await sources();
+  // The second becomes the cover, and the third goes.
+  await order.getByRole("button", { name: "Move picture 2 earlier" }).click();
+  await order.getByRole("button", { name: "Remove picture 3" }).click();
+  await expect(page.getByText("A gallery of 2, the first its cover.")).toBeVisible();
+  expect(await sources()).toEqual([b, a]);
+  const keys = JSON.parse(await page.locator("input[name=pictures]").inputValue()).map((picture: { key: string }) => picture.key) as string[];
+  expect(keys).toHaveLength(2);
+  await page.getByLabel("I made this").check();
+  const title = `Two frames by ${account.username}`;
+  await finishPost(page, title, "The same prompt, a minute apart, and what changed between them.");
+
+  const gallery = page.getByRole("group", { name: title });
+  await expect(gallery.locator("img").first()).toHaveAttribute("src", new RegExp(`${keys[0]}$`));
+  await expect(gallery.getByText("1 / 2")).toBeVisible();
+  // Swiped, as a finger would.
+  await gallery.locator(".snap-x").evaluate((strip) => strip.scrollTo({ left: strip.clientWidth }));
+  await expect(gallery.getByText("2 / 2")).toBeVisible();
+  // Full size, stepped through with the keyboard.
+  await gallery.getByRole("button", { name: /picture 2 of 2$/ }).click();
+  const large = page.getByRole("dialog");
+  await expect(large.locator("img")).toHaveAttribute("src", new RegExp(`${keys[1]}$`));
+  await page.keyboard.press("ArrowLeft");
+  await expect(large.locator("img")).toHaveAttribute("src", new RegExp(`${keys[0]}$`));
+  await expect(large).toContainText("1 / 2");
+  await page.keyboard.press("Escape");
+  await expect(large).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+});
+
 test("a file dropped on the upload area is uploaded, and one dropped beside it opens nothing", async ({ page, context, account, request }) => {
   await setPlan(request, account);
   await account.signIn(context);
@@ -200,7 +240,7 @@ test("a file dropped on the upload area is uploaded, and one dropped beside it o
   }, transfer);
   expect(prevented).toBe(true);
   await expect(page).toHaveURL(/\/submit$/);
-  const area = page.getByRole("button", { name: /^Choose or drop a picture/ });
+  const area = page.getByRole("button", { name: /^Choose or drop pictures/ });
   await area.dispatchEvent("dragenter", { dataTransfer: transfer });
   await area.dispatchEvent("dragover", { dataTransfer: transfer });
   await area.dispatchEvent("drop", { dataTransfer: transfer });

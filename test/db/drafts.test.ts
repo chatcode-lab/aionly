@@ -46,6 +46,7 @@ const blank: DraftFields = {
   height: null,
   duration: null,
   posterKey: null,
+  pictures: null,
 };
 
 const complete: DraftFields = {

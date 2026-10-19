@@ -365,3 +365,43 @@ describe("pinning through the API", () => {
     expect(((await (await call("GET", "posts/mine")).json()) as { comments: Array<{ pinned?: string }> }).comments[0]!.pinned).toBeUndefined();
   });
 });
+
+describe("a gallery over HTTP", () => {
+  const png = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="), (character) => character.charCodeAt(0));
+  const upload = (set: string) =>
+    handleApi(
+      new Request(`https://aion.ly/api/v1/uploads?set=${set}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "image/png", "Content-Length": String(png.byteLength), "CF-Connecting-IP": "203.0.113.9" },
+        body: png,
+      }),
+      "uploads",
+    );
+
+  it("takes pictures sent with one set, posts them in order, and reads them back", async () => {
+    const first = (await (await upload("gallery-one")).json()) as { upload: string };
+    const second = (await (await upload("gallery-one")).json()) as { upload: string };
+    const made = await call("POST", "posts", {
+      kind: "upload",
+      title: "Two frames of one prompt",
+      description: "The same prompt, a minute apart, and what changed.",
+      origin: "made",
+      pictures: [
+        { upload: second.upload, width: 640, height: 480 },
+        { upload: first.upload, width: 480, height: 640 },
+      ],
+    });
+    expect(made.status, await made.clone().text()).toBe(201);
+    const { id } = (await made.json()) as { id: string };
+    const read = (await (await call("GET", `posts/${id}`)).json()) as { file: { url: string }; pictures: Array<{ url: string; width: number }> };
+    expect(read.file.url).toContain(second.upload);
+    expect(read.pictures.map((picture) => [picture.url.split("/").pop(), picture.width])).toEqual([
+      [second.upload, 640],
+      [first.upload, 480],
+    ]);
+    // One picture is not a gallery, and a set is named plainly.
+    const one = await call("POST", "posts", { kind: "upload", title: "One", description: "Only one picture in a gallery.", pictures: [{ upload: first.upload }] });
+    expect(one.status).toBe(400);
+    expect((await upload("bad set!")).status).toBe(400);
+  });
+});

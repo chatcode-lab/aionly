@@ -1,7 +1,8 @@
-import { FileUp, X } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight, FileUp, ImagePlus, X } from "lucide-react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 
 import { formatDuration } from "~/lib/format";
+import { GALLERY_MAX } from "~/lib/gallery";
 import { type MediaType, mediaTypeOf, sizeLabel, UPLOAD_ACCEPT, UPLOAD_LIMITS } from "~/lib/uploads";
 
 import { cn } from "~/lib/cn";
@@ -24,10 +25,11 @@ export interface Uploaded {
 }
 
 /** Sends a body to the upload endpoint, reporting progress, which fetch cannot. */
-function send(body: Blob, role: "media" | "poster", onProgress?: (share: number) => void) {
+function send(body: Blob, role: "media" | "poster", onProgress?: (share: number) => void, set: string | null = null) {
   return new Promise<{ ok: true; key: string; media: MediaType } | { ok: false; error: string }>((resolve) => {
     const request = new XMLHttpRequest();
-    request.open("POST", `/submit/upload${role === "poster" ? "?role=poster" : ""}`);
+    const query = new URLSearchParams(role === "poster" ? { role } : set ? { set } : {});
+    request.open("POST", `/submit/upload${query.size > 0 ? `?${query}` : ""}`);
     request.setRequestHeader("Content-Type", body.type || "application/octet-stream");
     request.upload.onprogress = (event) => {
       if (event.lengthComputable) onProgress?.(event.loaded / event.total);
@@ -87,26 +89,38 @@ function probe(file: File, media: MediaType, url: string) {
   );
 }
 
+/** One set per form, so its pictures gather into one gallery on the server. */
+function newSet(): string {
+  return crypto.randomUUID();
+}
+
 /**
- * Picks a picture, video, or audio file and uploads it at once, with its
- * poster frame for a video, so Publish only has to name it. A file can be
- * chosen or dropped on it; one dropped elsewhere on the page is ignored,
- * rather than opened in place of the form.
+ * Picks pictures, up to GALLERY_MAX for a gallery, or one video or audio
+ * file, and uploads each at once, a video with its poster frame, so
+ * Publish only has to name them. Pictures can be put in order, the first
+ * being the cover, and taken out. Files can be chosen or dropped on it; one
+ * dropped elsewhere on the page is ignored, rather than opened in place of
+ * the form.
  */
 export function UploadPicker({
   value,
   onChange,
   error,
 }: {
-  value: Uploaded | null;
-  onChange: (next: Uploaded | null) => void;
+  value: Uploaded[];
+  onChange: (next: Uploaded[]) => void;
   error?: string;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const hintId = useId();
-  const [progress, setProgress] = useState<number | null>(null);
+  const set = useRef<string | null>(null);
+  const [progress, setProgress] = useState<{ index: number; of: number; share: number } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [over, setOver] = useState(false);
+  const busy = progress !== null;
+  const pictures = value.length > 0 && value.every((item) => item.media === "image");
+  // More can be added to an empty picker, or to pictures below the limit.
+  const room = value.length === 0 || (pictures && value.length < GALLERY_MAX);
 
   // A file dropped beside the picker would replace the page, and what was typed.
   useEffect(() => {
@@ -123,84 +137,207 @@ export function UploadPicker({
     };
   }, []);
 
-  // The preview is the uploader's own file; let it go when replaced.
-  useEffect(() => () => (value ? URL.revokeObjectURL(value.preview) : undefined), [value]);
-
-  const choose = async (file: File) => {
+  /** Checks a choice of files whole, then uploads them one after another. */
+  const add = async (files: File[]) => {
     setProblem(null);
-    const media = mediaTypeOf(file.type);
-    if (!media) return setProblem("Choose a picture, a video, or an audio file.");
-    if (file.size > UPLOAD_LIMITS[media]) {
-      return setProblem(`That file is ${sizeLabel(file.size)}; ${media === "image" ? "pictures" : media} can be at most ${sizeLabel(UPLOAD_LIMITS[media])}.`);
+    if (files.length === 0) return;
+    const kinds = files.map((file) => mediaTypeOf(file.type));
+    if (kinds.some((kind) => kind === null)) return setProblem("Choose pictures, a video, or an audio file.");
+    const playable = kinds.some((kind) => kind !== "image");
+    if (playable && (files.length > 1 || value.length > 0)) {
+      return setProblem(
+        value.length > 0 ? "A gallery is pictures only. Remove the pictures first to post a video or audio." : "Choose one video or audio file, or pictures.",
+      );
     }
-    const preview = URL.createObjectURL(file);
-    const shape = await probe(file, media, preview);
-    setProgress(0);
-    const sent = await send(file, "media", setProgress);
-    if (!sent.ok) {
-      setProgress(null);
-      URL.revokeObjectURL(preview);
-      return setProblem(sent.error);
+    if (!playable && value.some((item) => item.media !== "image")) return setProblem("Remove the video or audio first to post pictures.");
+    if (value.length + files.length > GALLERY_MAX) return setProblem(`A gallery holds at most ${GALLERY_MAX} pictures.`);
+    for (const [index, file] of files.entries()) {
+      const media = kinds[index]!;
+      if (file.size > UPLOAD_LIMITS[media]) {
+        return setProblem(
+          `${file.name} is ${sizeLabel(file.size)}; ${media === "image" ? "pictures" : media} can be at most ${sizeLabel(UPLOAD_LIMITS[media])}.`,
+        );
+      }
     }
-    let posterKey: string | null = null;
-    if (shape.poster) {
-      const poster = await send(shape.poster, "poster");
-      if (poster.ok) posterKey = poster.key;
+    let list = value;
+    for (const [index, file] of files.entries()) {
+      const media = kinds[index]!;
+      setProgress({ index, of: files.length, share: 0 });
+      const preview = URL.createObjectURL(file);
+      const shape = await probe(file, media, preview);
+      const sent = await send(file, "media", (share) => setProgress({ index, of: files.length, share }), media === "image" ? (set.current ??= newSet()) : null);
+      if (!sent.ok) {
+        URL.revokeObjectURL(preview);
+        setProblem(sent.error);
+        break;
+      }
+      let posterKey: string | null = null;
+      if (shape.poster) {
+        const poster = await send(shape.poster, "poster");
+        if (poster.ok) posterKey = poster.key;
+      }
+      list = [...list, { key: sent.key, media: sent.media, preview, width: shape.width, height: shape.height, duration: shape.duration, posterKey }];
+      onChange(list);
     }
     setProgress(null);
-    onChange({ key: sent.key, media: sent.media, preview, width: shape.width, height: shape.height, duration: shape.duration, posterKey });
   };
 
-  if (value) {
+  /** Takes one out, and lets go of its file on the server, so it counts no more. */
+  const remove = (key: string) => {
+    const item = value.find((upload) => upload.key === key);
+    if (item?.preview.startsWith("blob:")) URL.revokeObjectURL(item.preview);
+    onChange(value.filter((upload) => upload.key !== key));
+    void fetch(`/submit/upload?${new URLSearchParams({ key })}`, { method: "DELETE" }).catch(() => undefined);
+  };
+
+  /** Moves a picture one place earlier or later. */
+  const move = (index: number, by: -1 | 1) => {
+    const next = [...value];
+    const [item] = next.splice(index, 1);
+    next.splice(index + by, 0, item!);
+    onChange(next);
+  };
+
+  const status = progress
+    ? `Uploading${progress.of > 1 ? ` ${progress.index + 1} of ${progress.of}` : ""}… ${Math.round(progress.share * 100)}%`
+    : null;
+
+  const dropHandlers = {
+    // Handled here, as a disabled button gets no drag events while a file uploads.
+    onDragOver: (event: React.DragEvent) => {
+      if (!carriesFiles(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = !busy && room ? "copy" : "none";
+      setOver(!busy && room);
+    },
+    onDragLeave: (event: React.DragEvent) => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOver(false);
+    },
+    onDrop: (event: React.DragEvent) => {
+      if (!carriesFiles(event)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      setOver(false);
+      if (!busy && room) void add([...event.dataTransfer.files]);
+    },
+  };
+
+  const fileInput = (
+    <input
+      ref={input}
+      type="file"
+      accept={UPLOAD_ACCEPT}
+      multiple={value.length === 0 || pictures}
+      className="sr-only"
+      tabIndex={-1}
+      aria-label="Upload a file"
+      onChange={(event) => {
+        const files = [...(event.target.files ?? [])];
+        event.target.value = "";
+        void add(files);
+      }}
+    />
+  );
+  const message =
+    problem || error ? (
+      <p role="alert" className="mt-1 text-meta text-danger">
+        {problem ?? error}
+      </p>
+    ) : null;
+
+  // One video or audio file.
+  const single = value.length === 1 && value[0]!.media !== "image" ? value[0]! : null;
+  if (single) {
     return (
       <div className="space-y-2">
         <div className="relative overflow-hidden rounded-xl bg-surface-2">
-          {value.media === "image" ? (
-            <img src={value.preview} alt="Your upload" className="mx-auto max-h-80 w-auto max-w-full object-contain" />
-          ) : value.media === "video" ? (
-            <video src={value.preview} controls playsInline className="mx-auto max-h-80 w-auto max-w-full" />
+          {single.media === "video" ? (
+            <video src={single.preview} controls playsInline className="mx-auto max-h-80 w-auto max-w-full" />
           ) : (
-            <audio src={value.preview} controls className="w-full p-3" />
+            <audio src={single.preview} controls className="w-full p-3" />
           )}
         </div>
         <div className="flex items-center justify-between gap-3 text-meta text-text-muted">
           <span>
-            Uploaded{value.duration ? ` · ${formatDuration(value.duration)}` : ""}. It is published with the post.
+            Uploaded{single.duration ? ` · ${formatDuration(single.duration)}` : ""}. It is published with the post.
           </span>
-          <Button variant="ghost" onClick={() => onChange(null)}>
+          <Button variant="ghost" onClick={() => remove(single.key)}>
             <X size={16} aria-hidden /> Remove
           </Button>
         </div>
+        {message}
+      </div>
+    );
+  }
+
+  // Pictures: one, or a gallery, in order.
+  if (pictures) {
+    return (
+      <div className="space-y-2" {...dropHandlers}>
+        <ol
+          aria-label="Pictures, in order"
+          // Two to a row on a phone, so each tile's buttons fit.
+          className={cn("grid grid-cols-2 gap-2 rounded-xl min-[26rem]:grid-cols-3 sm:grid-cols-4", over && "ring-2 ring-accent")}
+        >
+          {value.map((item, index) => (
+            <li key={item.key} className="relative aspect-square overflow-hidden rounded-lg bg-surface-2">
+              <img src={item.preview} alt={`Picture ${index + 1}`} className="size-full object-cover" />
+              {index === 0 ? (
+                <span className="absolute top-1 left-1 rounded bg-overlay px-1.5 py-0.5 text-meta font-medium text-on-overlay">Cover</span>
+              ) : null}
+              <span className="absolute top-1 right-1">
+                <TileButton label={`Remove picture ${index + 1}`} disabled={busy} onClick={() => remove(item.key)}>
+                  <X size={16} aria-hidden />
+                </TileButton>
+              </span>
+              <div className="absolute inset-x-1 bottom-1 flex justify-between gap-1">
+                {index > 0 ? (
+                  <TileButton label={`Move picture ${index + 1} earlier`} disabled={busy} onClick={() => move(index, -1)}>
+                    <ChevronLeft size={16} aria-hidden />
+                  </TileButton>
+                ) : (
+                  <span />
+                )}
+                {index < value.length - 1 ? (
+                  <TileButton label={`Move picture ${index + 1} later`} disabled={busy} onClick={() => move(index, 1)}>
+                    <ChevronRight size={16} aria-hidden />
+                  </TileButton>
+                ) : null}
+              </div>
+            </li>
+          ))}
+          {room ? (
+            <li>
+              <button
+                type="button"
+                onClick={() => input.current?.click()}
+                disabled={busy}
+                className="flex aspect-square w-full flex-col items-center justify-center gap-1 rounded-lg border border-dashed border-border-strong p-2 text-center text-meta text-text-muted hover:bg-surface-2 disabled:opacity-70"
+              >
+                <ImagePlus size={20} aria-hidden className="text-text-faint" />
+                {status ?? "Add pictures"}
+              </button>
+            </li>
+          ) : null}
+        </ol>
+        <p className="text-meta text-text-muted">
+          {value.length > 1
+            ? `A gallery of ${value.length}, the first its cover. It is published with the post.`
+            : `Uploaded. Add pictures for a gallery, up to ${GALLERY_MAX}.`}
+        </p>
+        {fileInput}
+        {message}
       </div>
     );
   }
 
   return (
-    <div
-      // Handled here, as a disabled button gets no drag events while a file uploads.
-      onDragOver={(event) => {
-        if (!carriesFiles(event)) return;
-        event.preventDefault();
-        event.stopPropagation();
-        event.dataTransfer.dropEffect = progress === null ? "copy" : "none";
-        setOver(progress === null);
-      }}
-      onDragLeave={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOver(false);
-      }}
-      onDrop={(event) => {
-        if (!carriesFiles(event)) return;
-        event.preventDefault();
-        event.stopPropagation();
-        setOver(false);
-        const file = event.dataTransfer.files[0];
-        if (file && progress === null) void choose(file);
-      }}
-    >
+    <div {...dropHandlers}>
       <button
         type="button"
         onClick={() => input.current?.click()}
-        disabled={progress !== null}
+        disabled={busy}
         aria-describedby={hintId}
         className={cn(
           "flex w-full flex-col items-center rounded-xl border border-dashed border-border-strong px-4 py-6 text-center hover:bg-surface-2 disabled:opacity-70",
@@ -208,32 +345,31 @@ export function UploadPicker({
         )}
       >
         <FileUp size={24} aria-hidden className="text-text-faint" />
-        <span className="mt-2 text-body font-medium">
-          {progress === null ? "Choose or drop a picture, video, or audio file" : `Uploading… ${Math.round(progress * 100)}%`}
-        </span>
+        <span className="mt-2 text-body font-medium">{status ?? "Choose or drop pictures, a video, or an audio file"}</span>
         <span id={hintId} className="mt-1 max-w-sm text-meta text-text-muted">
-          Pictures up to {sizeLabel(UPLOAD_LIMITS.image)}, audio up to {sizeLabel(UPLOAD_LIMITS.audio)}, video up to{" "}
-          {sizeLabel(UPLOAD_LIMITS.video)}. Location data is removed from JPEG photos; other files keep theirs.
+          Up to {GALLERY_MAX} pictures for a gallery, each up to {sizeLabel(UPLOAD_LIMITS.image)}; audio up to{" "}
+          {sizeLabel(UPLOAD_LIMITS.audio)}, video up to {sizeLabel(UPLOAD_LIMITS.video)}. Location data is removed from
+          JPEG photos; other files keep theirs.
         </span>
       </button>
-      <input
-        ref={input}
-        type="file"
-        accept={UPLOAD_ACCEPT}
-        className="sr-only"
-        tabIndex={-1}
-        aria-label="Upload a file"
-        onChange={(event) => {
-          const file = event.target.files?.[0];
-          event.target.value = "";
-          if (file) void choose(file);
-        }}
-      />
-      {problem || error ? (
-        <p role="alert" className="mt-1 text-meta text-danger">
-          {problem ?? error}
-        </p>
-      ) : null}
+      {fileInput}
+      {message}
     </div>
+  );
+}
+
+/** A small control on a picture's tile, readable over any picture. */
+function TileButton({ label, disabled, onClick, children }: { label: string; disabled: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+      className="inline-flex size-8 items-center justify-center rounded-md bg-overlay text-on-overlay hover:bg-scrim disabled:opacity-50 pointer-coarse:size-9"
+    >
+      {children}
+    </button>
   );
 }

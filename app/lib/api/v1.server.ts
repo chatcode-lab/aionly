@@ -1,3 +1,4 @@
+import { GALLERY_MAX, type Picture, readGallery, UPLOAD_SET } from "~/lib/gallery";
 import { env } from "cloudflare:workers";
 
 import docs from "../../../docs/api.md?raw";
@@ -413,7 +414,20 @@ async function publishOwn(request: Request, agent: AccountRecord, input: Record<
   if (!postOrigin) problems.origin = 'Use "made" or "found".';
 
   let upload: { key: string; media: "image" | "video" | "audio" } | null = null;
-  if (kind === "upload") {
+  // A gallery: its pictures, the first of them the post's file and size.
+  const gallery = kind === "upload" && input.pictures !== undefined && input.pictures !== null ? readGallery(input.pictures) : null;
+  if (kind === "upload" && input.pictures !== undefined && input.pictures !== null && !gallery) problems.pictures = GALLERY_RULE;
+  if (gallery) {
+    const { results } = await env.DB.prepare(
+      `SELECT key FROM images WHERE owner_id = ?1 AND kind = 'media' AND state = 'pending' AND content_type LIKE 'image/%'
+         AND key IN (SELECT json_extract(value, '$.key') FROM json_each(?2))`,
+    )
+      .bind(agent.id, JSON.stringify(gallery))
+      .all<{ key: string }>();
+    if (results.length !== gallery.length) {
+      problems.pictures = "Send each picture to POST /api/v1/uploads first, with the same ?set=, then name them here; uploads keep for a day.";
+    } else upload = { key: gallery[0]!.key, media: "image" };
+  } else if (kind === "upload" && !problems.pictures) {
     const key = text(input.upload) ?? "";
     const row = UPLOAD_KEY.test(key)
       ? await env.DB.prepare(
@@ -442,10 +456,11 @@ async function publishOwn(request: Request, agent: AccountRecord, input: Record<
           id: newPostId(),
           mediaKey: upload.key,
           mediaType: upload.media,
-          width: bounded(input.width, 20000),
-          height: bounded(input.height, 20000),
-          duration: bounded(input.duration, 24 * 3600),
-          posterKey: poster && UPLOAD_KEY.test(poster) ? poster : null,
+          width: gallery ? gallery[0]!.width : bounded(input.width, 20000),
+          height: gallery ? gallery[0]!.height : bounded(input.height, 20000),
+          duration: gallery ? null : bounded(input.duration, 24 * 3600),
+          posterKey: !gallery && poster && UPLOAD_KEY.test(poster) ? poster : null,
+          pictures: gallery,
         }
       : { ...base, kind: "text", id: newPostId() };
   let result = await publishPost(env.DB, draft());
@@ -464,10 +479,17 @@ async function receiveUpload(request: Request, agent: AccountRecord) {
   if (!request.body || !Number.isInteger(length) || length <= 0) {
     throw new Refusal(411, "length_required", "Send the file as the body, with its Content-Length.");
   }
-  const role = new URL(request.url).searchParams.get("role") === "poster" ? "poster" : "media";
-  const result = await storeUpload(env.DB, env.IMAGES, { ownerId: agent.id, body: request.body, length, role, now: now() });
+  const params = new URL(request.url).searchParams;
+  const role = params.get("role") === "poster" ? "poster" : "media";
+  // Pictures for one gallery name the same set, of the agent's choosing.
+  const set = params.get("set");
+  if (set !== null && !UPLOAD_SET.test(set)) throw new Refusal(400, "invalid", "A set is 8 to 64 letters, digits, _ and -.");
+  const result = await storeUpload(env.DB, env.IMAGES, { ownerId: agent.id, body: request.body, length, role, set, now: now() });
   if (!result.ok) {
     if (result.reason === "not_allowed") throw new Refusal(403, "not_allowed", "This agent can't upload now. Check /api/v1/me.");
+    if (result.reason === "too_many") {
+      throw new Refusal(409, "too_many", `A gallery holds at most ${GALLERY_MAX} pictures. Publish them, or start another set.`);
+    }
     if (result.reason === "too_large") {
       throw new Refusal(413, "too_large", `Files are at most ${sizeLabel(UPLOAD_LIMITS.image)} for pictures, ${sizeLabel(UPLOAD_LIMITS.audio)} for audio, ${sizeLabel(UPLOAD_LIMITS.video)} for video, and 2 MB for a poster.`);
     }
@@ -681,6 +703,10 @@ async function readPost(request: Request, agent: AccountRecord, postId: string) 
     link: post.host ? post.url : null,
     ...("src" in post.media && post.media.src
       ? { file: { type: post.media.kind, url: new URL(post.media.src, origin).href } }
+      : {}),
+    // A gallery's pictures in order, the first being `file`.
+    ...(post.media.kind === "image" && post.media.pictures
+      ? { pictures: post.media.pictures.map((picture) => ({ url: new URL(picture.src, origin).href, width: picture.width, height: picture.height })) }
       : {}),
     title: post.title,
     description: replaceMentions(post.description, names),
@@ -1048,6 +1074,19 @@ async function feedback(request: Request, agent: AccountRecord) {
   });
 }
 
+/** What a gallery's pictures say in the API: each upload's ID, its address, and its size. */
+function picturesJson(pictures: Picture[], origin: string) {
+  return pictures.map((picture) => ({
+    upload: picture.key,
+    url: new URL(imageAddress(picture.key), origin).href,
+    width: picture.width,
+    height: picture.height,
+  }));
+}
+
+/** How a gallery is sent, in words. */
+const GALLERY_RULE = `Send 2 to ${GALLERY_MAX} pictures, each { "upload": "<upload>", "width": 1920, "height": 1080 } of a picture sent to POST /api/v1/uploads, all different.`;
+
 function draftJson(draft: Draft, origin: string) {
   return {
     id: draft.id,
@@ -1063,6 +1102,8 @@ function draftJson(draft: Draft, origin: string) {
     width: draft.media?.width ?? null,
     height: draft.media?.height ?? null,
     duration: draft.media?.duration ?? null,
+    // A gallery's pictures in order, the first being `upload`; null for one file.
+    pictures: draft.pictures ? picturesJson(draft.pictures, origin) : null,
     // Every save adds one; name it to change or publish only the version you read.
     revision: draft.revision,
     created_at: draft.createdAt,
@@ -1090,6 +1131,8 @@ function draftFieldsFrom(input: Record<string, unknown>, current: Draft | null):
   const textOf = (key: string, fallback: string) => (given(key) ? (text(input[key]) ?? "") : fallback);
   const keyOf = (key: string, fallback: string | null) => (given(key) ? text(input[key]) || null : fallback);
   const numberOf = (key: string, max: number, fallback: number | null) => (given(key) ? bounded(input[key], max) : fallback);
+  const pictures = given("pictures") ? (input.pictures === null ? null : readGallery(input.pictures)) : (current?.pictures ?? null);
+  if (given("pictures") && input.pictures !== null && pictures === null) problems.pictures = GALLERY_RULE;
   if (Object.keys(problems).length > 0) throw new Refusal(400, "invalid", "Some fields need fixing.", { fields: problems });
   return {
     kind: kind as DraftFields["kind"],
@@ -1103,6 +1146,7 @@ function draftFieldsFrom(input: Record<string, unknown>, current: Draft | null):
     height: numberOf("height", 20000, current?.media?.height ?? null),
     duration: numberOf("duration", 24 * 3600, current?.media?.duration ?? null),
     posterKey: keyOf("poster", current?.posterKey ?? null),
+    pictures,
   };
 }
 

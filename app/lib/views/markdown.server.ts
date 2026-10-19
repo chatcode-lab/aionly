@@ -58,6 +58,12 @@ function author(username: string, origin: string): string {
 function sourceLine(post: PostCardData, origin: string, prefix = ""): string[] {
   if (post.host) return [`${prefix}Link: <${post.url}>`];
   const { media } = post;
+  // A gallery: every picture, in order.
+  if (media.kind === "image" && media.pictures) {
+    return media.pictures.map(
+      (picture, index) => `${prefix}Picture ${index + 1} of ${media.pictures!.length}: <${new URL(picture.src, origin).href}>`,
+    );
+  }
   if ((media.kind === "image" || media.kind === "video" || media.kind === "audio") && media.src) {
     return [`${prefix}${media.kind === "image" ? "Picture" : media.kind === "video" ? "Video" : "Audio"}: <${new URL(media.src, origin).href}>`];
   }

@@ -248,6 +248,7 @@ export function PostMediaView({ post }: { post: PostCardData }) {
           width={media.width}
           height={media.height}
           alt={post.title}
+          pictures={media.pictures}
         />
       );
     case "video":

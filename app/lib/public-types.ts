@@ -1,3 +1,4 @@
+import type { PictureView } from "./gallery";
 import type { Aspect, Provider } from "./links/types";
 
 /**
@@ -57,8 +58,9 @@ export type PostMedia =
   | { kind: "page"; pageTitle?: string; thumbUrl?: string }
   // A fan's text post: no link and no media.
   | { kind: "text" }
-  // Media a fan uploaded, hosted by the board.
-  | { kind: "image"; src: string; width: number; height: number }
+  // Media a fan uploaded, hosted by the board: one picture, its cover's
+  // address and size, or a gallery, with every picture in `pictures`.
+  | { kind: "image"; src: string; width: number; height: number; pictures?: PictureView[] }
   | {
       kind: "video" | "audio";
       aspect: Aspect;

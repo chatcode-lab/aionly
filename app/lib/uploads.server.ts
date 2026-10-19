@@ -1,4 +1,5 @@
 import { entitledCondition, participantCondition } from "./db/accounts.server";
+import { GALLERY_MAX, storedGallery, UPLOAD_SET } from "./gallery";
 import { newId } from "./ids";
 import { MAX_IMAGE_BYTES } from "./images.server";
 import { type MediaType, sniffMedia, stripJpegMetadata, UPLOAD_LIMITS } from "./uploads";
@@ -14,7 +15,7 @@ export type UploadRole = "media" | "poster";
 
 export type UploadResult =
   | { ok: true; key: string; media: MediaType; contentType: string }
-  | { ok: false; reason: "too_large" | "unsupported" | "empty" | "not_allowed" };
+  | { ok: false; reason: "too_large" | "unsupported" | "empty" | "not_allowed" | "too_many" };
 
 const CACHE_CONTROL = "public, max-age=86400";
 
@@ -73,8 +74,10 @@ async function readAll(stream: ReadableStream<Uint8Array>, length: number): Prom
 }
 
 /**
- * Keeps an uploaded file as the account's one pending upload, or a video's
- * poster frame as its one pending post image, replacing any earlier one.
+ * Keeps an uploaded file as the account's pending upload, or a video's
+ * poster frame as its one pending post image, replacing any earlier one. A
+ * picture sent with a `set`, one gallery's, joins the pictures pending in
+ * that set, up to GALLERY_MAX, and replaces only what is pending outside it.
  * Pictures are read whole and lose their metadata; video and audio stream
  * straight into the bucket. `length` is the request's declared size, which
  * the stream must match exactly.
@@ -82,7 +85,7 @@ async function readAll(stream: ReadableStream<Uint8Array>, length: number): Prom
 export async function storeUpload(
   db: D1Database,
   bucket: R2Bucket,
-  input: { ownerId: string; body: ReadableStream<Uint8Array>; length: number; role: UploadRole; now: number },
+  input: { ownerId: string; body: ReadableStream<Uint8Array>; length: number; role: UploadRole; set?: string | null; now: number },
 ): Promise<UploadResult> {
   if (input.length <= 0) return { ok: false, reason: "empty" };
   const { head, whole } = await peek(input.body, 16);
@@ -119,26 +122,35 @@ export async function storeUpload(
   }
 
   const kind = poster ? "post" : "media";
+  // Only a picture joins a gallery's set; any other file stands alone.
+  const set = !poster && sniffed.media === "image" && input.set && UPLOAD_SET.test(input.set) ? input.set : null;
   // Uploads are the plan's, for a member who may take part; the write
   // checks both. The rows it displaces come back from the same batch, so
   // their files are deleted even when two uploads overlap.
   const allowed = (index: number) => `${participantCondition(index, input.now)} AND ${entitledCondition(index, input.now)}`;
+  const gathered = `(SELECT COUNT(*) FROM images WHERE owner_id = ?2 AND kind = 'media' AND state = 'pending' AND upload_set = ?7)`;
   let displaced: string[];
   try {
     const [deleted, inserted] = await db.batch([
       db
-        .prepare(`DELETE FROM images WHERE owner_id = ?1 AND kind = ?2 AND state = 'pending' AND ${allowed(1)} RETURNING key`)
-        .bind(input.ownerId, kind),
+        .prepare(
+          `DELETE FROM images WHERE owner_id = ?1 AND kind = ?2 AND state = 'pending'
+             AND (?3 IS NULL OR upload_set IS NOT ?3) AND ${allowed(1)} RETURNING key`,
+        )
+        .bind(input.ownerId, kind, set),
       db
         .prepare(
-          `INSERT INTO images (key, owner_id, kind, state, content_type, bytes, created_at)
-           SELECT ?1, ?2, ?3, 'pending', ?4, ?5, ?6 WHERE ${allowed(2)}`,
+          `INSERT INTO images (key, owner_id, kind, state, content_type, bytes, created_at, upload_set)
+           SELECT ?1, ?2, ?3, 'pending', ?4, ?5, ?6, ?7 WHERE ${allowed(2)} AND (?7 IS NULL OR ${gathered} < ${GALLERY_MAX})`,
         )
-        .bind(key, input.ownerId, kind, sniffed.contentType, bytes, input.now),
+        .bind(key, input.ownerId, kind, sniffed.contentType, bytes, input.now, set),
     ]);
     if (inserted!.meta.changes === 0) {
       await bucket.delete(key);
-      return { ok: false, reason: "not_allowed" };
+      const full = set
+        ? await db.prepare(`SELECT ${gathered} AS n`).bind(null, input.ownerId, null, null, null, null, set).first<{ n: number }>()
+        : null;
+      return { ok: false, reason: (full?.n ?? 0) >= GALLERY_MAX ? "too_many" : "not_allowed" };
     }
     displaced = (deleted!.results as Array<{ key: string }>).map((row) => row.key);
   } catch (error) {
@@ -150,25 +162,47 @@ export async function storeUpload(
 }
 
 /**
- * Deletes the files of upload posts their authors deleted, as the
- * snapshot sweep does for link posts. A moderator's removal keeps them.
+ * Lets go of one of the account's pending uploads, as when a picture is
+ * taken out of a gallery before it is published, so it counts no more
+ * toward the gallery's ten. Whether there was one.
+ */
+export async function releaseUpload(db: D1Database, bucket: R2Bucket, input: { ownerId: string; key: string }): Promise<boolean> {
+  const released = await db
+    .prepare(`DELETE FROM images WHERE key = ?1 AND owner_id = ?2 AND kind = 'media' AND state = 'pending' RETURNING key`)
+    .bind(input.key, input.ownerId)
+    .first<{ key: string }>();
+  if (released) await bucket.delete(released.key);
+  return released !== null;
+}
+
+/**
+ * Deletes the files of upload posts their authors deleted, every picture
+ * of a gallery included, as the snapshot sweep does for link posts, a few
+ * dozen posts a run. A moderator's removal keeps them.
  */
 export async function sweepDeletedUploads(db: D1Database, bucket: R2Bucket): Promise<number> {
   const { results } = await db
     .prepare(
-      `SELECT image.key FROM images AS image
-       JOIN posts AS post ON post.media_key = image.key
-       WHERE image.kind = 'media' AND post.deleted_at IS NOT NULL AND post.removed_batch_id IS NULL
-       LIMIT 200`,
+      `SELECT post.id, post.media_key, post.pictures FROM posts AS post
+       WHERE post.deleted_at IS NOT NULL AND post.removed_batch_id IS NULL
+         AND (post.media_key IS NOT NULL OR post.pictures IS NOT NULL) AND post.kind = 'upload'
+       LIMIT 50`,
     )
-    .all<{ key: string }>();
+    .all<{ id: string; media_key: string | null; pictures: string | null }>();
   if (results.length === 0) return 0;
-  const keys = results.map((row) => row.key);
-  await bucket.delete(keys);
-  const list = JSON.stringify(keys);
+  const named = results.flatMap((row) => [row.media_key, ...(storedGallery(row.pictures) ?? []).map((picture) => picture.key)]);
+  const keys = [...new Set(named.filter((key): key is string => key !== null))];
+  // Only files the board holds as media; a key no longer held is forgotten all the same.
+  const { results: held } = await db
+    .prepare(`SELECT key FROM images WHERE kind = 'media' AND key IN (SELECT value FROM json_each(?1))`)
+    .bind(JSON.stringify(keys))
+    .all<{ key: string }>();
+  if (held.length > 0) await bucket.delete(held.map((row) => row.key));
   await db.batch([
-    db.prepare(`UPDATE posts SET media_key = NULL WHERE media_key IN (SELECT value FROM json_each(?1))`).bind(list),
-    db.prepare(`DELETE FROM images WHERE key IN (SELECT value FROM json_each(?1))`).bind(list),
+    db
+      .prepare(`UPDATE posts SET media_key = NULL, pictures = NULL WHERE id IN (SELECT value FROM json_each(?1))`)
+      .bind(JSON.stringify(results.map((row) => row.id))),
+    db.prepare(`DELETE FROM images WHERE kind = 'media' AND key IN (SELECT value FROM json_each(?1))`).bind(JSON.stringify(keys)),
   ]);
-  return keys.length;
+  return held.length;
 }

@@ -1,3 +1,4 @@
+import { storedGallery } from "../gallery";
 import { newId } from "../ids";
 import { LOW_KARMA } from "../moderation";
 import { isSettingKey, settingSpec } from "../settings";
@@ -423,16 +424,18 @@ export async function purgePostMedia(
   input: { postId: string; actorId: string; now: number },
 ): Promise<string[] | null> {
   const row = await db
-    .prepare(`SELECT thumb_key, media_key FROM posts WHERE id = ?1 AND removed_batch_id IS NOT NULL`)
+    .prepare(`SELECT thumb_key, media_key, pictures FROM posts WHERE id = ?1 AND removed_batch_id IS NOT NULL`)
     .bind(input.postId)
-    .first<{ thumb_key: string | null; media_key: string | null }>();
+    .first<{ thumb_key: string | null; media_key: string | null; pictures: string | null }>();
   if (!row) return null;
-  const keys = [row.thumb_key, row.media_key].filter((key): key is string => key !== null);
+  // Every picture of a gallery too, the cover once.
+  const named = [row.thumb_key, row.media_key, ...(storedGallery(row.pictures) ?? []).map((picture) => picture.key)];
+  const keys = [...new Set(named.filter((key): key is string => key !== null))];
   // The files go first: should that fail, the post still names them, and
   // asking again finishes the job. Only then are they forgotten and logged.
   if (keys.length > 0) await bucket.delete(keys);
   await db.batch([
-    db.prepare(`UPDATE posts SET thumb_key = NULL, media_key = NULL WHERE id = ?1`).bind(input.postId),
+    db.prepare(`UPDATE posts SET thumb_key = NULL, media_key = NULL, pictures = NULL WHERE id = ?1`).bind(input.postId),
     db.prepare(`DELETE FROM images WHERE key IN (SELECT value FROM json_each(?1))`).bind(JSON.stringify(keys)),
     logAction(db, { id: newId(), batchId: newId(), actorId: input.actorId, action: "purge_media", targetType: "post", targetId: input.postId, reason: null, now: input.now }),
   ]);
