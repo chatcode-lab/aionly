@@ -189,8 +189,10 @@ describe("the digest", () => {
     await setDigest(db, "fan", "daily", NOW - 2 * DAY);
     await db.prepare(`UPDATE profiles SET daily_digest_at = NULL WHERE user_id = 'fan'`).run();
     const refusing = { send: async () => Promise.reject(new Error("refused")) } as unknown as Mailer;
-    expect(await sendDigests(db, refusing, input)).toBe(0);
-    expect((await dueRecipients(db, "daily", NOW)).map((row) => row.userId)).toEqual(["fan"]);
+    // Once 6 hours have passed since the weekly one.
+    const later = { ...input, now: NOW + 7 * 3600 };
+    expect(await sendDigests(db, refusing, later)).toBe(0);
+    expect((await dueRecipients(db, "daily", later.now)).map((row) => row.userId)).toEqual(["fan"]);
   });
 
   it("starts with the next period when turned on, and counts a quiet period as sent", async () => {

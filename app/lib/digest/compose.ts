@@ -41,11 +41,11 @@ const MONTHS = ["January", "February", "March", "April", "May", "June", "July", 
  * week", or the month by name. Without a period, as in an admin's test, the
  * past week or month up to now.
  */
-export function periodName(frequency: Frequency, period?: { from: number }): string {
+export function periodName(frequency: Frequency, period?: { to: number }): string {
   if (!period) return frequency === "monthly" ? "the past month" : frequency === "weekly" ? "the past week" : "the past day";
   if (frequency === "daily") return "the past day";
   if (frequency === "weekly") return "last week";
-  return MONTHS[new Date(period.from * 1000).getUTCMonth()]!;
+  return MONTHS[new Date(period.to * 1000).getUTCMonth()]!;
 }
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
@@ -110,36 +110,67 @@ ${post.excerpt ? `<div style="color:#55524c;font-size:14px;line-height:20px;marg
 
 const HOUR = 3600;
 const DAY = 24 * HOUR;
-/** Digests go out from this hour, UTC: morning in Europe, before the US wakes. */
-export const SEND_HOUR_UTC = 7;
 
-/**
- * When the current period's digest became due: today at the sending hour,
- * this Monday, or the first of this month. An account whose last digest
- * went out before this time gets one.
- */
-export function periodStart(frequency: Frequency, now: number): number {
-  const date = new Date(now * 1000);
-  const today = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()) / 1000 + SEND_HOUR_UTC * HOUR;
-  const latest = (at: number) => (at > now ? null : at);
-  if (frequency === "daily") return latest(today) ?? today - DAY;
-  if (frequency === "weekly") {
-    const sinceMonday = (date.getUTCDay() + 6) % 7;
-    const monday = today - sinceMonday * DAY;
-    return latest(monday) ?? monday - 7 * DAY;
-  }
-  const first = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1) / 1000 + SEND_HOUR_UTC * HOUR;
-  if (first <= now) return first;
-  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth() - 1, 1) / 1000 + SEND_HOUR_UTC * HOUR;
+// Periods end at 23:00 UTC. The daily digest goes out from 07:00, so a post
+// made late in the day has had 8 hours to gather votes and comments before
+// it is counted; the weekly and monthly ones go out from 19:00, so no two
+// kinds go out together: the weekly on Monday, for the week to Sunday
+// night, and the monthly on the month's first working day, or the Tuesday
+// when that is a Monday, for the month to its last night.
+const CUTOFF_HOUR_UTC = 23;
+const DAILY_HOUR_UTC = 7;
+const LATER_HOUR_UTC = 19;
+
+/** Midnight UTC of the day `at` falls on. */
+const dayOf = (at: number) => Math.floor(at / DAY) * DAY;
+
+/** 0 for Sunday to 6 for Saturday. */
+const weekday = (at: number) => new Date(at * 1000).getUTCDay();
+
+/** 23:00 the night before a day. */
+const cutoffBefore = (day: number) => day - (24 - CUTOFF_HOUR_UTC) * HOUR;
+
+/** Midnight UTC on the first of the month `offset` months from the one `at` falls in. */
+function monthStart(at: number, offset = 0): number {
+  const date = new Date(at * 1000);
+  return Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + offset, 1) / 1000;
+}
+
+/** When a month's digest goes out: its first working day that is not a Monday, at 19:00. */
+function monthlyDue(first: number): number {
+  let day = first;
+  while ([0, 1, 6].includes(weekday(day))) day += DAY;
+  return day + LATER_HOUR_UTC * HOUR;
 }
 
 /**
- * The posts a digest due now covers: those made from the start of the
- * period before to the start of this one. Periods of a kind meet without
- * overlapping, so one digest never lists a post the one before it did,
- * however late in its period either was sent.
+ * When the current period's digest became due: today at 07:00, this
+ * week's Monday at 19:00, or this month's sending day at 19:00. An account
+ * whose last digest of the kind went out before this time gets one.
+ */
+export function periodStart(frequency: Frequency, now: number): number {
+  const today = dayOf(now);
+  if (frequency === "daily") {
+    const due = today + DAILY_HOUR_UTC * HOUR;
+    return due <= now ? due : due - DAY;
+  }
+  if (frequency === "weekly") {
+    const due = today - ((weekday(now) + 6) % 7) * DAY + LATER_HOUR_UTC * HOUR;
+    return due <= now ? due : due - 7 * DAY;
+  }
+  const due = monthlyDue(monthStart(now));
+  return due <= now ? due : monthlyDue(monthStart(now, -1));
+}
+
+/**
+ * The posts a digest due now covers: those made in the period that ended at
+ * 23:00 before it was due, the day, the week to Sunday, or the month to its
+ * last day. Periods of a kind meet without overlapping, so one digest never
+ * lists a post the one before it did, however late either was sent.
  */
 export function periodWindow(frequency: Frequency, now: number): { from: number; to: number } {
-  const to = periodStart(frequency, now);
-  return { from: periodStart(frequency, to - 1), to };
+  const due = periodStart(frequency, now);
+  if (frequency === "monthly") return { from: cutoffBefore(monthStart(due, -1)), to: cutoffBefore(monthStart(due)) };
+  const to = cutoffBefore(dayOf(due));
+  return { from: to - (frequency === "daily" ? DAY : 7 * DAY), to };
 }

@@ -4,9 +4,10 @@ import { dueRecipients, sendDigests, sendTestDigest, setDigest } from "../../app
 import type { Mailer } from "../../app/lib/mail/mailers.server";
 import { comment, DAY, db, NOW, post, reset, user } from "./fixtures";
 
-// NOW is Friday, 15 January 2027, 08:00 UTC: the daily digest covers from
-// 07:00 the day before, the weekly one Monday 4 to Monday 11 January, and
-// the monthly one December.
+// NOW is Friday, 15 January 2027, 08:00 UTC. The daily digest due at 07:00
+// covers 23:00 on the 13th to 23:00 on the 14th; the weekly one, due Monday
+// the 11th at 19:00, the week to Sunday the 10th at 23:00; the monthly one,
+// due Friday the 1st at 19:00, December.
 const HOUR = 3600;
 
 interface Sent {
@@ -93,27 +94,27 @@ describe("a digest's posts", () => {
 describe("digests of one kind", () => {
   it("never list a post twice, however late in its period each was sent", async () => {
     await setDigest(db, "reader", "daily", NOW - 3 * DAY);
-    // Before and after the 07:00 boundary; both exist when the first goes out.
-    await post("before", { author: "maker", age: 90 * 60, title: "Made before seven", score: 6 });
-    await post("after", { author: "maker", age: 30 * 60, title: "Made after seven", score: 8 });
+    // Either side of the 23:00 cutoff; both exist when the first goes out.
+    await post("before", { author: "maker", age: 9.5 * HOUR, title: "Made before eleven", score: 6 });
+    await post("after", { author: "maker", age: 8.5 * HOUR, title: "Made after eleven", score: 8 });
 
     await sendDigests(db, mailer, { ...input, now: NOW + 2 * HOUR });
-    expect(sent.map((email) => email.subject)).toEqual(["The past day on aion.ly: Made before seven"]);
-    expect(sent[0]!.text).not.toContain("Made after seven");
+    expect(sent.map((email) => email.subject)).toEqual(["The past day on aion.ly: Made before eleven"]);
+    expect(sent[0]!.text).not.toContain("Made after eleven");
 
     await sendDigests(db, mailer, { ...input, now: NOW + DAY - 90 * 60 });
     expect(sent).toHaveLength(1);
     await sendDigests(db, mailer, { ...input, now: NOW + DAY });
     expect(sent.map((email) => email.subject)).toEqual([
-      "The past day on aion.ly: Made before seven",
-      "The past day on aion.ly: Made after seven",
+      "The past day on aion.ly: Made before eleven",
+      "The past day on aion.ly: Made after eleven",
     ]);
-    expect(sent[1]!.text).not.toContain("Made before seven");
+    expect(sent[1]!.text).not.toContain("Made before eleven");
   });
 });
 
 describe("the daily digest", () => {
-  it("brings the weekly and monthly ones, and the weekly one the monthly", async () => {
+  it("brings the weekly and monthly ones, and the weekly one the monthly, never two at once", async () => {
     await member("weekly", "week_reader");
     await member("monthly", "month_reader");
     await setDigest(db, "reader", "daily", NOW - 60 * DAY);
@@ -123,8 +124,16 @@ describe("the daily digest", () => {
     await post("week", { author: "maker", age: 6 * DAY, title: "Of the week", score: 5 });
     await post("month", { author: "maker", age: 20 * DAY, title: "Of December", score: 5 });
 
-    expect(await sendDigests(db, mailer, input)).toBe(6);
+    // All three are due now, but each account gets one digest at a time,
+    // the next once 6 hours have passed.
     const got = (to: string) => sent.filter((email) => email.to === `${to}@example.invalid`).map((email) => email.subject);
+    expect(await sendDigests(db, mailer, input)).toBe(3);
+    expect(got("reader")).toEqual(["The past day on aion.ly: Of the day"]);
+    expect(got("weekly")).toEqual(["Last week on aion.ly: Of the week"]);
+    expect(got("monthly")).toEqual(["December on aion.ly: Of December"]);
+    expect(await sendDigests(db, mailer, { ...input, now: NOW + 3 * HOUR })).toBe(0);
+    expect(await sendDigests(db, mailer, { ...input, now: NOW + 6 * HOUR })).toBe(2);
+    expect(await sendDigests(db, mailer, { ...input, now: NOW + 12 * HOUR })).toBe(1);
     expect(got("reader")).toEqual([
       "The past day on aion.ly: Of the day",
       "Last week on aion.ly: Of the week",
@@ -143,10 +152,12 @@ describe("the daily digest", () => {
       .prepare(`SELECT daily_digest_at, weekly_digest_at, monthly_digest_at FROM profiles WHERE user_id = 'reader'`)
       .first();
     expect(at).toEqual({ daily_digest_at: NOW - HOUR / 2, weekly_digest_at: NOW - HOUR / 2, monthly_digest_at: NOW - 60 * DAY });
-    // The month's is still due; today's and this week's come with their next periods.
-    expect((await dueRecipients(db, "monthly", NOW)).map((row) => row.userId)).toEqual(["reader"]);
-    expect(await dueRecipients(db, "weekly", NOW)).toEqual([]);
-    expect(await dueRecipients(db, "daily", NOW)).toEqual([]);
+    // The month's is still due, once 6 hours have passed since the choice
+    // counted as a digest; today's and this week's come with their next periods.
+    expect(await dueRecipients(db, "monthly", NOW)).toEqual([]);
+    expect((await dueRecipients(db, "monthly", NOW + 6 * HOUR)).map((row) => row.userId)).toEqual(["reader"]);
+    expect(await dueRecipients(db, "weekly", NOW + 6 * HOUR)).toEqual([]);
+    expect(await dueRecipients(db, "daily", NOW + 6 * HOUR)).toEqual([]);
   });
 });
 

@@ -20,6 +20,9 @@ import {
 /** Accounts sent to in one hourly run, per frequency; the next run carries on. */
 const BATCH = 100;
 
+/** No account gets two digests within this long, so kinds due at once go out apart. */
+const APART = 6 * 3600;
+
 /** When each kind of digest last went to an account. */
 const SENT_AT: Record<Frequency, string> = { daily: "daily_digest_at", weekly: "weekly_digest_at", monthly: "monthly_digest_at" };
 
@@ -84,9 +87,14 @@ export interface Recipient {
   chosen: Frequency;
 }
 
+/** When the account last got any digest, or one counted as sent. */
+const LAST_DIGEST = (profile: string) =>
+  `MAX(COALESCE(${profile}daily_digest_at, 0), COALESCE(${profile}weekly_digest_at, 0), COALESCE(${profile}monthly_digest_at, 0))`;
+
 /**
  * Accounts due this period's digest of a kind: with a choice that brings
- * it, a sign-in email, and none of that kind sent since the period began.
+ * it, a sign-in email, none of that kind sent since the period began, and
+ * no digest of any kind in the last few hours.
  */
 export async function dueRecipients(db: D1Database, frequency: Frequency, now: number, limit = BATCH): Promise<Recipient[]> {
   const sentAt = `profile.${SENT_AT[frequency]}`;
@@ -95,10 +103,11 @@ export async function dueRecipients(db: D1Database, frequency: Frequency, now: n
       `SELECT profile.user_id, account."email", profile.digest FROM profiles AS profile
        JOIN "user" AS account ON account."id" = profile.user_id
        WHERE profile.digest IN (SELECT value FROM json_each(?1)) AND (${sentAt} IS NULL OR ${sentAt} < ?2)
+         AND ${LAST_DIGEST("profile.")} <= ?4
          AND profile.deleted_at IS NULL AND profile.owner_id IS NULL
        LIMIT ?3`,
     )
-    .bind(chosenWith(frequency), periodStart(frequency, now), limit)
+    .bind(chosenWith(frequency), periodStart(frequency, now), limit, now - APART)
     .all<{ user_id: string; email: string; digest: Frequency }>();
   return results.map((row) => ({ userId: row.user_id, email: row.email, chosen: row.digest }));
 }
@@ -179,8 +188,9 @@ async function digestBar(db: D1Database): Promise<Bar> {
 }
 
 /**
- * Sends every digest that is due, a batch per kind per run. A period with
- * nothing notable sends nothing, and still counts as sent. Each address
+ * Sends every digest that is due, a batch per kind per run, never two to
+ * one account within a few hours. A period with nothing notable sends
+ * nothing, and still counts as sent. Each address
  * gets its own message, with its own unsubscribe link. Recipients are
  * claimed before anything is sent, so two runs at once never send one
  * twice; a refused send is released and tried again next run, and a run
@@ -202,10 +212,16 @@ export async function sendDigests(
       .prepare(
         `UPDATE profiles SET ${sentAt} = ?3
          WHERE user_id IN (SELECT value FROM json_each(?1)) AND digest IN (SELECT value FROM json_each(?4))
-           AND (${sentAt} IS NULL OR ${sentAt} < ?2)
+           AND (${sentAt} IS NULL OR ${sentAt} < ?2) AND ${LAST_DIGEST("")} <= ?5
          RETURNING user_id`,
       )
-      .bind(JSON.stringify(due.map((recipient) => recipient.userId)), periodStart(frequency, input.now), input.now, chosenWith(frequency))
+      .bind(
+        JSON.stringify(due.map((recipient) => recipient.userId)),
+        periodStart(frequency, input.now),
+        input.now,
+        chosenWith(frequency),
+        input.now - APART,
+      )
       .all<{ user_id: string }>();
     const mine = new Set(claimed.map((row) => row.user_id));
     const recipients = due.filter((recipient) => mine.has(recipient.userId));

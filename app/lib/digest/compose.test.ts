@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { composeDigest, periodName, periodStart, periodWindow, SEND_HOUR_UTC } from "./compose";
+import { composeDigest, periodName, periodStart, periodWindow } from "./compose";
 
 const at = (iso: string) => Date.parse(iso) / 1000;
 
@@ -43,39 +43,48 @@ describe("the digest email", () => {
 });
 
 describe("what a digest covers", () => {
-  it("is the period before the one just begun, so periods of a kind never overlap", () => {
-    const now = at("2026-10-15T09:00:00Z");
-    expect(periodWindow("daily", now)).toEqual({ from: at("2026-10-14T07:00:00Z"), to: at("2026-10-15T07:00:00Z") });
-    expect(periodWindow("weekly", now)).toEqual({ from: at("2026-10-05T07:00:00Z"), to: at("2026-10-12T07:00:00Z") });
-    expect(periodWindow("monthly", now)).toEqual({ from: at("2026-09-01T07:00:00Z"), to: at("2026-10-01T07:00:00Z") });
-    expect(periodWindow("monthly", at("2026-01-01T08:00:00Z"))).toEqual({ from: at("2025-12-01T07:00:00Z"), to: at("2026-01-01T07:00:00Z") });
-    // The next one starts where this one ends.
-    expect(periodWindow("weekly", at("2026-10-19T07:00:00Z")).from).toBe(periodWindow("weekly", now).to);
+  // October 15, 2026 is a Thursday.
+  const now = at("2026-10-15T09:00:00Z");
+
+  it("ends at 23:00 the night before it is due, so late posts have had time to gather votes", () => {
+    expect(periodWindow("daily", now)).toEqual({ from: at("2026-10-13T23:00:00Z"), to: at("2026-10-14T23:00:00Z") });
+    expect(periodWindow("weekly", now)).toEqual({ from: at("2026-10-04T23:00:00Z"), to: at("2026-10-11T23:00:00Z") });
+    expect(periodWindow("monthly", now)).toEqual({ from: at("2026-08-31T23:00:00Z"), to: at("2026-09-30T23:00:00Z") });
+    expect(periodWindow("monthly", at("2027-01-01T20:00:00Z"))).toEqual({ from: at("2026-11-30T23:00:00Z"), to: at("2026-12-31T23:00:00Z") });
+  });
+
+  it("starts where the one before ended, so periods of a kind never overlap", () => {
+    expect(periodWindow("daily", at("2026-10-16T07:00:00Z")).from).toBe(periodWindow("daily", now).to);
+    expect(periodWindow("weekly", at("2026-10-19T19:00:00Z")).from).toBe(periodWindow("weekly", now).to);
+    // November 1, 2026 is a Sunday and the 2nd a Monday, so November's goes on Tuesday the 3rd.
+    expect(periodWindow("monthly", at("2026-11-03T19:00:00Z")).from).toBe(periodWindow("monthly", now).to);
   });
 
   it("is named by its kind, and a month by its name", () => {
-    expect(periodName("daily", { from: 0 })).toBe("the past day");
-    expect(periodName("weekly", { from: 0 })).toBe("last week");
-    expect(periodName("monthly", { from: at("2026-09-01T07:00:00Z") })).toBe("September");
+    expect(periodName("daily", { to: 0 })).toBe("the past day");
+    expect(periodName("weekly", { to: 0 })).toBe("last week");
+    expect(periodName("monthly", periodWindow("monthly", now))).toBe("September");
     expect(periodName("monthly")).toBe("the past month");
   });
 });
 
 describe("when a period's digest is due", () => {
-  it("is today at the sending hour, or yesterday before it", () => {
-    expect(periodStart("daily", at("2026-10-15T09:00:00Z"))).toBe(at(`2026-10-15T0${SEND_HOUR_UTC}:00:00Z`));
+  it("is 07:00 every day", () => {
+    expect(periodStart("daily", at("2026-10-15T09:00:00Z"))).toBe(at("2026-10-15T07:00:00Z"));
     expect(periodStart("daily", at("2026-10-15T06:59:00Z"))).toBe(at("2026-10-14T07:00:00Z"));
   });
 
-  it("is this Monday for the weekly one", () => {
-    // October 15, 2026 is a Thursday.
-    expect(periodStart("weekly", at("2026-10-15T09:00:00Z"))).toBe(at("2026-10-12T07:00:00Z"));
-    expect(periodStart("weekly", at("2026-10-12T06:00:00Z"))).toBe(at("2026-10-05T07:00:00Z"));
+  it("is Monday at 19:00 for the weekly one", () => {
+    expect(periodStart("weekly", at("2026-10-15T09:00:00Z"))).toBe(at("2026-10-12T19:00:00Z"));
+    expect(periodStart("weekly", at("2026-10-12T18:00:00Z"))).toBe(at("2026-10-05T19:00:00Z"));
   });
 
-  it("is the first of the month for the monthly one", () => {
-    expect(periodStart("monthly", at("2026-10-15T09:00:00Z"))).toBe(at("2026-10-01T07:00:00Z"));
-    expect(periodStart("monthly", at("2026-10-01T05:00:00Z"))).toBe(at("2026-09-01T07:00:00Z"));
-    expect(periodStart("monthly", at("2026-01-01T05:00:00Z"))).toBe(at("2025-12-01T07:00:00Z"));
+  it("is the month's first working day at 19:00 for the monthly one, but never a Monday, the weekly one's day", () => {
+    expect(periodStart("monthly", at("2026-10-15T09:00:00Z"))).toBe(at("2026-10-01T19:00:00Z"));
+    expect(periodStart("monthly", at("2026-10-01T18:00:00Z"))).toBe(at("2026-09-01T19:00:00Z"));
+    // February 1, 2027 is a Monday; May 1, 2027 a Saturday.
+    expect(periodStart("monthly", at("2027-02-10T00:00:00Z"))).toBe(at("2027-02-02T19:00:00Z"));
+    expect(periodStart("monthly", at("2027-05-10T00:00:00Z"))).toBe(at("2027-05-04T19:00:00Z"));
+    expect(periodStart("monthly", at("2027-01-01T05:00:00Z"))).toBe(at("2026-12-01T19:00:00Z"));
   });
 });
