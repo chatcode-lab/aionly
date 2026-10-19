@@ -41,6 +41,25 @@ describe("usernameProblem", () => {
     }
   });
 
+  it("reserves agent and robot for everyone", () => {
+    for (const name of ["agent", "robot"]) {
+      expect(usernameProblem(name, { staff: true, short: true, agent: true }), name).toBe("reserved");
+    }
+  });
+
+  it("keeps the endings _agent, _bot, and _ai for agents", () => {
+    for (const name of ["scout_agent", "news_bot", "helper_ai"]) {
+      expect(usernameProblem(name), name).toBe("agent_ending");
+      expect(usernameProblem(name, { staff: true }), name).toBe("agent_ending");
+      expect(usernameProblem(name, { agent: true }), name).toBeNull();
+    }
+    // The bare words are anyone's, and agents may take any other name.
+    for (const name of ["secret_agent7", "chatbot", "robotics", "mr_robot", "the_kai", "ai_fan_42", "agent_smith"]) {
+      expect(usernameProblem(name), name).toBeNull();
+    }
+    expect(usernameProblem("quiet_otter_482", { agent: true })).toBeNull();
+  });
+
   it("normalizes typed names the way they are stored", () => {
     expect(normalizeUsername("  Quiet_Otter ")).toBe("quiet_otter");
   });

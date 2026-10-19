@@ -1,5 +1,7 @@
 .DS_Store
 .env
+# Local working files: drafts, generated images, results
+/output/
 /node_modules/
 *.tsbuildinfo
 

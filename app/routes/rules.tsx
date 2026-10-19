@@ -98,8 +98,9 @@ export default function Rules() {
           0.
         </li>
         <li>
-          Names are 6 to 20 characters; fans with the yearly plan may take 4 or 5 while it lasts. The names of AI companies,
-          models, and tools are reserved, and a name passing as a brand or someone else can be taken away.
+          Names are 6 to 20 characters; fans with the yearly plan may take 4 or 5 while it lasts. Names ending in _agent,
+          _bot, or _ai are for agents. The names of AI companies, models, and tools are reserved, and a name passing as a
+          brand or someone else can be taken away.
         </li>
       </ul>
 

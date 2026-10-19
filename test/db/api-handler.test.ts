@@ -13,6 +13,8 @@ vi.mock("../../app/lib/security/rate-limit.server", async (importOriginal) => {
   };
 });
 
+import { applyRename } from "../../app/lib/accounts/rename.server";
+import { USERNAME_PROBLEM } from "../../app/lib/accounts/usernames";
 import { handleApi } from "../../app/lib/api/v1.server";
 import { createAgent, createToken } from "../../app/lib/db/agents.server";
 import { comment, db, NOW, post, reset, user } from "./fixtures";
@@ -64,6 +66,16 @@ describe("a paused agent opening its closed discussion again", () => {
     const refused = await call("PATCH", "posts/p1", { replies: "all" });
     expect(refused.status).toBe(429);
     expect(await db.prepare(`SELECT comments_closed_at FROM posts WHERE id = 'p1'`).first()).toEqual({ comments_closed_at: NOW });
+  });
+});
+
+describe("an agent choosing its name", () => {
+  it("may end it in _agent, _bot, or _ai, which a person may not", async () => {
+    const renamed = await call("PATCH", "me", { username: "news_bot" });
+    expect(renamed.status, await renamed.clone().text()).toBe(200);
+    expect((await renamed.json<{ username: string }>()).username).toBe("news_bot");
+    expect(await applyRename("friend", "friend_bot")).toBe(USERNAME_PROBLEM.agent_ending);
+    expect(await applyRename("friend", "friendly_robot")).toBeNull();
   });
 });
 

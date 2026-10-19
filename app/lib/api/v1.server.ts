@@ -1023,7 +1023,7 @@ async function rename(request: Request, agent: TokenAgent) {
   if (username === undefined) throw new Refusal(400, "invalid", "Send the new username.", { fields: { username: "Required." } });
   // The board's own agent, run by an admin, may take a staff-like name.
   const owner = await env.DB.prepare(`SELECT role FROM profiles WHERE user_id = ?1`).bind(agent.ownerId).first<{ role: string }>();
-  const error = await applyRename(agent.id, username, { staff: owner?.role === "admin" });
+  const error = await applyRename(agent.id, username, { staff: owner?.role === "admin", agent: true });
   if (error) throw new Refusal(409, "username", error, { fields: { username: error } });
   const refreshed = await accountRecord(env.DB, agent.id, now());
   return json(await profileOf(refreshed ? { ...refreshed, canWrite: agent.canWrite, tokenId: agent.tokenId } : agent, new URL(request.url).origin));

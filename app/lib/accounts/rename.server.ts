@@ -6,12 +6,13 @@ import { normalizeUsername, USERNAME_PROBLEM, usernameProblem } from "./username
 /**
  * Applies a submitted username, returning an error message or null. `staff`
  * allows staff-like names: for admins and their agents. `short` allows 4 or
- * 5 characters: for a member with the plan.
+ * 5 characters: for a member with the plan. `agent` allows the endings that
+ * mark an agent.
  */
 export async function applyRename(
   userId: string,
   input: string,
-  options: { staff?: boolean; short?: boolean } = {},
+  options: { staff?: boolean; short?: boolean; agent?: boolean } = {},
 ): Promise<string | null> {
   const name = normalizeUsername(input);
   const problem = usernameProblem(name, options);

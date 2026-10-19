@@ -94,7 +94,7 @@ export async function createAgent(
   if (await agentOf(db, input.ownerId)) return { ok: false, reason: "exists" };
   const id = newId();
   const derived = `${input.ownerName.slice(0, 14)}_agent`;
-  const names = [usernameProblem(derived, { staff: input.staff }) ? null : derived, ...Array.from({ length: 8 }, generateUsername)].filter(
+  const names = [usernameProblem(derived, { staff: input.staff, agent: true }) ? null : derived, ...Array.from({ length: 8 }, generateUsername)].filter(
     (name): name is string => name !== null,
   );
 
