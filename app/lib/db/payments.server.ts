@@ -67,11 +67,15 @@ export function paymentStatements(db: D1Database, input: PaymentInput): D1Prepar
 }
 
 /**
- * Payments billed together, as SQL on `payments` (`alias`): one invoice's,
- * by the invoice's ID, which a plan's payment is recorded under and a
- * 4-letter username bought with it names; any other payment is its own.
+ * The payments billed together with the one whose billing key is `key`
+ * (SQL), as SQL on `payments` (`alias`): one invoice's, the payment
+ * recorded under the invoice's ID and any that name it, as the 4-letter
+ * username bought with the plan does; any other payment is its own. A
+ * payment's key is `COALESCE(invoice_id, id)`. Written as two indexed
+ * equalities, so finding them reads those few rows, never the ledger
+ * (review F85).
  */
-const BILLED = (alias: string) => `COALESCE(${alias}.invoice_id, ${alias}.id)`;
+const BILLED_WITH = (alias: string, key: string) => `(${alias}.id = ${key} OR ${alias}.invoice_id = ${key})`;
 
 /**
  * Sets the refunded part of the payments named by ID, invoice, or payment
@@ -83,20 +87,25 @@ const BILLED = (alias: string) => `COALESCE(${alias}.invoice_id, ${alias}.id)`;
  * each time, whichever of a shared invoice's payments was recorded first.
  */
 function applyRefunds(db: D1Database, id: string | null, paymentIntent: string | null): D1PreparedStatement {
+  const key = "COALESCE(payments.invoice_id, payments.id)";
+  // The billing keys touched: the ID itself (a payment's, or an invoice's
+  // that a refund names), and those of the payments with that ID or intent.
+  const touched = `SELECT ?1
+    UNION SELECT COALESCE(touched.invoice_id, touched.id) FROM payments AS touched WHERE touched.id = ?1
+    UNION SELECT COALESCE(touched.invoice_id, touched.id) FROM payments AS touched WHERE touched.payment_intent = ?2`;
   return db
     .prepare(
       `UPDATE payments SET refunded_cents = MIN(amount_cents, MAX(0,
          CAST(ROUND(
-           (SELECT SUM(member.amount_cents) FROM payments AS member WHERE ${BILLED("member")} = ${BILLED("payments")})
+           (SELECT SUM(member.amount_cents) FROM payments AS member WHERE ${BILLED_WITH("member", key)})
            * COALESCE((SELECT MAX(refund.refunded * 1.0 / refund.paid) FROM refunds AS refund
-               WHERE refund.invoice_id = ${BILLED("payments")}
+               WHERE refund.invoice_id = ${key}
                   OR refund.payment_intent IN (SELECT member.payment_intent FROM payments AS member
-                       WHERE ${BILLED("member")} = ${BILLED("payments")} AND member.payment_intent IS NOT NULL)), 0)) AS INTEGER)
+                       WHERE ${BILLED_WITH("member", key)})), 0)) AS INTEGER)
          - COALESCE((SELECT SUM(earlier.amount_cents) FROM payments AS earlier
-             WHERE ${BILLED("earlier")} = ${BILLED("payments")}
+             WHERE ${BILLED_WITH("earlier", key)}
                AND (earlier.kind <> 'plan', earlier.id) < (payments.kind <> 'plan', payments.id)), 0)))
-       WHERE ${BILLED("payments")} IN (SELECT ${BILLED("touched")} FROM payments AS touched
-         WHERE touched.id = ?1 OR touched.invoice_id = ?1 OR touched.payment_intent = ?2)`,
+       WHERE id IN (${touched}) OR invoice_id IN (${touched})`,
     )
     .bind(id, paymentIntent);
 }

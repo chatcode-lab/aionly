@@ -183,19 +183,32 @@ describe("the 4-letter username", () => {
     expect(paidNameAllowance({ ...session, metadata: { kind: "fresh_start" } })).toBeNull();
   });
 
-  it("is found among the customer's completed checkouts, so it is not sold twice (review F81)", async () => {
+  it("is found among the customer's completed checkouts, paid, still being paid, or failed (reviews F81, F84)", async () => {
+    const name = { kind: "name_allowance", name_length: "4", name_cents: "25000" };
     const fetcher = (async (input: RequestInfo | URL) => {
       const url = new URL(String(input));
       expect(url.searchParams.get("status")).toBe("complete");
+      expect(url.searchParams.getAll("expand[0]")).toEqual(["data.payment_intent"]);
       return Response.json({
         data: [
-          { id: "cs_plan", metadata: { user_id: "u1" } },
-          { id: "cs_name", metadata: { kind: "name_allowance" }, payment_status: "paid" },
+          { id: "cs_plan", mode: "subscription", payment_status: "paid", metadata: { user_id: "u1" } },
+          { id: "cs_paid", mode: "payment", client_reference_id: "u1", payment_status: "paid", metadata: name, payment_intent: { id: "pi_1", status: "succeeded" } },
+          { id: "cs_slow", mode: "payment", payment_status: "unpaid", metadata: name, payment_intent: { id: "pi_2", status: "processing" } },
+          { id: "cs_failed", mode: "payment", payment_status: "unpaid", metadata: name, payment_intent: { id: "pi_3", status: "requires_payment_method" } },
+          { id: "cs_bundle", mode: "subscription", payment_status: "unpaid", metadata: name, subscription: { id: "sub_1", status: "incomplete_expired" } },
         ],
         has_more: false,
       });
     }) as typeof fetch;
-    expect((await completedNameCheckouts(stripeClient("sk_test_unit", fetcher), "cus_1")).map((session) => session.id)).toEqual(["cs_name"]);
+    const found = await completedNameCheckouts(stripeClient("sk_test_unit", fetcher), "cus_1");
+    expect(found.map((item) => [item.session.id, item.state])).toEqual([
+      ["cs_paid", "paid"],
+      ["cs_slow", "pending"],
+      ["cs_failed", "failed"],
+      ["cs_bundle", "failed"],
+    ]);
+    // The payment intent comes back as its ID, as the rest of the board reads it.
+    expect(found[0]!.session.payment_intent).toBe("pi_1");
   });
 
   it("is left out of the plan's part of an invoice, which partners share", () => {

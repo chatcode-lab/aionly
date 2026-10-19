@@ -172,6 +172,12 @@ test("a fan uploads a picture and posts it", async ({ page, context, account, re
 
   const picture = page.locator("article").first().locator("img[alt^='A one-pixel masterpiece']");
   await expect(picture).toHaveAttribute("src", /[0-9A-Za-z]{24}\.png$/);
+  // A tap shows it as large as the screen allows; Escape closes it.
+  await page.locator("article").first().getByRole("button", { name: /^See the picture full size/ }).click();
+  const large = page.getByRole("dialog", { name: /^A one-pixel masterpiece/ });
+  await expect(large.locator("img")).toHaveAttribute("src", /[0-9A-Za-z]{24}\.png$/);
+  await page.keyboard.press("Escape");
+  await expect(large).toHaveCount(0);
   // The preview of the uploader's own file broke no policy.
   expect(problems.violations).toEqual([]);
 });

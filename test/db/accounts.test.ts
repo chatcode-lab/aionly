@@ -168,6 +168,10 @@ describe("short names and given names", () => {
     expect(await grantNameAllowance(db, { ...bought, sessionId: "cs_again", paidAt: NOW + 60 })).toEqual({ granted: true, duplicate: true });
     // Asked again, the first is still the first.
     expect(await grantNameAllowance(db, bought)).toEqual({ granted: true, duplicate: false });
+    // Whatever the order and the second: one applied in the same second
+    // with an ID that sorts first is still the second payment.
+    expect(await grantNameAllowance(db, { ...bought, sessionId: "cs_a", paidAt: NOW })).toEqual({ granted: true, duplicate: true });
+    expect((await db.prepare(`SELECT session_id FROM name_allowances WHERE user_id = 'past'`).all()).results).toEqual([{ session_id: "cs_name" }]);
     expect(await accountRecord(db, "house", NOW)).toMatchObject({ shortestName: 4 });
     expect(await renameUser(db, "house", "aion", NOW)).toEqual({ ok: true });
   });

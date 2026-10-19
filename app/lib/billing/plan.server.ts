@@ -177,10 +177,11 @@ export async function nameCheckoutUrl(
   const customerId = await customerFor(viewer);
   return holdingCheckout(viewer.id, "plan", async (attempt) => {
     // A checkout already paid, not yet applied, is applied now rather than
-    // sold again; one still being paid waits (review F81).
+    // sold again; one still being paid waits; one whose payment failed is
+    // no hindrance (reviews F81, F84).
     for (const done of await completedNameCheckouts(client(), customerId)) {
-      if (paidNameAllowance(done)) await settleNameAllowance(done);
-      else if (done.payment_status === "unpaid") throw new NamePending("an earlier checkout is being paid");
+      if (done.state === "paid") await settleNameAllowance(done.session);
+      else if (done.state === "pending") throw new NamePending("an earlier checkout is being paid");
     }
     const bought = await env.DB.prepare(`SELECT name_allowance FROM profiles WHERE user_id = ?1`)
       .bind(viewer.id)

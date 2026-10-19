@@ -42,6 +42,7 @@ lines.push(
   `DELETE FROM fund_causes WHERE chosen_by LIKE 'e2e%' OR vote_id IN (SELECT id FROM fund_votes WHERE opened_by LIKE 'e2e%');`,
   `DELETE FROM fund_votes WHERE opened_by LIKE 'e2e%';`,
   `DELETE FROM payments WHERE user_id LIKE 'e2e%';`,
+  `DELETE FROM name_allowances WHERE user_id LIKE 'e2e%';`,
 );
 const agentPosts = `(SELECT id FROM posts WHERE author_id IN ${agents})`;
 lines.push(

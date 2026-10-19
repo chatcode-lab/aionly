@@ -5,7 +5,7 @@ import { handleWebhook } from "../../app/lib/billing/plan.server";
 import { signWebhook } from "../../app/lib/billing/stripe";
 import { applyFreshStart } from "../../app/lib/db/fresh-starts.server";
 import { forgetFundStarted, fundStarted, fundSummary, giftStanding, recordGift, setShowGift } from "../../app/lib/db/fund.server";
-import { recordPayment, recordRefund } from "../../app/lib/db/payments.server";
+import { paymentStatements, recordPayment, recordRefund } from "../../app/lib/db/payments.server";
 import { profileByName } from "../../app/lib/db/profiles.server";
 import { db, NOW, reset, user } from "./fixtures";
 
@@ -187,6 +187,17 @@ describe("payments and the fund", () => {
       { id: "in_combo", kind: "plan", amount_cents: 7000, refunded_cents: 7000 },
       { id: "cs_combo", kind: "name", amount_cents: 25000, refunded_cents: 25000 },
     ]);
+  });
+
+  it("works refunds out over a payment's own invoice, never scanning the ledger (review F85)", async () => {
+    const captured: Array<{ sql: string; args: unknown[] }> = [];
+    const recording = { prepare: (sql: string) => ({ bind: (...args: unknown[]) => (captured.push({ sql, args }), {}) }) } as unknown as D1Database;
+    paymentStatements(recording, { id: "cs_x", userId: "fan", kind: "name", amountCents: 25000, currency: "usd", paidAt: NOW, paymentIntent: "pi_x", invoiceId: "in_x" });
+    const update = captured.find((statement) => statement.sql.startsWith("UPDATE payments SET refunded_cents"))!;
+    const { results } = await db.prepare(`EXPLAIN QUERY PLAN ${update.sql}`).bind(...update.args).all<{ detail: string }>();
+    const details = results.map((row) => row.detail);
+    expect(details.some((detail) => detail.startsWith("SEARCH"))).toBe(true);
+    expect(details.filter((detail) => /^SCAN (?!CONSTANT ROW)/.test(detail) || /payment_intent>\?/.test(detail))).toEqual([]);
   });
 
   it("keeps a refund that comes before its payment, and applies it when the payment comes (F66)", async () => {

@@ -18,6 +18,7 @@ const TABLES = [
   "fund_gifts",
   "fund_causes",
   "fund_votes",
+  "name_allowances",
   "payments",
   "refunds",
   "sign_in_link_sends",

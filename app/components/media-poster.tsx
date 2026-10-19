@@ -1,4 +1,6 @@
-import { ArrowUpRight, Music, Play } from "lucide-react";
+import { ArrowUpRight, Music, Play, X } from "lucide-react";
+import { Dialog } from "radix-ui";
+import { useState } from "react";
 
 import { cn } from "~/lib/cn";
 import { formatDuration } from "~/lib/format";
@@ -154,8 +156,9 @@ export function MediaPoster({
 }
 
 /**
- * A picture hosted by the board. The width and height reserve its shape
- * before it loads; tall pictures are capped and letterboxed, never cropped.
+ * A picture the board hosts, in its own shape, capped in height. A tap
+ * opens it as large as the screen allows, on its own, and a tap anywhere,
+ * Escape, or Close shuts it.
  */
 export function UploadedImage({
   src,
@@ -168,18 +171,42 @@ export function UploadedImage({
   height: number;
   alt: string;
 }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div className="flex justify-center overflow-hidden rounded-xl bg-surface-2">
-      <img
-        src={src}
-        width={width}
-        height={height}
-        alt={alt}
-        loading="lazy"
-        decoding="async"
-        className="h-auto max-h-[min(70vh,35rem)] w-auto max-w-full object-contain"
-      />
-    </div>
+    <Dialog.Root open={open} onOpenChange={setOpen}>
+      <div className="flex justify-center overflow-hidden rounded-xl bg-surface-2">
+        <Dialog.Trigger asChild>
+          <button type="button" aria-label={`See the picture full size: ${alt}`} className="block cursor-zoom-in">
+            <img
+              src={src}
+              width={width}
+              height={height}
+              alt={alt}
+              loading="lazy"
+              decoding="async"
+              className="h-auto max-h-[min(70vh,35rem)] w-auto max-w-full object-contain"
+            />
+          </button>
+        </Dialog.Trigger>
+      </div>
+      <Dialog.Portal>
+        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/90" />
+        <Dialog.Content
+          aria-describedby={undefined}
+          onClick={() => setOpen(false)}
+          className="fixed inset-0 z-50 flex cursor-zoom-out items-center justify-center p-2 sm:p-6"
+        >
+          <Dialog.Title className="sr-only">{alt}</Dialog.Title>
+          <img src={src} width={width} height={height} alt={alt} className="max-h-full max-w-full object-contain" />
+          <Dialog.Close
+            aria-label="Close"
+            className="absolute top-3 right-3 inline-flex size-10 items-center justify-center rounded-full bg-black/50 text-white hover:bg-black/70"
+          >
+            <X size={20} aria-hidden />
+          </Dialog.Close>
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }
 

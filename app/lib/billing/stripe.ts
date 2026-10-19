@@ -308,13 +308,44 @@ export interface StripeCheckoutSession {
   invoice?: string | null;
 }
 
+/** Payment intent statuses of a payment still under way, which may yet succeed. */
+const PAYING = new Set(["processing", "requires_action", "requires_confirmation", "requires_capture", "succeeded"]);
+
+/** Subscription statuses of a first payment still under way, or just made. */
+const SUBSCRIBING = new Set(["incomplete", "active", "trialing", "past_due"]);
+
 /**
- * The customer's completed checkouts for a short username, paid or still
- * being paid, so a member is not sold one they bought already (review F81).
+ * The customer's completed checkouts for a short username, each with where
+ * its payment stands: `paid`; `pending`, a delayed payment Stripe is still
+ * confirming; or `failed`, one that will not go through, which blocks
+ * nothing (review F84). Read as Stripe has them now, so a member is not
+ * sold one they bought already, nor kept from buying after a failure
+ * (review F81).
  */
-export async function completedNameCheckouts(client: StripeClient, customerId: string): Promise<StripeCheckoutSession[]> {
-  const all = await listAll<StripeCheckoutSession>(client, "/checkout/sessions", { customer: customerId, status: "complete" });
-  return all.filter((session) => session.metadata?.kind === NAME_ALLOWANCE_KIND);
+export async function completedNameCheckouts(
+  client: StripeClient,
+  customerId: string,
+): Promise<Array<{ session: StripeCheckoutSession; state: "paid" | "pending" | "failed" }>> {
+  const all = await listAll<
+    Omit<StripeCheckoutSession, "payment_intent" | "subscription"> & {
+      payment_intent?: { id: string; status: string } | string | null;
+      subscription?: { id: string; status: string } | string | null;
+    }
+  >(client, "/checkout/sessions", { customer: customerId, status: "complete", expand: ["data.payment_intent", "data.subscription"] });
+  return all
+    .filter((session) => session.metadata?.kind === NAME_ALLOWANCE_KIND)
+    .map((listed) => {
+      const intent = typeof listed.payment_intent === "object" ? listed.payment_intent : null;
+      const subscription = typeof listed.subscription === "object" ? listed.subscription : null;
+      const session: StripeCheckoutSession = {
+        ...listed,
+        payment_intent: intent?.id ?? (typeof listed.payment_intent === "string" ? listed.payment_intent : null),
+        subscription: subscription?.id ?? (typeof listed.subscription === "string" ? listed.subscription : null),
+      };
+      if (paidNameAllowance(session)) return { session, state: "paid" as const };
+      const paying = session.mode === "subscription" ? SUBSCRIBING.has(subscription?.status ?? "") : PAYING.has(intent?.status ?? "");
+      return { session, state: paying ? ("pending" as const) : ("failed" as const) };
+    });
 }
 
 /**
