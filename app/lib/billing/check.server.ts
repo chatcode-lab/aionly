@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 
-import { FRESH_START_PRICE, INTRO_PRICES, PLAN_PRICES } from "../plan";
+import { FRESH_START_PRICE, INTRO_PRICES, NAME_ALLOWANCES, PLAN_PRICES } from "../plan";
 import { portalConfigurationFor, stripeClient } from "./stripe";
 
 /** One line of a check: what was looked at, whether it is right, and what was found. */
@@ -16,7 +16,8 @@ const EXPECTED = [
   { ...INTRO_PRICES.month, interval: "month" },
   { ...INTRO_PRICES.year, interval: "year" },
   { ...FRESH_START_PRICE, interval: null },
-] as const;
+  ...Object.values(NAME_ALLOWANCES).map((price) => ({ ...price, interval: null })),
+];
 
 function failure(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
