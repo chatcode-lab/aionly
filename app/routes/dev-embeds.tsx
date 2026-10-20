@@ -57,7 +57,7 @@ const CHECKS: Record<Provider, string[]> = {
     "The player's own volume button turns the sound on, and it stays on",
   ],
   soundcloud: [
-    "The classic player: cover, title, and waveform, light in both themes",
+    "The classic player: title and waveform, no cover, light in both themes",
     "Playback starts only after a tap",
     "A playlist (/sets/) lists its tracks below the player",
   ],

@@ -159,7 +159,7 @@ test.describe("embed spike", () => {
     await soundcloud.getByRole("button", { name: "Load", exact: true }).click();
     await expect(soundcloud.locator("iframe")).toHaveAttribute(
       "src",
-      "https://w.soundcloud.com/player/?url=https%3A%2F%2Fsoundcloud.com%2Fforss%2Fflickermood&visual=false&auto_play=false&hide_related=true&show_comments=false&show_reposts=false&show_teaser=false",
+      "https://w.soundcloud.com/player/?url=https%3A%2F%2Fsoundcloud.com%2Fforss%2Fflickermood&visual=false&auto_play=false&hide_related=true&show_comments=false&show_reposts=false&show_teaser=false&show_artwork=false",
     );
     await expect(soundcloud.locator("iframe")).toHaveCSS("height", "166px");
 

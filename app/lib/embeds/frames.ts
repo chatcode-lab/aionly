@@ -76,8 +76,9 @@ export function frameUrl(link: MediaLink, options: FrameOptions): string {
     case "suno":
       return `${origin}/embed/${id}?theme=${options.theme}`;
     case "soundcloud": {
-      // The classic player: cover, title, and waveform in one compact band,
-      // and a playlist's tracks below it, with nothing else around them. It
+      // The classic player: title and waveform in one compact band, and a
+      // playlist's tracks below it, with nothing else around them. Without
+      // its cover, which the card's poster shows, the title fits a phone. It
       // has no dark theme. Anything but a resolved address is never passed on.
       const params = new URLSearchParams({
         url: `https://soundcloud.com/${SOUNDCLOUD_ID.test(link.id) ? link.id : "-"}`,
@@ -87,6 +88,7 @@ export function frameUrl(link: MediaLink, options: FrameOptions): string {
         show_comments: "false",
         show_reposts: "false",
         show_teaser: "false",
+        show_artwork: "false",
       });
       return `${origin}/player/?${params}`;
     }

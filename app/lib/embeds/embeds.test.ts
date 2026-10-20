@@ -114,6 +114,7 @@ describe("frameUrl", () => {
       show_comments: "false",
       show_reposts: "false",
       show_teaser: "false",
+      show_artwork: "false",
     });
     expect(frameHeight(link("soundcloud", "forss/flickermood"))).toBe(166);
     expect(frameHeight(link("soundcloud", "forss/sets/soulhack"))).toBe(300);
