@@ -83,7 +83,9 @@
 		{ "name": "RL_SIGNIN_IP", "namespace_id": "1007", "simple": { "limit": 10, "period": 60 } },
 		{ "name": "RL_READ_USER", "namespace_id": "1008", "simple": { "limit": 60, "period": 60 } },
 		{ "name": "RL_READ_IP", "namespace_id": "1009", "simple": { "limit": 240, "period": 60 } },
-		{ "name": "RL_UPDATES_USER", "namespace_id": "1010", "simple": { "limit": 6, "period": 60 } }
+		{ "name": "RL_UPDATES_USER", "namespace_id": "1010", "simple": { "limit": 6, "period": 60 } },
+		{ "name": "RL_UPLOAD_USER", "namespace_id": "1011", "simple": { "limit": 30, "period": 60 } },
+		{ "name": "RL_UPLOAD_IP", "namespace_id": "1012", "simple": { "limit": 90, "period": 60 } }
 	],
 	// The hourly sweep of abandoned pending images and sign-in states, and the
 	// digests that are due. Every environment inherits this schedule.
@@ -131,7 +133,9 @@
 				{ "name": "RL_SIGNIN_IP", "namespace_id": "2007", "simple": { "limit": 10, "period": 60 } },
 				{ "name": "RL_READ_USER", "namespace_id": "2008", "simple": { "limit": 60, "period": 60 } },
 				{ "name": "RL_READ_IP", "namespace_id": "2009", "simple": { "limit": 240, "period": 60 } },
-				{ "name": "RL_UPDATES_USER", "namespace_id": "2010", "simple": { "limit": 6, "period": 60 } }
+				{ "name": "RL_UPDATES_USER", "namespace_id": "2010", "simple": { "limit": 6, "period": 60 } },
+				{ "name": "RL_UPLOAD_USER", "namespace_id": "2011", "simple": { "limit": 30, "period": 60 } },
+				{ "name": "RL_UPLOAD_IP", "namespace_id": "2012", "simple": { "limit": 90, "period": 60 } }
 			],
 			"d1_databases": [
 				{
@@ -189,7 +193,9 @@
 				{ "name": "RL_SIGNIN_IP", "namespace_id": "3007", "simple": { "limit": 10, "period": 60 } },
 				{ "name": "RL_READ_USER", "namespace_id": "3008", "simple": { "limit": 60, "period": 60 } },
 				{ "name": "RL_READ_IP", "namespace_id": "3009", "simple": { "limit": 240, "period": 60 } },
-				{ "name": "RL_UPDATES_USER", "namespace_id": "3010", "simple": { "limit": 6, "period": 60 } }
+				{ "name": "RL_UPDATES_USER", "namespace_id": "3010", "simple": { "limit": 6, "period": 60 } },
+				{ "name": "RL_UPLOAD_USER", "namespace_id": "3011", "simple": { "limit": 30, "period": 60 } },
+				{ "name": "RL_UPLOAD_IP", "namespace_id": "3012", "simple": { "limit": 90, "period": 60 } }
 			],
 			"d1_databases": [
 				{

@@ -222,6 +222,65 @@ test("a fan posts a gallery: pictures in an order, swiped through and seen full 
   expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
 });
 
+test("Publish and Save draft wait for every chosen picture to upload (review F88)", async ({ page, context, account, request }) => {
+  await setPlan(request, account);
+  await account.signIn(context);
+  await open(page, "/submit");
+  await page.getByRole("button", { name: "Upload", exact: true }).click();
+  // The second picture's upload is held until let go.
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let sent = 0;
+  await page.route(
+    (url) => url.pathname === "/submit/upload",
+    async (route) => {
+      if (route.request().method() === "POST" && ++sent === 2) await held;
+      await route.continue();
+    },
+  );
+  const file = (name: string) => ({ name, mimeType: "image/png", buffer: PIXEL });
+  await page.getByLabel("Upload a file").setInputFiles([file("one.png"), file("two.png")]);
+  await page.getByLabel("I made this").check();
+  const title = `Both frames by ${account.username}`;
+  await page.getByLabel("Title").fill(title);
+  await page.getByRole("textbox", { name: "Description" }).fill("The same prompt, a minute apart, and what changed between them.");
+  await page.getByLabel(/made with AI or about AI/).check();
+  await expect(page.getByText("Turnstile stand-in")).toBeVisible();
+  await expect(page.getByText(/^Uploading 2 of 2/)).toBeVisible();
+  await expect(page.getByText("Publish or save once the upload finishes.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Publish" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Save draft" })).toBeDisabled();
+
+  release();
+  await expect(page.getByText("A gallery of 2, the first its cover.")).toBeVisible();
+  await page.getByRole("button", { name: "Publish" }).click();
+  await expect(page).toHaveURL(/\/p\/[0-9a-z]{7}\/[0-9a-z-]+$/);
+  await expect(page.getByRole("group", { name: title }).getByText("1 / 2")).toBeVisible();
+});
+
+test("a gallery of ten is uploaded and published within one minute (review F89)", async ({ page, context, account, request }) => {
+  await setPlan(request, account);
+  await account.signIn(context);
+  await open(page, "/submit");
+  await page.getByRole("button", { name: "Upload", exact: true }).click();
+  const files = Array.from({ length: 10 }, (_, n) => ({ name: `frame-${n + 1}.png`, mimeType: "image/png", buffer: PIXEL }));
+  await page.getByLabel("Upload a file").setInputFiles(files);
+  await expect(page.getByText("A gallery of 10, the first its cover.")).toBeVisible();
+  await page.getByLabel("I made this").check();
+  const title = `Ten frames by ${account.username}`;
+  await finishPost(page, title, "One prompt run ten times, a minute apart, in the order they came.");
+  const gallery = page.getByRole("group", { name: title });
+  await expect(gallery.getByText("1 / 10")).toBeVisible();
+  // Only the picture in view and the next are asked for; stepping on asks for one more (review F90).
+  const requested = () =>
+    page.evaluate(() => new Set(performance.getEntriesByType("resource").map((entry) => entry.name).filter((name) => /\/[0-9A-Za-z]{24}\.png$/.test(name))).size);
+  await expect(gallery.locator("img")).toHaveCount(2);
+  await gallery.locator(".snap-x").evaluate((strip) => strip.scrollTo({ left: strip.clientWidth }));
+  await expect(gallery.getByText("2 / 10")).toBeVisible();
+  await expect(gallery.locator("img")).toHaveCount(3);
+  expect(await requested()).toBeLessThanOrEqual(3);
+});
+
 test("a file dropped on the upload area is uploaded, and one dropped beside it opens nothing", async ({ page, context, account, request }) => {
   await setPlan(request, account);
   await account.signIn(context);

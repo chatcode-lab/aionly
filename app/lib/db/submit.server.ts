@@ -174,9 +174,12 @@ export async function publishPost(db: D1Database, post: NewPost): Promise<Publis
     upload?.mediaType === "image" && upload.pictures && upload.pictures.length > 1
       ? JSON.stringify(upload.pictures.map(({ key, width, height }) => ({ key, width, height })))
       : null;
+  // Pending, or the draft's: any picture its gallery keeps may become the
+  // cover, or the one picture left (review F87).
   const pending = (index: number, kind: "post" | "media") =>
     `(SELECT key FROM images WHERE key = ?${index} AND owner_id = ?2 AND kind = '${kind}' AND (state = 'pending'
-       OR (state = 'draft' AND key IN (SELECT media_key FROM drafts WHERE id = ?22 UNION ALL SELECT poster_key FROM drafts WHERE id = ?22))))`;
+       OR (state = 'draft' AND key IN (SELECT media_key FROM drafts WHERE id = ?22 UNION ALL SELECT poster_key FROM drafts WHERE id = ?22
+         UNION ALL SELECT json_extract(kept.value, '$.key') FROM drafts, json_each(drafts.pictures) AS kept WHERE drafts.id = ?22))))`;
   const allowed = `${participantCondition(2, post.now)} AND (
     EXISTS (SELECT 1 FROM profiles WHERE user_id = ?2 AND role = 'admin')
     OR (

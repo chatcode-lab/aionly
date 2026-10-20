@@ -199,6 +199,33 @@ describe("a gallery in a draft", () => {
     expect((await draftFor(db, saved.draft.id, "u1"))?.draft.postId).toBe(published.postId);
   });
 
+  it("publishes from the form with a new cover, or with the cover taken out, unsaved (review F87)", async () => {
+    const keys = [await send("u1", "set-one-aaaa"), await send("u1", "set-one-aaaa"), await send("u1", "set-one-aaaa")];
+    const saved = await saveDraft(db, { authorId: "u1", fields: fields(keys), now: NOW });
+    if (!saved.ok) throw new Error(JSON.stringify(saved));
+    const author = (await accountRecord(db, "u1", NOW))!;
+    const fromForm = (id: string, order: string[], draft: { id: string; revision: number }): NewPost => ({
+      kind: "upload", id, author, origin: "made", title: "Rain on a street that never was", description: "Four frames from one prompt, a minute apart.",
+      mediaKey: order[0]!, mediaType: "image", width: 1000, height: 800, duration: null, posterKey: null,
+      pictures: order.length > 1 ? pictures(order) : null, draft, now: NOW,
+    });
+    // The second moved first, then published without saving.
+    expect(await publishPost(db, fromForm("reordered", [keys[1]!, keys[0]!, keys[2]!], { id: saved.draft.id, revision: 1 }))).toEqual({
+      ok: true,
+      id: "reordered",
+    });
+    for (const key of keys) expect(await stateOf(key)).toBe("attached");
+
+    // Another draft of two, its cover taken out: the one picture left is the post's.
+    const more = [await send("u1", "set-two-bbbb"), await send("u1", "set-two-bbbb")];
+    const second = await saveDraft(db, { authorId: "u1", fields: fields(more), now: NOW });
+    if (!second.ok) throw new Error(JSON.stringify(second));
+    await db.prepare(`DELETE FROM posts`).run();
+    expect(await publishPost(db, fromForm("single", [more[1]!], { id: second.draft.id, revision: 1 }))).toEqual({ ok: true, id: "single" });
+    expect(await db.prepare(`SELECT media_key, pictures FROM posts WHERE id = 'single'`).first()).toEqual({ media_key: more[1], pictures: null });
+    expect(await stateOf(more[1]!)).toBe("attached");
+  });
+
   it("refuses a picture that is not the author's, or not a picture", async () => {
     const mine = await send("u1", "set-one-aaaa");
     const theirs = await send("u2", "set-two-bbbb");

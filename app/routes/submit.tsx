@@ -504,6 +504,8 @@ function Composer({ loaderData, actionData }: Pick<Route.ComponentProps, "loader
   const [checked, setChecked] = useState<Checked | null>(null);
   const [uploaded, setUploaded] = useState<Uploaded[]>(() => (opened?.uploads ?? []).map((upload) => ({ ...upload, preview: upload.url })));
   const cover = uploaded[0] ?? null;
+  // Files still uploading: neither Publish nor Save draft goes without them.
+  const [uploading, setUploading] = useState(false);
   const [touched, setTouched] = useState(false);
   const restored = useRef(false);
   // A server answer that the agent box was ticked, before scripts ran.
@@ -585,7 +587,8 @@ function Composer({ loaderData, actionData }: Pick<Route.ComponentProps, "loader
   const titleError = touched || result ? titleProblem(title) : null;
   const descriptionError = touched || result ? descriptionProblem(description, bodyMax) : null;
   const ready =
-    source === "link" ? Boolean(current?.receipt) && !duplicate : source === "upload" ? uploaded.length > 0 : true;
+    source === "link" ? Boolean(current?.receipt) && !duplicate : source === "upload" ? uploaded.length > 0 && !uploading : true;
+  const waiting = source === "upload" && uploading;
   const canPublish = ready && !gated && !blocked && token && !submitting;
 
   return (
@@ -659,7 +662,7 @@ function Composer({ loaderData, actionData }: Pick<Route.ComponentProps, "loader
           )
         ) : source === "upload" ? (
           <>
-            <UploadPicker value={uploaded} onChange={setUploaded} error={result?.errors.upload} />
+            <UploadPicker value={uploaded} onChange={setUploaded} onBusy={setUploading} error={result?.errors.upload} />
             <input type="hidden" name="upload_key" value={cover?.key ?? ""} />
             <input type="hidden" name="media_type" value={cover?.media ?? ""} />
             <input type="hidden" name="poster_key" value={cover?.posterKey ?? ""} />
@@ -827,11 +830,13 @@ function Composer({ loaderData, actionData }: Pick<Route.ComponentProps, "loader
           <div className="flex flex-wrap items-center justify-end gap-3">
             {source === "link" && !current?.receipt && !duplicate ? (
               <p className="text-meta text-text-muted">Check the link to publish.</p>
+            ) : waiting ? (
+              <p className="text-meta text-text-muted">Publish or save once the upload finishes.</p>
             ) : source === "upload" && uploaded.length === 0 ? (
               <p className="text-meta text-text-muted">Upload a file to publish.</p>
             ) : null}
             {/* A draft may be unfinished: the browser's own checks wait for publishing. */}
-            <Button type="submit" name="intent" value="save-draft" formNoValidate disabled={submitting}>
+            <Button type="submit" name="intent" value="save-draft" formNoValidate disabled={submitting || waiting}>
               {saving ? "Saving…" : "Save draft"}
             </Button>
             <Button variant="primary" type="submit" name="intent" value="publish" disabled={!canPublish}>

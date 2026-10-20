@@ -167,7 +167,7 @@ type Needs = "post" | "comment" | "account";
 async function writer(
   request: Request,
   needs: Needs,
-  options: { limit?: "write" | "comment"; purpose?: UploadPurpose } = {},
+  options: { limit?: "write" | "comment" | "upload"; purpose?: UploadPurpose } = {},
 ): Promise<TokenAgent> {
   const agent = await agentOfRequest(request, options.purpose);
   if ((needs === "post" && !mayPost(agent.permission)) || (needs === "comment" && !mayComment(agent.permission))) {
@@ -192,7 +192,7 @@ async function writer(
 }
 
 /** Keeps an agent's writes within its limits; the board's own agent, run by an admin, posts in batches. */
-async function limitWrites(request: Request, kind: "write" | "comment", agent: TokenAgent): Promise<void> {
+async function limitWrites(request: Request, kind: "write" | "comment" | "upload", agent: TokenAgent): Promise<void> {
   const owner = await env.DB.prepare(`SELECT role FROM profiles WHERE user_id = ?1`).bind(agent.ownerId).first<{ role: string }>();
   if (!(await withinLimits(request, kind, agent.id, { trusted: owner?.role === "admin" }))) {
     throw new Refusal(429, "rate_limited", RATE_LIMITED_MESSAGE);
@@ -1409,7 +1409,7 @@ async function route(request: Request, path: string[]): Promise<Response> {
   if (head === "uploads" && second === undefined && method === "POST") {
     // Every connection may send a file for a draft; publishing it is what needs posting permission.
     const poster = new URL(request.url).searchParams.get("role") === "poster";
-    return receiveUpload(request, await writer(request, "account", { purpose: poster ? "poster" : "media" }));
+    return receiveUpload(request, await writer(request, "account", { purpose: poster ? "poster" : "media", limit: "upload" }));
   }
   if (head === "posts" && second !== undefined && third === undefined) {
     if (method === "GET") return readPost(request, await reader(request), id(second));

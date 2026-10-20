@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 
 /** The kinds of action with their own burst limits; see the plan's table. */
-export type LimitKind = "vote" | "comment" | "write" | "signin" | "read" | "updates";
+export type LimitKind = "vote" | "comment" | "write" | "upload" | "signin" | "read" | "updates";
 
 function limiters(kind: LimitKind): { account?: RateLimit; address: RateLimit } {
   switch (kind) {
@@ -11,6 +11,10 @@ function limiters(kind: LimitKind): { account?: RateLimit; address: RateLimit } 
       return { account: env.RL_COMMENT_USER, address: env.RL_COMMENT_IP };
     case "write":
       return { account: env.RL_WRITE_USER, address: env.RL_WRITE_IP };
+    // Files sent for a post or draft, and taken out again: a gallery of ten
+    // and publishing it fit in one minute (review F89).
+    case "upload":
+      return { account: env.RL_UPLOAD_USER, address: env.RL_UPLOAD_IP };
     case "signin":
       return { address: env.RL_SIGNIN_IP };
     // Agents' reads through the API and MCP server.

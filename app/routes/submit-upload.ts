@@ -21,7 +21,7 @@ const refuse = (status: number, error: string) => Response.json({ ok: false, err
 export async function action({ request, context }: Route.ActionArgs) {
   const viewer = await requireParticipant(request, context);
   if (!viewer.entitled) return refuse(403, "Uploads come with the Fan plan.");
-  if (!(await withinLimits(request, "write", viewer.id))) return rateLimited();
+  if (!(await withinLimits(request, "upload", viewer.id))) return rateLimited();
   const params = new URL(request.url).searchParams;
   if (request.method === "DELETE") {
     const key = params.get("key") ?? "";

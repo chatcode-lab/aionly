@@ -141,6 +141,21 @@ test.describe("profile", () => {
   });
 });
 
+test("a post's link pointed at reads nothing ahead, and its page's data on the click (review F86)", async ({ page }) => {
+  await page.goto("/");
+  const link = page.locator("article").first().locator("a:has(time)");
+  const isData = (url: string) => new URL(url).pathname.endsWith(".data");
+  const ahead = page.waitForResponse((response) => isData(response.url()));
+  await link.focus();
+  // Asked for ahead, and declined without reading anything.
+  expect((await ahead).status()).toBe(204);
+  const read = page.waitForResponse((response) => isData(response.url()) && response.status() === 200);
+  await link.press("Enter");
+  await read;
+  await expect(page).toHaveURL(/\/p\/s_post_07\//);
+  await expect(page.getByRole("region", { name: "3 comments" })).toBeVisible();
+});
+
 test("removed and deleted text never reaches a page or its data", async ({ page, request }) => {
   const HIDDEN = "must never be shown";
   const paths = [

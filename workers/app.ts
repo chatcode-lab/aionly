@@ -113,6 +113,11 @@ async function pageAsMarkdown(origin: string, path: string, ctx: ExecutionContex
   });
 }
 
+/** A request the browser makes ahead of need, as for `<link rel="prefetch">`. */
+function isPrefetch(request: Request): boolean {
+  return ["Sec-Purpose", "Purpose", "X-Moz"].some((name) => request.headers.get(name)?.includes("prefetch") === true);
+}
+
 async function serve(request: Request, ctx: ExecutionContext): Promise<Response> {
   const nonce = createNonce();
   const options = {
@@ -204,6 +209,14 @@ async function serve(request: Request, ctx: ExecutionContext): Promise<Response>
         return withSecurityHeaders(request, missing, options);
       }
     }
+  }
+
+  // A page's data, fetched ahead as a link is pointed at. Pages are never
+  // kept without checking back (`private, no-cache`), so the click fetches
+  // it again: the read ahead would be wasted, and is declined before any
+  // loader runs (review F86). The page's code still loads ahead.
+  if (request.method === "GET" && url.pathname.endsWith(".data") && isPrefetch(request)) {
+    return withSecurityHeaders(request, new Response(null, { status: 204, headers: { "Cache-Control": "no-store" } }), options);
   }
 
   const context = new RouterContextProvider();

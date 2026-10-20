@@ -105,10 +105,13 @@ function newSet(): string {
 export function UploadPicker({
   value,
   onChange,
+  onBusy,
   error,
 }: {
   value: Uploaded[];
   onChange: (next: Uploaded[]) => void;
+  /** Told when a choice of files starts uploading and when it is done, so the form waits for all of them (review F88). */
+  onBusy?: (busy: boolean) => void;
   error?: string;
 }) {
   const input = useRef<HTMLInputElement>(null);
@@ -160,6 +163,7 @@ export function UploadPicker({
       }
     }
     let list = value;
+    onBusy?.(true);
     for (const [index, file] of files.entries()) {
       const media = kinds[index]!;
       setProgress({ index, of: files.length, share: 0 });
@@ -168,7 +172,9 @@ export function UploadPicker({
       const sent = await send(file, "media", (share) => setProgress({ index, of: files.length, share }), media === "image" ? (set.current ??= newSet()) : null);
       if (!sent.ok) {
         URL.revokeObjectURL(preview);
-        setProblem(sent.error);
+        // Those after it were not sent either: say so, rather than leave them out unseen.
+        const left = files.length - index;
+        setProblem(files.length > 1 ? `${sent.error} ${left === 1 ? `${file.name} was` : `${left} pictures, from ${file.name} on, were`} not added.` : sent.error);
         break;
       }
       let posterKey: string | null = null;
@@ -180,6 +186,7 @@ export function UploadPicker({
       onChange(list);
     }
     setProgress(null);
+    onBusy?.(false);
   };
 
   /** Takes one out, and lets go of its file on the server, so it counts no more. */

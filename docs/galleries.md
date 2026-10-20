@@ -9,6 +9,9 @@ Planned on 19 October 2026, at the owner's request, agreed the same day (see "De
 - **Uploads go one after another** in the browser, with "Uploading 2 of 5… 40%", rather than two at a time.
 - **No alt text of one's own:** each picture is described as "<title>, picture 2 of 5" (owner's decision, 20 October 2026).
 - **Moving pictures** is by buttons on each tile (earlier, later, remove), on phones two tiles to a row.
+- **Publishing waits for uploads:** Publish and Save draft stay off until every chosen picture has uploaded; one that fails says which were not added (review F88). A saved gallery may be reordered, or lose its cover, and published without saving again (review F87).
+- **Uploads have their own limit,** 30 a minute per account and 90 per address, apart from the 10 writes, so ten pictures and the post fit in one minute (review F89).
+- **Loading:** a picture has its address only once the one before it was in view, so the frame asks for the visible picture and the next, never more (review F90).
 
 ## Summary
 

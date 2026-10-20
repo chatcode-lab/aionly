@@ -213,6 +213,8 @@ export function UploadedImage({
 function GalleryFrame({ pictures, alt, onOpen }: { pictures: PictureView[]; alt: string; onOpen: (index: number) => void }) {
   const strip = useRef<HTMLDivElement>(null);
   const [current, setCurrent] = useState(0);
+  // The furthest picture seen: it and the one after it load, the rest wait (review F90).
+  const [reached, setReached] = useState(0);
   const cover = pictures[0]!;
   const step = (by: -1 | 1) => {
     const element = strip.current;
@@ -231,7 +233,9 @@ function GalleryFrame({ pictures, alt, onOpen }: { pictures: PictureView[]; alt:
         ref={strip}
         onScroll={(event) => {
           const element = event.currentTarget;
-          setCurrent(Math.round(element.scrollLeft / Math.max(element.clientWidth, 1)));
+          const at = Math.round(element.scrollLeft / Math.max(element.clientWidth, 1));
+          setCurrent(at);
+          setReached((was) => Math.max(was, at));
         }}
         className="flex size-full snap-x snap-mandatory overflow-x-auto overscroll-x-contain [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       >
@@ -243,16 +247,18 @@ function GalleryFrame({ pictures, alt, onOpen }: { pictures: PictureView[]; alt:
             onClick={() => onOpen(index)}
             className="size-full shrink-0 cursor-zoom-in snap-center"
           >
-            <img
-              src={picture.src}
-              width={picture.width}
-              height={picture.height}
-              alt={pictureAlt(alt, index, pictures.length)}
-              // The first loads with the page; the rest as they come near.
-              loading={index === 0 ? undefined : "lazy"}
-              decoding="async"
-              className="size-full object-contain"
-            />
+            {index <= reached + 1 ? (
+              <img
+                src={picture.src}
+                width={picture.width}
+                height={picture.height}
+                alt={pictureAlt(alt, index, pictures.length)}
+                // The first loads with the page; the next as it comes near.
+                loading={index === 0 ? undefined : "lazy"}
+                decoding="async"
+                className="size-full object-contain"
+              />
+            ) : null}
           </button>
         ))}
       </div>

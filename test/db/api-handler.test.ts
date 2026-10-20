@@ -381,6 +381,8 @@ describe("a gallery over HTTP", () => {
   it("takes pictures sent with one set, posts them in order, and reads them back", async () => {
     const first = (await (await upload("gallery-one")).json()) as { upload: string };
     const second = (await (await upload("gallery-one")).json()) as { upload: string };
+    // Files have a budget of their own, so ten leave room to publish (review F89).
+    expect(limits.asked).toEqual(["upload", "upload"]);
     const made = await call("POST", "posts", {
       kind: "upload",
       title: "Two frames of one prompt",
