@@ -6,16 +6,17 @@ import { describe, expect, it } from "vitest";
 import { AVATAR_COLORS, generatedAvatar } from "./avatar";
 import { formatAge, formatAgo, formatCount, formatWait } from "./format";
 import { parseTheme, readTheme, themeCookie } from "./theme";
+import { DEFAULT_TINT, TINT_COLORS, TINTS } from "./tint";
 
 const css = readFileSync(
   fileURLToPath(new URL("../app.css", import.meta.url)),
   "utf8",
 );
 
-/** Reads the custom properties of the block that follows a `theme:` marker. */
-function tokens(marker: string): Record<string, string> {
-  const start = css.indexOf(`/* theme:${marker} */`);
-  if (start === -1) throw new Error(`no theme block marked ${marker}`);
+/** Reads the custom properties of the block that follows a `theme:` (or `tint:`) marker. */
+function tokens(marker: string, kind = "theme"): Record<string, string> {
+  const start = css.indexOf(`/* ${kind}:${marker} */`);
+  if (start === -1) throw new Error(`no ${kind} block marked ${marker}`);
   const open = css.indexOf("{", start);
   const block = css.slice(open + 1, css.indexOf("}", open));
   return Object.fromEntries(
@@ -81,6 +82,31 @@ describe("design tokens", () => {
       Object.keys(tokens("light")).sort(),
     );
   });
+});
+
+describe("tints", () => {
+  const ACCENT_PAIRS = PAIRS.filter(([fg, bg]) => fg.includes("accent") || bg.includes("accent"));
+
+  it("leave orange to the themes, which hold its colors", () => {
+    for (const scheme of ["light", "dark"] as const) {
+      expect(tokens(scheme)).toMatchObject(TINT_COLORS[DEFAULT_TINT][scheme]);
+    }
+  });
+
+  for (const tint of TINTS.filter((name) => name !== DEFAULT_TINT)) {
+    it(`${tint}: app.css holds app/lib/tint.ts's colors, the system dark block the dark one's`, () => {
+      expect(tokens(`${tint}:light`, "tint")).toEqual(TINT_COLORS[tint].light);
+      expect(tokens(`${tint}:dark`, "tint")).toEqual(TINT_COLORS[tint].dark);
+      expect(tokens(`${tint}:system-dark`, "tint")).toEqual(TINT_COLORS[tint].dark);
+    });
+
+    for (const scheme of ["light", "dark"] as const) {
+      it.each(ACCENT_PAIRS)(`${tint}, ${scheme}: %s on %s meets AA contrast`, (fg, bg) => {
+        const values = { ...tokens(scheme), ...TINT_COLORS[tint][scheme] } as Record<string, string>;
+        expect(contrast(values[fg]!, values[bg]!)).toBeGreaterThanOrEqual(4.5);
+      });
+    }
+  }
 });
 
 describe("generatedAvatar", () => {

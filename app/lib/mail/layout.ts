@@ -9,6 +9,7 @@
 
 import { OPERATOR } from "../site";
 import { type TextSize, textScale } from "../text-size";
+import { DEFAULT_TINT, type Tint, TINT_COLORS } from "../tint";
 
 export function escape(text: string): string {
   return text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
@@ -82,4 +83,29 @@ export function atTextSize<T extends { html: string }>(email: T, size: TextSize)
       `style="${style.replace(/(font-size|line-height):(\d+(?:\.\d+)?)px/g, (_match, property: string, px: string) => `${property}:${Math.round(Number(px) * scale)}px`)}"`,
   );
   return { ...email, html };
+}
+
+/**
+ * An email in its recipient's tint (Settings, Display): the board's orange,
+ * and its pale ground, in their styles, swapped for the tint's light colors.
+ */
+export function atTint<T extends { html: string }>(email: T, tint: Tint): T {
+  if (tint === DEFAULT_TINT) return email;
+  const from = TINT_COLORS[DEFAULT_TINT].light;
+  const to = TINT_COLORS[tint].light;
+  const html = email.html.replace(/style="([^"]*)"/g, (_, style: string) =>
+    `style="${style.replaceAll(from.accent, to.accent).replaceAll(from["accent-soft"], to["accent-soft"])}"`,
+  );
+  return { ...email, html };
+}
+
+/** How a member reads the board's emails: their text size, and their tint while they have the plan. */
+export interface Reader {
+  textSize: TextSize;
+  tint: Tint;
+}
+
+/** An email as its recipient reads it. */
+export function forReader<T extends { html: string }>(email: T, reader: Reader): T {
+  return atTint(atTextSize(email, reader.textSize), reader.tint);
 }

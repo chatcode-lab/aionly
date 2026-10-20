@@ -1,6 +1,7 @@
 import type { PictureView } from "./gallery";
 import type { Aspect, Provider } from "./links/types";
 import type { TextSize } from "./text-size";
+import type { Tint } from "./tint";
 
 /**
  * The shapes that leave the server. Everything a page shows about a person,
@@ -56,6 +57,8 @@ export interface ViewerSummary extends PublicAuthor {
   editor?: boolean;
   /** The member's text size, when not the default. */
   textSize?: TextSize;
+  /** The fan's tint, when not orange and while they have the plan. */
+  tint?: Tint;
 }
 
 export type PostMedia =

@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { type APIRequestContext, test as base, type BrowserContext, expect, type Page } from "@playwright/test";
 
-import { ACCOUNTS_PER_WORKER, ADMIN_ACCOUNT, APPEAL_ACCOUNT, BANNED_ACCOUNT, LOW_KARMA_ACCOUNT, MAX_WORKERS } from "./accounts";
+import { ACCOUNTS_PER_WORKER, ADMIN_ACCOUNT, APPEAL_ACCOUNT, BANNED_ACCOUNT, DAY_OLD_ACCOUNT, LOW_KARMA_ACCOUNT, MAX_WORKERS } from "./accounts";
 
 export interface PageProblems {
   /** Console errors and uncaught exceptions. */
@@ -322,6 +322,8 @@ export const test = base.extend<{
   newAccount: () => TestAccount;
   /** An account under a permanent ban, shared by every test. */
   bannedAccount: TestAccount;
+  /** Made 30 hours ago, past the offer's 24 hours; shared, so only read. */
+  dayOldAccount: TestAccount;
   /** The admin, shared by every test that moderates. */
   adminAccount: TestAccount;
   /** This worker's account below the karma floor, at -120. */
@@ -349,6 +351,10 @@ export const test = base.extend<{
 
   bannedAccount: async ({ baseURL }, use) => {
     await use(testAccount(BANNED_ACCOUNT, "e2e_banned", baseURL!));
+  },
+
+  dayOldAccount: async ({ baseURL }, use) => {
+    await use(testAccount(DAY_OLD_ACCOUNT, "e2e_day_old", baseURL!));
   },
 
   lowKarmaAccount: async ({ baseURL }, use, testInfo) => {

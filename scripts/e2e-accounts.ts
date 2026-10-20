@@ -13,6 +13,7 @@ import {
   ADMIN_ACCOUNT,
   APPEAL_ACCOUNT,
   BANNED_ACCOUNT,
+  DAY_OLD_ACCOUNT,
   LOW_KARMA_ACCOUNT,
   MAX_WORKERS,
 } from "../e2e/accounts";
@@ -99,13 +100,14 @@ lines.push(
      OR (item_type = 'comment' AND item_id NOT IN (SELECT id FROM comments));`,
 );
 
-function account(id: string, name: string, profile: { ban?: string; admin?: boolean; karma?: number }): void {
-  const created = iso(now - 3600);
+function account(id: string, name: string, profile: { ban?: string; admin?: boolean; karma?: number; age?: number }): void {
+  const madeAt = now - (profile.age ?? 3600);
+  const created = iso(madeAt);
   lines.push(
     `INSERT INTO "user" ("id", "name", "email", "emailVerified", "createdAt", "updatedAt") VALUES ('${id}', 'Test ${id}', '${id}@example.invalid', 1, '${created}', '${created}');`,
     `INSERT INTO "session" ("id", "token", "userId", "expiresAt", "createdAt", "updatedAt") VALUES ('${id}s', 'e2e-session-${id}', '${id}', '${iso(now + 7 * 24 * 3600)}', '${created}', '${created}');`,
-    `INSERT INTO profiles (user_id, role, karma, vote_karma, created_at, banned_at, ban_reason) VALUES ('${id}', '${profile.admin ? "admin" : "user"}', ${profile.karma ?? 0}, ${profile.karma ?? 0}, ${now - 3600}, ${profile.ban ? now - 60 : "NULL"}, ${profile.ban ? `'${profile.ban}'` : "NULL"});`,
-    `INSERT INTO usernames (name, user_id, is_current, created_at) VALUES ('${name}', '${id}', 1, ${now - 3600});`,
+    `INSERT INTO profiles (user_id, role, karma, vote_karma, created_at, banned_at, ban_reason) VALUES ('${id}', '${profile.admin ? "admin" : "user"}', ${profile.karma ?? 0}, ${profile.karma ?? 0}, ${madeAt}, ${profile.ban ? now - 60 : "NULL"}, ${profile.ban ? `'${profile.ban}'` : "NULL"});`,
+    `INSERT INTO usernames (name, user_id, is_current, created_at) VALUES ('${name}', '${id}', 1, ${madeAt});`,
   );
 }
 
@@ -119,5 +121,6 @@ for (let n = 0; n < MAX_WORKERS; n += 1) {
 }
 account(BANNED_ACCOUNT, "e2e_banned", { ban: "Testing the read-only notice" });
 account(ADMIN_ACCOUNT, "e2e_admin", { admin: true });
+account(DAY_OLD_ACCOUNT, "e2e_day_old", { age: 30 * 3600 });
 
 console.log(lines.join("\n"));

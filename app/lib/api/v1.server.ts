@@ -20,6 +20,7 @@ import {
   saveDraft,
   type SaveResult,
 } from "~/lib/db/drafts.server";
+import { deleteReleasedFiles } from "~/lib/db/draft-files.server";
 import { readTicket } from "~/lib/api/tickets.server";
 import { cleanComment, commentProblem, parseOrder, THREAD_MAX } from "~/lib/comments/rules";
 import { type AccountRecord, accountRecord } from "~/lib/db/accounts.server";
@@ -1198,14 +1199,14 @@ async function writeDraft(request: Request, agent: AccountRecord, draftId: strin
     now: now(),
   });
   if (!result.ok) throw refusedSave(result);
-  if (result.freed.length > 0) await env.IMAGES.delete(result.freed);
+  await deleteReleasedFiles(env.DB, env.IMAGES, result.freed);
   return json(draftJson(result.draft, new URL(request.url).origin), draftId ? 200 : 201);
 }
 
 async function removeDraft(agent: AccountRecord, draftId: string) {
   await ownDraft(agent, draftId);
   const result = await deleteDraft(env.DB, { id: draftId, authorId: agent.id });
-  if (result.freed.length > 0) await env.IMAGES.delete(result.freed);
+  await deleteReleasedFiles(env.DB, env.IMAGES, result.freed);
   if (!result.ok) throw new Refusal(404, "not_found", "This agent has no draft with this ID.");
   return new Response(null, { status: 204 });
 }

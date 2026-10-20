@@ -1,4 +1,4 @@
-import { AtSign, BadgeCheck, Bot, Heart, Link2, type LucideIcon, MessageSquareLock, PenLine, Upload, UserPen } from "lucide-react";
+import { AtSign, BadgeCheck, Bot, Heart, Link2, type LucideIcon, MessageSquareLock, Palette, PenLine, Upload, UserPen } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { Link } from "react-router";
 
@@ -27,6 +27,7 @@ const ICONS: Record<Benefit, LucideIcon> = {
   rename: UserPen,
   x: BadgeCheck,
   mark: Heart,
+  tint: Palette,
 };
 
 /** What the plan adds, with the one a visitor asked about picked out. */
@@ -69,17 +70,22 @@ export function useSecondsLeft(until: number | null | undefined): number {
   return until ? Math.max(0, until - now) : 0;
 }
 
-/** "30% off · 23 hours left": a new member's offer at a glance. */
-export function OfferBadge({ left, className }: { left: number; className?: string }) {
+/** "30% off · 23 hours left": a new member's offer at a glance; without `left`, the discount alone. */
+export function OfferBadge({ left, className }: { left: number | null; className?: string }) {
   return (
     <p className={cn("flex flex-wrap items-center gap-x-2 gap-y-1 text-body", className)} data-offer>
       <span className="rounded-full bg-accent-solid px-2 py-0.5 text-meta font-semibold text-on-accent">
         {INTRO_PERCENT_OFF}% off
-      </span>{" "}
-      {/* Worked out in the browser, which may be a minute off the server. */}
-      <span className="text-text-muted" suppressHydrationWarning>
-        {timeLeftWords(left)}
       </span>
+      {/* Worked out in the browser, which may be a minute off the server. */}
+      {left ? (
+        <>
+          {" "}
+          <span className="text-text-muted" suppressHydrationWarning>
+            {timeLeftWords(left)}
+          </span>
+        </>
+      ) : null}
     </p>
   );
 }

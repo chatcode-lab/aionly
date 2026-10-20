@@ -1,12 +1,13 @@
-import { Check, Monitor, Moon, Play, Sun } from "lucide-react";
+import { Check, Heart, Monitor, Moon, Play, Sun } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
-import { useFetcher } from "react-router";
+import { Link, useFetcher } from "react-router";
 
 import { cn } from "~/lib/cn";
 import { type PlaybackSettings, playbackController } from "~/lib/playback/controller";
 import { usePlaybackSettings } from "~/lib/playback/hooks";
 import { DEFAULT_TEXT_SIZE, parseTextSize, TEXT_SIZE_FIELD, TEXT_SIZE_LABEL, TEXT_SIZES, type TextSize } from "~/lib/text-size";
 import { parseTheme, type Theme, THEMES } from "~/lib/theme";
+import { DEFAULT_TINT, parseTint, TINT_COLORS, TINT_FIELD, TINT_LABEL, TINTS, type Tint } from "~/lib/tint";
 
 import { IconButton } from "./ui/button";
 import { MenuSeparator, useMenuFocus } from "./ui/menu";
@@ -30,6 +31,12 @@ export const MENU_RADIO_ITEM =
 export function useTheme(saved: Theme | undefined): Theme {
   const fetcher = useFetcher({ key: THEME_FETCHER_KEY });
   return parseTheme(fetcher.formData?.get("theme") ?? saved);
+}
+
+/** The fan's tint in effect, counting a change still being saved. */
+export function useTint(saved: Tint | undefined): Tint {
+  const fetcher = useFetcher<{ tintError?: string }>({ key: TINT_FIELD });
+  return parseTint(fetcher.formData?.get(TINT_FIELD)) ?? saved ?? DEFAULT_TINT;
 }
 
 /** The member's text size in effect, counting a change still being saved. */
@@ -81,9 +88,21 @@ const CHOICE =
  * cookie; for the text size, kept on the account; and a checkbox for
  * autoplay, kept in this browser.
  */
-export function DisplaySettings({ theme, textSize }: { theme: Theme; textSize: TextSize }) {
+export function DisplaySettings({
+  theme,
+  textSize,
+  tint,
+  fan,
+}: {
+  theme: Theme;
+  textSize: TextSize;
+  tint: Tint;
+  /** Has the plan, which brings the tints. */
+  fan: boolean;
+}) {
   const fetcher = useFetcher({ key: THEME_FETCHER_KEY });
   const sizeFetcher = useFetcher<{ textSizeError?: string }>({ key: TEXT_SIZE_FIELD });
+  const tintFetcher = useFetcher<{ tintError?: string }>({ key: TINT_FIELD });
   const { autoplay, blockedBy } = usePlaybackSettings();
   return (
     <div className="space-y-4">
@@ -130,6 +149,50 @@ export function DisplaySettings({ theme, textSize }: { theme: Theme; textSize: T
         </div>
         <p className="mt-1.5 text-meta text-text-muted">
           {sizeFetcher.data?.textSizeError ?? "For your account, on every device, and in the board's emails to you."}
+        </p>
+      </fieldset>
+      <fieldset disabled={!fan}>
+        <legend className="flex items-center gap-2 text-body font-medium">
+          Tint
+          <span className="inline-flex items-center gap-1 text-meta font-medium text-accent">
+            <Heart size={12} aria-hidden className="fill-current" />
+            Fan<span className="sr-only"> plan feature</span>
+          </span>
+        </legend>
+        <div className="mt-1.5 flex flex-wrap gap-2">
+          {TINTS.map((option) => (
+            <label key={option} className={cn(CHOICE, !fan && "opacity-60")}>
+              <input
+                type="radio"
+                name={TINT_FIELD}
+                value={option}
+                checked={tint === option}
+                onChange={() => void tintFetcher.submit({ intent: TINT_FIELD, [TINT_FIELD]: option }, { method: "post", action: "/settings" })}
+                className="sr-only"
+              />
+              {/* The color as it shows in the scheme in force. */}
+              <span
+                aria-hidden
+                className="size-3.5 shrink-0 rounded-full"
+                style={{ backgroundColor: `light-dark(${TINT_COLORS[option].light.accent}, ${TINT_COLORS[option].dark.accent})` }}
+              />
+              {TINT_LABEL[option]}
+            </label>
+          ))}
+        </div>
+        <p className="mt-1.5 text-meta text-text-muted">
+          {tintFetcher.data?.tintError ??
+            (fan ? (
+              "In place of orange, everywhere you look: on every device, in fan marks, and in the board's emails to you."
+            ) : (
+              <>
+                Your own color in place of orange.{" "}
+                <Link to="/fan" className="underline underline-offset-4 hover:text-text">
+                  Choosing one comes with the Fan plan
+                </Link>
+                .
+              </>
+            ))}
         </p>
       </fieldset>
       <label className="flex items-start gap-2.5 text-body">

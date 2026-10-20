@@ -36,6 +36,14 @@ export const INTRO_PRICES: Record<PlanInterval, PlanPrice> = {
 export const INTRO_HOURS = 24;
 
 /**
+ * How long checkout gives a new member's prices: longer than the 24 hours
+ * offered everywhere, so one who comes back a day or two later still finds
+ * them on the Fan page, which then shows the price without a time left
+ * (owner's decision, 2026-10-20). Nothing else says so.
+ */
+export const INTRO_HONORED_HOURS = 72;
+
+/**
  * The consumer's right to withdraw from a first subscription, in days (see
  * the terms). The plan's invitations open only once it has passed.
  */
@@ -54,9 +62,14 @@ export function timeLeftWords(seconds: number): string {
   return `${minutes} ${minutes === 1 ? "minute" : "minutes"} left`;
 }
 
-/** When an account's new-member prices end, in seconds. */
+/** When an account's new-member offer ends, as it is offered, in seconds. */
 export function introEndsAt(joinedAt: number): number {
   return joinedAt + INTRO_HOURS * 3600;
+}
+
+/** When checkout stops giving an account a new member's prices, in seconds. */
+export function introHonoredUntil(joinedAt: number): number {
+  return joinedAt + INTRO_HONORED_HOURS * 3600;
 }
 
 /** The prices someone sees: a new member's while they last, else the plan's. */
@@ -100,7 +113,7 @@ export function freshStartAmount(typed: string): number | null {
  * Settings: "From then on, …". What a member posted stays.
  */
 export const PLAN_END_STOPS =
-  "your agent pauses, and new text posts, uploads, clickable outside links, choosing who can reply, your linked X account, and the fan mark stop until you subscribe again";
+  "your agent pauses, and new text posts, uploads, clickable outside links, choosing who can reply, your linked X account, the fan mark, and your tint stop until you subscribe again";
 
 /**
  * That a short name stays once the plan ends, but no longer for certain
@@ -110,7 +123,7 @@ export function shortNameUncertain(name: string): string {
   return `Your username, ${name}, stays yours, but no longer for certain: if someone else asks for it, it may go to them, after we tell you and give you time to subscribe again.`;
 }
 
-export type Benefit = "text" | "upload" | "agent" | "replies" | "links" | "name" | "rename" | "x" | "mark";
+export type Benefit = "text" | "upload" | "agent" | "replies" | "links" | "name" | "rename" | "x" | "mark" | "tint";
 
 /** What the plan adds, in the order the Fan plan page and paywalls list it. */
 export const PLAN_BENEFITS: ReadonlyArray<{ key: Benefit; label: string; detail: string }> = [
@@ -130,7 +143,7 @@ export const PLAN_BENEFITS: ReadonlyArray<{ key: Benefit; label: string; detail:
   {
     key: "links",
     label: "Clickable links",
-    detail: "An outside address on a line of its own becomes a real link in your posts and comments.",
+    detail: "Addresses in your posts and comments are real links, written bare or as their own label.",
   },
   {
     key: "name",
@@ -148,4 +161,5 @@ export const PLAN_BENEFITS: ReadonlyArray<{ key: Benefit; label: string; detail:
     detail: "Linked through X's own sign-in, to show your handle beside your name and use its photo, if you want.",
   },
   { key: "mark", label: "The fan mark", detail: "A small mark beside your name, if you want it shown." },
+  { key: "tint", label: "Your own tint", detail: "Rose, magenta, green, or teal in place of orange, everywhere you look and in your emails." },
 ];

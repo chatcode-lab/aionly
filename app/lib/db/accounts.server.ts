@@ -3,6 +3,7 @@ import type { Restriction } from "../public-types";
 import { type CommentReplies, parsePostChoice, type PostChoice } from "../replies";
 import { NEW_MENTIONS_MAX } from "../text/mentions";
 import { DEFAULT_TEXT_SIZE, storedTextSize, type TextSize } from "../text-size";
+import { DEFAULT_TINT, storedTint, type Tint } from "../tint";
 import { paymentStatements } from "./payments.server";
 import { settingSql } from "./setting-sql.server";
 
@@ -106,11 +107,13 @@ export interface AccountRecord {
   postReplies: PostChoice;
   /** The member's text size, for pages and emails (app/lib/text-size.ts). */
   textSize: TextSize;
+  /** The fan's tint as chosen, in force while they have the plan (app/lib/tint.ts). */
+  tint: Tint;
   /** Up to which place in the order mentions were committed in the member has seen theirs. */
   mentionsSeenSeq: number;
   /** Items mentioning the member or their agent since then, up to NEW_MENTIONS_MAX. */
   newMentions: number;
-  /** Unpublished drafts: the account's own, and its agent's waiting for it (not declined since their last change). */
+  /** Unpublished drafts: the account's own, and its agent's waiting for it (not declined at their current revision). */
   drafts: { own: number; fromAgent: number };
   /** An invitation claimed for this account at sign-up has yet to attach. */
   invitePending: boolean;
@@ -146,7 +149,7 @@ export async function accountRecord(
       `SELECT profile.user_id, profile.karma, profile.role, profile.avatar_key,
               profile.created_at, profile.banned_at, profile.banned_until,
               profile.ban_reason, profile.deleted_at, profile.owner_id,
-              profile.limits, profile.plan_until, profile.show_mark, profile.digest, profile.reply_policy, profile.post_replies, profile.text_size,
+              profile.limits, profile.plan_until, profile.show_mark, profile.digest, profile.reply_policy, profile.post_replies, profile.text_size, profile.tint,
               profile.karma_floor, username.name, profile.mentions_seen_seq, profile.name_allowance,
               COALESCE(profile.karma_floor, ${settingSql("karma_floor")}) AS floor_in_force,
               -- Mentions of the member or their agent since they last looked, up to 99.
@@ -156,11 +159,11 @@ export async function accountRecord(
                          (SELECT agent.user_id FROM profiles AS agent WHERE agent.owner_id = profile.user_id AND agent.deleted_at IS NULL))
                    AND seq > profile.mentions_seen_seq
                  LIMIT ${NEW_MENTIONS_MAX})) AS new_mentions,
-              -- Drafts waiting: the member's own, and their agent's not declined since its last change.
+              -- Drafts waiting: the member's own, and their agent's not declined at their current revision (review F95).
               (SELECT COUNT(*) FROM drafts WHERE author_id = profile.user_id AND post_id IS NULL) AS own_drafts,
               (SELECT COUNT(*) FROM drafts
                WHERE author_id = (SELECT agent.user_id FROM profiles AS agent WHERE agent.owner_id = profile.user_id AND agent.deleted_at IS NULL)
-                 AND post_id IS NULL AND (declined_at IS NULL OR updated_at > declined_at)) AS agent_drafts,
+                 AND post_id IS NULL AND (declined_revision IS NULL OR revision > declined_revision)) AS agent_drafts,
               -- A sign-up whose invitation, or partner, did not attach.
               (EXISTS (SELECT 1 FROM invites WHERE claimed_by = profile.user_id AND used_by IS NULL)
                 OR (profile.invited_by IS NULL AND EXISTS (
@@ -195,6 +198,7 @@ export async function accountRecord(
       reply_policy: Exclude<CommentReplies, "all"> | null;
       post_replies: string | null;
       text_size: number | null;
+      tint: string | null;
       karma_floor: number | null;
       name: string;
       mentions_seen_seq: number;
@@ -258,6 +262,7 @@ export async function accountRecord(
     replyPolicy: row.reply_policy ?? "all",
     postReplies: parsePostChoice(row.post_replies) ?? "all",
     textSize: storedTextSize(row.text_size),
+    tint: storedTint(row.tint),
     mentionsSeenSeq: row.mentions_seen_seq,
     newMentions: row.new_mentions,
     drafts: { own: row.own_drafts, fromAgent: row.agent_drafts },
@@ -271,6 +276,15 @@ export async function setTextSize(db: D1Database, userId: string, size: TextSize
     .prepare(`UPDATE profiles SET text_size = ?2 WHERE user_id = ?1`)
     .bind(userId, size === DEFAULT_TEXT_SIZE ? null : size)
     .run();
+}
+
+/** Chooses a member's tint; orange is stored as none. Anything else needs the plan, checked in the write. */
+export async function setTint(db: D1Database, userId: string, tint: Tint, now: number): Promise<boolean> {
+  const result = await db
+    .prepare(`UPDATE profiles SET tint = ?2 WHERE user_id = ?1 AND owner_id IS NULL AND (?2 IS NULL OR ${entitledCondition(1, now)})`)
+    .bind(userId, tint === DEFAULT_TINT ? null : tint)
+    .run();
+  return result.meta.changes > 0;
 }
 
 /** Whether the account already has a sign-in of this provider linked. */

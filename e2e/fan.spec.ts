@@ -68,6 +68,20 @@ test("the plan page shows what fans get, picks out what was asked for, and its p
   await expect(page.getByText("Your plan starts as soon as you pay, through Stripe.")).toBeVisible();
 });
 
+test("past the offer's 24 hours, a new member's price waits on the plan page alone, with no time left", async ({ page, context, dayOldAccount }) => {
+  await dayOldAccount.signIn(context);
+  // Nowhere else offers it any more.
+  await open(page, "/settings");
+  await expect(page.locator("[data-offer]")).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Fan plan" })).toContainText("$10 a month or $100 a year");
+  // On the plan page, the price holds for 72 hours, without saying how long.
+  await open(page, "/fan");
+  const price = page.locator("[data-price]");
+  await expect(price.locator("s")).toHaveText("Usually $100");
+  await expect(price).toContainText("$70 a year");
+  await expect(price.locator("[data-offer]")).toHaveText(/^30% off$/);
+});
+
 test("a new member's welcome leads to the plan, with a quiet way on", async ({ page, context, account }) => {
   await account.signIn(context);
   await open(page, "/welcome?next=%2Fu%2Fquiet_otter_482");
@@ -147,6 +161,18 @@ test("a fan writes a text post, with the fan mark and a clickable link", async (
   await expect(link).toHaveAttribute("target", "_blank");
   await expect(card.getByTitle("aion.ly fan")).toBeVisible();
 
+  // Anywhere in a fan's text: a bare address, and one labelled with itself,
+  // are links; a label of other words keeps its address beside it, to copy.
+  await page.getByLabel("Comment", { exact: true }).fill(
+    "Also see https://example.net/notes in passing, [www.example.org/a](https://example.org/a/), and [a trick](https://example.com/elsewhere).",
+  );
+  await page.getByRole("button", { name: "Comment", exact: true }).click();
+  const said = page.locator("li[id^='c-']", { hasText: "in passing" });
+  await expect(said.getByRole("link", { name: "example.net/notes" })).toHaveAttribute("href", "https://example.net/notes");
+  await expect(said.getByRole("link", { name: "www.example.org/a" })).toHaveAttribute("href", "https://example.org/a/");
+  await expect(said.locator("a[href='https://example.com/elsewhere']")).toHaveCount(0);
+  await expect(said.getByRole("button", { name: "Copy link https://example.com/elsewhere" })).toBeVisible();
+
   // In the feed, the excerpt keeps the post's lines.
   await open(page, "/?sort=new&range=all");
   const inFeed = page.locator("article").filter({ has: page.getByRole("link", { name: title }) });
@@ -160,6 +186,29 @@ test("a fan writes a text post, with the fan mark and a clickable link", async (
   await expect(page.getByText("The fan mark is hidden beside your name.")).toBeVisible();
   await open(page, `/u/${account.username}`);
   await expect(page.getByTitle("aion.ly fan")).toHaveCount(0);
+});
+
+test("a fan's tint stands in for orange on every page, from the first paint, in either scheme", async ({ page, context, account, request }) => {
+  await account.signIn(context);
+  await open(page, "/settings");
+  // Without the plan, the tints show but cannot be chosen.
+  await expect(page.getByRole("region", { name: "Display" }).getByRole("radio", { name: "Teal" })).toBeDisabled();
+
+  await setPlan(request, account);
+  await open(page, "/settings");
+  const display = page.getByRole("region", { name: "Display" });
+  const accent = () => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue("--accent").trim());
+  expect(await accent()).toBe("#c2410c");
+  const saved = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname.startsWith("/settings"));
+  await display.getByText("Teal", { exact: true }).click();
+  await expect.poll(accent).toBe("#0f766e");
+  expect((await saved).status()).toBe(200);
+  // Kept on the account, so the server renders it into every page.
+  expect(await (await page.request.get("/")).text()).toContain('data-tint="teal"');
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect.poll(accent).toBe("#4fd1c5");
+  await display.getByText("Orange", { exact: true }).click();
+  await expect.poll(accent).toBe("#ff9a5c");
 });
 
 test("a fan uploads a picture and posts it", async ({ page, context, account, request, problems }) => {

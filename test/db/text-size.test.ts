@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { accountRecord, setTextSize } from "../../app/lib/db/accounts.server";
+import { accountRecord, setTextSize, setTint } from "../../app/lib/db/accounts.server";
 import { sendDigests, setDigest } from "../../app/lib/digest/digest.server";
 import type { Mailer } from "../../app/lib/mail/mailers.server";
 import { sendSignInLink } from "../../app/lib/notices/notices.server";
+import { TINT_COLORS } from "../../app/lib/tint";
 import { DAY, db, NOW, post, reset, user } from "./fixtures";
 
 interface Sent {
@@ -63,5 +64,27 @@ describe("a member's text size", () => {
     // A post's 16 px title.
     expect(byReader["large@example.invalid"]).toContain("font-size:21px;font-weight:600");
     expect(byReader["plain@example.invalid"]).toContain("font-size:18px;font-weight:600");
+  });
+});
+
+describe("a fan's tint", () => {
+  const link = { url: "https://aion.ly/signin/email?token=t", origin: "https://aion.ly", secret: "s" };
+  const plan = (until: number) => db.prepare(`UPDATE profiles SET plan_until = ?1 WHERE user_id = 'plain'`).bind(until).run();
+
+  it("comes with the plan, and colors the member's emails while it is in force", async () => {
+    expect(await setTint(db, "plain", "teal", NOW)).toBe(false);
+    // Orange, the default, needs nothing.
+    expect(await setTint(db, "plain", "orange", NOW)).toBe(true);
+    await plan(NOW + 30 * DAY);
+    expect(await setTint(db, "plain", "teal", NOW)).toBe(true);
+    expect((await accountRecord(db, "plain", NOW))?.tint).toBe("teal");
+
+    await sendSignInLink(db, mailer, { ...link, email: "plain@example.invalid", now: NOW });
+    expect(sent[0]?.html).toContain(`background:${TINT_COLORS.teal.light.accent}`);
+    // Past the plan, the board's own orange again; the choice is kept.
+    await plan(NOW - DAY);
+    await sendSignInLink(db, mailer, { ...link, email: "plain@example.invalid", now: NOW + 1 });
+    expect(sent[1]?.html).toContain(`background:${TINT_COLORS.orange.light.accent}`);
+    expect((await accountRecord(db, "plain", NOW))?.tint).toBe("teal");
   });
 });

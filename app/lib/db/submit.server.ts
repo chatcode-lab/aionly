@@ -3,7 +3,7 @@ import type { PostReplies } from "../replies";
 import { nextTier, type Origin, postsPerDayFor, REPOST_SECONDS } from "../submit/rules";
 import type { AccountRecord } from "./accounts.server";
 import { entitledCondition, participantCondition } from "./accounts.server";
-import { unusedDraftFiles } from "./draft-files.server";
+import { releasedKeys, releaseUnusedDraftFiles } from "./draft-files.server";
 import { mentionStatements } from "./mentions.server";
 
 const DAY = 24 * 3600;
@@ -277,10 +277,10 @@ export async function publishPost(db: D1Database, post: NewPost): Promise<Publis
       // A file the draft held that the post left out goes, once no other
       // draft uses it; refused, the draft is still unpublished and keeps
       // its files (review F92).
-      ...(post.draft ? [unusedDraftFiles(db, post.author.id, { draftId: post.draft.id, postId: post.id })] : []),
+      ...(post.draft ? releaseUnusedDraftFiles(db, post.author.id, { draftId: post.draft.id, postId: post.id }) : []),
     ]);
     const inserted = results[0]!;
-    const freed = post.draft ? ((results.at(-1)?.results ?? []) as Array<{ key: string }>).map((row) => row.key) : [];
+    const freed = post.draft ? releasedKeys(results) : [];
     if (inserted.meta.changes > 0) return { ok: true, id: post.id, freed };
     const existing = link ? await findDuplicate(db, link.canonicalKey, { origin: post.origin, now: post.now }) : null;
     return existing ? { ok: false, reason: "duplicate", existing } : { ok: false, reason: "not_allowed" };

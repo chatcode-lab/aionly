@@ -16,7 +16,7 @@ import {
   stillHolding,
   runningSubscription,
 } from "../db/subscriptions.server";
-import { FRESH_START_PRICE, INTRO_PRICES, introEndsAt, NAME_ALLOWANCES, PLAN_PRICES, type PlanInterval } from "../plan";
+import { FRESH_START_PRICE, INTRO_PRICES, introHonoredUntil, NAME_ALLOWANCES, PLAN_PRICES, type PlanInterval } from "../plan";
 import {
   cancelSubscription,
   checkoutSubscription,
@@ -144,9 +144,12 @@ export async function checkoutUrl(
   });
 }
 
-/** The plan's price for the member now: a new member's within INTRO_HOURS of joining, and a little past. */
+/**
+ * The plan's price for the member now: a new member's within
+ * INTRO_HONORED_HOURS of joining, longer than the offer says, and a little past.
+ */
 function planLookupKey(viewer: AccountRecord, interval: PlanInterval): string {
-  return (now() < introEndsAt(viewer.createdAt) + INTRO_GRACE_SECONDS ? INTRO_PRICES : PLAN_PRICES)[interval].lookupKey;
+  return (now() < introHonoredUntil(viewer.createdAt) + INTRO_GRACE_SECONDS ? INTRO_PRICES : PLAN_PRICES)[interval].lookupKey;
 }
 
 /** The member has a short username already as short as the one asked for. */

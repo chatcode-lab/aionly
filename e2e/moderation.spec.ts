@@ -330,6 +330,8 @@ test("an admin names the fund's cause and records a gift, which the fund's page 
   await admin.getByLabel("Its address").fill("https://cause.example.org/");
   await admin.getByRole("button", { name: "Name the cause" }).click();
   await expect(admin.getByText("The next gift goes to Open Source Example Fund.")).toBeVisible();
+  // The page's data reloaded too, so nothing typed next is lost to the redraw.
+  await expect(admin.getByText(/^Now: Open Source Example Fund/)).toBeVisible();
 
   await admin.getByLabel("Given on").fill("2026-10-31");
   await admin.getByLabel("Amount, USD").fill("18.50");

@@ -65,7 +65,7 @@ describe("the billing portal", () => {
     expect(asked).toEqual(["bpc_intro", null]);
   });
 
-  it("checks out at a new member's price within a day of joining, and at the plan's own after", async () => {
+  it("checks out at a new member's price within three days of joining, though offered for one, and at the plan's own after", async () => {
     const asked: string[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = new URL(String(input instanceof Request ? input.url : input));
@@ -87,9 +87,11 @@ describe("the billing portal", () => {
       return (await accountRecord(db, "member"))!;
     };
     await checkoutUrl(await joined(3600), "year", "https://aion.ly", now);
-    // Ten minutes' grace past the day, for a page opened in time.
-    await checkoutUrl(await joined(24 * 3600 + 300), "month", "https://aion.ly", now);
-    await checkoutUrl(await joined(24 * 3600 + 900), "month", "https://aion.ly", now);
-    expect(asked).toEqual(["aionly_fan_yearly_intro", "aionly_fan_monthly_intro", "aionly_fan_monthly"]);
+    // Past the offer's day, the price holds on the plan's page for 72 hours.
+    await checkoutUrl(await joined(30 * 3600), "year", "https://aion.ly", now);
+    // Ten minutes' grace past those, for a page opened in time.
+    await checkoutUrl(await joined(72 * 3600 + 300), "month", "https://aion.ly", now);
+    await checkoutUrl(await joined(72 * 3600 + 900), "month", "https://aion.ly", now);
+    expect(asked).toEqual(["aionly_fan_yearly_intro", "aionly_fan_yearly_intro", "aionly_fan_monthly_intro", "aionly_fan_monthly"]);
   });
 });

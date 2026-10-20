@@ -7,7 +7,7 @@ import { postPage } from "../../app/lib/db/posts.server";
 import { type NewPost, publishPost } from "../../app/lib/db/submit.server";
 import type { DraftFields } from "../../app/lib/draft-rules";
 import { GALLERY_MAX, type Picture, pictureAlt, readGallery } from "../../app/lib/gallery";
-import { sweepUnusedDraftFiles } from "../../app/lib/db/draft-files.server";
+import { deleteReleasedFiles, sweepUnusedDraftFiles } from "../../app/lib/db/draft-files.server";
 import { releaseUpload, storeUpload, sweepDeletedUploads } from "../../app/lib/uploads.server";
 import { DAY, db, NOW, reset, user } from "./fixtures";
 
@@ -297,5 +297,41 @@ describe("draft files nothing uses", () => {
     expect(await stateOf(orphan)).toBeNull();
     expect(await bucket.get(orphan)).toBeNull();
     for (const key of [fresh, kept, shown]) expect(await stateOf(key)).toBe("draft");
+  });
+
+  it("stay queued while the bucket fails to delete them, and go with the next run (review F94)", async () => {
+    const queued = async () => (await db.prepare(`SELECT key FROM file_deletions ORDER BY key`).all<{ key: string }>()).results.map((row) => row.key);
+    const failing = { delete: async () => Promise.reject(new Error("the bucket is unreachable")) } as unknown as R2Bucket;
+    // A draft of two, published as its second picture alone: the first is let go and queued.
+    const keys = [await send("u1", "set-one-aaaa"), await send("u1", "set-one-aaaa")];
+    const saved = await saveDraft(db, {
+      authorId: "u1",
+      fields: {
+        kind: "upload", url: null, origin: "made", title: "A title", description: "", replies: null,
+        mediaKey: keys[0]!, width: 10, height: 10, duration: null, posterKey: null, pictures: pictures(keys),
+      },
+      now: NOW,
+    });
+    if (!saved.ok) throw new Error(JSON.stringify(saved));
+    const author = (await accountRecord(db, "u1", NOW))!;
+    const published = await publishPost(db, {
+      kind: "upload", id: "kept-one", author, origin: "made", title: "A title", description: "A description of twenty.",
+      mediaKey: keys[1]!, mediaType: "image", width: 10, height: 10, duration: null, posterKey: null, pictures: null,
+      draft: { id: saved.draft.id, revision: 1 }, now: NOW,
+    });
+    expect(published).toEqual({ ok: true, id: "kept-one", freed: [keys[0]] });
+    expect(await stateOf(keys[0]!)).toBeNull();
+    expect(await queued()).toEqual([keys[0]]);
+
+    // The bucket fails: the member's action goes on, and the key stays queued.
+    await deleteReleasedFiles(db, failing, published.ok ? published.freed : []);
+    expect(await queued()).toEqual([keys[0]]);
+    expect(await bucket.get(keys[0]!)).not.toBeNull();
+    // An hourly run that fails keeps it too; the next deletes it, and forgets it.
+    await expect(sweepUnusedDraftFiles(db, failing, NOW + DAY)).rejects.toThrow();
+    expect(await queued()).toEqual([keys[0]]);
+    expect(await sweepUnusedDraftFiles(db, bucket, NOW + 31 * DAY)).toBe(1);
+    expect(await bucket.get(keys[0]!)).toBeNull();
+    expect(await queued()).toEqual([]);
   });
 });

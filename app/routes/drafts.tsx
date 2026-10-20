@@ -23,6 +23,7 @@ import {
   type PublishDraftResult,
   removeAgentDraft,
 } from "~/lib/db/drafts.server";
+import { deleteReleasedFiles } from "~/lib/db/draft-files.server";
 import { mentionHosts, mentionNames } from "~/lib/db/mentions.server";
 import { cleanExplanation, DRAFT_LIMIT, EXPLANATION_MAX } from "~/lib/draft-rules";
 import { formatAgo, formatWait } from "~/lib/format";
@@ -33,6 +34,7 @@ import { privatePageMeta } from "~/lib/meta";
 import { ROW_ID } from "~/lib/security/body";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import type { PostMedia } from "~/lib/public-types";
+import type { CheckedLink } from "~/lib/submit/check.server";
 import { postPath } from "~/lib/slug";
 import { mentionIds } from "~/lib/text/mentions";
 import { requireAccount } from "~/lib/viewer.server";
@@ -197,7 +199,7 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
 
   if (intent === "delete") {
     const result = await deleteDraft(env.DB, { id, authorId: viewer.id });
-    if (result.freed.length > 0) await env.IMAGES.delete(result.freed);
+    await deleteReleasedFiles(env.DB, env.IMAGES, result.freed);
     return { draft: id };
   }
 
@@ -231,7 +233,7 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
   if (intent === "remove") {
     const result = await removeAgentDraft(env.DB, { id, ownerId: viewer.id, revision, explanation, now });
     if (!result.ok) return result.reason === "conflict" ? changed : gone;
-    if (result.freed.length > 0) await env.IMAGES.delete(result.freed);
+    await deleteReleasedFiles(env.DB, env.IMAGES, result.freed);
     return { draft: id };
   }
   return { draft: id, error: "That was not understood." };
@@ -270,10 +272,11 @@ function DraftSummary({ draft, now, full }: { draft: DraftItem; now: number; ful
  * with the same check Submit runs, as it reads the page.
  */
 function DraftMedia({ draft }: { draft: DraftItem }) {
-  const [checked, setChecked] = useState<PostMedia | null>(null);
+  // What the check found: the link as it resolved, a short one included, and its media (review F96).
+  const [checked, setChecked] = useState<{ url: string; host: string; media: PostMedia } | null>(null);
   const [state, setState] = useState<"idle" | "loading" | string>("idle");
   if (draft.media.kind === "text") return null;
-  const media = checked ?? draft.media;
+  const media = checked?.media ?? draft.media;
   const preview = async () => {
     setState("loading");
     try {
@@ -282,16 +285,18 @@ function DraftMedia({ draft }: { draft: DraftItem }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ url: draft.url }),
       });
-      const data = (await response.json()) as
-        | { ok: true; link: { provider: string | null; aspect: string | null; pageTitle: string | null; thumbUrl: string | null } }
-        | { ok: false; error?: string; message?: string };
+      const data = (await response.json()) as { ok: true; link: CheckedLink } | { ok: false; error?: string; message?: string };
       if (!data.ok) return setState(("error" in data && data.error) || ("message" in data && data.message) || "The preview did not load.");
       const { link } = data;
-      setChecked(
-        draft.media.kind === "media"
-          ? { ...draft.media, thumbUrl: link.thumbUrl ?? undefined }
-          : { kind: "page", pageTitle: link.pageTitle ?? undefined, thumbUrl: link.thumbUrl ?? undefined },
-      );
+      const thumbUrl = link.thumbUrl ?? undefined;
+      setChecked({
+        url: link.url,
+        host: link.host,
+        media:
+          link.provider && link.aspect
+            ? { kind: "media", provider: link.provider, aspect: link.aspect, thumbUrl }
+            : { kind: "page", pageTitle: link.pageTitle ?? undefined, thumbUrl },
+      });
       setState("idle");
     } catch {
       setState("The preview did not load. Try again.");
@@ -304,8 +309,8 @@ function DraftMedia({ draft }: { draft: DraftItem }) {
           id: `draft-${draft.id}`,
           path: "/drafts",
           title: draft.title,
-          url: draft.url ?? "/drafts",
-          host: draft.host ?? undefined,
+          url: checked?.url ?? draft.url ?? "/drafts",
+          host: checked?.host ?? draft.host ?? undefined,
           origin: "found",
           author: { id: "draft", username: "draft" },
           createdAt: 0,

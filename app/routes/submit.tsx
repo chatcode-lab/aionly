@@ -14,6 +14,7 @@ import { Notice } from "~/components/ui/states";
 import { type Uploaded, UploadPicker } from "~/components/upload-picker";
 import { agentOf } from "~/lib/db/agents.server";
 import { draftById, draftFor, saveDraft as saveServerDraft, type SaveResult } from "~/lib/db/drafts.server";
+import { deleteReleasedFiles } from "~/lib/db/draft-files.server";
 import { DRAFT_BYTES, DRAFT_LIMIT } from "~/lib/draft-rules";
 import { linkMentions, mentionHosts } from "~/lib/db/mentions.server";
 import {
@@ -231,7 +232,7 @@ async function saveAction(request: Request, context: Route.ActionArgs["context"]
     now: Math.floor(Date.now() / 1000),
   });
   if (!result.ok) return saveRefusal(result);
-  if (result.freed.length > 0) await env.IMAGES.delete(result.freed);
+  await deleteReleasedFiles(env.DB, env.IMAGES, result.freed);
   throw redirect(`/submit?draft=${result.draft.id}&saved`);
 }
 
@@ -341,7 +342,7 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
   }
   if (result.ok) {
     // Files the saved draft held that the post left out.
-    if (result.freed.length > 0) await env.IMAGES.delete(result.freed);
+    await deleteReleasedFiles(env.DB, env.IMAGES, result.freed);
     throw redirect(postPath({ id: result.id, title }));
   }
   if (result.reason === "id_taken") return { errors: {}, message: "That did not publish. Try again." };
@@ -745,7 +746,7 @@ function Composer({ loaderData, actionData }: Pick<Route.ComponentProps, "loader
                 : source === "upload"
                   ? "How it was made: tools, prompts, workflow."
                   : entitled
-                    ? "How it was made, or why it is worth reading. An address on its own line becomes a link."
+                    ? "How it was made, or why it is worth reading. Addresses become links."
                     : "How it was made, or why it is worth reading. Links show as plain text."
             }
             value={description}

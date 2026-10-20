@@ -1,6 +1,6 @@
 import { unsubscribeToken } from "../digest/digest.server";
 import type { Mailer } from "../mail/mailers.server";
-import { atTextSize } from "../mail/layout";
+import { forReader } from "../mail/layout";
 import { recipientOf } from "../mail/recipient.server";
 import { SENDERS } from "../mail/senders";
 import { INTRO_HOURS, introEndsAt } from "../plan";
@@ -119,10 +119,10 @@ export async function sendOfferEmails(
       .bind(now, row.user_id, row.offer_emails, due.next)
       .run();
     if (claimed.meta.changes === 0) continue;
-    const account = await recipientOf(db, row.user_id);
+    const account = await recipientOf(db, row.user_id, now);
     if (!account) continue;
     const unsubscribeUrl = await offersUnsubscribeUrl(input.origin, input.secret, row.user_id);
-    const email = atTextSize(composeOfferEmail({ kind: due.kind, left, origin: input.origin, unsubscribeUrl }), account.textSize);
+    const email = forReader(composeOfferEmail({ kind: due.kind, left, origin: input.origin, unsubscribeUrl }), account);
     try {
       await mailer.send({
         ...SENDERS.offers,
@@ -158,7 +158,7 @@ export async function sendTestOfferEmails(
   input: { userId: string; origin: string; secret: string },
 ): Promise<string | null> {
   if (!mailer) return "Amazon SES is not set up here (AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY), so no offer is sent.";
-  const account = await recipientOf(db, input.userId);
+  const account = await recipientOf(db, input.userId, Math.floor(Date.now() / 1000));
   if (!account) return "Your account has no sign-in email.";
   const unsubscribeUrl = await offersUnsubscribeUrl(input.origin, input.secret, input.userId);
   const samples: Array<[OfferEmailKind, number]> = [
@@ -167,7 +167,7 @@ export async function sendTestOfferEmails(
   ];
   try {
     for (const [kind, left] of samples) {
-      const email = atTextSize(composeOfferEmail({ kind, left, origin: input.origin, unsubscribeUrl }), account.textSize);
+      const email = forReader(composeOfferEmail({ kind, left, origin: input.origin, unsubscribeUrl }), account);
       await mailer.send({
         ...SENDERS.offers,
         to: account.email,

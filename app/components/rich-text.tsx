@@ -4,6 +4,7 @@ import { Link, useRouteLoaderData } from "react-router";
 
 import { copyText } from "~/lib/clipboard";
 import { cn } from "~/lib/cn";
+import { labelIsAddress } from "~/lib/links/label";
 import { sitePath } from "~/lib/links/site-path";
 import { type Block, type Inline, parseBlocks } from "~/lib/text/markdown";
 
@@ -44,22 +45,19 @@ function CopyUrl({ href }: { href: string }) {
 
 const SITE_LINK = "underline decoration-border-strong underline-offset-4 hover:decoration-current";
 
-/** True when the node at `index` has a line to itself: nothing but space around it. */
-function aloneOnLine(nodes: Inline[], index: number): boolean {
-  const blank = (node: Inline | undefined) => node?.type === "text" && node.text.trim() === "";
-  const edge = (node: Inline | undefined) => node === undefined || node.type === "break";
-  let before = index - 1;
-  while (blank(nodes[before])) before -= 1;
-  let after = index + 1;
-  while (blank(nodes[after])) after += 1;
-  return edge(nodes[before]) && edge(nodes[after]);
+/** A node's words, without their formatting. */
+function plainText(nodes: Inline[]): string {
+  return nodes
+    .map((node) => ("children" in node ? plainText(node.children) : node.type === "url" ? node.href : node.type === "text" || node.type === "code" ? node.text : ""))
+    .join("");
 }
 
 /**
- * An outside address a fan put on a line of its own: a real link,
- * shown in full or cut short, which search engines are told not to follow.
+ * An outside address in a fan's text, written bare or as its own label: a
+ * real link, shown in full or cut short, which search engines are told not
+ * to follow.
  */
-function OutsideLink({ href }: { href: string }) {
+function OutsideLink({ href, children }: { href: string; children?: ReactNode }) {
   return (
     <a
       href={href}
@@ -69,14 +67,14 @@ function OutsideLink({ href }: { href: string }) {
       title={href}
       className={cn("inline-block max-w-full truncate align-bottom", SITE_LINK)}
     >
-      {href.replace(/^https?:\/\//, "")}
+      {children ?? href.replace(/^https?:\/\//, "")}
     </a>
   );
 }
 
 interface RenderOptions {
   host: string | undefined;
-  /** Bare outside addresses alone on a line become real links. */
+  /** A fan's outside addresses, bare or labelled with themselves, become real links. */
   outsideLinks: boolean;
 }
 
@@ -115,11 +113,7 @@ function renderInline(nodes: Inline[], options: RenderOptions): ReactNode[] {
             </Link>
           );
         }
-        return options.outsideLinks && aloneOnLine(nodes, index) ? (
-          <OutsideLink key={index} href={node.href} />
-        ) : (
-          <CopyUrl key={index} href={node.href} />
-        );
+        return options.outsideLinks ? <OutsideLink key={index} href={node.href} /> : <CopyUrl key={index} href={node.href} />;
       }
       case "link": {
         const path = sitePath(node.href, host);
@@ -132,6 +126,14 @@ function renderInline(nodes: Inline[], options: RenderOptions): ReactNode[] {
         }
         if (!/^https?:\/\//.test(node.href)) {
           return <span key={index}>{renderInline(node.children, options)} ({node.href})</span>;
+        }
+        // A fan's link labelled with its own address hides nothing.
+        if (options.outsideLinks && labelIsAddress(plainText(node.children), node.href)) {
+          return (
+            <OutsideLink key={index} href={node.href}>
+              {renderInline(node.children, options)}
+            </OutsideLink>
+          );
         }
         // The label, then the address it hides, so nothing is disguised.
         return (
@@ -182,8 +184,9 @@ function renderBlocks(blocks: Block[], options: RenderOptions): ReactNode[] {
  * A description or comment in the board's limited Markdown. Everything is
  * rendered as elements and text. Links to the board itself are followed;
  * any other address is shown and copied on a tap, never followed, except
- * that a fan's bare address on a line of its own, with `outsideLinks`,
- * is a real link.
+ * that in a fan's text, with `outsideLinks`, a bare address, or a link
+ * whose label is its own address, is a real link (owner's decision,
+ * 2026-10-20, replacing the address alone on its line).
  */
 export function RichText({
   text,

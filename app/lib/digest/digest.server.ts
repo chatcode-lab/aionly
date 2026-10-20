@@ -3,10 +3,9 @@ import { postsByIds } from "../db/feed.server";
 import { LIVE } from "../db/rows.server";
 import { settingsInForce } from "../db/settings.server";
 import type { Mailer } from "../mail/mailers.server";
-import { atTextSize } from "../mail/layout";
-import { recipientOf } from "../mail/recipient.server";
+import { forReader, type Reader } from "../mail/layout";
+import { readerColumns, readerOf, recipientOf } from "../mail/recipient.server";
 import { SENDERS } from "../mail/senders";
-import { storedTextSize, type TextSize } from "../text-size";
 import { plainText } from "../text/markdown";
 import {
   CHOSEN_WITH,
@@ -83,13 +82,12 @@ export async function setDigest(db: D1Database, userId: string, digest: Frequenc
     .run();
 }
 
-export interface Recipient {
+/** Who gets a digest, and how they read it: their text size and tint. */
+export interface Recipient extends Reader {
   userId: string;
   email: string;
   /** The digest they turned on, which brings this one. */
   chosen: Frequency;
-  /** The text size they read it at. */
-  textSize: TextSize;
 }
 
 /** When the account last got any digest, or one counted as sent. */
@@ -105,7 +103,7 @@ export async function dueRecipients(db: D1Database, frequency: Frequency, now: n
   const sentAt = `profile.${SENT_AT[frequency]}`;
   const { results } = await db
     .prepare(
-      `SELECT profile.user_id, account."email", profile.digest, profile.text_size FROM profiles AS profile
+      `SELECT profile.user_id, account."email", profile.digest, ${readerColumns("profile", now)} FROM profiles AS profile
        JOIN "user" AS account ON account."id" = profile.user_id
        WHERE profile.digest IN (SELECT value FROM json_each(?1)) AND (${sentAt} IS NULL OR ${sentAt} < ?2)
          AND ${LAST_DIGEST("profile.")} <= ?4
@@ -113,8 +111,8 @@ export async function dueRecipients(db: D1Database, frequency: Frequency, now: n
        LIMIT ?3`,
     )
     .bind(chosenWith(frequency), periodStart(frequency, now), limit, now - APART)
-    .all<{ user_id: string; email: string; digest: Frequency; text_size: number | null }>();
-  return results.map((row) => ({ userId: row.user_id, email: row.email, chosen: row.digest, textSize: storedTextSize(row.text_size) }));
+    .all<{ user_id: string; email: string; digest: Frequency; text_size: number | null; tint: string | null }>();
+  return results.map((row) => ({ userId: row.user_id, email: row.email, chosen: row.digest, ...readerOf(row) }));
 }
 
 /**
@@ -238,7 +236,7 @@ export async function sendDigests(
     const failed: string[] = [];
     for (const recipient of recipients) {
       const unsubscribeUrl = `${input.origin}/digest/unsubscribe?token=${encodeURIComponent(await unsubscribeToken(input.secret, recipient.userId))}`;
-      const email = atTextSize(
+      const email = forReader(
         composeDigest({
           frequency,
           chosen: recipient.chosen,
@@ -247,7 +245,7 @@ export async function sendDigests(
           origin: input.origin,
           unsubscribeUrl,
         }),
-        recipient.textSize,
+        recipient,
       );
       try {
         await mailer.send({
@@ -290,7 +288,7 @@ export async function sendTestDigest(
   mailer: Mailer,
   input: { userId: string; origin: string; secret: string; from: string; now: number },
 ): Promise<string | null> {
-  const account = await recipientOf(db, input.userId);
+  const account = await recipientOf(db, input.userId, input.now);
   if (!account) return "Your account has no sign-in email.";
   const bar = await digestBar(db);
   const past = (days: number) => ({ from: input.now - days * 24 * 3600, to: input.now + 1, origin: input.origin });
@@ -308,9 +306,9 @@ export async function sendTestDigest(
   // A digest of the most discussed alone is a digest too (review F82).
   if (lists.voted.length === 0 && lists.discussed.length === 0) return "No posts this month to list.";
   const unsubscribeUrl = `${input.origin}/digest/unsubscribe?token=${encodeURIComponent(await unsubscribeToken(input.secret, input.userId))}`;
-  const email = atTextSize(
+  const email = forReader(
     composeDigest({ frequency, chosen: frequency, period: periodName(frequency), ...lists, origin: input.origin, unsubscribeUrl }),
-    account.textSize,
+    account,
   );
   try {
     await mailer.send({

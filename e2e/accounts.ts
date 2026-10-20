@@ -14,6 +14,9 @@ export const BANNED_ACCOUNT = "e2eban";
 /** The ID of the admin account, shared: tests act through it, never on it. */
 export const ADMIN_ACCOUNT = "e2eadmin";
 
+/** The ID of an account made 30 hours ago, past the new-member offer's 24 hours: shared, only read. */
+export const DAY_OLD_ACCOUNT = "e2edayold";
+
 /**
  * Accounts at -120 and -130 karma, below the floor, one of each per worker:
  * the prefix of their IDs. A fresh start changes them, so no two tests share one.

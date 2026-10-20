@@ -1,10 +1,9 @@
 import { loadSettings } from "../db/settings.server";
 import { settingSql } from "../db/setting-sql.server";
 import type { Mailer } from "../mail/mailers.server";
-import { atTextSize } from "../mail/layout";
-import { recipientOf } from "../mail/recipient.server";
+import { forReader } from "../mail/layout";
+import { readerColumns, readerOf, recipientOf } from "../mail/recipient.server";
 import { SENDERS } from "../mail/senders";
-import { storedTextSize } from "../text-size";
 import { USERNAME_MIN } from "../accounts/usernames";
 import { composePlanEndNotice, composeReadOnlyNotice, composeSignInLink } from "./notices";
 
@@ -62,9 +61,9 @@ export async function sendReadOnlyNotices(db: D1Database, mailer: Mailer, input:
       .bind(row.user_id, now)
       .run();
     if (claimed.meta.changes === 0) continue;
-    const account = await recipientOf(db, row.user_id);
+    const account = await recipientOf(db, row.user_id, input.now);
     if (!account) continue;
-    const email = atTextSize(composeReadOnlyNotice({ karma: row.karma, floor: row.floor, room, origin: input.origin }), account.textSize);
+    const email = forReader(composeReadOnlyNotice({ karma: row.karma, floor: row.floor, room, origin: input.origin }), account);
     try {
       await mailer.send({ ...SENDERS.notices, to: account.email, ...email });
       sent += 1;
@@ -155,9 +154,9 @@ export async function sendPlanEndNotices(db: D1Database, mailer: Mailer, input: 
       .bind(row.user_id, now)
       .run();
     if (claimed.meta.changes === 0) continue;
-    const account = await recipientOf(db, row.user_id);
+    const account = await recipientOf(db, row.user_id, input.now);
     if (!account) continue;
-    const email = atTextSize(
+    const email = forReader(
       composePlanEndNotice({
         reason: row.reason,
         endsAt: row.period_end ?? row.plan_until,
@@ -165,7 +164,7 @@ export async function sendPlanEndNotices(db: D1Database, mailer: Mailer, input: 
         shortName: row.username.length < USERNAME_MIN,
         origin: input.origin,
       }),
-      account.textSize,
+      account,
     );
     try {
       await mailer.send({ ...SENDERS.notices, to: account.email, ...email });
@@ -206,11 +205,11 @@ export async function sendSignInLink(
   const address = input.email.trim().toLowerCase();
   const account = await db
     .prepare(
-      `SELECT account."id", profile.text_size FROM "user" AS account JOIN profiles AS profile ON profile.user_id = account."id"
+      `SELECT account."id", ${readerColumns("profile", input.now)} FROM "user" AS account JOIN profiles AS profile ON profile.user_id = account."id"
        WHERE account."email" = ?1 AND profile.deleted_at IS NULL AND profile.owner_id IS NULL`,
     )
     .bind(address)
-    .first<{ id: string; text_size: number | null }>();
+    .first<{ id: string; text_size: number | null; tint: string | null }>();
   if (!account) return false;
   const reserved = await db
     .prepare(
@@ -223,7 +222,7 @@ export async function sendSignInLink(
   await mailer.send({
     ...SENDERS.signIn,
     to: address,
-    ...atTextSize(composeSignInLink({ url: input.url, origin: input.origin }), storedTextSize(account.text_size)),
+    ...forReader(composeSignInLink({ url: input.url, origin: input.origin }), readerOf(account)),
   });
   return true;
 }

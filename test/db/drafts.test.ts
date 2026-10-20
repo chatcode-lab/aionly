@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { DRAFT_BYTES, DRAFT_LIMIT, type DraftFields } from "../../app/lib/draft-rules";
+import { accountRecord } from "../../app/lib/db/accounts.server";
 import { createAgent } from "../../app/lib/db/agents.server";
 import { deleteAccount } from "../../app/lib/db/deletion.server";
 import {
@@ -274,6 +275,21 @@ describe("an owner's feedback", () => {
     ]);
     expect((await draftFor(db, id, agentId))?.draft).toMatchObject({ declinedAt: NOW, revision: 1 });
     expect((await publish(id, "owner", 1)).ok).toBe(true);
+  });
+
+  it("waits for the owner again once the agent changes a declined draft, however soon (review F95)", async () => {
+    const waiting = async () => (await accountRecord(db, "owner", NOW))!.drafts.fromAgent;
+    const saved = await save(agentId);
+    const id = saved.ok ? saved.draft.id : "";
+    expect(await waiting()).toBe(1);
+    await declineDraft(db, { id, ownerId: "owner", revision: 1, explanation: null, now: NOW });
+    expect(await waiting()).toBe(0);
+    // Changed within the same second as the decline: a new revision, waiting.
+    await save(agentId, { title: "Notes on a small model, with numbers" }, { id });
+    expect((await draftFor(db, id, agentId))?.draft).toMatchObject({ revision: 2, updatedAt: NOW });
+    expect(await waiting()).toBe(1);
+    await declineDraft(db, { id, ownerId: "owner", revision: 2, explanation: null, now: NOW });
+    expect(await waiting()).toBe(0);
   });
 
   it("refuses a stale review and anyone but the owner", async () => {

@@ -28,6 +28,7 @@ import {
   INTRO_HOURS,
   INTRO_PERCENT_OFF,
   introEndsAt,
+  introHonoredUntil,
   NAME_ALLOWANCES,
   PLAN_BENEFITS,
   PLAN_PRICES,
@@ -83,9 +84,10 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     signedIn: viewer !== null,
     admin: viewer?.role === "admin",
     fan: viewer?.fan ?? false,
-    // A new member's prices, while they last.
+    // A new member's prices, while checkout gives them, and the 24 hours the offer says, for its time left.
     introUntil:
-      viewer && !viewer.entitled && !viewer.ownerId && now < introEndsAt(viewer.createdAt) ? introEndsAt(viewer.createdAt) : null,
+      viewer && !viewer.entitled && !viewer.ownerId && now < introHonoredUntil(viewer.createdAt) ? introHonoredUntil(viewer.createdAt) : null,
+    introOfferedUntil: viewer && !viewer.entitled && !viewer.ownerId ? introEndsAt(viewer.createdAt) : null,
     interval: (url.searchParams.get("interval") === "month" && (!wanted || allowance) ? "month" : "year") as PlanInterval,
     plan: status && viewer?.fan
       ? { interval: status.interval, periodEnd: status.periodEnd, ending: status.cancelAtPeriodEnd }
@@ -265,6 +267,7 @@ const FEATURE_TITLE: Record<Benefit, string> = {
   x: "Linking X is for fans",
   rename: "Changing your name early is for fans",
   mark: "The fan mark",
+  tint: "Tints are for fans",
 };
 
 export default function Fan({ loaderData, actionData }: Route.ComponentProps) {
@@ -274,6 +277,8 @@ export default function Fan({ loaderData, actionData }: Route.ComponentProps) {
   const busy = navigation.state !== "idle" && navigation.formAction?.startsWith("/fan") === true;
   const error = actionData && "error" in actionData ? actionData.error : undefined;
   const introLeft = useSecondsLeft(loaderData.introUntil);
+  // The time left shows only within the 24 hours offered; after, the price alone.
+  const offerLeft = useSecondsLeft(loaderData.introOfferedUntil);
   const claiming = wanted !== null && interval === "year";
 
   const heading = wanted
@@ -387,7 +392,7 @@ export default function Fan({ loaderData, actionData }: Route.ComponentProps) {
                   <p className="text-display">
                     <OfferPrice interval={interval} />
                   </p>
-                  <OfferBadge left={introLeft} />
+                  <OfferBadge left={offerLeft > 0 ? offerLeft : null} />
                 </>
               ) : (
                 <p className="text-display font-semibold">

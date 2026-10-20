@@ -5,7 +5,7 @@ import { settingsInForce } from "../db/settings.server";
 import { sendTestDigest } from "../digest/digest.server";
 import { composePlanEndNotice, composeReadOnlyNotice, composeSignInLink } from "../notices/notices";
 import { sendTestOfferEmails } from "../offers/offers.server";
-import { atTextSize } from "./layout";
+import { forReader } from "./layout";
 import { bulkMailer, type Carrier, transactionalMailer } from "./mailers.server";
 import { recipientOf } from "./recipient.server";
 import { SENDERS } from "./senders";
@@ -24,7 +24,7 @@ const NO_SES = "Amazon SES is not set up here (AWS_ACCESS_KEY_ID and AWS_SECRET_
  */
 export async function sendTestEmails(input: { userId: string; origin: string; now: number }): Promise<Check[]> {
   const { userId, origin, now } = input;
-  const account = await recipientOf(env.DB, userId);
+  const account = await recipientOf(env.DB, userId, now);
   if (!account) return [{ label: "Emails", ok: false, detail: "Your account has no sign-in email." }];
   const checks: Check[] = [];
 
@@ -42,7 +42,7 @@ export async function sendTestEmails(input: { userId: string; origin: string; no
   try {
     const carriers = new Set<Carrier | null | void>();
     for (const sample of samples) {
-      carriers.add(await transactional.send({ ...atTextSize(sample, account.textSize), to: account.email, subject: `[Test] ${sample.subject}` }));
+      carriers.add(await transactional.send({ ...forReader(sample, account), to: account.email, subject: `[Test] ${sample.subject}` }));
     }
     const ses = carriers.size === 1 && carriers.has("ses");
     checks.push({

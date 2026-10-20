@@ -19,7 +19,7 @@ import { HeaderActions } from "./components/header-actions";
 import { NotifyProvider } from "./components/notify";
 import { SignInProvider } from "./components/sign-in";
 import { SiteFooter, SiteHeader } from "./components/site-chrome";
-import { useTextSize, useTheme } from "./components/theme-switch";
+import { useTextSize, useTheme, useTint } from "./components/theme-switch";
 import { ErrorState, Notice } from "./components/ui/states";
 import { ToastProvider } from "./components/ui/toast";
 import { invitesRequired, xConfigured } from "./lib/auth.server";
@@ -34,6 +34,7 @@ import { detectInAppBrowser } from "./lib/in-app-browser";
 import type { ViewerSummary } from "./lib/public-types";
 import { writesSettled } from "./lib/pending-writes";
 import { DEFAULT_TEXT_SIZE, textScale } from "./lib/text-size";
+import { DEFAULT_TINT } from "./lib/tint";
 import { readTheme } from "./lib/theme";
 import { viewerOf } from "./lib/viewer.server";
 
@@ -77,6 +78,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
         ...(account.fan && account.showMark ? { fan: true } : {}),
         ...(term?.userId === account.id ? { editor: true } : {}),
         ...(account.textSize !== DEFAULT_TEXT_SIZE ? { textSize: account.textSize } : {}),
+        // A fan's own tint, while the plan is in force.
+        ...(account.entitled && account.tint !== DEFAULT_TINT ? { tint: account.tint } : {}),
         // A new member's prices, while they last, for every paywall to show.
         ...(!account.entitled && !account.ownerId && Date.now() / 1000 < introEndsAt(account.createdAt)
           ? { introUntil: introEndsAt(account.createdAt) }
@@ -138,6 +141,8 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const theme = useTheme(data?.theme);
   // A member's text size scales the four text sizes (app.css), from the first paint.
   const textSize = useTextSize(data?.viewer?.textSize);
+  // A fan's tint stands in for orange (app.css), from the first paint too.
+  const tint = useTint(data?.viewer?.tint);
   // A route asks for the feed's sort and range controls through its handle.
   const feedToolbar = useMatches().some(
     (match) => (match.handle as { feedToolbar?: boolean } | undefined)?.feedToolbar,
@@ -147,6 +152,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     <html
       lang="en"
       data-theme={theme}
+      data-tint={tint === DEFAULT_TINT ? undefined : tint}
       style={textSize === DEFAULT_TEXT_SIZE ? undefined : ({ "--text-scale": textScale(textSize) } as React.CSSProperties)}
     >
       <head>

@@ -7,7 +7,7 @@ import { readReceipt } from "../submit/receipt.server";
 import { cleanDescription, cleanTitle, DESCRIPTION_MAX, descriptionProblem, type Origin, type PostKind, TEXT_BODY_MAX, titleProblem } from "../submit/rules";
 import { mediaTypeOf } from "../uploads";
 import { accountRecord } from "./accounts.server";
-import { unusedDraftFiles } from "./draft-files.server";
+import { deleteReleasedFiles, releasedKeys, releaseUnusedDraftFiles } from "./draft-files.server";
 import { linkMentions } from "./mentions.server";
 import { type Existing, type NewPost, postingStatus, type PostingStatus, publishPost } from "./submit.server";
 
@@ -266,7 +266,7 @@ export async function saveDraft(
         )
         // A new draft has no revision to match.
         .bind(...values.slice(0, 16));
-  const [written, , , freed] = await db.batch([
+  const results = await db.batch([
     write,
     // Files it now uses are kept with it, out of reach of the pending sweep.
     db
@@ -284,10 +284,11 @@ export async function saveDraft(
            AND EXISTS (SELECT 1 FROM drafts WHERE id = ?3 AND post_id IS NULL AND pictures = ?1)`,
       )
       .bind(picturesJson ?? "[]", input.authorId, id),
-    unusedDraftFiles(db, input.authorId),
+    ...releaseUnusedDraftFiles(db, input.authorId),
   ]);
-  const keys = ((freed!.results ?? []) as Array<{ key: string }>).map((row) => row.key);
-  if (written!.meta.changes === 0) {
+  const written = results[0]!;
+  const keys = releasedKeys(results);
+  if (written.meta.changes === 0) {
     const live = await db.prepare(`SELECT ${LIVE_AUTHOR} AS live`).bind(null, input.authorId).first<{ live: number }>();
     if (!live?.live) return { ok: false, reason: "not_found" };
     if (((await sizeAfter())?.bytes ?? 0) > DRAFT_BYTES) return { ok: false, reason: "too_large" };
@@ -337,11 +338,11 @@ function bytesAfterSql(id: number, author: number, media: number, poster: number
 
 /** Deletes the author's own unpublished draft, and its files: their keys come back for the bucket. */
 export async function deleteDraft(db: D1Database, input: { id: string; authorId: string }): Promise<{ ok: boolean; freed: string[] }> {
-  const [deleted, freed] = await db.batch([
+  const results = await db.batch([
     db.prepare(`DELETE FROM drafts WHERE id = ?1 AND author_id = ?2 AND post_id IS NULL`).bind(input.id, input.authorId),
-    unusedDraftFiles(db, input.authorId),
+    ...releaseUnusedDraftFiles(db, input.authorId),
   ]);
-  return { ok: deleted!.meta.changes > 0, freed: ((freed!.results ?? []) as Array<{ key: string }>).map((row) => row.key) };
+  return { ok: results[0]!.meta.changes > 0, freed: releasedKeys(results) };
 }
 
 export type PublishDraftResult =
@@ -474,7 +475,7 @@ export async function publishDraft(
   let result = await publishPost(db, post());
   for (let attempt = 0; attempt < 3 && !result.ok && result.reason === "id_taken"; attempt += 1) result = await publishPost(db, post());
   if (result.ok) {
-    if (result.freed.length > 0) await input.bucket.delete(result.freed);
+    await deleteReleasedFiles(db, input.bucket, result.freed);
     return { ok: true, postId: result.id, title, already: false };
   }
   if (result.reason === "duplicate") return { ok: false, reason: "duplicate", existing: result.existing };
@@ -574,7 +575,7 @@ export async function declineDraft(
       )
       .bind(feedbackId, input.id, input.ownerId, input.revision, input.explanation, input.now),
     db
-      .prepare(`UPDATE drafts SET declined_at = ?2 WHERE id = ?1 AND EXISTS (SELECT 1 FROM agent_feedback WHERE id = ?3)`)
+      .prepare(`UPDATE drafts SET declined_at = ?2, declined_revision = revision WHERE id = ?1 AND EXISTS (SELECT 1 FROM agent_feedback WHERE id = ?3)`)
       .bind(input.id, input.now, feedbackId),
   ]);
   if (noted!.meta.changes > 0) return { ok: true };
@@ -599,7 +600,7 @@ export async function removeAgentDraft(
   const feedbackId = newId();
   const agentId = await agentIdOf(db, input.ownerId);
   if (!agentId) return { ok: false, reason: "not_found" };
-  const [noted, , freed] = await db.batch([
+  const results = await db.batch([
     db
       .prepare(
         `INSERT INTO agent_feedback (id, agent_id, action, target_type, target_id, revision, explanation, title, body, link, created_at)
@@ -609,10 +610,10 @@ export async function removeAgentDraft(
       )
       .bind(feedbackId, input.id, agentId, input.revision, input.explanation, input.now),
     db.prepare(`DELETE FROM drafts WHERE id = ?1 AND EXISTS (SELECT 1 FROM agent_feedback WHERE id = ?2)`).bind(input.id, feedbackId),
-    unusedDraftFiles(db, agentId),
+    ...releaseUnusedDraftFiles(db, agentId),
   ]);
-  const keys = ((freed!.results ?? []) as Array<{ key: string }>).map((row) => row.key);
-  if (noted!.meta.changes > 0) return { ok: true, freed: keys };
+  const keys = releasedKeys(results);
+  if (results[0]!.meta.changes > 0) return { ok: true, freed: keys };
   return refusedReview(db, input.id, input.ownerId);
 }
 

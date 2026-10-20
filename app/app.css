@@ -134,6 +134,99 @@
     }
   }
 
+  /*
+   * A fan's tint (Settings, Display; app/lib/tint.ts, whose colors a test
+   * compares with these) in place of orange, which is the themes' own: the
+   * light colors on any page with the tint, then the dark ones where the
+   * page is dark, by its theme or by the device under System.
+   */
+  /* tint:rose:light */
+  [data-tint="rose"] {
+    --accent: #be123c;
+    --accent-solid: #be123c;
+    --on-accent: #ffffff;
+    --accent-soft: #ffecef;
+  }
+  /* tint:rose:dark */
+  [data-theme="dark"][data-tint="rose"] {
+    --accent: #ff8ca3;
+    --accent-solid: #ff8ca3;
+    --on-accent: #1b1a18;
+    --accent-soft: #3b1820;
+  }
+  /* tint:magenta:light */
+  [data-tint="magenta"] {
+    --accent: #a21caf;
+    --accent-solid: #a21caf;
+    --on-accent: #ffffff;
+    --accent-soft: #fbecfd;
+  }
+  /* tint:magenta:dark */
+  [data-theme="dark"][data-tint="magenta"] {
+    --accent: #ef8cf5;
+    --accent-solid: #ef8cf5;
+    --on-accent: #1b1a18;
+    --accent-soft: #341838;
+  }
+  /* tint:green:light */
+  [data-tint="green"] {
+    --accent: #137a3b;
+    --accent-solid: #137a3b;
+    --on-accent: #ffffff;
+    --accent-soft: #e9f6ee;
+  }
+  /* tint:green:dark */
+  [data-theme="dark"][data-tint="green"] {
+    --accent: #5fd68b;
+    --accent-solid: #5fd68b;
+    --on-accent: #1b1a18;
+    --accent-soft: #15301f;
+  }
+  /* tint:teal:light */
+  [data-tint="teal"] {
+    --accent: #0f766e;
+    --accent-solid: #0f766e;
+    --on-accent: #ffffff;
+    --accent-soft: #e6f4f2;
+  }
+  /* tint:teal:dark */
+  [data-theme="dark"][data-tint="teal"] {
+    --accent: #4fd1c5;
+    --accent-solid: #4fd1c5;
+    --on-accent: #1b1a18;
+    --accent-soft: #112f2c;
+  }
+  @media (prefers-color-scheme: dark) {
+    /* tint:rose:system-dark */
+    [data-theme="system"][data-tint="rose"] {
+      --accent: #ff8ca3;
+      --accent-solid: #ff8ca3;
+      --on-accent: #1b1a18;
+      --accent-soft: #3b1820;
+    }
+    /* tint:magenta:system-dark */
+    [data-theme="system"][data-tint="magenta"] {
+      --accent: #ef8cf5;
+      --accent-solid: #ef8cf5;
+      --on-accent: #1b1a18;
+      --accent-soft: #341838;
+    }
+    /* tint:green:system-dark */
+    [data-theme="system"][data-tint="green"] {
+      --accent: #5fd68b;
+      --accent-solid: #5fd68b;
+      --on-accent: #1b1a18;
+      --accent-soft: #15301f;
+    }
+    /* tint:teal:system-dark */
+    [data-theme="system"][data-tint="teal"] {
+      --accent: #4fd1c5;
+      --accent-solid: #4fd1c5;
+      --on-accent: #1b1a18;
+      --accent-soft: #112f2c;
+    }
+  }
+
   :root {
     /*
      * Touch targets are 44 px, or 40 px on the narrowest phones, where a

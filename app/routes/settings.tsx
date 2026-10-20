@@ -11,7 +11,7 @@ import { PermissionChoice } from "~/components/permission-choice";
 import { FanMark } from "~/components/post-card";
 import { CopyButton, XLogo } from "~/components/sign-in";
 import { RepliesField } from "~/components/replies-field";
-import { DisplaySettings, useTextSize, useTheme } from "~/components/theme-switch";
+import { DisplaySettings, useTextSize, useTheme, useTint } from "~/components/theme-switch";
 import { UsernameForm } from "~/components/username-form";
 import { Select } from "~/components/ui/select";
 import { Button } from "~/components/ui/button";
@@ -29,7 +29,7 @@ import {
 import { wantedShortName } from "~/lib/accounts/wanted-name";
 import { authFor, xConfigured } from "~/lib/auth.server";
 import { cancelForDeletion } from "~/lib/billing/plan.server";
-import { type AccountRecord, nameFreeFor, renameStatus, setTextSize } from "~/lib/db/accounts.server";
+import { type AccountRecord, nameFreeFor, renameStatus, setTextSize, setTint } from "~/lib/db/accounts.server";
 import { agentOf, createAgent, createToken, MAX_TOKENS, type OwnedAgent, revokeToken, setTokenPermission } from "~/lib/db/agents.server";
 import { setReplyChoices } from "~/lib/db/authoring.server";
 import { createInvite, type InviteStanding, inviteStanding, revokeInvite } from "~/lib/db/invites.server";
@@ -58,6 +58,7 @@ import { currentEditor, forgetEditor, picksOfTerm, setFocus } from "~/lib/db/edi
 import { FOCUS_MAX } from "~/lib/editors";
 import { sendOffersSoon } from "~/lib/offers/send.server";
 import { parseTextSize, TEXT_SIZE_FIELD } from "~/lib/text-size";
+import { parseTint, TINT_FIELD } from "~/lib/tint";
 import { readTheme } from "~/lib/theme";
 import { setupPrompt } from "~/lib/agents/setup";
 import { cn } from "~/lib/cn";
@@ -295,6 +296,16 @@ export async function action({ request, context }: Route.ActionArgs) {
     if (!size) return { textSizeError: "Choose one of the sizes." };
     await setTextSize(env.DB, account.id, size);
     return { textSizeSaved: true };
+  }
+
+  // A fan's tint; back to orange works without the plan, as a banned member may.
+  if (form.get("intent") === TINT_FIELD) {
+    const account = await requireAccount(request, context);
+    if (!(await withinLimits(request, "write", account.id))) return { tintError: RATE_LIMITED_MESSAGE };
+    const tint = parseTint(form.get(TINT_FIELD));
+    if (!tint) return { tintError: "Choose one of the tints." };
+    if (!(await setTint(env.DB, account.id, tint, Math.floor(Date.now() / 1000)))) return { tintError: "Choosing a tint comes with the Fan plan." };
+    return { tintSaved: true };
   }
   // Showing on the profile what one's fresh starts gave, or not.
   if (form.get("intent") === "gift") {
@@ -1342,6 +1353,7 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
   // The theme in effect, counting a change still being saved.
   const theme = useTheme(loaderData.theme);
   const textSize = useTextSize(viewer?.textSize);
+  const tint = useTint(viewer?.tint);
   const renamed = actionData && "saved" in actionData ? actionData : undefined;
   const photo = actionData && "photoError" in actionData ? actionData : undefined;
   const hint = firstChange
@@ -1459,7 +1471,7 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
       </Section>
 
       <Section title="Display">
-        <DisplaySettings theme={theme} textSize={textSize} />
+        <DisplaySettings theme={theme} textSize={textSize} tint={tint} fan={loaderData.canHaveAgent} />
       </Section>
 
       <Section title="Email" id="email">
