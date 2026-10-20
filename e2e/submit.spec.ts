@@ -49,7 +49,8 @@ test("a link is checked, previewed, published, and then the day's allowance show
   await expect(card).toContainText("Discovery");
 
   await open(page, "/submit");
-  await expect(page.getByRole("status").filter({ hasText: /Next post available in 2[34] h/ })).toBeVisible();
+  // The allowance in force comes first, so the next tier never reads as the limit.
+  await expect(page.getByRole("status").filter({ hasText: /^You can post once a day at your karma\. Next post available in 2[34] h\. Your draft is saved\. From 50 karma, twice a day\.$/ })).toBeVisible();
   await expect(page.getByRole("button", { name: "Publish" })).toBeDisabled();
 
   // The draft was cleared on publishing.

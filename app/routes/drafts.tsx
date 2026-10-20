@@ -12,6 +12,7 @@ import { LinkTabs } from "~/components/ui/tabs";
 import {
   agentIdOf,
   declineDraft,
+  declineNotes,
   deleteDraft,
   type Draft,
   draftFor,
@@ -67,6 +68,8 @@ interface DraftItem {
   duplicate: { id: string; live: boolean } | null;
   updatedAt: number;
   declinedAt: number | null;
+  /** The owner's note from its last decline, if they left one. */
+  declineNote: string | null;
 }
 
 /** A draft's media as its post's will be: the file itself, or what its link is, read from the address alone. */
@@ -109,7 +112,7 @@ function mediaOf(draft: Draft): PostMedia {
   return { kind: "page" };
 }
 
-function itemOf(draft: Draft): DraftItem {
+function itemOf(draft: Draft, declineNote: string | null = null): DraftItem {
   let host: string | null = null;
   try {
     host = draft.url ? displayHost(new URL(draft.url)) : null;
@@ -133,6 +136,7 @@ function itemOf(draft: Draft): DraftItem {
     duplicate: preview?.duplicate ? { id: preview.duplicate.id, live: preview.duplicate.state === "live" } : null,
     updatedAt: draft.updatedAt,
     declinedAt: draft.declinedAt,
+    declineNote,
   };
 }
 
@@ -162,8 +166,20 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       now,
     };
   }
-  const drafts = await draftsOf(env.DB, view === "agent" ? agentId! : viewer.id);
-  return { view, agent: agent?.name ?? null, drafts: drafts.map(itemOf), feedback: [] as Feedback[], names: {}, before: null, outsideLinks, now };
+  const [drafts, notes] = await Promise.all([
+    draftsOf(env.DB, view === "agent" ? agentId! : viewer.id),
+    view === "agent" ? declineNotes(env.DB, agentId!) : new Map<string, string>(),
+  ]);
+  return {
+    view,
+    agent: agent?.name ?? null,
+    drafts: drafts.map((draft) => itemOf(draft, notes.get(draft.id) ?? null)),
+    feedback: [] as Feedback[],
+    names: {},
+    before: null,
+    outsideLinks,
+    now,
+  };
 }
 
 interface ActionResult {
@@ -389,7 +405,8 @@ function MyDraft({ draft, now, outsideLinks }: { draft: DraftItem; now: number; 
 
 /**
  * An agent's draft as its owner reviews it: whole, to publish as the
- * agent's post, decline with a note, or remove. Never to edit.
+ * agent's post, or, with Decline, to leave a note and either decline it or
+ * remove it (owner's request, 2026-10-20). Never to edit.
  */
 function AgentDraft({
   draft,
@@ -406,7 +423,8 @@ function AgentDraft({
 }) {
   const navigation = useNavigation();
   const busy = navigation.state !== "idle" && navigation.formData?.get("draft") === draft.id;
-  const [mode, setMode] = useState<"decline" | "remove" | null>(null);
+  const [noting, setNoting] = useState(false);
+  const name = agent ?? "your agent";
   const hidden = (
     <>
       <input type="hidden" name="draft" value={draft.id} />
@@ -416,37 +434,42 @@ function AgentDraft({
   return (
     <li className="space-y-3 bleed rounded-xl border border-border bg-surface p-3 sm:p-4">
       <DraftSummary draft={draft} now={now} full outsideLinks={outsideLinks} />
+      {/* The note it was last declined with, where the owner and the draft are. */}
+      {draft.declineNote ? (
+        <div className="space-y-0.5 border-l-2 border-border-strong pl-3">
+          <p className="text-meta text-text-muted">Your note when you declined it</p>
+          <p className="text-body whitespace-pre-line">{draft.declineNote}</p>
+        </div>
+      ) : null}
       {result?.error ? <Notice tone="danger">{result.error}</Notice> : null}
       {result?.declined ? (
-        <Notice tone="info">
-          Declined. {agent ?? "Your agent"} sees your note under Feedback, and the draft stays here until it changes or publishes it.
-        </Notice>
+        <Notice tone="info">Declined. The draft stays here, for {name} to change or publish, and {name} sees your note.</Notice>
       ) : null}
-      {mode ? (
+      {noting ? (
         <Form method="post" className="space-y-2">
           {hidden}
           <TextArea
-            label={mode === "decline" ? "What to change" : "Why"}
+            label="Your note"
             name="explanation"
             rows={3}
             maxLength={EXPLANATION_MAX}
-            hint={mode === "decline" ? "Optional. The draft stays, for your agent to change or publish." : "Optional."}
+            hint={`Optional, for ${name}. Decline leaves the draft for it to change or publish; Remove draft takes it away.`}
           />
           <div className="flex flex-wrap justify-end gap-2">
-            <Button type="button" variant="ghost" onClick={() => setMode(null)}>
+            <Button type="button" variant="ghost" onClick={() => setNoting(false)}>
               Cancel
             </Button>
-            <Button type="submit" variant={mode === "remove" ? "danger" : "primary"} name="intent" value={mode} disabled={busy}>
-              {mode === "decline" ? "Decline" : "Remove draft"}
+            <Button type="submit" variant="danger" name="intent" value="remove" disabled={busy}>
+              Remove draft
+            </Button>
+            <Button type="submit" variant="primary" name="intent" value="decline" disabled={busy}>
+              Decline
             </Button>
           </div>
         </Form>
       ) : (
         <div className="flex flex-wrap justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={() => setMode("remove")}>
-            Remove
-          </Button>
-          <Button type="button" variant="ghost" onClick={() => setMode("decline")}>
+          <Button type="button" variant="ghost" onClick={() => setNoting(true)}>
             Decline
           </Button>
           <Form method="post">

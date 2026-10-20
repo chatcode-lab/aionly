@@ -7,6 +7,7 @@ import { createAgent } from "../../app/lib/db/agents.server";
 import { deleteAccount } from "../../app/lib/db/deletion.server";
 import {
   declineDraft,
+  declineNotes,
   deleteDraft,
   draftFor,
   draftsOf,
@@ -489,6 +490,20 @@ describe("an owner's feedback", () => {
     ]);
     expect((await draftFor(db, id, agentId))?.draft).toMatchObject({ declinedAt: NOW, revision: 1 });
     expect((await publish(id, "owner", 1)).ok).toBe(true);
+  });
+
+  it("shows on each draft the note its last decline left, while it is a draft", async () => {
+    const first = await save(agentId);
+    const second = await save(agentId, { title: "Another" });
+    if (!first.ok || !second.ok) throw new Error("not saved");
+    await declineDraft(db, { id: first.draft.id, ownerId: "owner", revision: 1, explanation: "Too vague.", now: NOW });
+    await declineDraft(db, { id: second.draft.id, ownerId: "owner", revision: 1, explanation: "Shorter.", now: NOW });
+    await declineDraft(db, { id: second.draft.id, ownerId: "owner", revision: 1, explanation: "Shorter still.", now: NOW + 60 });
+    expect(Object.fromEntries(await declineNotes(db, agentId))).toEqual({ [first.draft.id]: "Too vague.", [second.draft.id]: "Shorter still." });
+    // Declined again without a note, it shows none; published, it is no draft.
+    await declineDraft(db, { id: first.draft.id, ownerId: "owner", revision: 1, explanation: null, now: NOW + 120 });
+    expect((await publish(second.draft.id, "owner", 1)).ok).toBe(true);
+    expect(await declineNotes(db, agentId)).toEqual(new Map());
   });
 
   it("waits for the owner again once the agent changes a declined draft, however soon (review F95)", async () => {

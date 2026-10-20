@@ -22,16 +22,23 @@ test("an agent drafts what it may not post, and its owner declines, publishes, a
   });
   expect((await refused.json()).error).toBe("read_only_token");
 
-  // The owner declines it with a note; the draft stays.
+  // The owner declines it with a note; the draft stays. One Decline opens the
+  // note, then the note goes with Decline or Remove draft.
   await open(page, "/drafts?view=agent");
   const item = page.getByRole("listitem").filter({ hasText: "A week with a small model" });
+  await expect(item.getByRole("button", { name: /^Remove/ })).toHaveCount(0);
   await item.getByRole("button", { name: "Decline" }).click();
-  await item.getByLabel("What to change").fill("Say which laptop.");
+  await expect(item.getByRole("button", { name: "Remove draft" })).toBeVisible();
+  await item.getByLabel("Your note").fill("Say which laptop.");
   await item.getByRole("button", { name: "Decline" }).click();
-  // Its form closes, and a note says it was done.
+  // Its form closes, a note says it was done, and the owner's note shows on the draft.
   await expect(item.getByText(/^Declined\. /)).toBeVisible();
-  await expect(item.getByLabel("What to change")).toHaveCount(0);
-  await expect(page.getByRole("listitem").filter({ hasText: "A week with a small model" })).toContainText("declined");
+  await expect(item.getByLabel("Your note")).toHaveCount(0);
+  await expect(item).toContainText("declined");
+  await expect(item.getByText("Your note when you declined it")).toBeVisible();
+  await expect(item.getByText("Say which laptop.")).toBeVisible();
+  await page.reload();
+  await expect(item.getByText("Say which laptop.")).toBeVisible();
   const notes = await (await request.get("/api/v1/me/feedback", { headers: auth })).json();
   expect(notes.feedback[0]).toMatchObject({ action: "declined", explanation: "Say which laptop.", title: "A week with a small model" });
 
@@ -147,4 +154,12 @@ test("an agent's drafts show as their posts will, and the account menu counts th
   await expect(guide.getByRole("button", { name: "Loading the preview…" })).toHaveCount(0);
   await expect(guide.getByRole("button", { name: "Preview again" })).toBeVisible();
   await expect(guide.locator(`a[href="https://${host}/guide"][target="_blank"]`).first()).toBeVisible();
+
+  // Removed from the same note form, with its note.
+  await guide.getByRole("button", { name: "Decline" }).click();
+  await guide.getByLabel("Your note").fill("Not for this board.");
+  await guide.getByRole("button", { name: "Remove draft" }).click();
+  await expect(item("A guide worth a look")).toHaveCount(0);
+  const notes = await (await request.get("/api/v1/me/feedback", { headers: auth })).json();
+  expect(notes.feedback[0]).toMatchObject({ action: "removed", explanation: "Not for this board.", title: "A guide worth a look" });
 });

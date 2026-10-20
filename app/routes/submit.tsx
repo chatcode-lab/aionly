@@ -216,10 +216,12 @@ function statusMessage(status: PostingStatus, now: number): string | null {
     case "karma":
       return "Posting is paused while your karma is below 0. Comments and votes still count.";
     case "wait": {
-      const wait = `Next post available in ${formatWait(status.nextAt - now)}. Your draft is saved.`;
       const times = (count: number) => (count === 1 ? "once" : count === 2 ? "twice" : `${count} times`);
+      // What the account may post now first, so the next tier never reads as its limit.
+      const allowance = status.perDay > 0 ? `You can post ${times(status.perDay)} a day${status.next ? " at your karma" : ""}. ` : "";
+      const wait = `${allowance}Next post available in ${formatWait(status.nextAt - now)}. Your draft is saved.`;
       return status.next
-        ? `${wait} At ${status.next.karma} karma you can post ${times(status.next.postsPerDay)} a day.`
+        ? `${wait} From ${status.next.karma} karma, ${times(status.next.postsPerDay)} a day.`
         : wait;
     }
   }

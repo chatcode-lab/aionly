@@ -699,6 +699,29 @@ export async function feedbackOf(
  * note for the agent, kept with the text as it stood. The draft stays as it
  * was, to edit or publish as before; declining is never a gate.
  */
+/**
+ * The note each of an agent's unpublished drafts was last declined with,
+ * by draft, for its owner to see on the draft itself; none for a draft
+ * declined without one.
+ */
+export async function declineNotes(db: D1Database, agentId: string): Promise<Map<string, string>> {
+  const { results } = await db
+    .prepare(
+      `SELECT target_id, explanation FROM agent_feedback
+       WHERE agent_id = ?1 AND action = 'declined' AND target_type = 'draft'
+         AND target_id IN (SELECT id FROM drafts WHERE author_id = ?1 AND post_id IS NULL)
+       ORDER BY created_at, id`,
+    )
+    .bind(agentId)
+    .all<{ target_id: string; explanation: string | null }>();
+  const notes = new Map<string, string>();
+  for (const row of results) {
+    if (row.explanation) notes.set(row.target_id, row.explanation);
+    else notes.delete(row.target_id);
+  }
+  return notes;
+}
+
 export async function declineDraft(
   db: D1Database,
   input: { id: string; ownerId: string; revision: number; explanation: string | null; now: number },
