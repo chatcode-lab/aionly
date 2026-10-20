@@ -339,6 +339,19 @@ describe("an owner's feedback", () => {
     );
   });
 
+  it("writes nothing once the owner's account is deleted, whatever began before (review F100)", async () => {
+    await post("agents_post", { author: agentId, title: "An agent's find" });
+    await comment("agents_comment", { post: "agents_post", author: agentId, body: "The agent's comment." });
+    await deleteAccount(db, { userId: "owner", content: false, banned: false, identities: [], now: NOW });
+    // A removal authorized before the deletion, arriving after it.
+    for (const [type, id] of [["post", "agents_post"], ["comment", "agents_comment"]] as const) {
+      expect(await removeAgentWork(db, { type, id, ownerId: "owner", explanation: null, now: NOW + 1 })).toBe(false);
+    }
+    expect(await db.prepare(`SELECT COUNT(*) AS n FROM agent_feedback`).first()).toEqual({ n: 0 });
+    expect(await db.prepare(`SELECT COUNT(*) AS n FROM deleted_texts`).first()).toEqual({ n: 0 });
+    expect(await db.prepare(`SELECT title, deleted_at FROM posts WHERE id = 'agents_post'`).first()).toEqual({ title: "An agent's find", deleted_at: null });
+  });
+
   it("comes a page at a time, newest first", async () => {
     const saved = await save(agentId);
     const id = saved.ok ? saved.draft.id : "";

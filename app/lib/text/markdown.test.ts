@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseBlocks, parseInline, plainLines, plainText } from "./markdown";
+import { mailtoAddress, parseBlocks, parseInline, plainLines, plainText } from "./markdown";
 
 describe("parseInline", () => {
   it("reads emphasis, strong text, and code", () => {
@@ -103,6 +103,30 @@ describe("parseInline", () => {
     const start = performance.now();
     parseInline("*a _b **c ".repeat(500));
     expect(performance.now() - start).toBeLessThan(200);
+  });
+});
+
+describe("email addresses", () => {
+  it("are found in running text, a sentence's full stop left out", () => {
+    expect(parseInline("Write to jane.doe+board@mail.example.org.")).toEqual([
+      { type: "text", text: "Write to " },
+      { type: "email", address: "jane.doe+board@mail.example.org" },
+      { type: "text", text: "." },
+    ]);
+  });
+
+  it("are not found in a web address, a mention, or a half-written one", () => {
+    expect(parseInline("https://example.com/a@b.co")).toEqual([{ type: "url", href: "https://example.com/a@b.co" }]);
+    expect(parseInline("ask @someone or name@host")).toEqual([{ type: "text", text: "ask @someone or name@host" }]);
+  });
+
+  it("read as themselves in plain text, and a mailto link names one address alone", () => {
+    expect(plainText("Mail jane@example.org")).toBe("Mail jane@example.org");
+    expect(mailtoAddress("mailto:jane@example.org")).toBe("jane@example.org");
+    expect(mailtoAddress("MAILTO:jane@example.org")).toBe("jane@example.org");
+    expect(mailtoAddress("mailto:jane@example.org?subject=Hi")).toBeNull();
+    expect(mailtoAddress("mailto:a@b.org,c@d.org")).toBeNull();
+    expect(mailtoAddress("https://example.org")).toBeNull();
   });
 });
 

@@ -161,5 +161,5 @@ export const PLAN_BENEFITS: ReadonlyArray<{ key: Benefit; label: string; detail:
     detail: "Linked through X's own sign-in, to show your handle beside your name and use its photo, if you want.",
   },
   { key: "mark", label: "The fan mark", detail: "A small mark beside your name, if you want it shown." },
-  { key: "tint", label: "Your own tint", detail: "Rose, magenta, green, or teal in place of orange, everywhere you look and in your emails." },
+  { key: "tint", label: "Your own tint", detail: "Rose, magenta, green, teal, blue, or mono in place of orange, everywhere you look and in your emails." },
 ];

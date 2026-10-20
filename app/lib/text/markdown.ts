@@ -16,7 +16,9 @@ export type Inline =
   | { type: "mention"; id: string }
   // `[label](href)`, with the label parsed, or a bare address.
   | { type: "link"; href: string; children: Inline[] }
-  | { type: "url"; href: string };
+  | { type: "url"; href: string }
+  // An email address written in the text.
+  | { type: "email"; address: string };
 
 export type Block =
   | { type: "paragraph"; children: Inline[] }
@@ -35,6 +37,15 @@ const LINK = /^\[([^\]\n]{0,500})\]\(([^()\s]{1,2048})(?:[ \t]+"[^"\n]{0,200}")?
 const ESCAPABLE = /[\\`*_[\]()>#+\-.!~<@]/;
 const MENTION_TOKEN = /^<@([A-Za-z0-9_-]{1,32})>/;
 const BARE_URL = /^https?:\/\/[^\s<>"'`]+/;
+/** An email address, at most as long as one may be; its domain ends in letters, so a full stop after it stays out. */
+const EMAIL = /^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.[A-Za-z]{2,24}/;
+const EMAIL_CHAR = /[A-Za-z0-9._%+-]/;
+
+/** The address a `mailto:` link writes to, when it is one address and nothing more. */
+export function mailtoAddress(href: string): string | null {
+  const address = /^mailto:(.+)$/i.exec(href)?.[1];
+  return address && EMAIL.exec(address)?.[0] === address ? address : null;
+}
 const WORD = /[\p{L}\p{N}]/u;
 
 function isBlank(line: string): boolean {
@@ -196,6 +207,17 @@ export function parseInline(source: string, nesting = 0): Inline[] {
       }
     }
 
+    // An email address, from where one could begin.
+    if (EMAIL_CHAR.test(char) && (index === 0 || !EMAIL_CHAR.test(source[index - 1]!))) {
+      const email = EMAIL.exec(source.slice(index, index + 320));
+      if (email && !email[0].startsWith(".")) {
+        flush();
+        out.push({ type: "email", address: email[0] });
+        index += email[0].length;
+        continue;
+      }
+    }
+
     const strike = char === "~" && source[index + 1] === "~";
     if ((char === "*" || char === "_" || strike) && nesting < MAX_NESTING) {
       const delimiter = source[index + 1] === char ? char + char : char;
@@ -290,6 +312,8 @@ function inlineText(nodes: Inline[], lineBreak = " "): string {
           return `<@${node.id}>`;
         case "url":
           return node.href;
+        case "email":
+          return node.address;
         case "link": {
           const label = inlineText(node.children, lineBreak);
           return label && label !== node.href ? `${label} (${node.href})` : node.href;

@@ -196,6 +196,34 @@
     --on-accent: #1b1a18;
     --accent-soft: #112f2c;
   }
+  /* tint:blue:light */
+  [data-tint="blue"] {
+    --accent: #0369a1;
+    --accent-solid: #0369a1;
+    --on-accent: #ffffff;
+    --accent-soft: #e8f3fb;
+  }
+  /* tint:blue:dark */
+  [data-theme="dark"][data-tint="blue"] {
+    --accent: #5cb8f0;
+    --accent-solid: #5cb8f0;
+    --on-accent: #1b1a18;
+    --accent-soft: #12283a;
+  }
+  /* tint:mono:light */
+  [data-tint="mono"] {
+    --accent: #2f2d2a;
+    --accent-solid: #2f2d2a;
+    --on-accent: #ffffff;
+    --accent-soft: #ecebe8;
+  }
+  /* tint:mono:dark */
+  [data-theme="dark"][data-tint="mono"] {
+    --accent: #e7e5e0;
+    --accent-solid: #e7e5e0;
+    --on-accent: #1b1a18;
+    --accent-soft: #2c2a27;
+  }
   @media (prefers-color-scheme: dark) {
     /* tint:rose:system-dark */
     [data-theme="system"][data-tint="rose"] {
@@ -224,6 +252,20 @@
       --accent-solid: #4fd1c5;
       --on-accent: #1b1a18;
       --accent-soft: #112f2c;
+    }
+    /* tint:blue:system-dark */
+    [data-theme="system"][data-tint="blue"] {
+      --accent: #5cb8f0;
+      --accent-solid: #5cb8f0;
+      --on-accent: #1b1a18;
+      --accent-soft: #12283a;
+    }
+    /* tint:mono:system-dark */
+    [data-theme="system"][data-tint="mono"] {
+      --accent: #e7e5e0;
+      --accent-solid: #e7e5e0;
+      --on-accent: #1b1a18;
+      --accent-soft: #2c2a27;
     }
   }
 

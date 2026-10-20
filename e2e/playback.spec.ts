@@ -171,7 +171,9 @@ test("playback the viewer starts takes over, and stops once scrolled away", asyn
 
 test("a song loads ahead, and it and a video never play together", async ({ page }, testInfo) => {
   test.skip(Boolean(testInfo.project.use.hasTouch), "On a touch screen a song waits for a tap; see the next test.");
-  // With autoplay off, only what the viewer starts plays.
+  // With autoplay off, only what the viewer starts plays. A tall window
+  // shows the song and a video beside it, as the viewer starts what they see.
+  await page.setViewportSize({ width: 1280, height: 1800 });
   await page.addInitScript(() => window.localStorage.setItem("autoplay", "off"));
   await page.goto("/");
   await focus(page, SONG);
@@ -182,13 +184,12 @@ test("a song loads ahead, and it and a video never play together", async ({ page
     await card(page, SONG).locator("iframe").evaluate((element) => element.clientHeight),
   ).toBe(176);
 
-  // A video near it was loaded ahead too; the viewer starts it.
-  let video: Frame | undefined;
-  await expect
-    .poll(() => (video = page.frames().find((frame) => frame.url().includes("youtube-nocookie"))))
-    .toBeTruthy();
+  // The video below it, on screen too, was loaded ahead; the viewer starts it.
+  const video: Frame | undefined = await player(page, "Tears of Steel");
   await expect.poll(() => video!.evaluate(() => "player" in window)).toBe(true);
   await video!.evaluate(() => (window as unknown as Fake).viewerPlay());
+  // It buffers first, as YouTube's does, and is not paused for it.
+  await expect.poll(() => isPlaying(video!)).toBe(true);
 
   // Playing the song in its own controls pauses the video.
   await card(page, SONG).frameLocator("iframe").getByRole("button", { name: "Play" }).click();
@@ -223,6 +224,8 @@ test("on a touch screen a song waits for a tap, and stops when a video starts or
   await focus(page, BUNNY);
   const video = await player(page, BUNNY);
   await video.evaluate(() => (window as unknown as Fake).viewerPlay());
+  // It buffers first, as YouTube's does, and is not paused for it.
+  await expect.poll(() => isPlaying(video)).toBe(true);
   await expect.poll(() => songStopped(page), { timeout: 10_000 }).toBe(true);
   expect(await isPlaying(video)).toBe(true);
   expect(await playingCount(page)).toBe(1);

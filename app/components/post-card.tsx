@@ -205,24 +205,42 @@ function CopyLinkButton({ path }: { path: string }) {
  */
 function Excerpt({ post }: { post: PostCardData }) {
   const text = useRef<HTMLParagraphElement>(null);
-  // Cut by length on the server, or by the line clamp, measured once drawn.
-  const [cut, setCut] = useState(post.excerpt.endsWith("…"));
+  // Cut by length on the server, or by the line clamp, measured whenever
+  // the excerpt's size changes, as when the window narrows (review F103).
+  const truncated = post.excerpt.endsWith("…");
+  const [clamped, setClamped] = useState(false);
   const [open, setOpen] = useState(false);
+  const [asked, setAsked] = useState(false);
   const whole = useFetcher<{ description: string; names: MentionNames }>();
+  const loaded = whole.data && "description" in whole.data ? whole.data : null;
+  const showing = open && loaded !== null;
   useEffect(() => {
     const element = text.current;
-    if (element && element.scrollHeight > element.clientHeight + 1) setCut(true);
-  }, [post.excerpt]);
-  const loaded = whole.data && "description" in whole.data ? whole.data : null;
+    if (!element || showing) return;
+    const measure = () => setClamped(element.scrollHeight > element.clientHeight + 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [post.excerpt, showing]);
+  // Asked for and answered without the text: the post is gone, or the
+  // request failed (review F102).
+  const failed = open && asked && whole.state === "idle" && loaded === null;
+  const load = () => {
+    setAsked(true);
+    void whole.load(`/api/post-text/${post.id}`);
+  };
   const toggle = () => {
-    if (!open && !loaded && whole.state === "idle") void whole.load(`/api/post-text/${post.id}`);
+    if (failed) return load();
+    if (!open && !loaded && whole.state === "idle") load();
     setOpen(!open);
   };
   return (
     <div className="mt-3">
-      {open && loaded ? (
+      {showing ? (
         <MentionsProvider names={loaded.names}>
-          <RichText text={loaded.description} outsideLinks={post.author.outsideLinks} />
+          {/* In the excerpt's muted color, as more of the same text. */}
+          <RichText text={loaded.description} className="text-text-muted" outsideLinks={post.author.outsideLinks} />
         </MentionsProvider>
       ) : (
         <p
@@ -237,14 +255,15 @@ function Excerpt({ post }: { post: PostCardData }) {
           {post.excerpt}
         </p>
       )}
-      {cut ? (
+      {failed ? <p className="mt-1 text-meta text-text-muted">The rest of this post is no longer available.</p> : null}
+      {truncated || clamped || showing ? (
         <button
           type="button"
-          aria-expanded={open && loaded !== null}
+          aria-expanded={showing}
           onClick={toggle}
           className="mt-1 text-meta font-medium text-text-muted hover:text-text hover:underline"
         >
-          {open ? (loaded ? "Show less" : "Loading…") : "Show more"}
+          {showing ? "Show less" : failed ? "Try again" : open ? "Loading…" : "Show more"}
         </button>
       ) : null}
     </div>

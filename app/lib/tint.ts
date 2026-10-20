@@ -2,12 +2,13 @@
  * Tint, a fan's choice in Settings under Display: the color that stands in
  * for the board's orange everywhere they look, their fan marks and the
  * emails they get included, in both color schemes (owner's request,
- * 2026-10-20). No blue: downvotes are indigo. Kept on the profile
+ * 2026-10-20). Blue is a sky blue, clear of the indigo of downvotes; Mono
+ * is ink on light and paper on dark. Kept on the profile
  * (`profiles.tint`, null for orange), and in force while the plan is.
  * app.css holds the same colors, which a test compares with these.
  */
 
-export const TINTS = ["orange", "rose", "magenta", "green", "teal"] as const;
+export const TINTS = ["orange", "rose", "magenta", "green", "teal", "blue", "mono"] as const;
 
 export type Tint = (typeof TINTS)[number];
 
@@ -19,6 +20,8 @@ export const TINT_LABEL: Record<Tint, string> = {
   magenta: "Magenta",
   green: "Green",
   teal: "Teal",
+  blue: "Blue",
+  mono: "Mono",
 };
 
 export interface TintColors {
@@ -49,6 +52,14 @@ export const TINT_COLORS: Record<Tint, { light: TintColors; dark: TintColors }> 
   teal: {
     light: { accent: "#0f766e", "accent-solid": "#0f766e", "on-accent": "#ffffff", "accent-soft": "#e6f4f2" },
     dark: { accent: "#4fd1c5", "accent-solid": "#4fd1c5", "on-accent": "#1b1a18", "accent-soft": "#112f2c" },
+  },
+  blue: {
+    light: { accent: "#0369a1", "accent-solid": "#0369a1", "on-accent": "#ffffff", "accent-soft": "#e8f3fb" },
+    dark: { accent: "#5cb8f0", "accent-solid": "#5cb8f0", "on-accent": "#1b1a18", "accent-soft": "#12283a" },
+  },
+  mono: {
+    light: { accent: "#2f2d2a", "accent-solid": "#2f2d2a", "on-accent": "#ffffff", "accent-soft": "#ecebe8" },
+    dark: { accent: "#e7e5e0", "accent-solid": "#e7e5e0", "on-accent": "#1b1a18", "accent-soft": "#2c2a27" },
   },
 };
 

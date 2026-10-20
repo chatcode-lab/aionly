@@ -152,4 +152,31 @@ describe("upgrading a database with data in it", () => {
       { id: "unchanged", declined_revision: 1, waiting: 0 },
     ]);
   });
+
+  it("queues the files the retired sweep still owed deleted accounts, and leaves every other post's (review F101)", () => {
+    const db = new DatabaseSync(":memory:");
+    migrate(db, "", "0044_declined_revisions.sql");
+    db.exec(`
+      INSERT INTO profiles (user_id, created_at, deleted_at) VALUES ('gone', 0, ${NOW - 60}), ('here', 0, NULL);
+      INSERT INTO images (key, owner_id, kind, state, content_type, bytes, created_at) VALUES
+        ('owed.png', 'gone', 'post', 'attached', 'image/png', 1, 0),
+        ('kept_live.png', 'gone', 'post', 'attached', 'image/png', 1, 0),
+        ('kept_removed.png', 'gone', 'post', 'attached', 'image/png', 1, 0),
+        ('kept_author.png', 'here', 'post', 'attached', 'image/png', 1, 0);
+      INSERT INTO posts (id, author_id, kind, url, canonical_key, title, description, origin, created_at, thumb_key, deleted_at, removed_batch_id) VALUES
+        ('owed', 'gone', 'link', 'https://example.com/1', 'example.com/1', '', '', 'found', 0, 'owed.png', ${NOW - 60}, NULL),
+        ('live', 'gone', 'link', 'https://example.com/2', 'example.com/2', 'A post', 'Kept.', 'found', 0, 'kept_live.png', NULL, NULL),
+        ('removed', 'gone', 'link', 'https://example.com/3', 'example.com/3', 'A post', 'Kept.', 'found', 0, 'kept_removed.png', ${NOW - 60}, 'batch'),
+        ('author', 'here', 'link', 'https://example.com/4', 'example.com/4', '', '', 'found', 0, 'kept_author.png', ${NOW - 60}, NULL);
+    `);
+    migrate(db, "0044_declined_revisions.sql", MIGRATIONS[MIGRATIONS.length - 1]!);
+    expect(db.prepare(`SELECT key FROM file_deletions`).all()).toEqual([{ key: "owed.png" }]);
+    expect(db.prepare(`SELECT key FROM images ORDER BY key`).all()).toEqual([{ key: "kept_author.png" }, { key: "kept_live.png" }, { key: "kept_removed.png" }]);
+    expect(db.prepare(`SELECT id, thumb_key FROM posts ORDER BY id`).all()).toEqual([
+      { id: "author", thumb_key: "kept_author.png" },
+      { id: "live", thumb_key: "kept_live.png" },
+      { id: "owed", thumb_key: null },
+      { id: "removed", thumb_key: "kept_removed.png" },
+    ]);
+  });
 });

@@ -74,7 +74,7 @@ test("mentions, strikethrough, site links, and copyable outside links", async ({
   await open(page, POST);
   const marker = `Links from ${account.username} in ${testInfo.project.name}`;
   await page.getByLabel("Comment", { exact: true }).fill(
-    `${marker}: ~~old~~ thanks @Quiet_Otter_482, see https://example.com/a/very/long/path?with=query and [our source](https://aion.ly/p/s_post_07) or [the paper](https://arxiv.org/abs/1706.03762)`,
+    `${marker}: ~~old~~ thanks @Quiet_Otter_482, see https://example.com/a/very/long/path?with=query and [our source](https://aion.ly/p/s_post_07) or [the paper](https://arxiv.org/abs/1706.03762), or mail editor@example.org`,
   );
   await page.getByRole("button", { name: "Comment", exact: true }).click();
   const item = page.locator("li[id^='c-']", { hasText: marker });
@@ -92,6 +92,9 @@ test("mentions, strikethrough, site links, and copyable outside links", async ({
   await copy.click();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("https://example.com/a/very/long/path?with=query");
   await expect(item.getByRole("button", { name: "Copy link https://arxiv.org/abs/1706.03762" })).toBeVisible();
+  // An email address, likewise, to copy.
+  await expect(item.locator("a[href^='mailto:']")).toHaveCount(0);
+  await expect(item.getByRole("button", { name: "Copy email address editor@example.org" })).toBeVisible();
 
   // Editing shows the mention by name, and saving keeps it a mention.
   await item.getByRole("button", { name: "Comment actions" }).first().click();

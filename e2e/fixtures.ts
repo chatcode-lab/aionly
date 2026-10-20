@@ -34,7 +34,13 @@ const FAKE_FRAMES: Array<{ match: RegExp; script: string }> = [
         deliver();
       };
       window.player = () => ({ playing: state === 1, muted });
-      window.viewerPlay = () => change(1);
+      // As YouTube's own play button does: buffering first, then playing,
+      // unless a pause comes while it loads.
+      let loading;
+      window.viewerPlay = () => {
+        change(3);
+        loading = setTimeout(() => change(1), 300);
+      };
       window.viewerPause = () => change(2);
       window.viewerUnmute = () => { muted = false; deliver(); };
       // As YouTube reports a video that cannot be embedded (150).
@@ -50,7 +56,7 @@ const FAKE_FRAMES: Array<{ match: RegExp; script: string }> = [
         if (data.event !== "command") return;
         window.commands.push(data.func);
         if (data.func === "playVideo") change(1);
-        if (data.func === "pauseVideo") change(2);
+        if (data.func === "pauseVideo") { clearTimeout(loading); change(2); }
         if (data.func === "mute") { muted = true; deliver(); }
         if (data.func === "unMute") { muted = false; deliver(); }
       });

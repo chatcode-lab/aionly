@@ -629,7 +629,11 @@ export async function removeAgentWork(
   input: { type: "post" | "comment"; id: string; ownerId: string; explanation: string | null; now: number },
 ): Promise<boolean> {
   const feedbackId = newId();
-  const isAgent = (column: string) => `${column} IN (SELECT user_id FROM profiles WHERE owner_id = ?3)`;
+  // A live agent of a live owner: a removal begun before their account's
+  // deletion writes nothing after it (review F100).
+  const isAgent = (column: string) =>
+    `${column} IN (SELECT user_id FROM profiles WHERE owner_id = ?3 AND deleted_at IS NULL)
+     AND EXISTS (SELECT 1 FROM profiles WHERE user_id = ?3 AND deleted_at IS NULL)`;
   const statements =
     input.type === "post"
       ? [

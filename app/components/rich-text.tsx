@@ -6,7 +6,7 @@ import { copyText } from "~/lib/clipboard";
 import { cn } from "~/lib/cn";
 import { labelIsAddress } from "~/lib/links/label";
 import { sitePath } from "~/lib/links/site-path";
-import { type Block, type Inline, parseBlocks } from "~/lib/text/markdown";
+import { type Block, type Inline, mailtoAddress, parseBlocks } from "~/lib/text/markdown";
 
 import { Mention } from "./mentions";
 
@@ -14,7 +14,7 @@ import { Mention } from "./mentions";
  * An outside address: shown, never followed. A tap copies it, so it can be
  * pasted somewhere on purpose. A long one is cut short with an ellipsis.
  */
-function CopyUrl({ href }: { href: string }) {
+function CopyUrl({ href, email = false }: { href: string; email?: boolean }) {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
@@ -26,7 +26,7 @@ function CopyUrl({ href }: { href: string }) {
     <button
       type="button"
       title={href}
-      aria-label={`Copy link ${href}`}
+      aria-label={email ? `Copy email address ${href}` : `Copy link ${href}`}
       onClick={async () => setCopied(await copyText(href))}
       className="inline-flex max-w-full items-baseline gap-1 rounded-sm align-bottom text-text-muted underline decoration-dotted decoration-border-strong underline-offset-4 hover:text-text"
     >
@@ -37,7 +37,7 @@ function CopyUrl({ href }: { href: string }) {
         <Copy size={13} aria-hidden className="shrink-0 self-center" />
       )}
       <span role="status" className="sr-only">
-        {copied ? "Link copied" : ""}
+        {copied ? (email ? "Email address copied" : "Link copied") : ""}
       </span>
     </button>
   );
@@ -48,7 +48,17 @@ const SITE_LINK = "underline decoration-border-strong underline-offset-4 hover:d
 /** A node's words, without their formatting. */
 function plainText(nodes: Inline[]): string {
   return nodes
-    .map((node) => ("children" in node ? plainText(node.children) : node.type === "url" ? node.href : node.type === "text" || node.type === "code" ? node.text : ""))
+    .map((node) =>
+      "children" in node
+        ? plainText(node.children)
+        : node.type === "url"
+          ? node.href
+          : node.type === "email"
+            ? node.address
+            : node.type === "text" || node.type === "code"
+              ? node.text
+              : "",
+    )
     .join("");
 }
 
@@ -68,6 +78,15 @@ function OutsideLink({ href, children }: { href: string; children?: ReactNode })
       className={cn("inline-block max-w-full truncate align-bottom", SITE_LINK)}
     >
       {children ?? href.replace(/^https?:\/\//, "")}
+    </a>
+  );
+}
+
+/** An email address in a fan's text: a link that opens a new message to it. */
+function MailLink({ address, children }: { address: string; children?: ReactNode }) {
+  return (
+    <a href={`mailto:${address}`} rel="nofollow ugc" title={address} className={cn("inline-block max-w-full truncate align-bottom", SITE_LINK)}>
+      {children ?? address}
     </a>
   );
 }
@@ -106,6 +125,9 @@ function renderInline(nodes: Inline[], options: RenderOptions): ReactNode[] {
         return <del key={index}>{renderInline(node.children, options)}</del>;
       case "mention":
         return options.inLink ? null : <Mention key={index} id={node.id} />;
+      case "email":
+        if (options.inLink) return node.address;
+        return options.outsideLinks ? <MailLink key={index} address={node.address} /> : <CopyUrl key={index} href={node.address} email />;
       case "url": {
         if (options.inLink) return node.href;
         const path = sitePath(node.href, host);
@@ -126,6 +148,24 @@ function renderInline(nodes: Inline[], options: RenderOptions): ReactNode[] {
             <Link key={index} to={path} className={SITE_LINK}>
               {renderInline(node.children, { ...options, inLink: true })}
             </Link>
+          );
+        }
+        // An email link: followed as an address is, by a fan, labelled with itself.
+        const address = mailtoAddress(node.href);
+        if (address) {
+          const label = plainText(node.children).trim().toLowerCase();
+          if (options.outsideLinks && (label === address.toLowerCase() || label === `mailto:${address.toLowerCase()}`)) {
+            return (
+              <MailLink key={index} address={address}>
+                {renderInline(node.children, { ...options, inLink: true })}
+              </MailLink>
+            );
+          }
+          return (
+            <span key={index}>
+              {node.children.length > 0 ? <>{renderInline(node.children, options)} </> : null}
+              <CopyUrl href={address} email />
+            </span>
           );
         }
         if (!/^https?:\/\//.test(node.href)) {

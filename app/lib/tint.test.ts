@@ -5,9 +5,10 @@ import { atTint, composeLetter, forReader } from "./mail/layout";
 import { parseTint, storedTint, TINT_COLORS } from "./tint";
 
 describe("a tint", () => {
-  it("is one of the five, from a form or the profile, else orange", () => {
+  it("is one of the seven, from a form or the profile, else orange", () => {
     expect(parseTint("teal")).toBe("teal");
-    expect(parseTint("blue")).toBeNull();
+    expect(parseTint("mono")).toBe("mono");
+    expect(parseTint("indigo")).toBeNull();
     expect(storedTint(null)).toBe("orange");
     expect(storedTint("rose")).toBe("rose");
     expect(storedTint("nonsense")).toBe("orange");

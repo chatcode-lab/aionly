@@ -57,6 +57,17 @@ describe("account deletion", () => {
     expect((await copies()).results.map((row) => row.item_id)).toEqual(["c2"]);
   });
 
+  it("queues, in its own write, the files of every post it deletes, one published just before included (review F99)", async () => {
+    await db.batch([
+      db.prepare(`INSERT INTO images (key, owner_id, kind, state, content_type, bytes, created_at) VALUES ('snap_file', 'leaver', 'post', 'attached', 'image/png', 10, ?1)`).bind(NOW),
+      db.prepare(`UPDATE posts SET thumb_key = 'snap_file' WHERE id = 'p1'`),
+    ]);
+    expect(await leave(true)).toEqual(["snap_file"]);
+    expect(await db.prepare(`SELECT key FROM images WHERE key = 'snap_file'`).first()).toBeNull();
+    expect(await db.prepare(`SELECT key FROM file_deletions`).all()).toMatchObject({ results: [{ key: "snap_file" }] });
+    expect(await db.prepare(`SELECT thumb_key, deleted_at FROM posts WHERE id = 'p1'`).first()).toEqual({ thumb_key: null, deleted_at: NOW });
+  });
+
   it("removes sign-in records and sessions, and keeps a tombstone that names no one", async () => {
     await leave(false);
     for (const table of ["user", "account", "session"]) {

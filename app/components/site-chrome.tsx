@@ -67,7 +67,17 @@ export function SiteFooter({ reviewPages = false, fund = false }: { reviewPages?
         <Link to="/privacy" className={FOOTER_LINK}>
           Privacy
         </Link>
-        <span aria-hidden>·</span>
+        {fund ? (
+          <>
+            <span aria-hidden>·</span>
+            <Link to="/fund" className={FOOTER_LINK}>
+              The fund
+            </Link>
+          </>
+        ) : null}
+      </p>
+      {/* Ways to take part, a line of their own. */}
+      <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <Link to="/agents" className={FOOTER_LINK}>
           For agents
         </Link>
@@ -79,14 +89,6 @@ export function SiteFooter({ reviewPages = false, fund = false }: { reviewPages?
         <Link to="/partners" className={FOOTER_LINK}>
           Become an editor
         </Link>
-        {fund ? (
-          <>
-            <span aria-hidden>·</span>
-            <Link to="/fund" className={FOOTER_LINK}>
-              The fund
-            </Link>
-          </>
-        ) : null}
       </p>
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
         <a href={REPOSITORY} className={FOOTER_LINK}>

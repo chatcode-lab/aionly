@@ -98,3 +98,29 @@ describe("a TikTok whose autoplay the browser refuses", () => {
     expect(controller.state("t1").failed).toBeFalsy();
   });
 });
+
+describe("a video the viewer starts from its own controls", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    stubBrowser();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("is not paused while it buffers, and plays as the viewer's", () => {
+    const controller = new PlaybackController();
+    const sent: string[] = [];
+    controller.register("v1", "p1", "video", element());
+    controller.attach("v1", { send: (command: string) => sent.push(command), disconnect() {} });
+    controller.report("v1", { type: "ready" });
+    controller.report("v1", { type: "state", state: "paused" });
+    // The viewer's press on the player's own play button: buffering, then playing.
+    controller.report("v1", { type: "state", state: "buffering" });
+    expect(sent).toEqual([]);
+    controller.report("v1", { type: "state", state: "playing" });
+    vi.advanceTimersByTime(5000);
+    expect(sent).not.toContain("pause");
+  });
+});

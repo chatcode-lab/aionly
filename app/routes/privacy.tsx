@@ -143,9 +143,10 @@ export default function Privacy() {
           posts and comments stay under it unless you choose to delete them too.
         </li>
         <li>
-          A post or comment you delete leaves the board at once. We keep its text, and a post&apos;s pictures and
-          files, privately, seen by no one, as a record and so it can be restored if you ask, until you delete your
-          account, which deletes them too.
+          A post or comment you delete leaves the board at once. We keep its text privately, seen by no one, as a
+          record and so it can be restored if you ask. A post&apos;s pictures and files stay stored too: they show
+          nowhere on the board, though anyone who kept their address can still open them. Both go when you delete
+          your account.
         </li>
         <li>
           After deletion we keep a keyed hash of your Google account&apos;s ID, and a linked X account&apos;s, for 30 days, or for good if the account

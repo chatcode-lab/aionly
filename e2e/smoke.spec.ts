@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures";
+import { expect, open, test } from "./fixtures";
 
 test.describe("security baseline", () => {
   test("every page ships the site policy and can be read without violations", async ({
@@ -412,7 +412,8 @@ test.describe("design review page", () => {
   });
 
   test("saves a post from its card", async ({ page }) => {
-    await page.goto("/dev/ui");
+    // Once the page runs, so the click is not lost before it does.
+    await open(page, "/dev/ui");
     const card = page.locator("article", { hasText: "A four-minute stop-motion short" });
 
     const save = card.getByRole("button", { name: "Save post" });

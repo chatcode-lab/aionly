@@ -164,7 +164,7 @@ test("a fan writes a text post, with the fan mark and a clickable link", async (
   // Anywhere in a fan's text: a bare address, and one labelled with itself,
   // are links; a label of other words keeps its address beside it, to copy.
   await page.getByLabel("Comment", { exact: true }).fill(
-    "Also see https://example.net/notes in passing, [www.example.org/a](https://example.org/a/), [https://example.org/guide](https://example.org/guide), [example.net/guide](https://example.net:8443/guide), and [a trick](https://example.com/elsewhere).",
+    "Also see https://example.net/notes in passing, [www.example.org/a](https://example.org/a/), [https://example.org/guide](https://example.org/guide), [example.net/guide](https://example.net:8443/guide), and [a trick](https://example.com/elsewhere). Mail jane@example.org, [jane@example.org](mailto:jane@example.org), or [Jane](mailto:jane@example.org).",
   );
   await page.getByRole("button", { name: "Comment", exact: true }).click();
   const said = page.locator("li[id^='c-']", { hasText: "in passing" });
@@ -178,6 +178,9 @@ test("a fan writes a text post, with the fan mark and a clickable link", async (
   // A port the label leaves out is not hidden behind it (review F98).
   await expect(said.locator("a[href='https://example.net:8443/guide']")).toHaveCount(0);
   await expect(said.getByRole("button", { name: "Copy link https://example.net:8443/guide" })).toBeVisible();
+  // Email addresses open a message, written bare or labelled with themselves; other words keep the address to copy.
+  await expect(said.locator("a[href='mailto:jane@example.org']")).toHaveCount(2);
+  await expect(said.getByRole("button", { name: "Copy email address jane@example.org" })).toHaveCount(1);
   // Drawn again from the server, the thread's links hydrate without complaint.
   await page.reload();
   await expect(page.locator("li[id^='c-']", { hasText: "in passing" }).locator("a[href='https://example.org/guide']")).toHaveCount(1);
@@ -221,6 +224,43 @@ test("a long post's excerpt in the feed opens to its whole text, and closes agai
   await expect(card.getByRole("button", { name: "Show more" })).toBeVisible();
   // A short one has nothing more to show.
   await expect(page.locator("article").filter({ hasText: "Sample post: a post on X" }).getByRole("button", { name: "Show more" })).toHaveCount(0);
+});
+
+test("Show more follows the window's width, and says when the post has gone (review F102, F103)", async ({ page, context, account, request }) => {
+  await setPlan(request, account);
+  await account.signIn(context);
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await open(page, "/submit");
+  await page.getByRole("button", { name: "Text", exact: true }).click();
+  const title = `A middling note by ${account.username}`;
+  // Short of the excerpt's length: whole in four lines on a desktop, more on a phone.
+  await finishPost(
+    page,
+    title,
+    "A note of middling length, long enough to wrap well past four lines on a narrow phone, yet short enough to sit in under four on a desktop, and never cut by length on the server, which trims only past its excerpt's limit.",
+  );
+  const postPath = new URL(page.url()).pathname;
+
+  await open(page, "/?sort=new&range=all");
+  const card = page.locator("article").filter({ has: page.getByRole("link", { name: title }) });
+  await expect(card).toContainText("never cut by length on the server");
+  await expect(card.getByRole("button", { name: "Show more" })).toHaveCount(0);
+  await page.setViewportSize({ width: 320, height: 800 });
+  await expect(card.getByRole("button", { name: "Show more" })).toBeVisible();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await expect(card.getByRole("button", { name: "Show more" })).toHaveCount(0);
+
+  // Deleted in another tab while this feed stays open.
+  await page.setViewportSize({ width: 320, height: 800 });
+  const other = await context.newPage();
+  await open(other, postPath);
+  await other.getByRole("button", { name: "Post actions" }).click();
+  await other.getByRole("menuitem", { name: "Delete" }).click();
+  await other.getByRole("dialog", { name: "Delete this post?" }).getByRole("button", { name: "Delete post" }).click();
+  await expect(other.getByText("[deleted by author]")).toBeVisible();
+  await card.getByRole("button", { name: "Show more" }).click();
+  await expect(card.getByText("The rest of this post is no longer available.")).toBeVisible();
+  await expect(card.getByRole("button", { name: "Try again" })).toBeVisible();
 });
 
 test("a fan's tint stands in for orange on every page, from the first paint, in either scheme", async ({ page, context, account, request }) => {

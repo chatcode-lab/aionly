@@ -74,28 +74,22 @@ export async function deleteAccount(
     .first<{ user_id: string }>();
   const accounts = JSON.stringify(agent ? [userId, agent.user_id] : [userId]);
   const inList = `(SELECT value FROM json_each(?1))`;
-  const { results: avatars } = await db
-    .prepare(`SELECT avatar_key FROM profiles WHERE user_id IN ${inList} AND avatar_key IS NOT NULL`)
-    .bind(accounts)
-    .all<{ avatar_key: string }>();
-  const { results: draftFiles } = await db
-    .prepare(`SELECT key FROM images WHERE owner_id IN ${inList} AND state = 'draft'`)
-    .bind(accounts)
-    .all<{ key: string }>();
-  // The files of its posts deleted by their author, before or now: the
-  // picture or upload, a gallery's others, and a snapshot or poster.
-  const gone = (post: string) =>
-    `${post}.author_id IN ${inList} AND ${post}.removed_batch_id IS NULL${input.content ? "" : ` AND ${post}.deleted_at IS NOT NULL`}`;
-  const { results: postFiles } = await db
-    .prepare(
-      `SELECT media_key AS key FROM posts AS post WHERE ${gone("post")} AND media_key IS NOT NULL
-       UNION SELECT thumb_key FROM posts AS post WHERE ${gone("post")} AND thumb_key IS NOT NULL
-       UNION SELECT json_extract(picture.value, '$.key') FROM posts AS post, json_each(post.pictures) AS picture WHERE ${gone("post")}`,
-    )
-    .bind(accounts)
-    .all<{ key: string }>();
-  const files = [...new Set([...avatars.map((row) => row.avatar_key), ...draftFiles.map((row) => row.key), ...postFiles.map((row) => row.key)])];
+  // Its files: its avatar, its drafts' files, and the files of its posts
+  // deleted by their author, before or in this batch (the picture or
+  // upload, a gallery's others, and a snapshot or poster). Read inside the
+  // batch, after its posts are deleted, so a post published meanwhile is
+  // counted too (review F99); a moderator's removal keeps its record.
+  const files = `SELECT avatar_key AS key FROM profiles WHERE user_id IN ${inList} AND avatar_key IS NOT NULL
+    UNION SELECT key FROM images WHERE owner_id IN ${inList} AND (kind = 'avatar' OR state = 'draft')
+    UNION SELECT media_key FROM posts WHERE author_id IN ${inList} AND deleted_at IS NOT NULL AND removed_batch_id IS NULL
+    UNION SELECT thumb_key FROM posts WHERE author_id IN ${inList} AND deleted_at IS NOT NULL AND removed_batch_id IS NULL
+    UNION SELECT json_extract(picture.value, '$.key') FROM posts, json_each(posts.pictures) AS picture
+      WHERE posts.author_id IN ${inList} AND posts.deleted_at IS NOT NULL AND posts.removed_batch_id IS NULL`;
 
+  // Its files, queued for the bucket as their rows go; the keys come back.
+  const queue = db
+    .prepare(`INSERT INTO file_deletions (key, queued_at) SELECT key, ?2 FROM (${files}) WHERE key IS NOT NULL ON CONFLICT (key) DO NOTHING RETURNING key`)
+    .bind(accounts, now);
   const statements: D1PreparedStatement[] = input.identities.map((hash) =>
     db
       .prepare(
@@ -124,11 +118,9 @@ export async function deleteAccount(
     db.prepare(`DELETE FROM checkout_claims WHERE user_id = ?1`).bind(userId),
     db.prepare(`DELETE FROM checkout_returns WHERE user_id = ?1`).bind(userId),
     db.prepare(`UPDATE agent_tokens SET revoked_at = ?2 WHERE agent_id IN ${inList} AND revoked_at IS NULL`).bind(accounts, now),
-    // Its files, queued for the bucket as their rows go, and its deleted posts' hold on them.
-    db
-      .prepare(`INSERT INTO file_deletions (key, queued_at) SELECT value, ?2 FROM json_each(?1) WHERE TRUE ON CONFLICT (key) DO NOTHING`)
-      .bind(JSON.stringify(files), now),
-    db.prepare(`DELETE FROM images WHERE key IN (SELECT value FROM json_each(?1))`).bind(JSON.stringify(files)),
+    // Its files, queued, then their rows, and its deleted posts' hold on them.
+    queue,
+    db.prepare(`DELETE FROM images WHERE key IN (${files})`).bind(accounts),
     db.prepare(`DELETE FROM images WHERE kind = 'avatar' AND owner_id IN ${inList}`).bind(accounts),
     db.prepare(`DELETE FROM images WHERE state = 'draft' AND owner_id IN ${inList}`).bind(accounts),
     db
@@ -155,6 +147,7 @@ export async function deleteAccount(
     ...settleKarma(db, `(SELECT invited_by FROM profiles WHERE user_id = ?1)`, userId),
     db.prepare(`UPDATE invites SET revoked_at = ?2 WHERE inviter_id = ?1 AND used_by IS NULL AND revoked_at IS NULL`).bind(userId, now),
   );
-  await db.batch(statements);
-  return files;
+  const results = await db.batch(statements);
+  const queued = results[statements.indexOf(queue)]!;
+  return ((queued.results ?? []) as Array<{ key: string }>).map((row) => row.key);
 }

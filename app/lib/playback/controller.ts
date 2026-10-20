@@ -486,7 +486,10 @@ export class PlaybackController {
         slot.connection.send("play");
         slot.sent = { play: true, sound, at: now };
       }
-    } else if (isPlaying(slot.player) && !recent(false)) {
+    } else if (slot.player === "playing" && !recent(false)) {
+      // Only once it plays: a start of the viewer's own reports buffering
+      // first, and pausing that stopped it before it loaded. Playing, it is
+      // then theirs (onState), and never paused here.
       slot.connection.send("pause");
       slot.sent = { play: false, sound: false, at: now };
     }
