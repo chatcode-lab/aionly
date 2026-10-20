@@ -69,7 +69,7 @@ export function FanMark() {
 /** Beside the name of a member who linked their X account through X's sign-in. */
 export function XMark({ handle }: { handle: string }) {
   return (
-    <span title={`Linked X account @${handle}`} className="inline-flex items-center text-[0.8125rem] leading-none font-semibold text-text">
+    <span title={`Linked X account @${handle}`} className="inline-flex items-center text-meta leading-none font-semibold text-text">
       <span aria-hidden>𝕏</span>
       <span className="sr-only">Linked X account @{handle}</span>
     </span>

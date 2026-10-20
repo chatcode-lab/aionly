@@ -8,6 +8,7 @@
  */
 
 import { OPERATOR } from "../site";
+import { type TextSize, textScale } from "../text-size";
 
 export function escape(text: string): string {
   return text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
@@ -65,4 +66,20 @@ ${escape(OPERATOR.name)}, ${escape(OPERATOR.address)}
     `${OPERATOR.name}, ${OPERATOR.address}`,
   ].join("\n");
   return { subject, html, text };
+}
+
+/**
+ * An email at its recipient's text size (Settings, Display): every font
+ * size and line height in its styles scaled, its spacing and width kept.
+ * The default size leaves it as it is.
+ */
+export function atTextSize<T extends { html: string }>(email: T, size: TextSize): T {
+  if (size === 100) return email;
+  const scale = textScale(size);
+  const html = email.html.replace(
+    /style="([^"]*)"/g,
+    (_, style: string) =>
+      `style="${style.replace(/(font-size|line-height):(\d+(?:\.\d+)?)px/g, (_match, property: string, px: string) => `${property}:${Math.round(Number(px) * scale)}px`)}"`,
+  );
+  return { ...email, html };
 }

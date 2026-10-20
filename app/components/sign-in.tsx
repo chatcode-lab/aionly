@@ -181,7 +181,7 @@ function MemberSignIns({ next, sent }: { next: string; sent?: boolean }) {
             spellCheck={false}
             maxLength={254}
             placeholder="Your account's email"
-            className="h-9 min-w-0 flex-1 rounded-lg border border-border-strong bg-surface px-3 text-body text-text placeholder:text-text-faint pointer-coarse:h-(--touch) pointer-coarse:text-[1rem]"
+            className="h-9 min-w-0 flex-1 rounded-lg border border-border-strong bg-surface px-3 text-body text-text placeholder:text-text-faint pointer-coarse:h-(--touch) pointer-coarse:text-[length:max(1rem,var(--text-body))]"
           />
           <Button type="submit">Send link</Button>
         </div>
@@ -301,7 +301,7 @@ export function InviteCodeForm({ label, typed }: { label: string; typed?: string
           spellCheck={false}
           maxLength={12}
           placeholder="Invitation code"
-          className="h-9 min-w-0 flex-1 rounded-lg border border-border-strong bg-surface px-3 font-mono text-body tracking-wider text-text uppercase placeholder:font-sans placeholder:tracking-normal placeholder:text-text-faint placeholder:normal-case pointer-coarse:h-(--touch) pointer-coarse:text-[1rem]"
+          className="h-9 min-w-0 flex-1 rounded-lg border border-border-strong bg-surface px-3 font-mono text-body tracking-wider text-text uppercase placeholder:font-sans placeholder:tracking-normal placeholder:text-text-faint placeholder:normal-case pointer-coarse:h-(--touch) pointer-coarse:text-[length:max(1rem,var(--text-body))]"
         />
         <Button type="submit">Use code</Button>
       </div>

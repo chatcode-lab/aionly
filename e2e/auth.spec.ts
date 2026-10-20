@@ -137,6 +137,30 @@ test("signed in, the theme and autoplay are chosen in Settings", async ({ page, 
   await expect(page.getByRole("region", { name: "Display" }).getByRole("checkbox", { name: /Autoplay videos/ })).not.toBeChecked();
 });
 
+test("a member's text size, chosen in Settings, scales the text on every page from the first paint", async ({ page, context, account }) => {
+  await account.signIn(context);
+  await open(page, "/settings");
+  const display = page.getByRole("region", { name: "Display" });
+  const bodySize = () => page.evaluate(() => getComputedStyle(document.body).fontSize);
+  await expect(display.getByRole("radio", { name: "100%" })).toBeChecked();
+  expect(await bodySize()).toBe("15px");
+  const saved = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname.startsWith("/settings"));
+  await display.getByText("150%", { exact: true }).click();
+  await expect.poll(bodySize).toBe("22.5px");
+  expect((await saved).status()).toBe(200);
+  // Kept on the account, so the server renders it into the page.
+  expect(await (await page.request.get("/")).text()).toContain("--text-scale:1.5");
+  for (const path of ["/", `/u/${account.username}`, "/settings"]) {
+    await open(page, path);
+    expect(await bodySize()).toBe("22.5px");
+    // Spacing and the column stay, so nothing scrolls sideways, even at 320 px.
+    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+  }
+  await expect(page.getByRole("region", { name: "Display" }).getByRole("radio", { name: "150%" })).toBeChecked();
+  await page.getByRole("region", { name: "Display" }).getByText("100%", { exact: true }).click();
+  await expect.poll(bodySize).toBe("15px");
+});
+
 test("signing out ends the session", async ({ page, context, account }) => {
   await account.signIn(context);
   await open(page, "/");

@@ -9,7 +9,7 @@ import { PermissionChoice } from "~/components/permission-choice";
 import { FanMark } from "~/components/post-card";
 import { CopyButton, XLogo } from "~/components/sign-in";
 import { RepliesField } from "~/components/replies-field";
-import { DisplaySettings, useTheme } from "~/components/theme-switch";
+import { DisplaySettings, useTextSize, useTheme } from "~/components/theme-switch";
 import { UsernameForm } from "~/components/username-form";
 import { Button } from "~/components/ui/button";
 import { TextArea } from "~/components/ui/field";
@@ -26,7 +26,7 @@ import {
 import { wantedShortName } from "~/lib/accounts/wanted-name";
 import { authFor, xConfigured } from "~/lib/auth.server";
 import { cancelForDeletion } from "~/lib/billing/plan.server";
-import { type AccountRecord, nameFreeFor, renameStatus } from "~/lib/db/accounts.server";
+import { type AccountRecord, nameFreeFor, renameStatus, setTextSize } from "~/lib/db/accounts.server";
 import { agentOf, createAgent, createToken, MAX_TOKENS, type OwnedAgent, revokeToken, setTokenPermission } from "~/lib/db/agents.server";
 import { setCommentReplies } from "~/lib/db/authoring.server";
 import { createInvite, type InviteStanding, inviteStanding, revokeInvite } from "~/lib/db/invites.server";
@@ -54,6 +54,7 @@ import { partnerStanding, type PartnerStanding } from "~/lib/db/partners.server"
 import { currentEditor, forgetEditor, picksOfTerm, setFocus } from "~/lib/db/editors.server";
 import { FOCUS_MAX } from "~/lib/editors";
 import { sendOffersSoon } from "~/lib/offers/send.server";
+import { parseTextSize, TEXT_SIZE_FIELD } from "~/lib/text-size";
 import { readTheme } from "~/lib/theme";
 import { COMMENT_REPLIES, type CommentReplies, parseCommentReplies } from "~/lib/replies";
 
@@ -279,6 +280,15 @@ export async function action({ request, context }: Route.ActionArgs) {
     const saved = await setFocus(env.DB, { editorId: account.id, focus: focus || null, now: Math.floor(Date.now() / 1000) });
     forgetEditor();
     return saved ? { focusSaved: true } : { focusError: "Your term is over, so the focus can no longer change." };
+  }
+  // The member's text size, for every page and email, whatever their standing.
+  if (form.get("intent") === TEXT_SIZE_FIELD) {
+    const account = await requireAccount(request, context);
+    if (!(await withinLimits(request, "write", account.id))) return { textSizeError: RATE_LIMITED_MESSAGE };
+    const size = parseTextSize(form.get(TEXT_SIZE_FIELD));
+    if (!size) return { textSizeError: "Choose one of the sizes." };
+    await setTextSize(env.DB, account.id, size);
+    return { textSizeSaved: true };
   }
   // Showing on the profile what one's fresh starts gave, or not.
   if (form.get("intent") === "gift") {
@@ -601,7 +611,7 @@ function NewTokenForm({ disabled }: { disabled: boolean }) {
           id="token-label"
           name="label"
           maxLength={TOKEN_LABEL_MAX}
-          className="mt-1 h-9 w-full rounded-lg border border-border-strong bg-surface px-3 text-body pointer-coarse:h-(--touch) pointer-coarse:text-[1rem]"
+          className="mt-1 h-9 w-full rounded-lg border border-border-strong bg-surface px-3 text-body pointer-coarse:h-(--touch) pointer-coarse:text-[length:max(1rem,var(--text-body))]"
         />
       </div>
       <div className="basis-full">
@@ -1019,7 +1029,7 @@ function DeleteAccountForm({ username, error }: { username: string; error?: stri
           autoComplete="off"
           value={typed}
           onChange={(event) => setTyped(event.target.value)}
-          className="mt-1 h-9 w-full rounded-lg border border-border-strong bg-surface px-3 text-body pointer-coarse:h-(--touch) pointer-coarse:text-[1rem]"
+          className="mt-1 h-9 w-full rounded-lg border border-border-strong bg-surface px-3 text-body pointer-coarse:h-(--touch) pointer-coarse:text-[length:max(1rem,var(--text-body))]"
         />
       </div>
       {error ? <Notice tone="danger">{error}</Notice> : null}
@@ -1250,12 +1260,14 @@ function Section({ title, id, children }: { title: React.ReactNode; id?: string;
 }
 
 export default function Settings({ loaderData, actionData }: Route.ComponentProps) {
+  const viewer = useViewer();
   // Admins may take staff-like names.
-  const staff = useViewer()?.role === "admin";
+  const staff = viewer?.role === "admin";
   const settings = useSettings();
   const { id, username, email, photoUrl, hasGooglePhoto, banned, firstChange, nextChangeAt, planChange, planChangeLeft } = loaderData;
   // The theme in effect, counting a change still being saved.
   const theme = useTheme(loaderData.theme);
+  const textSize = useTextSize(viewer?.textSize);
   const renamed = actionData && "saved" in actionData ? actionData : undefined;
   const photo = actionData && "photoError" in actionData ? actionData : undefined;
   const hint = firstChange
@@ -1361,7 +1373,7 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
       </Section>
 
       <Section title="Display">
-        <DisplaySettings theme={theme} />
+        <DisplaySettings theme={theme} textSize={textSize} />
       </Section>
 
       <Section title="Email" id="email">

@@ -19,7 +19,7 @@ import { HeaderActions } from "./components/header-actions";
 import { NotifyProvider } from "./components/notify";
 import { SignInProvider } from "./components/sign-in";
 import { SiteFooter, SiteHeader } from "./components/site-chrome";
-import { useTheme } from "./components/theme-switch";
+import { useTextSize, useTheme } from "./components/theme-switch";
 import { ErrorState, Notice } from "./components/ui/states";
 import { ToastProvider } from "./components/ui/toast";
 import { invitesRequired, xConfigured } from "./lib/auth.server";
@@ -33,6 +33,7 @@ import { imageAddress } from "./lib/media.server";
 import { detectInAppBrowser } from "./lib/in-app-browser";
 import type { ViewerSummary } from "./lib/public-types";
 import { writesSettled } from "./lib/pending-writes";
+import { textScale } from "./lib/text-size";
 import { readTheme } from "./lib/theme";
 import { viewerOf } from "./lib/viewer.server";
 
@@ -74,6 +75,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
         newMentions: account.newMentions,
         ...(account.fan && account.showMark ? { fan: true } : {}),
         ...(term?.userId === account.id ? { editor: true } : {}),
+        ...(account.textSize !== 100 ? { textSize: account.textSize } : {}),
         // A new member's prices, while they last, for every paywall to show.
         ...(!account.entitled && !account.ownerId && Date.now() / 1000 < introEndsAt(account.createdAt)
           ? { introUntil: introEndsAt(account.createdAt) }
@@ -133,13 +135,19 @@ export function Layout({ children }: { children: React.ReactNode }) {
   // The server renders the remembered theme into the document, and CSS
   // resolves "system", so the first paint is already correct.
   const theme = useTheme(data?.theme);
+  // A member's text size scales the four text sizes (app.css), from the first paint.
+  const textSize = useTextSize(data?.viewer?.textSize);
   // A route asks for the feed's sort and range controls through its handle.
   const feedToolbar = useMatches().some(
     (match) => (match.handle as { feedToolbar?: boolean } | undefined)?.feedToolbar,
   );
 
   return (
-    <html lang="en" data-theme={theme}>
+    <html
+      lang="en"
+      data-theme={theme}
+      style={textSize === 100 ? undefined : ({ "--text-scale": textScale(textSize) } as React.CSSProperties)}
+    >
       <head>
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />

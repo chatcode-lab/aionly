@@ -227,7 +227,7 @@ function ProviderSpike({
             <select
               value={start}
               onChange={(event) => setStart(event.target.value as Start)}
-              className="h-9 min-w-0 flex-1 rounded-lg border border-border-strong bg-surface px-2 text-body pointer-coarse:h-(--touch) pointer-coarse:text-[1rem]"
+              className="h-9 min-w-0 flex-1 rounded-lg border border-border-strong bg-surface px-2 text-body pointer-coarse:h-(--touch) pointer-coarse:text-[length:max(1rem,var(--text-body))]"
             >
               <option value="paused">Paused</option>
               <option value="muted">Autoplay muted (card in focus)</option>

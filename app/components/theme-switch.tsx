@@ -5,6 +5,7 @@ import { useFetcher } from "react-router";
 import { cn } from "~/lib/cn";
 import { type PlaybackSettings, playbackController } from "~/lib/playback/controller";
 import { usePlaybackSettings } from "~/lib/playback/hooks";
+import { parseTextSize, TEXT_SIZE_FIELD, TEXT_SIZES, type TextSize } from "~/lib/text-size";
 import { parseTheme, type Theme, THEMES } from "~/lib/theme";
 
 import { IconButton } from "./ui/button";
@@ -29,6 +30,12 @@ export const MENU_RADIO_ITEM =
 export function useTheme(saved: Theme | undefined): Theme {
   const fetcher = useFetcher({ key: THEME_FETCHER_KEY });
   return parseTheme(fetcher.formData?.get("theme") ?? saved);
+}
+
+/** The member's text size in effect, counting a change still being saved. */
+export function useTextSize(saved: TextSize | undefined): TextSize {
+  const fetcher = useFetcher<{ textSizeError?: string }>({ key: TEXT_SIZE_FIELD });
+  return parseTextSize(fetcher.formData?.get(TEXT_SIZE_FIELD)) ?? saved ?? 100;
 }
 
 /** The three theme choices, in the header's theme switch for visitors. */
@@ -65,13 +72,18 @@ export function ThemeRadioGroup({ theme }: { theme: Theme }) {
   );
 }
 
+const CHOICE =
+  "flex h-9 cursor-pointer items-center gap-2 rounded-lg border border-border-strong px-3 text-body has-checked:border-accent has-checked:bg-accent-soft has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent pointer-coarse:h-(--touch)";
+
 /**
- * The theme and autoplay as a section of Settings, where a signed-in member
- * finds them: radio buttons for the theme, kept in a cookie, and a checkbox
- * for autoplay, kept in this browser.
+ * The theme, text size, and autoplay as a section of Settings, where a
+ * signed-in member finds them: radio buttons for the theme, kept in a
+ * cookie; for the text size, kept on the account; and a checkbox for
+ * autoplay, kept in this browser.
  */
-export function DisplaySettings({ theme }: { theme: Theme }) {
+export function DisplaySettings({ theme, textSize }: { theme: Theme; textSize: TextSize }) {
   const fetcher = useFetcher({ key: THEME_FETCHER_KEY });
+  const sizeFetcher = useFetcher<{ textSizeError?: string }>({ key: TEXT_SIZE_FIELD });
   const { autoplay, blockedBy } = usePlaybackSettings();
   return (
     <div className="space-y-4">
@@ -81,10 +93,7 @@ export function DisplaySettings({ theme }: { theme: Theme }) {
           {THEMES.map((option) => {
             const { label, Icon } = OPTIONS[option];
             return (
-              <label
-                key={option}
-                className="flex h-9 cursor-pointer items-center gap-2 rounded-lg border border-border-strong px-3 text-body has-checked:border-accent has-checked:bg-accent-soft pointer-coarse:h-(--touch)"
-              >
+              <label key={option} className={CHOICE}>
                 <input
                   type="radio"
                   name="theme"
@@ -99,6 +108,29 @@ export function DisplaySettings({ theme }: { theme: Theme }) {
             );
           })}
         </div>
+      </fieldset>
+      <fieldset>
+        <legend className="text-body font-medium">Text size</legend>
+        <div className="mt-1.5 flex flex-wrap gap-2">
+          {TEXT_SIZES.map((option) => (
+            <label key={option} className={CHOICE}>
+              <input
+                type="radio"
+                name={TEXT_SIZE_FIELD}
+                value={option}
+                checked={textSize === option}
+                onChange={() =>
+                  void sizeFetcher.submit({ intent: TEXT_SIZE_FIELD, [TEXT_SIZE_FIELD]: option }, { method: "post", action: "/settings" })
+                }
+                className="sr-only"
+              />
+              {option}%
+            </label>
+          ))}
+        </div>
+        <p className="mt-1.5 text-meta text-text-muted">
+          {sizeFetcher.data?.textSizeError ?? "For your account, on every device, and in the board's emails to you."}
+        </p>
       </fieldset>
       <label className="flex items-start gap-2.5 text-body">
         <input

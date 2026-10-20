@@ -18,7 +18,7 @@ import { Button } from "./ui/button";
 const COUNTER_FROM = COMMENT_MAX - 500;
 
 const TEXTAREA =
-  "block w-full resize-y rounded-lg border bg-surface px-3 py-2 text-body text-text placeholder:text-text-faint pointer-coarse:text-[1rem]";
+  "block w-full resize-y rounded-lg border bg-surface px-3 py-2 text-body text-text placeholder:text-text-faint pointer-coarse:text-[length:max(1rem,var(--text-body))]";
 
 /**
  * Comment text with its counter and error, sent with Ctrl or Cmd and Enter.

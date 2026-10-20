@@ -1,7 +1,10 @@
 import { loadSettings } from "../db/settings.server";
 import { settingSql } from "../db/setting-sql.server";
 import type { Mailer } from "../mail/mailers.server";
+import { atTextSize } from "../mail/layout";
+import { recipientOf } from "../mail/recipient.server";
 import { SENDERS } from "../mail/senders";
+import { storedTextSize } from "../text-size";
 import { USERNAME_MIN } from "../accounts/usernames";
 import { composePlanEndNotice, composeReadOnlyNotice, composeSignInLink } from "./notices";
 
@@ -59,9 +62,9 @@ export async function sendReadOnlyNotices(db: D1Database, mailer: Mailer, input:
       .bind(row.user_id, now)
       .run();
     if (claimed.meta.changes === 0) continue;
-    const account = await db.prepare(`SELECT "email" FROM "user" WHERE "id" = ?1`).bind(row.user_id).first<{ email: string }>();
+    const account = await recipientOf(db, row.user_id);
     if (!account) continue;
-    const email = composeReadOnlyNotice({ karma: row.karma, floor: row.floor, room, origin: input.origin });
+    const email = atTextSize(composeReadOnlyNotice({ karma: row.karma, floor: row.floor, room, origin: input.origin }), account.textSize);
     try {
       await mailer.send({ ...SENDERS.notices, to: account.email, ...email });
       sent += 1;
@@ -152,15 +155,18 @@ export async function sendPlanEndNotices(db: D1Database, mailer: Mailer, input: 
       .bind(row.user_id, now)
       .run();
     if (claimed.meta.changes === 0) continue;
-    const account = await db.prepare(`SELECT "email" FROM "user" WHERE "id" = ?1`).bind(row.user_id).first<{ email: string }>();
+    const account = await recipientOf(db, row.user_id);
     if (!account) continue;
-    const email = composePlanEndNotice({
-      reason: row.reason,
-      endsAt: row.period_end ?? row.plan_until,
-      username: row.username,
-      shortName: row.username.length < USERNAME_MIN,
-      origin: input.origin,
-    });
+    const email = atTextSize(
+      composePlanEndNotice({
+        reason: row.reason,
+        endsAt: row.period_end ?? row.plan_until,
+        username: row.username,
+        shortName: row.username.length < USERNAME_MIN,
+        origin: input.origin,
+      }),
+      account.textSize,
+    );
     try {
       await mailer.send({ ...SENDERS.notices, to: account.email, ...email });
       sent += 1;
@@ -200,11 +206,11 @@ export async function sendSignInLink(
   const address = input.email.trim().toLowerCase();
   const account = await db
     .prepare(
-      `SELECT account."id" FROM "user" AS account JOIN profiles AS profile ON profile.user_id = account."id"
+      `SELECT account."id", profile.text_size FROM "user" AS account JOIN profiles AS profile ON profile.user_id = account."id"
        WHERE account."email" = ?1 AND profile.deleted_at IS NULL AND profile.owner_id IS NULL`,
     )
     .bind(address)
-    .first();
+    .first<{ id: string; text_size: number | null }>();
   if (!account) return false;
   const reserved = await db
     .prepare(
@@ -214,7 +220,11 @@ export async function sendSignInLink(
     .bind(await addressHash(input.secret, address), input.now)
     .run();
   if (reserved.meta.changes === 0) return false;
-  await mailer.send({ ...SENDERS.signIn, to: address, ...composeSignInLink({ url: input.url, origin: input.origin }) });
+  await mailer.send({
+    ...SENDERS.signIn,
+    to: address,
+    ...atTextSize(composeSignInLink({ url: input.url, origin: input.origin }), storedTextSize(account.text_size)),
+  });
   return true;
 }
 

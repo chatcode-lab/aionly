@@ -1,5 +1,6 @@
 import type { PictureView } from "./gallery";
 import type { Aspect, Provider } from "./links/types";
+import type { TextSize } from "./text-size";
 
 /**
  * The shapes that leave the server. Everything a page shows about a person,
@@ -51,6 +52,8 @@ export interface ViewerSummary extends PublicAuthor {
   introUntil?: number;
   /** The guest editor of the running term, who picks posts. */
   editor?: boolean;
+  /** The member's text size, when not the default. */
+  textSize?: TextSize;
 }
 
 export type PostMedia =

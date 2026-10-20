@@ -163,7 +163,7 @@ export default function Users({ loaderData }: Route.ComponentProps) {
             defaultValue={query}
             placeholder="Find by name"
             aria-label="Find by name"
-            className="h-9 min-w-0 flex-1 rounded-lg border border-border-strong bg-surface px-3 text-body pointer-coarse:h-(--touch) pointer-coarse:text-[1rem]"
+            className="h-9 min-w-0 flex-1 rounded-lg border border-border-strong bg-surface px-3 text-body pointer-coarse:h-(--touch) pointer-coarse:text-[length:max(1rem,var(--text-body))]"
           />
           <Button type="submit">Find</Button>
         </Form>

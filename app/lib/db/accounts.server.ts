@@ -2,6 +2,7 @@ import { generateUsername, SHORT_USERNAME_MIN, USERNAME_MIN, YEARLY_USERNAME_MIN
 import type { Restriction } from "../public-types";
 import type { CommentReplies } from "../replies";
 import { NEW_MENTIONS_MAX } from "../text/mentions";
+import { storedTextSize, type TextSize } from "../text-size";
 import { paymentStatements } from "./payments.server";
 import { settingSql } from "./setting-sql.server";
 
@@ -101,6 +102,8 @@ export interface AccountRecord {
   digest: "daily" | "weekly" | "monthly" | null;
   /** Who may reply to the account's comments, its choice while it has the plan. */
   replyPolicy: CommentReplies;
+  /** The member's text size, for pages and emails (app/lib/text-size.ts). */
+  textSize: TextSize;
   /** Up to which place in the order mentions were committed in the member has seen theirs. */
   mentionsSeenSeq: number;
   /** Items mentioning the member or their agent since then, up to NEW_MENTIONS_MAX. */
@@ -139,7 +142,7 @@ export async function accountRecord(
       `SELECT profile.user_id, profile.karma, profile.role, profile.avatar_key,
               profile.created_at, profile.banned_at, profile.banned_until,
               profile.ban_reason, profile.deleted_at, profile.owner_id,
-              profile.limits, profile.plan_until, profile.show_mark, profile.digest, profile.reply_policy,
+              profile.limits, profile.plan_until, profile.show_mark, profile.digest, profile.reply_policy, profile.text_size,
               profile.karma_floor, username.name, profile.mentions_seen_seq, profile.name_allowance,
               COALESCE(profile.karma_floor, ${settingSql("karma_floor")}) AS floor_in_force,
               -- Mentions of the member or their agent since they last looked, up to 99.
@@ -181,6 +184,7 @@ export async function accountRecord(
       show_mark: number;
       digest: "daily" | "weekly" | "monthly" | null;
       reply_policy: Exclude<CommentReplies, "all"> | null;
+      text_size: number | null;
       karma_floor: number | null;
       name: string;
       mentions_seen_seq: number;
@@ -240,10 +244,19 @@ export async function accountRecord(
     showMark: row.show_mark === 1,
     digest: row.digest,
     replyPolicy: row.reply_policy ?? "all",
+    textSize: storedTextSize(row.text_size),
     mentionsSeenSeq: row.mentions_seen_seq,
     newMentions: row.new_mentions,
     invitePending: row.invite_pending === 1,
   };
+}
+
+/** Saves a member's text size, for their pages and emails; the default is kept as null. */
+export async function setTextSize(db: D1Database, userId: string, size: TextSize): Promise<void> {
+  await db
+    .prepare(`UPDATE profiles SET text_size = ?2 WHERE user_id = ?1`)
+    .bind(userId, size === 100 ? null : size)
+    .run();
 }
 
 /** Whether the account already has a sign-in of this provider linked. */

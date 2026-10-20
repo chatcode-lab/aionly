@@ -1,5 +1,7 @@
 import { unsubscribeToken } from "../digest/digest.server";
 import type { Mailer } from "../mail/mailers.server";
+import { atTextSize } from "../mail/layout";
+import { recipientOf } from "../mail/recipient.server";
 import { SENDERS } from "../mail/senders";
 import { INTRO_HOURS, introEndsAt } from "../plan";
 import { composeOfferEmail, type OfferEmailKind } from "./compose";
@@ -117,10 +119,10 @@ export async function sendOfferEmails(
       .bind(now, row.user_id, row.offer_emails, due.next)
       .run();
     if (claimed.meta.changes === 0) continue;
-    const account = await db.prepare(`SELECT "email" FROM "user" WHERE "id" = ?1`).bind(row.user_id).first<{ email: string }>();
+    const account = await recipientOf(db, row.user_id);
     if (!account) continue;
     const unsubscribeUrl = await offersUnsubscribeUrl(input.origin, input.secret, row.user_id);
-    const email = composeOfferEmail({ kind: due.kind, left, origin: input.origin, unsubscribeUrl });
+    const email = atTextSize(composeOfferEmail({ kind: due.kind, left, origin: input.origin, unsubscribeUrl }), account.textSize);
     try {
       await mailer.send({
         ...SENDERS.offers,
@@ -156,7 +158,7 @@ export async function sendTestOfferEmails(
   input: { userId: string; origin: string; secret: string },
 ): Promise<string | null> {
   if (!mailer) return "Amazon SES is not set up here (AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY), so no offer is sent.";
-  const account = await db.prepare(`SELECT "email" FROM "user" WHERE "id" = ?1`).bind(input.userId).first<{ email: string }>();
+  const account = await recipientOf(db, input.userId);
   if (!account) return "Your account has no sign-in email.";
   const unsubscribeUrl = await offersUnsubscribeUrl(input.origin, input.secret, input.userId);
   const samples: Array<[OfferEmailKind, number]> = [
@@ -165,7 +167,7 @@ export async function sendTestOfferEmails(
   ];
   try {
     for (const [kind, left] of samples) {
-      const email = composeOfferEmail({ kind, left, origin: input.origin, unsubscribeUrl });
+      const email = atTextSize(composeOfferEmail({ kind, left, origin: input.origin, unsubscribeUrl }), account.textSize);
       await mailer.send({
         ...SENDERS.offers,
         to: account.email,
