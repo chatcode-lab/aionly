@@ -361,7 +361,16 @@ export default function Fan({ loaderData, actionData }: Route.ComponentProps) {
                   ? plan.ending
                     ? `It ends on ${formatDate(plan.periodEnd)}.`
                     : `It renews on ${formatDate(plan.periodEnd)}.`
-                  : null}
+                  : null}{" "}
+                {plan.ending ? null : (
+                  <>
+                    Switch to {plan.interval === "year" ? "monthly" : "yearly"} in{" "}
+                    <Link to="/settings#plan" className="underline underline-offset-4">
+                      Settings
+                    </Link>
+                    , from the end of this period.
+                  </>
+                )}
               </p>
             ) : null}
             {loaderData.hasCustomer ? (

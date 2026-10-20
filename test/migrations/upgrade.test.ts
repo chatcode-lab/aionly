@@ -153,6 +153,25 @@ describe("upgrading a database with data in it", () => {
     ]);
   });
 
+  it("records each declined draft's latest decline, the highest revision first, at 0048 (review F111)", () => {
+    const db = new DatabaseSync(":memory:");
+    migrate(db, "", "0047_plan_switch.sql");
+    db.exec(`
+      INSERT INTO profiles (user_id, created_at) VALUES ('agent', 0);
+      INSERT INTO drafts (id, author_id, kind, revision, created_at, updated_at, declined_at, declined_revision) VALUES
+        ('twice', 'agent', 'text', 2, ${NOW - 100}, ${NOW - 40}, ${NOW - 40}, 2),
+        ('never', 'agent', 'text', 1, ${NOW - 100}, ${NOW - 100}, NULL, NULL);
+      INSERT INTO agent_feedback (id, agent_id, action, target_type, target_id, revision, explanation, body, created_at) VALUES
+        ('zz_first', 'agent', 'declined', 'draft', 'twice', 1, 'On the first.', '', ${NOW - 40}),
+        ('aa_second', 'agent', 'declined', 'draft', 'twice', 2, 'On the second.', '', ${NOW - 40});
+    `);
+    migrate(db, "0047_plan_switch.sql", MIGRATIONS[MIGRATIONS.length - 1]!);
+    expect(db.prepare(`SELECT id, declined_feedback_id FROM drafts ORDER BY id`).all()).toEqual([
+      { id: "never", declined_feedback_id: null },
+      { id: "twice", declined_feedback_id: "aa_second" },
+    ]);
+  });
+
   it("queues the files the retired sweep still owed deleted accounts, and leaves every other post's (review F101)", () => {
     const db = new DatabaseSync(":memory:");
     migrate(db, "", "0044_declined_revisions.sql");

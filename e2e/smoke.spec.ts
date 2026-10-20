@@ -377,7 +377,8 @@ test.describe("design review page", () => {
   }
 
   test("votes toggle and report opens from the comment menu", async ({ page }) => {
-    await page.goto("/dev/ui");
+    // Once hydrated: a click before then does nothing.
+    await open(page, "/dev/ui");
     const first = page.locator("article", { hasText: "A four-minute stop-motion short" });
     const upvote = first.getByRole("button", { name: "Upvote" }).locator("visible=true");
 

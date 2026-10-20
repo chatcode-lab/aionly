@@ -11,8 +11,12 @@ import {
   paidNameAllowance,
   periodEnd,
   planCentsOf,
+  releaseSchedule,
+  schedulePlanSwitch,
+  scheduledSwitch,
   type StripeInvoice,
   runningSubscriptions,
+  switchDone,
   signWebhook,
   stripeClient,
   type StripeSubscription,
@@ -317,5 +321,99 @@ describe("fresh start payments", () => {
       "automatic_tax[enabled]": "true",
       "metadata[kind]": "fresh_start",
     });
+  });
+});
+
+describe("switching the plan at the period's end", () => {
+  const START = 1_800_000_000;
+  const END = START + 30 * 24 * 3600;
+  const subscription = (schedule: StripeSubscription["schedule"], key = "aionly_fan_monthly"): StripeSubscription => ({
+    id: "sub_1",
+    object: "subscription",
+    customer: "cus_1",
+    status: "active",
+    cancel_at_period_end: false,
+    automatic_tax: { enabled: true },
+    schedule,
+    items: { data: [{ current_period_end: END, price: { id: "price_m", lookup_key: key, recurring: { interval: "month" } } }] },
+  });
+  const phase = (start: number, end: number, price: string, key: string) => ({
+    start_date: start,
+    end_date: end,
+    items: [{ price: { id: price, lookup_key: key }, quantity: 1 }],
+    discounts: [{ coupon: null, discount: "di_guest", promotion_code: null }],
+  });
+  const scheduled = (metadata: Record<string, string> = { aionly: "plan_switch" }) => ({
+    id: "sub_sched_1",
+    metadata,
+    current_phase: { start_date: START, end_date: END },
+    phases: [phase(START, END, "price_m", "aionly_fan_monthly"), phase(END, END + 365 * 24 * 3600, "price_y", "aionly_fan_yearly")],
+  });
+
+  /** A Stripe that answers the subscription as given, then as switched, recording every call. */
+  function fakeStripe(before: StripeSubscription, after: StripeSubscription) {
+    const calls: Array<{ method: string; path: string; form: URLSearchParams }> = [];
+    let reads = 0;
+    const fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      calls.push({ method: init?.method ?? "GET", path: url.pathname, form: new URLSearchParams(init?.method === "POST" ? String(init.body) : url.search) });
+      if (url.pathname === "/v1/subscriptions/sub_1") return Response.json(reads++ === 0 ? before : after);
+      if (url.pathname === "/v1/subscription_schedules") return Response.json({ ...scheduled({}), phases: [scheduled().phases[0]] });
+      return Response.json({});
+    }) as typeof fetch;
+    return { client: stripeClient("sk_test_unit", fetcher), calls };
+  }
+
+  it("makes a schedule whose next phase bills the other price from the period's end, nothing charged now", async () => {
+    const { client, calls } = fakeStripe(subscription(null), subscription(scheduled()));
+    const after = await schedulePlanSwitch(client, "sub_1", "price_y");
+    expect(calls.map((call) => `${call.method} ${call.path}`)).toEqual([
+      "GET /v1/subscriptions/sub_1",
+      "POST /v1/subscription_schedules",
+      "POST /v1/subscription_schedules/sub_sched_1",
+      "GET /v1/subscriptions/sub_1",
+    ]);
+    expect(calls[0]!.form.get("expand[0]")).toBe("schedule.phases.items.price");
+    expect(calls[1]!.form.get("from_subscription")).toBe("sub_1");
+    expect(Object.fromEntries(calls[2]!.form)).toEqual({
+      end_behavior: "release",
+      proration_behavior: "none",
+      "metadata[aionly]": "plan_switch",
+      "phases[0][start_date]": String(START),
+      "phases[0][end_date]": String(END),
+      "phases[0][items][0][price]": "price_m",
+      "phases[0][items][0][quantity]": "1",
+      "phases[0][proration_behavior]": "none",
+      "phases[0][discounts][0][discount]": "di_guest",
+      "phases[0][automatic_tax][enabled]": "true",
+      "phases[1][items][0][price]": "price_y",
+      "phases[1][items][0][quantity]": "1",
+      "phases[1][iterations]": "1",
+      "phases[1][proration_behavior]": "none",
+      "phases[1][discounts][0][discount]": "di_guest",
+      "phases[1][automatic_tax][enabled]": "true",
+    });
+    expect(scheduledSwitch(after)).toEqual({ priceKey: "aionly_fan_yearly", at: END });
+  });
+
+  it("changes a switch already asked for in its own schedule, and lets go of it to keep the plan", async () => {
+    const asked = fakeStripe(subscription(scheduled()), subscription(scheduled()));
+    await schedulePlanSwitch(asked.client, "sub_1", "price_y");
+    expect(asked.calls.some((call) => call.path === "/v1/subscription_schedules")).toBe(false);
+    const kept = fakeStripe(subscription(scheduled()), subscription(null));
+    const after = await releaseSchedule(kept.client, "sub_1");
+    expect(kept.calls.map((call) => `${call.method} ${call.path}`)).toContain("POST /v1/subscription_schedules/sub_sched_1/release");
+    expect(scheduledSwitch(after)).toBeNull();
+  });
+
+  it("reads a switch only from a schedule it can see, and knows its own once made", () => {
+    expect(scheduledSwitch(subscription("sub_sched_1"))).toBeUndefined();
+    expect(scheduledSwitch(subscription(null))).toBeNull();
+    // In its last phase, the switch is made: nothing more to come, and the board lets go of its own schedule.
+    const made = { ...scheduled(), current_phase: { start_date: END, end_date: END + 365 * 24 * 3600 } };
+    expect(scheduledSwitch(subscription(made, "aionly_fan_yearly"))).toBeNull();
+    expect(switchDone(subscription(made, "aionly_fan_yearly"))).toBe(true);
+    expect(switchDone(subscription(scheduled()))).toBe(false);
+    expect(switchDone(subscription({ ...made, metadata: {} }, "aionly_fan_yearly"))).toBe(false);
   });
 });

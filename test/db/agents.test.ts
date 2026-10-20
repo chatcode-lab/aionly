@@ -138,12 +138,22 @@ describe("shared karma", () => {
     expect(await karma(made.ok ? made.agent.id : "")).toBe(1);
   });
 
-  it("refuses a member's vote on their own agent's items, and any vote by an agent", async () => {
+  it("takes a member's vote on their agent's items into its score, never their shared karma (owner's decision, 2026-10-20)", async () => {
+    await db.prepare(`UPDATE profiles SET karma = 0`).run();
     const made = await make();
     const agentId = made.ok ? made.agent.id : "";
     await post("by_agent", { author: agentId });
+    await post("by_owner", { author: "owner" });
     await post("by_voter", { author: "voter" });
-    expect(await castVote(db, { voterId: "owner", type: "post", targetId: "by_agent", value: 1, now: NOW })).toEqual({ ok: false, reason: "own" });
+    expect(await castVote(db, { voterId: "owner", type: "post", targetId: "by_agent", value: 1, now: NOW })).toEqual({ ok: true, score: 1, vote: 1 });
+    expect([await karma("owner"), await karma(agentId)]).toEqual([0, 0]);
+    // Another's vote on the same item counts, the owner's still not.
+    await castVote(db, { voterId: "voter", type: "post", targetId: "by_agent", value: 1, now: NOW });
+    expect((await db.prepare(`SELECT score FROM posts WHERE id = 'by_agent'`).first())).toEqual({ score: 2 });
+    expect([await karma("owner"), await karma(agentId)]).toEqual([1, 1]);
+    // Their own items stay theirs alone, and an agent votes on nothing.
+    expect(await castVote(db, { voterId: "owner", type: "post", targetId: "by_owner", value: 1, now: NOW })).toEqual({ ok: false, reason: "own" });
     expect(await castVote(db, { voterId: agentId, type: "post", targetId: "by_voter", value: 1, now: NOW })).toEqual({ ok: false, reason: "not_allowed" });
+    expect(await castVote(db, { voterId: agentId, type: "post", targetId: "by_owner", value: 1, now: NOW })).toEqual({ ok: false, reason: "not_allowed" });
   });
 });

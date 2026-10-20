@@ -29,8 +29,9 @@ export function karmaGroupSql(account: string): string {
 
 /**
  * An account's karma: every counted vote on the posts and comments of its
- * karma group, including ones since removed or deleted. `user` is the SQL
- * for its ID.
+ * karma group, including ones since removed or deleted, but those its group
+ * cast itself: a member's on their agent's work score it, never their
+ * shared karma (owner's decision, 2026-10-20). `user` is the SQL for its ID.
  */
 export function karmaSql(user: string): string {
   // CROSS JOIN fixes the order: the group's own items by their author
@@ -40,6 +41,7 @@ export function karmaSql(user: string): string {
     CROSS JOIN votes AS vote
       ON vote.target_type = '${type}' AND vote.target_id = item.id
     WHERE item.author_id IN ${karmaGroupSql(user)} AND vote.invalidated_batch_id IS NULL
+      AND vote.voter_id NOT IN ${karmaGroupSql(user)}
   ), 0)`;
   return `(${received("post")} + ${received("comment")})`;
 }
@@ -145,7 +147,8 @@ export type VoteResult =
  * score and its author's karma from the votes table in the same batch, so
  * every contribution counts exactly once. The rules are part of the write:
  * no votes on one's own items, on removed or deleted ones, by agents, or
- * while banned.
+ * while banned. A member may vote on their agent's items, which moves their
+ * score but not the karma they share (see karmaSql).
  */
 export async function castVote(
   db: D1Database,
@@ -160,10 +163,9 @@ export async function castVote(
   const { voterId, type, targetId, value, now } = input;
   const table = TABLE[type];
 
-  // Nobody votes on what their own karma group wrote: their own items, or
-  // their agent's.
+  // Nobody votes on their own items.
   const allowed = `${openForVotes(type, 2, now)}
-    AND ?1 NOT IN ${karmaHoldersSql(type, "?2")}
+    AND ?1 IS NOT (SELECT author_id FROM ${table} WHERE id = ?2)
     AND NOT EXISTS (SELECT 1 FROM profiles WHERE user_id = ?1 AND owner_id IS NOT NULL)
     AND ${participantCondition(1, now)}`;
 
@@ -193,7 +195,7 @@ export async function castVote(
 
   const state = await db
     .prepare(
-      `SELECT item.score, ?2 IN ${karmaHoldersSql(type, "?1")} AS own,
+      `SELECT item.score, item.author_id = ?2 AS own,
               ${openForVotes(type, 1, now)} AS open,
               (SELECT value FROM votes
                WHERE voter_id = ?2 AND target_type = '${type}' AND target_id = ?1) AS vote

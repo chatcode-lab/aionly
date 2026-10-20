@@ -65,6 +65,25 @@ export function stripeClient(secretKey: string, fetcher: typeof fetch = fetch): 
   };
 }
 
+/** A price as a schedule's phase names it, expanded. */
+interface PhasePrice {
+  id: string;
+  lookup_key: string | null;
+}
+
+/** A subscription schedule as the board reads it: its phases, each price expanded. */
+export interface StripeSchedule {
+  id: string;
+  metadata?: Record<string, string>;
+  current_phase: { start_date: number; end_date: number } | null;
+  phases: Array<{
+    start_date: number;
+    end_date: number;
+    items: Array<{ price: string | PhasePrice; quantity?: number }>;
+    discounts?: Array<{ coupon?: string | null; discount?: string | null; promotion_code?: string | null }>;
+  }>;
+}
+
 /** A subscription as the board reads it from Stripe. */
 export interface StripeSubscription {
   id: string;
@@ -73,6 +92,9 @@ export interface StripeSubscription {
   status: string;
   cancel_at_period_end: boolean;
   metadata?: Record<string, string>;
+  /** Its schedule, expanded when read through getSubscription; an ID otherwise. */
+  schedule?: string | StripeSchedule | null;
+  automatic_tax?: { enabled: boolean };
   /** Before API version 2025-03-31, the period sat on the subscription. */
   current_period_end?: number;
   items: {
@@ -533,8 +555,94 @@ export async function checkoutSubscription(
   };
 }
 
+/** A subscription as it is now, with its schedule's phases and their prices. */
 export function getSubscription(client: StripeClient, id: string): Promise<StripeSubscription> {
-  return client.request<StripeSubscription>("GET", `/subscriptions/${encodeURIComponent(id)}`);
+  return client.request<StripeSubscription>("GET", `/subscriptions/${encodeURIComponent(id)}`, { expand: ["schedule.phases.items.price"] });
+}
+
+/** Schedules the board makes, so it lets go only of its own. */
+const SWITCH_METADATA = { aionly: "plan_switch" };
+
+const phasePriceKey = (price: string | PhasePrice | undefined) => (price && typeof price === "object" ? price.lookup_key : null);
+
+/**
+ * The plan switch a subscription's schedule holds: the price its next phase
+ * moves to, and when, if that is another price. Null for none, undefined
+ * when the schedule was not read (a bare ID), so what is known stays.
+ */
+export function scheduledSwitch(subscription: StripeSubscription): { priceKey: string; at: number } | null | undefined {
+  const schedule = subscription.schedule;
+  if (!schedule) return null;
+  if (typeof schedule === "string") return undefined;
+  const current = subscription.items.data[0]?.price.lookup_key ?? null;
+  const end = schedule.current_phase?.end_date;
+  const next = schedule.phases.find((phase) => phase.start_date === end);
+  const key = phasePriceKey(next?.items[0]?.price);
+  return next && key && key !== current ? { priceKey: key, at: next.start_date } : null;
+}
+
+/**
+ * Whether the subscription's schedule is the board's own, its switch made:
+ * in its last phase, nothing more to come, so it can be let go and leave
+ * the plan free to change or cancel in the portal again.
+ */
+export function switchDone(subscription: StripeSubscription): boolean {
+  const schedule = subscription.schedule;
+  if (!schedule || typeof schedule === "string" || schedule.metadata?.aionly !== SWITCH_METADATA.aionly) return false;
+  const last = schedule.phases.at(-1);
+  return last !== undefined && schedule.current_phase?.start_date === last.start_date;
+}
+
+/**
+ * Switches the plan to `priceId` at the end of the period paid for, through
+ * a schedule: this period stays as it is, nothing is charged or credited
+ * now, and the new price bills from then on (owner's decision, 2026-10-20).
+ * A switch already asked for is replaced. Answers with the subscription as
+ * it is after.
+ */
+export async function schedulePlanSwitch(client: StripeClient, subscriptionId: string, priceId: string): Promise<StripeSubscription> {
+  const subscription = await getSubscription(client, subscriptionId);
+  const existing = subscription.schedule;
+  const schedule =
+    existing && typeof existing === "object"
+      ? existing
+      : await client.request<StripeSchedule>("POST", "/subscription_schedules", { from_subscription: subscriptionId });
+  const phase =
+    schedule.phases.find((candidate) => candidate.start_date === schedule.current_phase?.start_date) ?? schedule.phases[0]!;
+  const current = phase.items[0]!;
+  const currentPrice = typeof current.price === "object" ? current.price.id : current.price;
+  // The plan's discounts and tax carry on, as they would at a renewal.
+  const discounts = (phase.discounts ?? []).map((discount) =>
+    discount.discount ? { discount: discount.discount } : discount.promotion_code ? { promotion_code: discount.promotion_code } : { coupon: discount.coupon },
+  );
+  const tax = subscription.automatic_tax?.enabled ? { enabled: true } : undefined;
+  await client.request("POST", `/subscription_schedules/${encodeURIComponent(schedule.id)}`, {
+    end_behavior: "release",
+    proration_behavior: "none",
+    metadata: SWITCH_METADATA,
+    phases: [
+      {
+        start_date: phase.start_date,
+        end_date: phase.end_date,
+        items: [{ price: currentPrice, quantity: current.quantity ?? 1 }],
+        proration_behavior: "none",
+        discounts,
+        automatic_tax: tax,
+      },
+      { items: [{ price: priceId, quantity: 1 }], iterations: 1, proration_behavior: "none", discounts, automatic_tax: tax },
+    ],
+  });
+  return getSubscription(client, subscriptionId);
+}
+
+/** Lets go of a subscription's schedule, keeping its price as it is: no switch. */
+export async function releaseSchedule(client: StripeClient, subscriptionId: string): Promise<StripeSubscription> {
+  const subscription = await getSubscription(client, subscriptionId);
+  const schedule = subscription.schedule;
+  if (!schedule) return subscription;
+  const id = typeof schedule === "string" ? schedule : schedule.id;
+  await client.request("POST", `/subscription_schedules/${encodeURIComponent(id)}/release`);
+  return getSubscription(client, subscriptionId);
 }
 
 /** Stripe statuses under which a subscription may still charge. */

@@ -766,6 +766,28 @@ test("a plan set to end says what stops then, and that a short name is no longer
   await expect(page.getByText(/no longer for certain/).first()).toBeVisible();
 });
 
+test("a fan switches between monthly and yearly from the end of the period, and can keep the plan as it is", async ({ page, context, account, request }) => {
+  await setPlan(request, account);
+  await account.signIn(context);
+  await open(page, "/settings");
+  const plan = page.getByRole("region", { name: "Fan plan" });
+  await expect(plan).toContainText(/Switch to yearly, \$100 a year, from .+, when this period ends\. Nothing is charged before then\./);
+  // Without Stripe, as in tests, the switch waits for payments to open.
+  await plan.getByRole("button", { name: "Switch to yearly" }).click();
+  await expect(page.getByText("Payments open soon.")).toBeVisible();
+
+  // A switch asked for shows until it is made, with the way to keep the plan.
+  await setPlan(request, account, "active", "month", false, true);
+  await open(page, "/settings");
+  await expect(plan).toContainText(/Switching to yearly on .+, at \$100 a year\./);
+  await expect(plan.getByRole("button", { name: "Keep it monthly" })).toBeVisible();
+  await expect(plan.getByRole("button", { name: "Switch to yearly" })).toHaveCount(0);
+
+  // The plan's page points to it too.
+  await open(page, "/fan");
+  await expect(page.getByRole("link", { name: "Settings" }).filter({ hasText: "Settings" }).last()).toHaveAttribute("href", "/settings#plan");
+});
+
 test("a name of 5 characters comes with the yearly plan", async ({ page, context, account, request }) => {
   const short = `q${account.id.replace(/\D/g, "").slice(-3).padStart(3, "0")}a`;
   await account.signIn(context);

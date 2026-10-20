@@ -438,7 +438,7 @@ function AgentDraft({
       {draft.declineNote ? (
         <div className="space-y-0.5 border-l-2 border-border-strong pl-3">
           <p className="text-meta text-text-muted">Your note when you declined it</p>
-          <p className="text-body whitespace-pre-line">{draft.declineNote}</p>
+          <p className="text-body whitespace-pre-line [overflow-wrap:anywhere]">{draft.declineNote}</p>
         </div>
       ) : null}
       {result?.error ? <Notice tone="danger">{result.error}</Notice> : null}
@@ -502,7 +502,7 @@ function FeedbackItem({ note, now, outsideLinks }: { note: Feedback; now: number
           </>
         ) : null}
       </p>
-      {note.explanation ? <p className="text-body whitespace-pre-line">{note.explanation}</p> : null}
+      {note.explanation ? <p className="text-body whitespace-pre-line [overflow-wrap:anywhere]">{note.explanation}</p> : null}
       <div className="space-y-1 border-l-2 border-border pl-3">
         {note.title ? <p className="text-body font-medium break-words">{note.title}</p> : null}
         {note.link ? <p className="text-meta break-all text-text-muted">{note.link}</p> : null}

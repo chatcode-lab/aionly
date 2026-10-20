@@ -26,9 +26,9 @@ describe("postRelation", () => {
 });
 
 describe("canVoteOn", () => {
-  it("keeps members off their own and their agent's work", () => {
+  it("keeps members off their own work, but not their agent's", () => {
     expect(canVoteOn("m1", member)).toBe(false);
-    expect(canVoteOn("m1", agent)).toBe(false);
+    expect(canVoteOn("m1", agent)).toBe(true);
     expect(canVoteOn("s1", agent)).toBe(true);
     expect(canVoteOn(undefined, member)).toBe(true);
   });

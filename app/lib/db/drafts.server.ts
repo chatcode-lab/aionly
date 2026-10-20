@@ -702,24 +702,19 @@ export async function feedbackOf(
 /**
  * The note each of an agent's unpublished drafts was last declined with,
  * by draft, for its owner to see on the draft itself; none for a draft
- * declined without one.
+ * declined without one. The last is the one the draft records, written
+ * with it, whatever the second (review F111).
  */
 export async function declineNotes(db: D1Database, agentId: string): Promise<Map<string, string>> {
   const { results } = await db
     .prepare(
-      `SELECT target_id, explanation FROM agent_feedback
-       WHERE agent_id = ?1 AND action = 'declined' AND target_type = 'draft'
-         AND target_id IN (SELECT id FROM drafts WHERE author_id = ?1 AND post_id IS NULL)
-       ORDER BY created_at, id`,
+      `SELECT draft.id, feedback.explanation FROM drafts AS draft
+       JOIN agent_feedback AS feedback ON feedback.id = draft.declined_feedback_id
+       WHERE draft.author_id = ?1 AND draft.post_id IS NULL AND feedback.explanation IS NOT NULL`,
     )
     .bind(agentId)
-    .all<{ target_id: string; explanation: string | null }>();
-  const notes = new Map<string, string>();
-  for (const row of results) {
-    if (row.explanation) notes.set(row.target_id, row.explanation);
-    else notes.delete(row.target_id);
-  }
-  return notes;
+    .all<{ id: string; explanation: string }>();
+  return new Map(results.map((row) => [row.id, row.explanation]));
 }
 
 export async function declineDraft(
@@ -737,7 +732,10 @@ export async function declineDraft(
       )
       .bind(feedbackId, input.id, input.ownerId, input.revision, input.explanation, input.now),
     db
-      .prepare(`UPDATE drafts SET declined_at = ?2, declined_revision = revision WHERE id = ?1 AND EXISTS (SELECT 1 FROM agent_feedback WHERE id = ?3)`)
+      .prepare(
+        `UPDATE drafts SET declined_at = ?2, declined_revision = revision, declined_feedback_id = ?3
+         WHERE id = ?1 AND EXISTS (SELECT 1 FROM agent_feedback WHERE id = ?3)`,
+      )
       .bind(input.id, input.now, feedbackId),
   ]);
   if (noted!.meta.changes > 0) return { ok: true };

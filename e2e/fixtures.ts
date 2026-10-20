@@ -165,10 +165,15 @@ export async function setPlan(
   status: "active" | "canceled" = "active",
   interval: "month" | "year" = "month",
   ending = false,
+  /** A switch to the other interval, asked for, made at the period's end. */
+  switching = false,
 ): Promise<void> {
   const now = Math.floor(Date.now() / 1000);
+  const end = now + (interval === "year" ? 365 : 30) * 24 * 3600;
+  const key = (of: "month" | "year") => (of === "year" ? "aionly_fan_yearly" : "aionly_fan_monthly");
+  const other = interval === "year" ? "month" : "year";
   const payload = JSON.stringify({
-    id: `evt_${account.id}_${status}_${interval}${ending ? "_ending" : ""}`,
+    id: `evt_${account.id}_${status}_${interval}${ending ? "_ending" : ""}${switching ? "_switching" : ""}`,
     type: status === "active" ? "customer.subscription.created" : "customer.subscription.deleted",
     created: now,
     data: {
@@ -179,11 +184,22 @@ export async function setPlan(
         status,
         cancel_at_period_end: ending,
         metadata: { user_id: account.id },
+        schedule: switching
+          ? {
+              id: `sub_sched_${account.id}`,
+              metadata: { aionly: "plan_switch" },
+              current_phase: { start_date: now, end_date: end },
+              phases: [
+                { start_date: now, end_date: end, items: [{ price: { id: "price_e2e", lookup_key: key(interval) }, quantity: 1 }] },
+                { start_date: end, end_date: end + 365 * 24 * 3600, items: [{ price: { id: "price_e2e_next", lookup_key: key(other) }, quantity: 1 }] },
+              ],
+            }
+          : null,
         items: {
           data: [
             {
-              current_period_end: now + (interval === "year" ? 365 : 30) * 24 * 3600,
-              price: { id: "price_e2e", lookup_key: interval === "year" ? "aionly_fan_yearly" : "aionly_fan_monthly", recurring: { interval } },
+              current_period_end: end,
+              price: { id: "price_e2e", lookup_key: key(interval), recurring: { interval } },
             },
           ],
         },

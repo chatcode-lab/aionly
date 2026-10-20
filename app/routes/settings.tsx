@@ -28,7 +28,7 @@ import {
 } from "~/lib/accounts/usernames";
 import { wantedShortName } from "~/lib/accounts/wanted-name";
 import { authFor, xConfigured } from "~/lib/auth.server";
-import { cancelForDeletion } from "~/lib/billing/plan.server";
+import { billingOpen, cancelForDeletion, keepPlan, switchPlan } from "~/lib/billing/plan.server";
 import { type AccountRecord, nameFreeFor, renameStatus, setTextSize, setTint } from "~/lib/db/accounts.server";
 import { agentOf, createAgent, createToken, MAX_TOKENS, type OwnedAgent, revokeToken, setTokenPermission } from "~/lib/db/agents.server";
 import { setReplyChoices } from "~/lib/db/authoring.server";
@@ -38,7 +38,7 @@ import { inviteRefusal, inviteShareWords } from "~/lib/invites";
 import { shareWords } from "~/lib/partners";
 import { loadSettings } from "~/lib/db/settings.server";
 import { useSettings } from "~/lib/use-settings";
-import { PLAN_END_STOPS, shortNameUncertain, WITHDRAWAL_DAYS } from "~/lib/plan";
+import { INTRO_PRICES, PLAN_END_STOPS, PLAN_PRICES, type PlanInterval, shortNameUncertain, WITHDRAWAL_DAYS } from "~/lib/plan";
 import type { Settings } from "~/lib/settings";
 import { deleteAccount, identityHash } from "~/lib/db/deletion.server";
 import { describeWatch, watchListOf } from "~/lib/db/updates.server";
@@ -382,6 +382,32 @@ export async function action({ request, context }: Route.ActionArgs) {
   if (form.get("intent") === "mark") {
     await setShowMark(env.DB, viewer.id, form.get("show") === "on");
     return { markSaved: true };
+  }
+
+  // Switching between monthly and yearly, at the end of the period paid for, or keeping the plan as it is.
+  if (form.get("intent") === "plan-switch" || form.get("intent") === "plan-keep") {
+    if (!billingOpen()) return { planError: "Payments open soon." };
+    try {
+      if (form.get("intent") === "plan-keep") {
+        await keepPlan(viewer);
+        return { planNotice: "Your plan stays as it is." };
+      }
+      const to = form.get("to");
+      if (to !== "month" && to !== "year") return { planError: "That was not understood." };
+      const result = await switchPlan(viewer, to);
+      if (result.ok) return { planNotice: `Your plan switches to ${to === "year" ? "yearly" : "monthly"} when this period ends.` };
+      return {
+        planError:
+          result.reason === "ending"
+            ? "Your plan is set to end. Renew it in Manage billing first, then switch."
+            : result.reason === "same"
+              ? `Your plan is ${to === "year" ? "yearly" : "monthly"} already.`
+              : "There is no running plan to switch.",
+      };
+    } catch (error) {
+      console.error("plan switch", error);
+      return { planError: "That did not go through. Try again in a minute." };
+    }
   }
 
   if (form.get("intent") === "replies") {
@@ -872,6 +898,67 @@ function PhotoForm({
   );
 }
 
+/** A plan price's words, by its lookup key: "$100 a year". */
+function priceWords(key: string | null): string | null {
+  for (const prices of [PLAN_PRICES, INTRO_PRICES]) {
+    for (const interval of ["month", "year"] as const) {
+      if (prices[interval].lookupKey === key) return `${prices[interval].label} a ${interval}`;
+    }
+  }
+  return null;
+}
+
+/** The interval a plan price bills by, by its lookup key. */
+function intervalOfKey(key: string | null): PlanInterval | null {
+  for (const prices of [PLAN_PRICES, INTRO_PRICES]) {
+    for (const interval of ["month", "year"] as const) if (prices[interval].lookupKey === key) return interval;
+  }
+  return null;
+}
+
+/**
+ * Switching between monthly and yearly, either way, at the end of the
+ * period paid for: nothing is charged or credited before then (owner's
+ * decision, 2026-10-20). A switch waiting can be undone, and a plan set to
+ * end is renewed first.
+ */
+function PlanSwitch({ plan, disabled }: { plan: PlanStatus; disabled: boolean }) {
+  const navigation = useNavigation();
+  const busy = navigation.state !== "idle" && String(navigation.formData?.get("intent") ?? "").startsWith("plan-");
+  const word = (interval: PlanInterval) => (interval === "year" ? "yearly" : "monthly");
+  if (!plan.interval || !plan.periodEnd || (plan.status !== "active" && plan.status !== "trialing") || plan.cancelAtPeriodEnd) return null;
+  const next = intervalOfKey(plan.nextPriceKey);
+  if (next && plan.nextAt) {
+    return (
+      <Form method="post" className="flex flex-wrap items-center justify-between gap-3">
+        <input type="hidden" name="intent" value="plan-keep" />
+        <p className="min-w-0 flex-1 basis-60 text-body">
+          Switching to {word(next)} on {formatDate(plan.nextAt)}, at {priceWords(plan.nextPriceKey)}.{" "}
+          <span className="text-text-muted">Until then, Manage billing can&apos;t change or cancel the plan; keep it {word(plan.interval)} first to do that.</span>
+        </p>
+        <Button type="submit" disabled={disabled || busy}>
+          Keep it {word(plan.interval)}
+        </Button>
+      </Form>
+    );
+  }
+  const other: PlanInterval = plan.interval === "year" ? "month" : "year";
+  const intro = Object.values(INTRO_PRICES).some((price) => price.lookupKey === plan.priceKey);
+  const price = (intro ? INTRO_PRICES : PLAN_PRICES)[other];
+  return (
+    <Form method="post" className="flex flex-wrap items-center justify-between gap-3">
+      <input type="hidden" name="intent" value="plan-switch" />
+      <input type="hidden" name="to" value={other} />
+      <p className="min-w-0 flex-1 basis-60 text-body text-text-muted">
+        Switch to {word(other)}, {price.label} a {other}, from {formatDate(plan.periodEnd)}, when this period ends. Nothing is charged before then.
+      </p>
+      <Button type="submit" disabled={disabled || busy}>
+        Switch to {word(other)}
+      </Button>
+    </Form>
+  );
+}
+
 /**
  * The Fan plan: its state and billing, and the mark beside the name. A plan
  * set to end says what stops then, and that a short name is no longer
@@ -930,6 +1017,7 @@ function PlanSection({
           From then on, {PLAN_END_STOPS}.{username.length < USERNAME_MIN ? ` ${shortNameUncertain(username)}` : null}
         </Notice>
       ) : null}
+      <PlanSwitch plan={plan} disabled={disabled} />
       {plan.customerId ? (
         <Form method="post" action="/fan">
           <Button type="submit" name="intent" value="portal">
@@ -1411,9 +1499,11 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
         />
       </Section>
 
-      <Section title="Fan plan" paid="plan">
+      <Section title="Fan plan" id="plan" paid="plan">
         <PlanSection plan={loaderData.plan} username={username} disabled={banned} />
         {actionData && "markSaved" in actionData ? <Notice>Saved.</Notice> : null}
+        {actionData && "planNotice" in actionData ? <Notice>{actionData.planNotice}</Notice> : null}
+        {actionData && "planError" in actionData ? <Notice tone="danger">{actionData.planError}</Notice> : null}
       </Section>
 
       <Section title="Replies" paid="feature">

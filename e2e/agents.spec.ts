@@ -73,11 +73,12 @@ test("an admin connects an agent, which posts, comments, and edits through the A
   const read = await (await request.get(`/api/v1/posts/${post.id}`, { headers: auth })).json();
   expect(read).toMatchObject({ title: "Gathered by the board's agent", link: "https://e2e-agent.example.com/gathered", author: { username: "aionly_e2e_scout", agent: true } });
 
-  // On the page, the author carries the Agent badge, and its owner cannot vote on it.
+  // On the page, the author carries the Agent badge, and its owner may vote
+  // on it: the post's score moves, the karma they share does not.
   await open(page, `/p/${post.id}`);
   const card = page.locator("article").first();
   await expect(card.getByText("Agent", { exact: true })).toBeVisible();
-  await expect(card.getByRole("button", { name: "Upvote" }).first()).toBeDisabled();
+  await expect(card.getByRole("button", { name: "Upvote" }).first()).toBeEnabled();
 
   // A comment, edited, then deleted.
   const comment = await request.post(`/api/v1/posts/${post.id}/comments`, { headers: auth, data: { body: "Posted from the API, thanks @e2e_admin." } });

@@ -1,4 +1,4 @@
-import { intervalOf, periodEnd, type StripeSubscription } from "../billing/stripe";
+import { intervalOf, periodEnd, scheduledSwitch, type StripeSubscription } from "../billing/stripe";
 
 /**
  * Days the plan stays in force past the end of the period paid for, so a
@@ -18,12 +18,16 @@ export interface PlanStatus {
   priceKey: string | null;
   periodEnd: number | null;
   cancelAtPeriodEnd: boolean;
+  /** A switch asked for, to this price's key, made at `nextAt`, the period's end. */
+  nextPriceKey: string | null;
+  nextAt: number | null;
 }
 
 export async function planStatus(db: D1Database, userId: string): Promise<PlanStatus> {
   const row = await db
     .prepare(
-      `SELECT customer_id, status, interval, price_key, period_end, cancel_at_period_end FROM subscriptions WHERE user_id = ?1`,
+      `SELECT customer_id, status, interval, price_key, period_end, cancel_at_period_end, next_price_key, next_price_at
+       FROM subscriptions WHERE user_id = ?1`,
     )
     .bind(userId)
     .first<{
@@ -33,6 +37,8 @@ export async function planStatus(db: D1Database, userId: string): Promise<PlanSt
       price_key: string | null;
       period_end: number | null;
       cancel_at_period_end: number;
+      next_price_key: string | null;
+      next_price_at: number | null;
     }>();
   return {
     customerId: row?.customer_id ?? null,
@@ -41,7 +47,19 @@ export async function planStatus(db: D1Database, userId: string): Promise<PlanSt
     priceKey: row?.price_key ?? null,
     periodEnd: row?.period_end ?? null,
     cancelAtPeriodEnd: row?.cancel_at_period_end === 1,
+    nextPriceKey: row?.next_price_key ?? null,
+    nextAt: row?.next_price_at ?? null,
   };
+}
+
+/**
+ * The time to stamp a subscription read fresh from Stripe now: now, but
+ * never before the last event applied, so a clock a little behind
+ * Stripe's cannot make the freshest word read as stale.
+ */
+export async function freshEventAt(db: D1Database, userId: string, now: number): Promise<number> {
+  const row = await db.prepare(`SELECT event_at FROM subscriptions WHERE user_id = ?1`).bind(userId).first<{ event_at: number | null }>();
+  return Math.max(now, row?.event_at ?? 0);
 }
 
 /** Records an account's Stripe customer, made before its first checkout. */
@@ -89,16 +107,20 @@ export async function applySubscription(
   if (!owner) return false;
 
   const until = planUntilFor(subscription, input.now);
+  // The switch its schedule holds; unknown when the schedule was not read, and kept then.
+  const next = scheduledSwitch(subscription);
   await db.batch([
     db
       .prepare(
         `INSERT INTO subscriptions (user_id, customer_id, subscription_id, status, interval, period_end,
-           cancel_at_period_end, event_at, updated_at, price_key)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+           cancel_at_period_end, event_at, updated_at, price_key, next_price_key, next_price_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
          ON CONFLICT (user_id) DO UPDATE SET
            customer_id = excluded.customer_id, subscription_id = excluded.subscription_id,
            status = excluded.status, interval = excluded.interval, period_end = excluded.period_end,
            price_key = excluded.price_key,
+           next_price_key = CASE WHEN ?13 THEN excluded.next_price_key ELSE subscriptions.next_price_key END,
+           next_price_at = CASE WHEN ?13 THEN excluded.next_price_at ELSE subscriptions.next_price_at END,
            cancel_at_period_end = excluded.cancel_at_period_end, event_at = excluded.event_at,
            updated_at = excluded.updated_at
          WHERE (subscriptions.event_at IS NULL OR subscriptions.event_at <= excluded.event_at)
@@ -123,6 +145,9 @@ export async function applySubscription(
         input.eventAt,
         input.now,
         subscription.items.data[0]?.price.lookup_key ?? null,
+        next?.priceKey ?? null,
+        next?.at ?? null,
+        next === undefined ? 0 : 1,
       ),
     // Follows the row just written, so a stale event changes neither. An
     // ended plan's end only moves earlier, so hearing of it again never

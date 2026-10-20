@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { DRAFT_BYTES, DRAFT_LIMIT, type DraftFields } from "../../app/lib/draft-rules";
 import { accountRecord } from "../../app/lib/db/accounts.server";
@@ -490,6 +490,45 @@ describe("an owner's feedback", () => {
     ]);
     expect((await draftFor(db, id, agentId))?.draft).toMatchObject({ declinedAt: NOW, revision: 1 });
     expect((await publish(id, "owner", 1)).ok).toBe(true);
+  });
+
+  describe("declined twice in one second (review F111)", () => {
+    afterEach(() => vi.restoreAllMocks());
+    /** Fills the next random bytes with one value: an ID of one character, repeated. */
+    const filled = (value: number) => (array: ArrayBufferView) => {
+      new Uint8Array(array.buffer, array.byteOffset, array.byteLength).fill(value);
+      return array;
+    };
+    /** The next two IDs made, the first sorting after the second: "zz…" and "aa…", or "yy…" and "bb…". */
+    let pair = 0;
+    const idsAgainstOrder = () => {
+      const [first, second] = pair++ === 0 ? [61, 36] : [60, 37];
+      vi.spyOn(crypto, "getRandomValues").mockImplementationOnce(filled(first)).mockImplementationOnce(filled(second));
+    };
+    const decline = (id: string, revision: number, explanation: string | null) => declineDraft(db, { id, ownerId: "owner", revision, explanation, now: NOW });
+
+    it("shows the note written last, a later decline without one showing none", async () => {
+      const saved = await save(agentId);
+      if (!saved.ok) throw new Error("not saved");
+      idsAgainstOrder();
+      await decline(saved.draft.id, 1, "Earlier note.");
+      await decline(saved.draft.id, 1, "Latest note.");
+      expect(await declineNotes(db, agentId)).toEqual(new Map([[saved.draft.id, "Latest note."]]));
+      idsAgainstOrder();
+      await decline(saved.draft.id, 1, "Another.");
+      await decline(saved.draft.id, 1, null);
+      expect(await declineNotes(db, agentId)).toEqual(new Map());
+    });
+
+    it("shows a later revision's note over an earlier revision's", async () => {
+      const saved = await save(agentId);
+      if (!saved.ok) throw new Error("not saved");
+      idsAgainstOrder();
+      await decline(saved.draft.id, 1, "On the first version.");
+      expect((await save(agentId, { title: "Changed" }, { id: saved.draft.id, revision: 1 })).ok).toBe(true);
+      await decline(saved.draft.id, 2, "On the second.");
+      expect(await declineNotes(db, agentId)).toEqual(new Map([[saved.draft.id, "On the second."]]));
+    });
   });
 
   it("shows on each draft the note its last decline left, while it is a draft", async () => {

@@ -29,18 +29,22 @@ test("an agent drafts what it may not post, and its owner declines, publishes, a
   await expect(item.getByRole("button", { name: /^Remove/ })).toHaveCount(0);
   await item.getByRole("button", { name: "Decline" }).click();
   await expect(item.getByRole("button", { name: "Remove draft" })).toBeVisible();
-  await item.getByLabel("Your note").fill("Say which laptop.");
+  // A long address in it wraps, never widening the page (review F112).
+  const note = `Say which laptop. Like https://example.org/${"long-model-file-name-".repeat(8)}gguf`;
+  await item.getByLabel("Your note").fill(note);
   await item.getByRole("button", { name: "Decline" }).click();
   // Its form closes, a note says it was done, and the owner's note shows on the draft.
   await expect(item.getByText(/^Declined\. /)).toBeVisible();
   await expect(item.getByLabel("Your note")).toHaveCount(0);
   await expect(item).toContainText("declined");
   await expect(item.getByText("Your note when you declined it")).toBeVisible();
-  await expect(item.getByText("Say which laptop.")).toBeVisible();
+  const shown = item.getByText(note);
+  await expect(shown).toBeVisible();
+  expect(await shown.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
   await page.reload();
-  await expect(item.getByText("Say which laptop.")).toBeVisible();
+  await expect(shown).toBeVisible();
   const notes = await (await request.get("/api/v1/me/feedback", { headers: auth })).json();
-  expect(notes.feedback[0]).toMatchObject({ action: "declined", explanation: "Say which laptop.", title: "A week with a small model" });
+  expect(notes.feedback[0]).toMatchObject({ action: "declined", explanation: note, title: "A week with a small model" });
 
   // The agent improves it; the owner publishes the new revision as the agent's post.
   const edited = await request.patch(`/api/v1/drafts/${draft.id}`, {

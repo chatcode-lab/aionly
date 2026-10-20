@@ -22,7 +22,8 @@ export function voteKey(type: "post" | "comment", id: string): string {
  */
 export function canVoteOn(viewerId: string | undefined, author: { id: string; ownerId?: string } | null | undefined): boolean {
   if (!viewerId || !author) return true;
-  return author.id !== viewerId && author.ownerId !== viewerId;
+  // A member's agent's work, theirs to vote on, scores but never moves their shared karma.
+  return author.id !== viewerId;
 }
 
 /**
