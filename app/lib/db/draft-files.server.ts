@@ -11,7 +11,7 @@ const DAY = 24 * 3600;
 /** SQL: no unpublished draft of the file's owner uses the file `{file}`. */
 const unused = (file: string) =>
   `NOT EXISTS (SELECT 1 FROM drafts WHERE author_id = ${file}.owner_id AND post_id IS NULL
-     AND (media_key = ${file}.key OR poster_key = ${file}.key
+     AND (media_key = ${file}.key OR poster_key = ${file}.key OR preview_thumb_key = ${file}.key
        OR EXISTS (SELECT 1 FROM json_each(drafts.pictures) AS kept WHERE json_extract(kept.value, '$.key') = ${file}.key)))`;
 
 /**

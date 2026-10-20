@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { useState } from "react";
-import { Form, Link, redirect, useNavigation } from "react-router";
+import { Form, Link, redirect, useFetcher, useNavigation } from "react-router";
 
 import { MentionsProvider } from "~/components/mentions";
 import { PostMediaView } from "~/components/post-media";
@@ -14,6 +14,7 @@ import {
   declineDraft,
   deleteDraft,
   type Draft,
+  draftFor,
   draftsOf,
   type Feedback,
   FEEDBACK_PAGE,
@@ -22,6 +23,7 @@ import {
   publishDraft,
   type PublishDraftResult,
   removeAgentDraft,
+  saveDraftPreview,
 } from "~/lib/db/drafts.server";
 import { deleteReleasedFiles } from "~/lib/db/draft-files.server";
 import { mentionHosts, mentionNames } from "~/lib/db/mentions.server";
@@ -34,7 +36,7 @@ import { privatePageMeta } from "~/lib/meta";
 import { ROW_ID } from "~/lib/security/body";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import type { PostMedia } from "~/lib/public-types";
-import type { CheckedLink } from "~/lib/submit/check.server";
+import { checkLink } from "~/lib/submit/check.server";
 import { postPath } from "~/lib/slug";
 import { mentionIds } from "~/lib/text/mentions";
 import { requireAccount } from "~/lib/viewer.server";
@@ -61,6 +63,9 @@ interface DraftItem {
   pictures: string[] | null;
   /** What the post will show above its description, as the feed shows it; a link's page preview loads on asking. */
   media: PostMedia;
+  /** Whether a link's preview was made, and the post that has its link already, if one does. */
+  previewed: boolean;
+  duplicate: { id: string; live: boolean } | null;
   updatedAt: number;
   declinedAt: number | null;
 }
@@ -90,6 +95,12 @@ function mediaOf(draft: Draft): PostMedia {
         return { kind: "audio", aspect: "audio", src, thumbUrl, duration };
     }
   }
+  // The preview Preview made, kept with the draft while its link stays.
+  if (draft.preview) {
+    const { provider, aspect, pageTitle, thumbKey } = draft.preview;
+    const thumbUrl = thumbKey ? imageAddress(thumbKey) : undefined;
+    return provider && aspect ? { kind: "media", provider, aspect, thumbUrl } : { kind: "page", pageTitle: pageTitle ?? undefined, thumbUrl };
+  }
   try {
     const link = resolveLink(new URL(draft.url ?? ""));
     if (link.kind === "media") return { kind: "media", provider: link.provider, aspect: link.aspect };
@@ -106,17 +117,21 @@ function itemOf(draft: Draft): DraftItem {
   } catch {
     // An unfinished link shows as typed.
   }
+  const { preview } = draft;
   return {
     id: draft.id,
     revision: draft.revision,
     kind: draft.kind,
     title: draft.title,
     description: draft.description,
-    url: draft.url,
-    host,
+    // The link as its preview resolved it, a short one included (review F96).
+    url: preview?.url ?? draft.url,
+    host: preview?.host ?? host,
     file: draft.media ? { type: draft.media.type, src: imageAddress(draft.media.key) } : null,
     pictures: draft.pictures ? draft.pictures.map((picture) => imageAddress(picture.key)) : null,
     media: mediaOf(draft),
+    previewed: preview !== null,
+    duplicate: preview?.duplicate ? { id: preview.duplicate.id, live: preview.duplicate.state === "live" } : null,
     updatedAt: draft.updatedAt,
     declinedAt: draft.declinedAt,
   };
@@ -154,6 +169,8 @@ interface ActionResult {
   draft: string;
   /** What went wrong; none when it was done, and the lists load again. */
   error?: string;
+  /** It was declined: its note is with the agent now. */
+  declined?: boolean;
 }
 
 /** Why an agent's draft did not publish, for its owner. */
@@ -203,6 +220,27 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
     return { draft: id };
   }
 
+  if (intent === "preview") {
+    // A link draft's preview, made as Submit makes it, for its author, and kept with it.
+    const found = await draftFor(env.DB, id, viewer.id);
+    if (!found || found.draft.postId) return { draft: id, error: "This draft is gone." };
+    const { draft } = found;
+    if (draft.kind !== "link" || !draft.url) return { draft: id, error: "This draft has no link to preview." };
+    const checked = await checkLink({
+      raw: draft.url,
+      userId: draft.authorId,
+      ownHosts: [new URL(request.url).hostname],
+      db: env.DB,
+      bucket: env.IMAGES,
+      secret: env.BETTER_AUTH_SECRET,
+      now,
+    });
+    if (!checked.ok) return { draft: id, error: checked.error };
+    const saved = await saveDraftPreview(env.DB, { id, authorId: draft.authorId, url: draft.url, link: checked.link, duplicate: checked.duplicate });
+    await deleteReleasedFiles(env.DB, env.IMAGES, saved.freed);
+    return saved.ok ? { draft: id } : { draft: id, error: "This draft changed meanwhile. Preview it again." };
+  }
+
   const revision = Number(form.get("revision"));
   if (!Number.isInteger(revision) || revision < 1) return { draft: id, error: "That was not understood." };
   const changed = { draft: id, error: "Your agent changed this draft since you read it. Read it again first." };
@@ -228,7 +266,7 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
   if (intent === "decline") {
     const result = await declineDraft(env.DB, { id, ownerId: viewer.id, revision, explanation, now });
     if (!result.ok) return result.reason === "conflict" ? changed : gone;
-    return { draft: id };
+    return { draft: id, declined: true };
   }
   if (intent === "remove") {
     const result = await removeAgentDraft(env.DB, { id, ownerId: viewer.id, revision, explanation, now });
@@ -269,39 +307,14 @@ function DraftSummary({ draft, now, full }: { draft: DraftItem; now: number; ful
 /**
  * A draft's picture, gallery, player, or link card, as its post will show
  * them. A link's page title and picture are fetched only when asked for,
- * with the same check Submit runs, as it reads the page.
+ * with the same check Submit runs, as it reads the page, and kept with the
+ * draft until its link changes.
  */
 function DraftMedia({ draft }: { draft: DraftItem }) {
-  // What the check found: the link as it resolved, a short one included, and its media (review F96).
-  const [checked, setChecked] = useState<{ url: string; host: string; media: PostMedia } | null>(null);
-  const [state, setState] = useState<"idle" | "loading" | string>("idle");
+  const fetcher = useFetcher<ActionResult>();
   if (draft.media.kind === "text") return null;
-  const media = checked?.media ?? draft.media;
-  const preview = async () => {
-    setState("loading");
-    try {
-      const response = await fetch("/submit/check", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: draft.url }),
-      });
-      const data = (await response.json()) as { ok: true; link: CheckedLink } | { ok: false; error?: string; message?: string };
-      if (!data.ok) return setState(("error" in data && data.error) || ("message" in data && data.message) || "The preview did not load.");
-      const { link } = data;
-      const thumbUrl = link.thumbUrl ?? undefined;
-      setChecked({
-        url: link.url,
-        host: link.host,
-        media:
-          link.provider && link.aspect
-            ? { kind: "media", provider: link.provider, aspect: link.aspect, thumbUrl }
-            : { kind: "page", pageTitle: link.pageTitle ?? undefined, thumbUrl },
-      });
-      setState("idle");
-    } catch {
-      setState("The preview did not load. Try again.");
-    }
-  };
+  const loading = fetcher.state !== "idle";
+  const error = fetcher.state === "idle" ? fetcher.data?.error : undefined;
   return (
     <div className="space-y-1.5">
       <PostMediaView
@@ -309,30 +322,46 @@ function DraftMedia({ draft }: { draft: DraftItem }) {
           id: `draft-${draft.id}`,
           path: "/drafts",
           title: draft.title,
-          url: checked?.url ?? draft.url ?? "/drafts",
-          host: checked?.host ?? draft.host ?? undefined,
+          url: draft.url ?? "/drafts",
+          host: draft.host ?? undefined,
           origin: "found",
           author: { id: "draft", username: "draft" },
           createdAt: 0,
           score: 0,
           commentCount: 0,
           excerpt: "",
-          media,
+          media: draft.media,
         }}
       />
-      {draft.kind === "link" && draft.url && !checked ? (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <Button variant="ghost" className="-ml-2" onClick={() => void preview()} disabled={state === "loading"}>
-            {state === "loading" ? "Loading the preview…" : "Preview"}
+      {draft.duplicate ? (
+        <p className="text-meta text-text-muted">
+          {draft.duplicate.live ? (
+            <>
+              This link is posted already:{" "}
+              <Link to={`/p/${draft.duplicate.id}`} className="underline underline-offset-4">
+                see the post
+              </Link>
+              .
+            </>
+          ) : (
+            "This link was posted before, and that post was removed."
+          )}
+        </p>
+      ) : null}
+      {draft.kind === "link" && draft.url && !draft.previewed ? (
+        <fetcher.Form method="post" className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <input type="hidden" name="draft" value={draft.id} />
+          <Button type="submit" variant="ghost" className="-ml-2" name="intent" value="preview" disabled={loading}>
+            {loading ? "Loading the preview…" : "Preview"}
           </Button>
-          {state !== "idle" && state !== "loading" ? (
+          {error ? (
             <p role="alert" className="text-meta text-danger">
-              {state}
+              {error}
             </p>
           ) : (
             <p className="text-meta text-text-muted">Its page's title and picture, as the post will show them.</p>
           )}
-        </div>
+        </fetcher.Form>
       ) : null}
     </div>
   );
@@ -363,7 +392,7 @@ function MyDraft({ draft, now }: { draft: DraftItem; now: number }) {
  * An agent's draft as its owner reviews it: whole, to publish as the
  * agent's post, decline with a note, or remove. Never to edit.
  */
-function AgentDraft({ draft, now, error }: { draft: DraftItem; now: number; error?: string }) {
+function AgentDraft({ draft, now, agent, result }: { draft: DraftItem; now: number; agent: string | null; result?: ActionResult }) {
   const navigation = useNavigation();
   const busy = navigation.state !== "idle" && navigation.formData?.get("draft") === draft.id;
   const [mode, setMode] = useState<"decline" | "remove" | null>(null);
@@ -376,7 +405,12 @@ function AgentDraft({ draft, now, error }: { draft: DraftItem; now: number; erro
   return (
     <li className="space-y-3 bleed rounded-xl border border-border bg-surface p-3 sm:p-4">
       <DraftSummary draft={draft} now={now} full />
-      {error ? <Notice tone="danger">{error}</Notice> : null}
+      {result?.error ? <Notice tone="danger">{result.error}</Notice> : null}
+      {result?.declined ? (
+        <Notice tone="info">
+          Declined. {agent ?? "Your agent"} sees your note under Feedback, and the draft stays here until it changes or publishes it.
+        </Notice>
+      ) : null}
       {mode ? (
         <Form method="post" className="space-y-2">
           {hidden}
@@ -512,7 +546,14 @@ export default function Drafts({ loaderData, actionData }: Route.ComponentProps)
           <ol className="space-y-3">
             {drafts.map((draft) =>
               view === "agent" ? (
-                <AgentDraft key={`${draft.id}-${draft.revision}`} draft={draft} now={now} error={result?.draft === draft.id ? result.error : undefined} />
+                // A new revision, or a decline, starts it afresh, the note's form closed.
+                <AgentDraft
+                  key={`${draft.id}-${draft.revision}-${draft.declinedAt ?? ""}`}
+                  draft={draft}
+                  now={now}
+                  agent={agent}
+                  result={result?.draft === draft.id ? result : undefined}
+                />
               ) : (
                 <MyDraft key={draft.id} draft={draft} now={now} />
               ),

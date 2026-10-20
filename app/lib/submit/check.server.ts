@@ -29,6 +29,8 @@ export interface CheckedLink {
   pageTitle: string | null;
   /** The pending snapshot, visible to its owner only until published. */
   thumbUrl: string | null;
+  /** That snapshot's key, for a draft that keeps it. */
+  thumbKey: string | null;
   /** The link's own title, to prefill the post's title. */
   suggestedTitle: string | null;
 }
@@ -108,6 +110,7 @@ export async function checkLink(input: {
     aspect: resolved.kind === "media" ? resolved.aspect : null,
     pageTitle: null,
     thumbUrl: null,
+    thumbKey: null,
     suggestedTitle: null,
   };
   if (duplicate) return { ok: true, link: base, duplicate, receipt: null };
@@ -150,6 +153,7 @@ export async function checkLink(input: {
     // Only a preview card shows the page's own title.
     pageTitle: resolved.kind === "page" ? (meta.title ?? null) : null,
     thumbUrl: thumbKey ? imageAddress(thumbKey) : null,
+    thumbKey,
     suggestedTitle: meta.title ?? null,
   };
   const receipt = await signReceipt(

@@ -2,9 +2,10 @@ import { type Picture, storedGallery } from "../gallery";
 import { newId, newPostId } from "../ids";
 import { cleanDraft, DRAFT_BYTES, DRAFT_LIMIT, type DraftFields, draftProblems } from "../draft-rules";
 import { type PostChoice, parsePostChoice, type PostReplies } from "../replies";
-import { checkLink } from "../submit/check.server";
+import { type CheckedLink, checkLink } from "../submit/check.server";
 import { readReceipt } from "../submit/receipt.server";
 import { cleanDescription, cleanTitle, DESCRIPTION_MAX, descriptionProblem, type Origin, type PostKind, TEXT_BODY_MAX, titleProblem } from "../submit/rules";
+import type { Aspect, Provider } from "../links/types";
 import { mediaTypeOf } from "../uploads";
 import { accountRecord } from "./accounts.server";
 import { deleteReleasedFiles, releasedKeys, releaseUnusedDraftFiles } from "./draft-files.server";
@@ -45,6 +46,22 @@ export interface Draft {
   declinedAt: number | null;
   /** The post it became, once published. */
   postId: string | null;
+  /** Its link's preview, made on asking, while the link is the one it was made for. */
+  preview: DraftPreview | null;
+}
+
+/** A link draft's preview, as the Submit check found its link (see saveDraftPreview). */
+export interface DraftPreview {
+  /** The address as checked, a short link resolved, and its host. */
+  url: string;
+  host: string;
+  provider: Provider | null;
+  aspect: Aspect | null;
+  pageTitle: string | null;
+  /** Its snapshot, kept as one of the draft's files. */
+  thumbKey: string | null;
+  /** The post that holds the link already, when one does. */
+  duplicate: Existing | null;
 }
 
 interface DraftRow {
@@ -68,6 +85,19 @@ interface DraftRow {
   updated_at: number;
   declined_at: number | null;
   post_id: string | null;
+  preview: string | null;
+  preview_thumb_key: string | null;
+}
+
+/** A stored preview, while the draft's link is still the one it was made for. */
+function previewOf(row: DraftRow): DraftPreview | null {
+  if (!row.preview) return null;
+  try {
+    const { for: madeFor, ...preview } = JSON.parse(row.preview) as Omit<DraftPreview, "thumbKey"> & { for: string };
+    return madeFor === row.url ? { ...preview, thumbKey: row.preview_thumb_key } : null;
+  } catch {
+    return null;
+  }
 }
 
 function toDraft(row: DraftRow): Draft {
@@ -91,6 +121,7 @@ function toDraft(row: DraftRow): Draft {
     updatedAt: row.updated_at,
     declinedAt: row.declined_at,
     postId: row.post_id,
+    preview: previewOf(row),
   };
 }
 
@@ -249,7 +280,10 @@ export async function saveDraft(
         .prepare(
           `UPDATE drafts SET kind = ?3, url = ?4, origin = ?5, title = ?6, description = ?7, replies = ?8,
              media_key = ?9, media_type = ?10, media_width = ?11, media_height = ?12, media_duration = ?13,
-             poster_key = ?14, updated_at = ?15, pictures = ?16, revision = revision + 1
+             poster_key = ?14, updated_at = ?15, pictures = ?16, revision = revision + 1,
+             -- Another link drops the preview made for the last, and so its snapshot.
+             preview = CASE WHEN url IS ?4 THEN preview ELSE NULL END,
+             preview_thumb_key = CASE WHEN url IS ?4 THEN preview_thumb_key ELSE NULL END
            WHERE id = ?1 AND author_id = ?2 AND post_id IS NULL AND (?17 IS NULL OR revision = ?17)
              AND ${fileHolds(9, "media", "media_key")} AND ${fileHolds(14, "post", "poster_key")} AND ${picturesHold}
              AND ${bytesAfterSql(1, 2, 9, 14, 16)} <= ${DRAFT_BYTES} AND ${LIVE_AUTHOR}`,
@@ -340,6 +374,42 @@ function bytesAfterSql(id: number, author: number, media: number, poster: number
 export async function deleteDraft(db: D1Database, input: { id: string; authorId: string }): Promise<{ ok: boolean; freed: string[] }> {
   const results = await db.batch([
     db.prepare(`DELETE FROM drafts WHERE id = ?1 AND author_id = ?2 AND post_id IS NULL`).bind(input.id, input.authorId),
+    ...releaseUnusedDraftFiles(db, input.authorId),
+  ]);
+  return { ok: results[0]!.meta.changes > 0, freed: releasedKeys(results) };
+}
+
+/**
+ * Keeps a link draft's preview, as the Drafts page's Preview checked it for
+ * the draft's author: its snapshot becomes one of the draft's files, in place
+ * of any earlier one, which is let go. Nothing is kept once the draft's link
+ * changed or it was published. The keys let go come back for the bucket.
+ */
+export async function saveDraftPreview(
+  db: D1Database,
+  input: { id: string; authorId: string; url: string; link: CheckedLink; duplicate: Existing | null },
+): Promise<{ ok: boolean; freed: string[] }> {
+  const { link } = input;
+  const preview = JSON.stringify({
+    for: input.url,
+    url: link.url,
+    host: link.host,
+    provider: link.provider,
+    aspect: link.aspect,
+    pageTitle: link.pageTitle,
+    duplicate: input.duplicate,
+  });
+  const results = await db.batch([
+    db
+      .prepare(`UPDATE drafts SET preview = ?3, preview_thumb_key = ?4 WHERE id = ?1 AND author_id = ?2 AND post_id IS NULL AND url = ?5`)
+      .bind(input.id, input.authorId, preview, link.thumbKey, input.url),
+    db
+      .prepare(
+        `UPDATE images SET state = 'draft'
+         WHERE key = ?1 AND owner_id = ?2 AND state = 'pending'
+           AND EXISTS (SELECT 1 FROM drafts WHERE id = ?3 AND post_id IS NULL AND preview_thumb_key = ?1)`,
+      )
+      .bind(link.thumbKey ?? "", input.authorId, input.id),
     ...releaseUnusedDraftFiles(db, input.authorId),
   ]);
   return { ok: results[0]!.meta.changes > 0, freed: releasedKeys(results) };

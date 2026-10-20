@@ -16,6 +16,7 @@ import {
   removeAgentDraft,
   removeAgentWork,
   saveDraft,
+  saveDraftPreview,
 } from "../../app/lib/db/drafts.server";
 import { sweepPendingImages } from "../../app/lib/images.server";
 import { comment, DAY, db, NOW, post, reset, user } from "./fixtures";
@@ -175,6 +176,68 @@ describe("saving drafts", () => {
     expect(await save("owner", { title: "Stale take" }, { id, revision: 1 })).toEqual({ ok: false, reason: "conflict", revision: 2 });
     // Nobody else changes it, the owner of an agent included.
     expect(await save("other", { title: "Not mine" }, { id })).toEqual({ ok: false, reason: "not_found" });
+  });
+});
+
+describe("previewing drafts", () => {
+  const song = "https://suno.com/song/cf674415-debb-498c-aa29-37a58a28d8e9";
+  /** A link's check, as Submit's would answer for a song's short link (review F96). */
+  const checked = (thumbKey: string | null) => ({
+    url: song,
+    host: "suno.com",
+    provider: "suno" as const,
+    aspect: "audio" as const,
+    pageTitle: "A song",
+    thumbUrl: null,
+    thumbKey,
+    suggestedTitle: "A song",
+  });
+
+  it("keeps a link's preview and its snapshot with the draft, until its link changes", async () => {
+    const saved = await save(agentId, { kind: "link", url: "https://suno.com/s/ShortSongLink", origin: "found" });
+    if (!saved.ok) throw new Error(JSON.stringify(saved));
+    const { id } = saved.draft;
+    await sent(agentId, key("p", "jpg"), { kind: "post", type: "image/jpeg" });
+    const url = "https://suno.com/s/ShortSongLink";
+    expect(await saveDraftPreview(db, { id, authorId: agentId, url, link: checked(key("p", "jpg")), duplicate: null })).toEqual({ ok: true, freed: [] });
+    expect((await draftsOf(db, agentId))[0]!.preview).toEqual({
+      url: song,
+      host: "suno.com",
+      provider: "suno",
+      aspect: "audio",
+      pageTitle: "A song",
+      thumbKey: key("p", "jpg"),
+      duplicate: null,
+    });
+    // The snapshot is the draft's now: safe from the pending sweep.
+    expect(await state(key("p", "jpg"))).toBe("draft");
+    await sweepPendingImages(db, env.IMAGES, NOW + 2 * DAY);
+    expect(await state(key("p", "jpg"))).toBe("draft");
+
+    // Previewed again, the new snapshot takes the old one's place.
+    await sent(agentId, key("q", "jpg"), { kind: "post", type: "image/jpeg" });
+    expect(await saveDraftPreview(db, { id, authorId: agentId, url, link: checked(key("q", "jpg")), duplicate: null })).toEqual({ ok: true, freed: [key("p", "jpg")] });
+    // Saved with the same link, it stays; with another, it goes, and its snapshot.
+    const same = await save(agentId, { kind: "link", url, origin: "found", title: "Retitled" }, { id });
+    expect(same).toMatchObject({ ok: true, freed: [], draft: { preview: { thumbKey: key("q", "jpg") } } });
+    const moved = await save(agentId, { kind: "link", url: "https://example.com/elsewhere", origin: "found" }, { id });
+    expect(moved).toMatchObject({ ok: true, freed: [key("q", "jpg")], draft: { preview: null } });
+
+    // A preview of the link it had is not kept; its snapshot stays pending, for the sweep.
+    await sent(agentId, key("r", "jpg"), { kind: "post", type: "image/jpeg" });
+    expect(await saveDraftPreview(db, { id, authorId: agentId, url, link: checked(key("r", "jpg")), duplicate: null })).toEqual({ ok: false, freed: [] });
+    expect(await state(key("r", "jpg"))).toBe("pending");
+  });
+
+  it("names the post that has the link already, and is for the author alone", async () => {
+    await post("p1", { author: "other", url: song, key: "suno:cf674415-debb-498c-aa29-37a58a28d8e9" });
+    const saved = await save("owner", { kind: "link", url: song, origin: "found" });
+    if (!saved.ok) throw new Error(JSON.stringify(saved));
+    const duplicate = { id: "p1", state: "live" as const };
+    expect((await saveDraftPreview(db, { id: saved.draft.id, authorId: "owner", url: song, link: checked(null), duplicate })).ok).toBe(true);
+    expect((await draftsOf(db, "owner"))[0]!.preview).toMatchObject({ thumbKey: null, duplicate });
+    // Someone else's draft is not theirs to preview.
+    expect((await saveDraftPreview(db, { id: saved.draft.id, authorId: "other", url: song, link: checked(null), duplicate: null })).ok).toBe(false);
   });
 });
 

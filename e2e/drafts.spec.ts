@@ -28,6 +28,9 @@ test("an agent drafts what it may not post, and its owner declines, publishes, a
   await item.getByRole("button", { name: "Decline" }).click();
   await item.getByLabel("What to change").fill("Say which laptop.");
   await item.getByRole("button", { name: "Decline" }).click();
+  // Its form closes, and a note says it was done.
+  await expect(item.getByText(/^Declined\. /)).toBeVisible();
+  await expect(item.getByLabel("What to change")).toHaveCount(0);
   await expect(page.getByRole("listitem").filter({ hasText: "A week with a small model" })).toContainText("declined");
   const notes = await (await request.get("/api/v1/me/feedback", { headers: auth })).json();
   expect(notes.feedback[0]).toMatchObject({ action: "declined", explanation: "Say which laptop.", title: "A week with a small model" });
@@ -111,16 +114,15 @@ test("an agent's drafts show as their posts will, and the account menu counts th
     { kind: "link", url: "https://www.youtube.com/watch?v=aqz-KE-bpKQ", title: "Big Buck Bunny, once more", origin: "found" },
     { kind: "link", url: `https://${host}/guide`, title: "A guide worth a look", origin: "found" },
     { kind: "upload", upload: (await uploaded.json()).upload, width: 1, height: 1, title: "One pixel, generated", origin: "made" },
-    { kind: "link", url: "https://suno.com/s/ShortSongLink", title: "A song by its short link", origin: "found" },
   ]) {
     const saved = await request.post("/api/v1/drafts", { headers: auth, data });
     expect(saved.status(), await saved.text()).toBe(201);
   }
 
-  // The menu says four wait, and leads to the agent's, the only ones.
+  // The menu says three wait, and leads to the agent's, the only ones.
   await open(page, "/");
-  await page.getByRole("button", { name: /^Account: .*4 drafts from your agent/ }).click();
-  const drafts = page.getByRole("menuitem", { name: "Drafts 4 waiting" });
+  await page.getByRole("button", { name: /^Account: .*3 drafts from your agent/ }).click();
+  const drafts = page.getByRole("menuitem", { name: "Drafts 3 waiting" });
   await expect(drafts).toHaveAttribute("href", "/drafts?view=agent");
   await drafts.click();
   await expect(page).toHaveURL(/\/drafts\?view=agent$/);
@@ -133,26 +135,10 @@ test("an agent's drafts show as their posts will, and the account menu counts th
   await expect(item("One pixel, generated").getByRole("button", { name: /^See the picture full size/ })).toBeVisible();
   const guide = item("A guide worth a look");
   await expect(guide.locator(`a[href="https://${host}/guide"][target="_blank"]`).first()).toBeVisible();
-  // Its page's title and picture load when asked for.
+  // Its page's title and picture load when asked for, and stay with the draft.
   await guide.getByRole("button", { name: "Preview" }).click();
   await expect(guide.getByRole("button", { name: "Preview" })).toHaveCount(0);
-
-  // A short link is a page until the check resolves it, then the player it
-  // stands for (review F96). The check answers as Suno's would resolve it.
-  const song = item("A song by its short link");
-  await expect(song.getByRole("button", { name: /^Play song/ })).toHaveCount(0);
-  await page.route(
-    (url) => url.pathname === "/submit/check",
-    (route) =>
-      route.fulfill({
-        json: {
-          ok: true,
-          link: { url: "https://suno.com/song/cf674415-debb-498c-aa29-37a58a28d8e9", host: "suno.com", provider: "suno", aspect: "audio", pageTitle: null, thumbUrl: null, suggestedTitle: null },
-          duplicate: null,
-          receipt: null,
-        },
-      }),
-  );
-  await song.getByRole("button", { name: "Preview" }).click();
-  await expect(song.getByRole("button", { name: /^Play song/ }).or(song.locator("iframe"))).toBeVisible();
+  await page.reload();
+  await expect(guide.locator(`a[href="https://${host}/guide"][target="_blank"]`).first()).toBeVisible();
+  await expect(guide.getByRole("button", { name: "Preview" })).toHaveCount(0);
 });
