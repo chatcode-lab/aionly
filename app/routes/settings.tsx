@@ -137,7 +137,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     planChange: status.planChange,
     planChangeLeft: status.planChangeLeft,
     // The shortest name the member may hold: 5 with the yearly plan, 4
-    // with the 4-letter username or as an admin, else 6.
+    // with the Short username package or as an admin, else 6.
     shortestName: viewer.shortestName,
     // Connecting an agent comes with the plan; admins need no plan. An
     // agent kept from a lapsed plan is shown, paused.
@@ -410,7 +410,7 @@ export async function action({ request, context }: Route.ActionArgs) {
     };
   }
 
-  // A short name to claim with the yearly plan or the 4-letter username: on to the plan's page.
+  // A short name to claim with the yearly plan or the Short username package: on to the plan's page.
   if (form.get("intent") === "claim") {
     const wanted = wantedShortName(form.get("username"), { staff: viewer.role === "admin" });
     if (!wanted) return { error: USERNAME_PROBLEM.pattern, saved: false };
@@ -421,7 +421,7 @@ export async function action({ request, context }: Route.ActionArgs) {
   }
   const error = await applyRename(viewer.id, String(form.get("username") ?? ""), {
     staff: viewer.role === "admin",
-    // A short name is the yearly plan's or the 4-letter username's, for a member.
+    // A short name is the yearly plan's or the Short username package's, for a member.
     shortest: viewer.shortestName,
   });
   return error ? { error, saved: false } : { error: undefined, saved: true };
@@ -436,9 +436,9 @@ function nameLengths(shortest: number, name: string, planInForce: boolean): stri
   const uncertain = name.length < USERNAME_MIN && !planInForce ? ` ${shortNameUncertain(name)}` : "";
   if (shortest <= ALLOWANCE_USERNAME_MIN) return `${shortest} to ${USERNAME_MAX} characters.${uncertain}`;
   if (shortest === YEARLY_USERNAME_MIN) {
-    return `${shortest} to ${USERNAME_MAX} characters, or ${ALLOWANCE_USERNAME_MIN} with the 4-letter username add-on.${uncertain}`;
+    return `${shortest} to ${USERNAME_MAX} characters, or ${ALLOWANCE_USERNAME_MIN} with the Short username package.${uncertain}`;
   }
-  return `${USERNAME_MIN} to ${USERNAME_MAX} characters, ${YEARLY_USERNAME_MIN} with the yearly plan, or ${ALLOWANCE_USERNAME_MIN} with the 4-letter username add-on.${uncertain}`;
+  return `${USERNAME_MIN} to ${USERNAME_MAX} characters, ${YEARLY_USERNAME_MIN} with the yearly plan, or ${ALLOWANCE_USERNAME_MIN} with the Short username package.${uncertain}`;
 }
 
 /**
@@ -1392,7 +1392,7 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
             current={username}
             staff={staff}
             shortest={loaderData.shortestName}
-            // A member may claim a shorter name with the yearly plan or the 4-letter username.
+            // A member may claim a shorter name with the yearly plan or the Short username package.
             claimShort={loaderData.shortestName > SHORT_USERNAME_MIN && !banned}
             hint={`${nameLengths(loaderData.shortestName, username, loaderData.plan.fan || loaderData.plan.admin)} ${hint}`}
             error={renamed?.error}

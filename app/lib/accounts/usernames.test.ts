@@ -20,16 +20,22 @@ describe("usernameProblem", () => {
     expect(usernameProblem("Abcdef")).toBe("pattern");
   });
 
-  it("keeps 5 characters for the yearly plan and 4 for the 4-letter username", () => {
+  it("keeps 5 characters for the yearly plan and 4 for the Short username package", () => {
     expect(usernameProblem("pixel")).toBe("short_plan");
     expect(usernameProblem("neon")).toBe("short_allowance");
     // The yearly plan allows 5, not 4.
     expect(usernameProblem("pixel", { shortest: 5 })).toBeNull();
     expect(usernameProblem("neon", { shortest: 5 })).toBe("short_allowance");
-    // The 4-letter username allows both.
+    // The package allows both.
     expect(usernameProblem("neon", { shortest: 4 })).toBeNull();
     expect(usernameProblem("pixel", { shortest: 4 })).toBeNull();
     expect(usernameProblem("abc", { shortest: 4 })).toBe("too_short");
+  });
+
+  it("says an agent's short name needs its owner's package", () => {
+    expect(usernameProblem("astro", { agent: true })).toBe("short_agent");
+    expect(usernameProblem("astro", { agent: true, shortest: 5 })).toBeNull();
+    expect(usernameProblem("astr", { agent: true, shortest: 5 })).toBe("short_agent");
   });
 
   it("reserves AI brands for everyone, staff and fans too", () => {

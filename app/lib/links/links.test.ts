@@ -207,6 +207,37 @@ describe("resolveLink", () => {
     expect(resolve("https://suno.com/@artist").kind).toBe("page");
   });
 
+  it("resolves SoundCloud tracks and playlists, and flags share links", () => {
+    expect(resolve("https://soundcloud.com/Forss/Flickermood?si=abc&utm_source=clipboard")).toMatchObject({
+      kind: "media",
+      provider: "soundcloud",
+      id: "forss/flickermood",
+      canonicalKey: "soundcloud:forss/flickermood",
+      aspect: "audio",
+      controlled: false,
+    });
+    expect(keyOf("https://m.soundcloud.com/forss/flickermood")).toBe("soundcloud:forss/flickermood");
+    // A track opened from a playlist is the track.
+    expect(keyOf("https://soundcloud.com/forss/flickermood?in=forss/sets/soulhack")).toBe("soundcloud:forss/flickermood");
+    expect(keyOf("https://soundcloud.com/auggie-490304907/sets/ai-baroque-music-quiz")).toBe(
+      "soundcloud:auggie-490304907/sets/ai-baroque-music-quiz",
+    );
+    expect(resolve("https://on.soundcloud.com/AbCdEf123")).toMatchObject({ kind: "short", provider: "soundcloud" });
+    // Accounts, their pages, the site's own, and private links stay pages.
+    for (const page of [
+      "https://soundcloud.com/forss",
+      "https://soundcloud.com/forss/tracks",
+      "https://soundcloud.com/forss/sets",
+      "https://soundcloud.com/discover/sets/charts-top",
+      "https://soundcloud.com/search/sounds?q=ai",
+      "https://soundcloud.com/forss/flickermood/s-AbCdEf",
+      "https://soundcloud.com/forss/sets/soulhack/s-AbCdEf",
+      "https://soundcloud.com/forss/flickermood/recommended",
+    ]) {
+      expect(resolve(page).kind, page).toBe("page");
+    }
+  });
+
   it("collapses every Reddit spelling of one post", () => {
     const keys = [
       "https://www.reddit.com/r/place/comments/tqbguc/412022/",
@@ -346,6 +377,7 @@ describe("stored addresses", () => {
     expect(stored("https://m.youtube.com/watch?v=dQw4w9WgXcQ&feature=share")).toBe("https://www.youtube.com/watch?v=dQw4w9WgXcQ");
     expect(stored("https://www.youtube.com/shorts/jNQXAC9IVRw?feature=share")).toBe("https://www.youtube.com/shorts/jNQXAC9IVRw");
     expect(stored("https://suno.com/song/CF674415-DEBB-498C-AA29-37A58A28D8E9?sh=xyz")).toBe("https://suno.com/song/cf674415-debb-498c-aa29-37a58a28d8e9");
+    expect(stored("https://m.soundcloud.com/Forss/Flickermood?si=abc#t=1:00")).toBe("https://soundcloud.com/forss/flickermood");
     expect(stored("https://old.reddit.com/r/place/comments/tqbguc/412022/abc123/?utm_source=share")).toBe("https://www.reddit.com/r/place/comments/tqbguc/");
     expect(stored("https://t.me/s/Telegram/83?single")).toBe("https://t.me/telegram/83");
     expect(stored("https://twitter.com/jack/status/20?s=20&t=abc")).toBe("https://twitter.com/jack/status/20");

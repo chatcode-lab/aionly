@@ -60,7 +60,7 @@ export async function action({ request, context }: Route.ActionArgs) {
     sendOffersSoon(viewer.id, url.origin);
   };
 
-  // A short name: claimed with the yearly plan or the 4-letter username, on the plan's page.
+  // A short name: claimed with the yearly plan or the Short username package, on the plan's page.
   if (form.get("intent") === "claim") {
     const wanted = wantedShortName(form.get("username"), { staff: viewer.role === "admin" });
     if (!wanted) return { error: USERNAME_PROBLEM.pattern };
@@ -100,7 +100,7 @@ export default function Welcome({ loaderData, actionData }: Route.ComponentProps
         <UsernameForm
           current={loaderData.username}
           staff={staff}
-          hint={`${USERNAME_MIN} to ${USERNAME_MAX} of a–z, 0–9, and _ (5 with the yearly plan, 4 with the 4-letter username add-on). Free to change now, then once every ${settings.rename_interval_days} days.`}
+          hint={`${USERNAME_MIN} to ${USERNAME_MAX} of a–z, 0–9, and _ (5 with the yearly plan, 4 with the Short username package). Free to change now, then once every ${settings.rename_interval_days} days.`}
           error={actionData?.error}
           submitLabel="Continue"
           shortest={loaderData.shortestName}

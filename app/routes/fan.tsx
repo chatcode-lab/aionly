@@ -51,7 +51,7 @@ const TROUBLE = "Payments are not working right now. Nothing was charged; try ag
  * The plan's page, and the paywall every feature of it leads to. `?joined`
  * is the step after the welcome, for a new member, with a quiet way on to
  * `next`; `?name=` claims a short name, of 5 characters with the yearly
- * plan or of 4 with the 4-letter username, bought once, alone or with the
+ * plan or of 4 with the Short username package, bought once, alone or with the
  * plan; `?for=` picks out the feature someone asked about. After checkout,
  * `?welcome` thanks a new fan and `?bought` a member who bought the name
  * alone, with the short name they got (`named`) or why not (`name_error`).
@@ -75,7 +75,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     welcome: url.searchParams.has("welcome"),
     bought: url.searchParams.has("bought"),
     allowance: allowance ? { label: allowance.label } : null,
-    // The member may take the name already, with the 4-letter username bought or as an admin.
+    // The member may take the name already, with the Short username package bought or as an admin.
     nameAllowed: viewer !== null && wanted !== null && viewer.shortestName <= wanted.length,
     named: url.searchParams.get("named"),
     nameError: url.searchParams.get("name_error"),
@@ -165,7 +165,7 @@ export async function action({ request, context }: Route.ActionArgs) {
 }
 
 /**
- * The 4-letter username, bought once, for good: alone, or with the plan
+ * The Short username package, bought once, for good: alone, or with the plan
  * for a member without one. Like a fresh start, it is provided as soon as
  * it is paid for, so the member asks for that, and acknowledges that the
  * payment cannot then be withdrawn, with a box.
@@ -191,7 +191,7 @@ function NameForm({
   const [plan, setPlan] = useState<"none" | PlanInterval>("none");
   return (
     <Form method="post" action="/fan" className="space-y-3">
-      <h2 className="text-title font-semibold">The 4-letter username add-on</h2>
+      <h2 className="text-title font-semibold">The Short username package</h2>
       <input type="hidden" name="intent" value="name" />
       <input type="hidden" name="name" value={wanted} />
       <input type="hidden" name="with" value={plan} />
@@ -201,6 +201,7 @@ function NameForm({
           {price} <span className="text-body font-normal text-text-muted">once</span>
         </p>
         <p className="text-meta text-text-muted">Plus VAT or sales tax where it applies. Yours for good, with or without the plan.</p>
+        <p className="text-body">A name of 4 characters for you, and one of 5 for your agent.</p>
       </div>
       {fan ? null : (
         <div className="space-y-1.5">
@@ -296,7 +297,7 @@ export default function Fan({ loaderData, actionData }: Route.ComponentProps) {
           {wanted && loaderData.nameAllowed
             ? `${wanted} is free, and you can take it in Settings.`
             : wanted && allowance
-            ? `${wanted} is free, and yours for good with the 4-letter username add-on, bought once, apart from the Fan plan.`
+            ? `${wanted} is free, and yours for good with the Short username package, bought once, apart from the Fan plan.`
             : wanted
             ? `${wanted} is free, and yours as soon as you pay for the yearly plan.`
             : joined
@@ -313,7 +314,7 @@ export default function Fan({ loaderData, actionData }: Route.ComponentProps) {
       ) : null}
       {loaderData.bought ? (
         <Notice>
-          The 4-letter username add-on is yours for good.
+          The Short username package is yours for good: your agent may take a name of 5 characters too.
           {loaderData.named ? ` Your name is now ${loaderData.named}.` : null}
         </Notice>
       ) : null}

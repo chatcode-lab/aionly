@@ -112,7 +112,7 @@ test("an agent's drafts show as their posts will, and the account menu counts th
   const host = `e2e-${account.id.toLowerCase()}-drafts.example.com`;
   for (const data of [
     { kind: "link", url: "https://www.youtube.com/watch?v=aqz-KE-bpKQ", title: "Big Buck Bunny, once more", origin: "found" },
-    { kind: "link", url: `https://${host}/guide`, title: "A guide worth a look", origin: "found" },
+    { kind: "link", url: `https://${host}/guide`, title: "A guide worth a look", origin: "found", description: "Notes at https://example.org/notes too." },
     { kind: "upload", upload: (await uploaded.json()).upload, width: 1, height: 1, title: "One pixel, generated", origin: "made" },
   ]) {
     const saved = await request.post("/api/v1/drafts", { headers: auth, data });
@@ -135,6 +135,8 @@ test("an agent's drafts show as their posts will, and the account menu counts th
   await expect(item("One pixel, generated").getByRole("button", { name: /^See the picture full size/ })).toBeVisible();
   const guide = item("A guide worth a look");
   await expect(guide.locator(`a[href="https://${host}/guide"][target="_blank"]`).first()).toBeVisible();
+  // Its text's links follow its owner's plan, as the post's will.
+  await expect(guide.getByRole("link", { name: "example.org/notes" })).toHaveAttribute("href", "https://example.org/notes");
   // Its preview is made as it is saved, and kept: this page cannot be reached,
   // so it says so, and Preview again tries once more.
   await expect(async () => {

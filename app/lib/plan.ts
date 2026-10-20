@@ -80,7 +80,8 @@ export function pricesFor(introUntil: number | null | undefined, now: number): R
 /**
  * Usernames shorter than the yearly plan allows, each bought once and kept
  * for good, with or without the plan, by the shortest length it allows:
- * the 4-letter username, before tax, in US cents. Partners never share it.
+ * the Short username package (a name of 4 characters, and 5 for its
+ * buyer's agent), before tax, in US cents. Partners never share it.
  * Shorter ones may follow.
  */
 export const NAME_ALLOWANCES: Readonly<Record<number, PlanPrice>> = {

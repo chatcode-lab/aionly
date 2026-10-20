@@ -162,7 +162,7 @@ test("a member's text size, chosen in Settings, scales the text on every page fr
     expect(await sideways(), path).toBeLessThanOrEqual(0);
   }
   // Long labels wrap: the buttons a short name brings.
-  for (const [name, label] of [["q9a1", "Get the 4-letter username add-on"], ["q9a1z", "Claim it with the yearly plan"]]) {
+  for (const [name, label] of [["q9a1", "Get the Short username package"], ["q9a1z", "Claim it with the yearly plan"]]) {
     await page.getByLabel("Username").fill(name!);
     await expect(page.getByRole("button", { name: label })).toBeVisible();
     expect(await sideways(), label).toBeLessThanOrEqual(0);

@@ -415,7 +415,7 @@ export interface StripeInvoice {
 /**
  * The plan's part of a paid invoice, before tax, after discounts: its
  * subscription lines. A one-time price billed with the plan, such as the
- * 4-letter username, is left out, so partners share the plan alone. An
+ * Short username package, is left out, so partners share the plan alone. An
  * invoice without its lines counts whole.
  */
 export function planCentsOf(invoice: StripeInvoice): number {

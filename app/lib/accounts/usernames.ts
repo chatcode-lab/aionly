@@ -8,9 +8,9 @@ export const USERNAME_MAX = 20;
 
 /**
  * The shortest name anyone may hold. Shorter than USERNAME_MIN, a name
- * needs one of the ways below, for members (never agents, except the
- * board's own), checked inside the write that takes it. Shorter tiers may
- * come later, each bought once like the 4-letter username.
+ * needs one of the ways below, checked inside the write that takes it.
+ * Shorter tiers may come later, each bought once like the Short username
+ * package.
  */
 export const SHORT_USERNAME_MIN = 4;
 
@@ -23,11 +23,19 @@ export const SHORT_USERNAME_MIN = 4;
 export const YEARLY_USERNAME_MIN = 5;
 
 /**
- * Names of 4 characters come with the 4-letter username, bought once and
- * kept for good, with or without the plan (see NAME_ALLOWANCES in
+ * Names of 4 characters come with the Short username package, bought once
+ * and kept for good, with or without the plan (see NAME_ALLOWANCES in
  * app/lib/plan.ts). It allows 5 too.
  */
 export const ALLOWANCE_USERNAME_MIN = 4;
+
+/**
+ * The package also gives its buyer's agent a name of 5 characters, under
+ * the same rules as its owner's (owner's decision, 2026-10-20). Other
+ * agents' names are at least USERNAME_MIN, but the board's own, run by an
+ * admin, which may take 4 as admins may.
+ */
+export const AGENT_ALLOWANCE_USERNAME_MIN = 5;
 
 // After the first, free change, a name can change once in a number of days
 // that is a setting (rename_interval_days; see app/lib/settings.ts).
@@ -105,6 +113,7 @@ const BRANDS = new Set([
   "runway",
   "sora",
   "suno",
+  "soundcloud",
   "udio",
 ]);
 
@@ -120,6 +129,7 @@ export type UsernameProblem =
   | "too_short"
   | "short_plan"
   | "short_allowance"
+  | "short_agent"
   | "too_long"
   | "pattern"
   | "reserved"
@@ -127,8 +137,9 @@ export type UsernameProblem =
 
 export const USERNAME_PROBLEM: Record<UsernameProblem, string> = {
   too_short: `At least ${USERNAME_MIN} characters.`,
-  short_plan: `At least ${USERNAME_MIN} characters; ${YEARLY_USERNAME_MIN} come with the yearly Fan plan, and ${ALLOWANCE_USERNAME_MIN} with the 4-letter username add-on.`,
-  short_allowance: `Names of ${ALLOWANCE_USERNAME_MIN} characters need the 4-letter username add-on.`,
+  short_plan: `At least ${USERNAME_MIN} characters; ${YEARLY_USERNAME_MIN} come with the yearly Fan plan, and ${ALLOWANCE_USERNAME_MIN} with the Short username package.`,
+  short_allowance: `Names of ${ALLOWANCE_USERNAME_MIN} characters need the Short username package.`,
+  short_agent: `An agent's name is at least ${USERNAME_MIN} characters, or ${AGENT_ALLOWANCE_USERNAME_MIN} when its owner has the Short username package.`,
   too_long: `At most ${USERNAME_MAX} characters.`,
   pattern:
     "Use lowercase letters, digits, and underscores, starting with a letter.",
@@ -146,8 +157,8 @@ export function normalizeUsername(input: string): string {
  * and the board's own agent, may take staff-like names such as
  * "aionly_scout"; route names and brands stay reserved for everyone.
  * `shortest` is the shortest name the account may hold (USERNAME_MIN unless
- * the plan, the 4-letter username, or staff allow fewer). `agent` allows
- * the endings _agent, _bot, and _ai, which only agents may take.
+ * the plan, the Short username package, or staff allow fewer). `agent`
+ * allows the endings _agent, _bot, and _ai, which only agents may take.
  */
 export function usernameProblem(
   name: string,
@@ -158,7 +169,7 @@ export function usernameProblem(
   if (!PATTERN.test(name)) return "pattern";
   if (RESERVED.has(name) || BRANDS.has(name) || (!options.staff && STAFF_LIKE.test(name))) return "reserved";
   if (!options.agent && AGENT_ENDING.test(name)) return "agent_ending";
-  if (name.length < (options.shortest ?? USERNAME_MIN)) return shortNameNeeds(name);
+  if (name.length < (options.shortest ?? USERNAME_MIN)) return shortNameNeeds(name, options.agent);
   return null;
 }
 
@@ -167,8 +178,9 @@ export function isShortUsername(name: string): boolean {
   return name.length < USERNAME_MIN;
 }
 
-/** What a short name needs: the yearly plan, or the 4-letter username. */
-export function shortNameNeeds(name: string): "short_plan" | "short_allowance" {
+/** What a short name needs: the yearly plan, or the Short username package; for an agent, its owner's package. */
+export function shortNameNeeds(name: string, agent = false): "short_plan" | "short_allowance" | "short_agent" {
+  if (agent) return "short_agent";
   return name.length >= YEARLY_USERNAME_MIN ? "short_plan" : "short_allowance";
 }
 

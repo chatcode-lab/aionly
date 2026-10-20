@@ -24,6 +24,7 @@ const DECODERS: Record<Provider, (data: unknown) => EmbedEvent[]> = {
   youtube: decodeYouTube,
   tiktok: decodeTikTok,
   suno: () => [],
+  soundcloud: () => [],
   x: decodeX,
   reddit: decodeReddit,
   telegram: decodeTelegram,

@@ -137,7 +137,7 @@ export default function AdminPartners({ loaderData, actionData }: Route.Componen
       {actionData && "error" in actionData ? <Notice tone="danger">{actionData.error}</Notice> : null}
       <p className="text-body text-text-muted">
         Everyone who joins through a link is invited by its partner, who gets the link&apos;s share of their plan
-        payments, before VAT and refunds, never of the 4-letter username add-on.{" "}
+        payments, before VAT and refunds, never of the Short username package.{" "}
         <a href="/partners" className="underline underline-offset-4">The offer</a>
       </p>
 

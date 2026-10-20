@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { cn } from "~/lib/cn";
 import { connectEmbed } from "~/lib/embeds/connect";
-import { FRAME_LAYOUT, frameUrl } from "~/lib/embeds/frames";
+import { FRAME_LAYOUT, frameHeight, frameUrl } from "~/lib/embeds/frames";
 import { resolveLink } from "~/lib/links/resolve";
 import type { MediaLink, Provider } from "~/lib/links/types";
 import { playbackController } from "~/lib/playback/controller";
@@ -28,6 +28,7 @@ const SLOT_KIND: Record<Provider, SlotKind> = {
   youtube: "video",
   tiktok: "tiktok",
   suno: "song",
+  soundcloud: "song",
   x: "post",
   reddit: "post",
   telegram: "post",
@@ -105,10 +106,8 @@ function ProviderMedia({
   media: Extract<PostMedia, { kind: "media" }>;
 }) {
   const { key, ref, state } = useMediaSlot(post.id, SLOT_KIND[media.provider]);
-  const link = useMemo(
-    () => (state.mounted ? mediaLinkOf(post.url) : null),
-    [state.mounted, post.url],
-  );
+  const resolved = useMemo(() => mediaLinkOf(post.url), [post.url]);
+  const link = state.mounted ? resolved : null;
 
   // The provider said it cannot play here: the original, as a preview card.
   if (state.failed) {
@@ -143,7 +142,9 @@ function ProviderMedia({
               ? (playbackController()?.posterHeight(post.id) ??
                 FRAME_LAYOUT[media.provider].initialHeight)
               : media.aspect === "audio"
-                ? FRAME_LAYOUT[media.provider].initialHeight
+                ? resolved
+                  ? frameHeight(resolved)
+                  : FRAME_LAYOUT[media.provider].initialHeight
                 : undefined
           }
           onActivate={() => playbackController()?.tap(key)}

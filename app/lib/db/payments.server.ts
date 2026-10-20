@@ -18,7 +18,7 @@ export interface PaymentInput {
   currency: string;
   paidAt: number;
   paymentIntent?: string | null;
-  /** The invoice it was billed on with others, as the 4-letter username with the plan. */
+  /** The invoice it was billed on with others, as the Short username package with the plan. */
   invoiceId?: string | null;
 }
 
@@ -69,7 +69,7 @@ export function paymentStatements(db: D1Database, input: PaymentInput): D1Prepar
 /**
  * The payments billed together with the one whose billing key is `key`
  * (SQL), as SQL on `payments` (`alias`): one invoice's, the payment
- * recorded under the invoice's ID and any that name it, as the 4-letter
+ * recorded under the invoice's ID and any that name it, as the Short
  * username bought with the plan does; any other payment is its own. A
  * payment's key is `COALESCE(invoice_id, id)`. Written as two indexed
  * equalities, so finding them reads those few rows, never the ledger
@@ -82,7 +82,7 @@ const BILLED_WITH = (alias: string, key: string) => `(${alias}.id = ${key} OR ${
  * intent, and of those billed with them, from the refunds kept for them:
  * the largest share any of their charges was refunded, applied to their
  * amount together, before tax, and given to the plan first, since the
- * 4-letter username billed with it is not refundable (review F80). It
+ * Short username package billed with it is not refundable (review F80). It
  * follows the refunds kept, which never lower, so it is worked out afresh
  * each time, whichever of a shared invoice's payments was recorded first.
  */

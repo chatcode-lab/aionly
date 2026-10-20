@@ -17,7 +17,7 @@ import { TextField } from "./ui/field";
  * Edits the account's username. The rules are checked as the name is typed;
  * whether it is free is checked on submit. With `claimShort`, a name
  * shorter than the account may hold, which needs the yearly plan or the
- * 4-letter username, is offered as that: the button sends `intent=claim`,
+ * Short username package, is offered as that: the button sends `intent=claim`,
  * for the page to lead on to the plan's page.
  */
 export function UsernameForm({
@@ -43,7 +43,7 @@ export function UsernameForm({
   staff?: boolean;
   /** The shortest name the account may hold now. */
   shortest?: number;
-  /** Offers a shorter name with what allows it, the yearly plan or the 4-letter username. */
+  /** Offers a shorter name with what allows it, the yearly plan or the Short username package. */
   claimShort?: boolean;
   /** Called with the name as typed, normalized, for a live preview. */
   onNameChange?: (name: string) => void;
@@ -87,7 +87,7 @@ export function UsernameForm({
           claim === "short_plan"
             ? "Names of 5 characters come with the yearly Fan plan."
             : claim === "short_allowance"
-              ? `Names of 4 characters need the 4-letter username add-on, bought once apart from the Fan plan: ${NAME_ALLOWANCES[4]!.label} plus VAT.`
+              ? `Names of 4 characters need the Short username package, bought once apart from the Fan plan: ${NAME_ALLOWANCES[4]!.label} plus VAT.`
               : undefined
         }
       />
@@ -105,7 +105,7 @@ export function UsernameForm({
           : claim === "short_plan"
             ? "Claim it with the yearly plan"
             : claim
-              ? "Get the 4-letter username add-on"
+              ? "Get the Short username package"
               : submitLabel}
       </Button>
     </Form>

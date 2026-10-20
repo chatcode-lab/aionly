@@ -713,20 +713,20 @@ test("an account with a running plan is not deleted while Stripe cannot cancel i
   expect((await page.request.get(`/u/${account.username}`)).status()).toBe(200);
 });
 
-test("a name of 4 characters comes with the 4-letter username, bought once, with or without the plan", async ({ page, context, account, request }) => {
+test("a name of 4 characters comes with the Short username package, bought once, with or without the plan", async ({ page, context, account, request }) => {
   const four = `k${account.id.replace(/\D/g, "").slice(-3).padStart(3, "0")}`;
   await account.signIn(context);
   await open(page, "/settings");
   await page.getByLabel("Username").fill(four);
-  const note = page.getByText(/Names of 4 characters need the 4-letter username add-on, bought once apart from the Fan plan: \$250 plus VAT\./);
+  const note = page.getByText(/Names of 4 characters need the Short username package, bought once apart from the Fan plan: \$250 plus VAT\./);
   await expect(note).toBeVisible();
   // Right under the field, in the line kept for its messages.
   const field = (await page.getByLabel("Username").boundingBox())!;
   expect((await note.boundingBox())!.y - (field.y + field.height)).toBeLessThan(12);
-  await page.getByRole("button", { name: "Get the 4-letter username add-on" }).click();
+  await page.getByRole("button", { name: "Get the Short username package" }).click();
   await expect(page).toHaveURL(new RegExp(`/fan\\?name=${four}&next=%2Fsettings$`));
   await expect(page.getByRole("heading", { name: `Claim ${four}` })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "The 4-letter username add-on" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "The Short username package" })).toBeVisible();
   await expect(page.getByText("$250 once")).toBeVisible();
   // The name alone, or with the plan; the box asks for it at once, without a refund.
   const pay = page.getByRole("button", { name: /^(Claim .+|Payments open soon)$/ });

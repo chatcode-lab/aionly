@@ -37,11 +37,12 @@ describe("buildSitePolicy", () => {
     ]);
   });
 
-  it("limits frames to the six providers and Turnstile", () => {
+  it("limits frames to the seven providers and Turnstile", () => {
     expect(policy["frame-src"]).toEqual([
       "https://www.youtube-nocookie.com",
       "https://www.tiktok.com",
       "https://suno.com",
+      "https://w.soundcloud.com",
       "https://platform.twitter.com",
       "https://embed.reddit.com",
       "https://t.me",

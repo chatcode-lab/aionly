@@ -98,6 +98,18 @@ const FAKE_FRAMES: Array<{ match: RegExp; script: string }> = [
     `,
   },
   {
+    // SoundCloud's player, likewise, in this board's use of it.
+    match: /^https:\/\/w\.soundcloud\.com\/player\//,
+    script: `
+      let playing = false;
+      window.player = () => ({ playing });
+      const button = document.createElement("button");
+      button.textContent = "Play";
+      button.onclick = () => { playing = true; };
+      addEventListener("DOMContentLoaded", () => document.body.append(button));
+    `,
+  },
+  {
     match: /^https:\/\/platform\.twitter\.com\/embed\/Tweet\.html/,
     script: `
       setTimeout(() => parent.postMessage(
@@ -216,7 +228,7 @@ export async function payFreshStart(request: APIRequestContext, account: TestAcc
 }
 
 /**
- * Buys the 4-letter username the way Stripe reports it: a signed webhook
+ * Buys the Short username package the way Stripe reports it: a signed webhook
  * that a checkout for it alone was completed and paid. Nothing reaches
  * Stripe.
  */

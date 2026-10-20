@@ -37,6 +37,7 @@ const SAMPLES: Record<Provider, string> = {
   youtube: "https://www.youtube.com/watch?v=jNQXAC9IVRw",
   tiktok: "https://www.tiktok.com/@scout2015/video/6718335390845095173",
   suno: "https://suno.com/song/cf674415-debb-498c-aa29-37a58a28d8e9",
+  soundcloud: "https://soundcloud.com/forss/flickermood",
   x: "https://x.com/jack/status/20",
   reddit: "https://www.reddit.com/r/place/comments/tqbguc/412022/",
   telegram: "https://t.me/telegram/83",
@@ -54,6 +55,11 @@ const CHECKS: Record<Provider, string[]> = {
     "The video starts by itself, muted",
     "Pause and Play work from the buttons",
     "The player's own volume button turns the sound on, and it stays on",
+  ],
+  soundcloud: [
+    "The classic player: cover, title, and waveform, light in both themes",
+    "Playback starts only after a tap",
+    "A playlist (/sets/) lists its tracks below the player",
   ],
   suno: [
     "The player follows the site theme",

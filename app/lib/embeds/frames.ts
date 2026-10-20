@@ -8,6 +8,7 @@ export const FRAME_ORIGINS: Record<Provider, string> = {
   youtube: "https://www.youtube-nocookie.com",
   tiktok: "https://www.tiktok.com",
   suno: "https://suno.com",
+  soundcloud: "https://w.soundcloud.com",
   x: "https://platform.twitter.com",
   reddit: "https://embed.reddit.com",
   telegram: "https://t.me",
@@ -18,6 +19,9 @@ const REDDIT_EMBED_PATH =
   /^(?:r|user)\/[A-Za-z0-9_-]{1,32}\/comments\/[a-z0-9]{1,12}$/;
 
 const TELEGRAM_POST_ID = /^[a-z][a-z0-9_]{3,31}\/\d{1,10}$/;
+
+// The only shapes `resolveLink` produces for SoundCloud: a track, or a playlist.
+const SOUNDCLOUD_ID = /^[a-z0-9_-]{1,100}\/(?:sets\/)?[a-z0-9_-]{1,100}$/;
 
 export interface FrameOptions {
   /** The embedding page's origin, which YouTube requires for `postMessage`. */
@@ -71,6 +75,21 @@ export function frameUrl(link: MediaLink, options: FrameOptions): string {
     }
     case "suno":
       return `${origin}/embed/${id}?theme=${options.theme}`;
+    case "soundcloud": {
+      // The classic player: cover, title, and waveform in one compact band,
+      // and a playlist's tracks below it, with nothing else around them. It
+      // has no dark theme. Anything but a resolved address is never passed on.
+      const params = new URLSearchParams({
+        url: `https://soundcloud.com/${SOUNDCLOUD_ID.test(link.id) ? link.id : "-"}`,
+        visual: "false",
+        auto_play: "false",
+        hide_related: "true",
+        show_comments: "false",
+        show_reposts: "false",
+        show_teaser: "false",
+      });
+      return `${origin}/player/?${params}`;
+    }
     case "x": {
       const params = new URLSearchParams({
         id: link.id,
@@ -142,6 +161,8 @@ export const FRAME_LAYOUT: Record<Provider, FrameLayout> = {
   tiktok: {},
   // Suno's player lays itself out to fit; this height suits every column.
   suno: { initialHeight: 176 },
+  // SoundCloud's classic player, for one track; see frameHeight for a playlist.
+  soundcloud: { initialHeight: 166 },
   x: { maxWidth: 550, initialHeight: 320, selfSizing: true, lightScheme: true },
   reddit: { maxWidth: 640, initialHeight: 420, selfSizing: true },
   telegram: {
@@ -152,6 +173,19 @@ export const FRAME_LAYOUT: Record<Provider, FrameLayout> = {
     ownOutline: true,
   },
 };
+
+/** A SoundCloud playlist's player, with three of its tracks listed below. */
+const SOUNDCLOUD_LIST_HEIGHT = 300;
+
+/**
+ * The height a link's frame takes until it reports its own, if it does,
+ * which its poster keeps too: the provider's, but a SoundCloud playlist's,
+ * which lists its tracks below the player.
+ */
+export function frameHeight(link: Pick<MediaLink, "provider" | "id">): number | undefined {
+  if (link.provider === "soundcloud" && link.id.includes("/sets/")) return SOUNDCLOUD_LIST_HEIGHT;
+  return FRAME_LAYOUT[link.provider].initialHeight;
+}
 
 /**
  * Sandbox for provider frames. `allow-same-origin` keeps the provider's own

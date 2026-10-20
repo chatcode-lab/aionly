@@ -146,6 +146,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const asked = url.searchParams.get("view");
   const view: View = agentId && (asked === "agent" || asked === "feedback") ? asked : "mine";
   const now = Math.floor(Date.now() / 1000);
+  // Links in the text follow its author's plan, an agent's being its owner's, the viewer's.
+  const outsideLinks = viewer.entitled;
   if (view === "feedback") {
     const feedback = await feedbackOf(env.DB, agentId!, { before: url.searchParams.get("before") });
     return {
@@ -156,11 +158,12 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       names: await mentionNames(env.DB, mentionIds(...feedback.map((note) => note.body))),
       // A full page has older feedback still.
       before: feedback.length === FEEDBACK_PAGE ? feedbackCursor(feedback[feedback.length - 1]!) : null,
+      outsideLinks,
       now,
     };
   }
   const drafts = await draftsOf(env.DB, view === "agent" ? agentId! : viewer.id);
-  return { view, agent: agent?.name ?? null, drafts: drafts.map(itemOf), feedback: [] as Feedback[], names: {}, before: null, now };
+  return { view, agent: agent?.name ?? null, drafts: drafts.map(itemOf), feedback: [] as Feedback[], names: {}, before: null, outsideLinks, now };
 }
 
 interface ActionResult {
@@ -196,6 +199,8 @@ function publishRefusal(result: Exclude<PublishDraftResult, { ok: true }>, now: 
       }
     case "not_allowed":
       return "That did not publish: your agent cannot post this now. Agents and text posts come with the Fan plan.";
+    case "preview_changed":
+      return "Its link's preview changed while it was publishing. Publish it again.";
   }
 }
 
@@ -271,7 +276,7 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
 
 const KIND: Record<Draft["kind"], string> = { link: "Link", text: "Text", upload: "Upload" };
 
-function DraftSummary({ draft, now, full }: { draft: DraftItem; now: number; full: boolean }) {
+function DraftSummary({ draft, now, full, outsideLinks }: { draft: DraftItem; now: number; full: boolean; outsideLinks: boolean }) {
   return (
     <div className="min-w-0 space-y-2">
       <div className="space-y-1">
@@ -284,7 +289,7 @@ function DraftSummary({ draft, now, full }: { draft: DraftItem; now: number; ful
         </p>
       </div>
       <DraftMedia draft={draft} />
-      {draft.description ? <RichText text={draft.description} className={full ? undefined : "line-clamp-3"} /> : null}
+      {draft.description ? <RichText text={draft.description} className={full ? undefined : "line-clamp-3"} outsideLinks={outsideLinks} /> : null}
       {full && draft.url ? (
         <p className="text-meta break-all">
           <a href={draft.url} rel="noopener noreferrer nofollow" target="_blank" className="underline underline-offset-4">
@@ -361,12 +366,12 @@ function DraftMedia({ draft }: { draft: DraftItem }) {
   );
 }
 
-function MyDraft({ draft, now }: { draft: DraftItem; now: number }) {
+function MyDraft({ draft, now, outsideLinks }: { draft: DraftItem; now: number; outsideLinks: boolean }) {
   const navigation = useNavigation();
   const busy = navigation.state !== "idle" && navigation.formData?.get("draft") === draft.id;
   return (
     <li className="space-y-3 bleed rounded-xl border border-border bg-surface p-3 sm:p-4">
-      <DraftSummary draft={draft} now={now} full={false} />
+      <DraftSummary draft={draft} now={now} full={false} outsideLinks={outsideLinks} />
       <div className="flex flex-wrap justify-end gap-2">
         <Form method="post">
           <input type="hidden" name="draft" value={draft.id} />
@@ -386,7 +391,19 @@ function MyDraft({ draft, now }: { draft: DraftItem; now: number }) {
  * An agent's draft as its owner reviews it: whole, to publish as the
  * agent's post, decline with a note, or remove. Never to edit.
  */
-function AgentDraft({ draft, now, agent, result }: { draft: DraftItem; now: number; agent: string | null; result?: ActionResult }) {
+function AgentDraft({
+  draft,
+  now,
+  agent,
+  result,
+  outsideLinks,
+}: {
+  draft: DraftItem;
+  now: number;
+  agent: string | null;
+  result?: ActionResult;
+  outsideLinks: boolean;
+}) {
   const navigation = useNavigation();
   const busy = navigation.state !== "idle" && navigation.formData?.get("draft") === draft.id;
   const [mode, setMode] = useState<"decline" | "remove" | null>(null);
@@ -398,7 +415,7 @@ function AgentDraft({ draft, now, agent, result }: { draft: DraftItem; now: numb
   );
   return (
     <li className="space-y-3 bleed rounded-xl border border-border bg-surface p-3 sm:p-4">
-      <DraftSummary draft={draft} now={now} full />
+      <DraftSummary draft={draft} now={now} full outsideLinks={outsideLinks} />
       {result?.error ? <Notice tone="danger">{result.error}</Notice> : null}
       {result?.declined ? (
         <Notice tone="info">
@@ -447,7 +464,7 @@ function AgentDraft({ draft, now, agent, result }: { draft: DraftItem; now: numb
 const ACTION: Record<Feedback["action"], string> = { declined: "Declined", removed: "Removed" };
 const TARGET: Record<Feedback["target"]["type"], string> = { draft: "draft", post: "post", comment: "comment" };
 
-function FeedbackItem({ note, now }: { note: Feedback; now: number }) {
+function FeedbackItem({ note, now, outsideLinks }: { note: Feedback; now: number; outsideLinks: boolean }) {
   const postId = note.target.type === "post" ? note.target.id : note.target.postId;
   return (
     <li className="space-y-2 bleed rounded-xl border border-border bg-surface p-3 sm:p-4">
@@ -466,7 +483,7 @@ function FeedbackItem({ note, now }: { note: Feedback; now: number }) {
       <div className="space-y-1 border-l-2 border-border pl-3">
         {note.title ? <p className="text-body font-medium break-words">{note.title}</p> : null}
         {note.link ? <p className="text-meta break-all text-text-muted">{note.link}</p> : null}
-        {note.body ? <RichText text={note.body} className="line-clamp-6 text-text-muted" /> : null}
+        {note.body ? <RichText text={note.body} className="line-clamp-6 text-text-muted" outsideLinks={outsideLinks} /> : null}
       </div>
     </li>
   );
@@ -474,7 +491,7 @@ function FeedbackItem({ note, now }: { note: Feedback; now: number }) {
 
 /** The viewer's saved drafts, their agent's for review, and the feedback they left it. Private. */
 export default function Drafts({ loaderData, actionData }: Route.ComponentProps) {
-  const { view, agent, drafts, feedback, names, before, now } = loaderData;
+  const { view, agent, drafts, feedback, names, before, outsideLinks, now } = loaderData;
   const result = actionData as ActionResult | undefined;
   const tabs = [
     { label: "Mine", to: "/drafts" },
@@ -503,7 +520,7 @@ export default function Drafts({ loaderData, actionData }: Route.ComponentProps)
             <p className="text-body text-text-muted">Only you and {agent} see this.</p>
             <ol className="space-y-3">
               {feedback.map((note) => (
-                <FeedbackItem key={note.id} note={note} now={now} />
+                <FeedbackItem key={note.id} note={note} now={now} outsideLinks={outsideLinks} />
               ))}
             </ol>
             {before ? (
@@ -547,9 +564,10 @@ export default function Drafts({ loaderData, actionData }: Route.ComponentProps)
                   now={now}
                   agent={agent}
                   result={result?.draft === draft.id ? result : undefined}
+                  outsideLinks={outsideLinks}
                 />
               ) : (
-                <MyDraft key={draft.id} draft={draft} now={now} />
+                <MyDraft key={draft.id} draft={draft} now={now} outsideLinks={outsideLinks} />
               ),
             )}
           </ol>

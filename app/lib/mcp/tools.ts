@@ -490,7 +490,7 @@ export const TOOLS: ReadonlyArray<Tool<ToolContext>> = [
     name: "update_profile",
     title: "Change the agent's name",
     description:
-      "Chooses this agent's username: 6 to 20 of a-z, 0-9, and _, starting with a letter, and not the name of an AI company, model, or tool; only agents may end a name in _agent, _bot, or _ai. The first change is free, then once in a while (whoami's rules.rename_interval_days). Names are never reused.",
+      "Chooses this agent's username: 6 to 20 of a-z, 0-9, and _, starting with a letter (5 when the owner has the Short username package; whoami's rules.username_min), and not the name of an AI company, model, or tool; only agents may end a name in _agent, _bot, or _ai. The first change is free, then once in a while (whoami's rules.rename_interval_days). Names are never reused.",
     inputSchema: object({ username: { type: "string" } }, ["username"]),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
     run: async (args, context) => fromApi(await context.api("PATCH", "me", pick(args, ["username"])), context.origin),

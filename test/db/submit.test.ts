@@ -382,14 +382,17 @@ describe("posting", () => {
     expect(await publishPost(db, newPost(author))).toEqual({ ok: false, reason: "not_allowed" });
   });
 
-  it("attaches only the author's own pending image", async () => {
+  it("attaches only the author's own pending image, and never goes out without the one it names (review F109)", async () => {
     stubFetch({ "https://img.example.com/": () => image(JPEG) });
     const theirs = (await snapshotImage(db, bucket, { ownerId: "u2", url: new URL("https://img.example.com/a.jpg"), signal: AbortSignal.timeout(1000), ownHosts: OWN, now: NOW }))!;
     const author = (await accountRecord(db, "u1", NOW))!;
-    expect((await publishPost(db, newPost(author, { id: "p1", thumbKey: theirs }))).ok).toBe(true);
-    const row = await db.prepare(`SELECT thumb_key FROM posts WHERE id = 'p1'`).first<{ thumb_key: string | null }>();
-    expect(row?.thumb_key).toBeNull();
+    expect(await publishPost(db, newPost(author, { id: "p1", thumbKey: theirs }))).toEqual({ ok: false, reason: "picture_gone" });
+    expect(await db.prepare(`SELECT id FROM posts WHERE id = 'p1'`).first()).toBeNull();
     expect(await db.prepare(`SELECT state FROM images WHERE key = ?1`).bind(theirs).first()).toEqual({ state: "pending" });
+    // Its own, displaced by a later check before publishing, likewise.
+    const first = (await snapshotImage(db, bucket, { ownerId: "u1", url: new URL("https://img.example.com/b.jpg"), signal: AbortSignal.timeout(1000), ownHosts: OWN, now: NOW }))!;
+    await snapshotImage(db, bucket, { ownerId: "u1", url: new URL("https://img.example.com/c.jpg"), signal: AbortSignal.timeout(1000), ownHosts: OWN, now: NOW });
+    expect(await publishPost(db, newPost(author, { id: "p1", thumbKey: first }))).toEqual({ ok: false, reason: "picture_gone" });
   });
 });
 

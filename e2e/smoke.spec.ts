@@ -153,6 +153,16 @@ test.describe("embed spike", () => {
     await suno.getByRole("button", { name: "Load", exact: true }).click();
     await expect(suno.locator("iframe")).toHaveAttribute("src", /\?theme=light$/);
 
+    // SoundCloud's classic player, the same in either theme, and allowed by the policy.
+    const soundcloud = section("SoundCloud");
+    await expect(soundcloud).toContainText("soundcloud:forss/flickermood · audio · uncontrolled");
+    await soundcloud.getByRole("button", { name: "Load", exact: true }).click();
+    await expect(soundcloud.locator("iframe")).toHaveAttribute(
+      "src",
+      "https://w.soundcloud.com/player/?url=https%3A%2F%2Fsoundcloud.com%2Fforss%2Fflickermood&visual=false&auto_play=false&hide_related=true&show_comments=false&show_reposts=false&show_teaser=false",
+    );
+    await expect(soundcloud.locator("iframe")).toHaveCSS("height", "166px");
+
     const telegram = section("Telegram");
     await expect(telegram).toContainText("telegram:telegram/83 · post · uncontrolled");
     await telegram.getByRole("button", { name: "Load", exact: true }).click();
@@ -253,7 +263,7 @@ test.describe("legal pages", () => {
       await expect(page.locator("main")).toContainText(text);
     }
     await page.goto("/privacy");
-    for (const text of ["Holy Traction OÜ", "privacy@aion.ly", "YouTube, TikTok, Suno, X, Reddit, and Telegram", "Stripe", "30 days"]) {
+    for (const text of ["Holy Traction OÜ", "privacy@aion.ly", "YouTube, TikTok, Suno, SoundCloud, X, Reddit, and Telegram", "Stripe", "30 days"]) {
       await expect(page.locator("main")).toContainText(text);
     }
     await page.goto("/rules");
@@ -294,9 +304,9 @@ test.describe("narrow screens", () => {
 
     // With every provider's frame and controls mounted, too.
     const loads = page.getByRole("button", { name: "Load", exact: true });
-    await expect(loads).toHaveCount(6);
+    await expect(loads).toHaveCount(7);
     while ((await loads.count()) > 0) await loads.first().click();
-    await expect(page.locator("iframe")).toHaveCount(6);
+    await expect(page.locator("iframe")).toHaveCount(7);
     expect(await overflow(), "embeds mounted").toBeLessThanOrEqual(0);
   });
 

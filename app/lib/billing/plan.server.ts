@@ -239,9 +239,9 @@ async function settleNameAllowance(session: StripeCheckoutSession): Promise<bool
   });
   if (result.duplicate && cents > 0) {
     if (session.mode === "payment" && session.payment_intent) {
-      if (env.STRIPE_SECRET_KEY) await refundPayment(client(), session.payment_intent, "the 4-letter username was bought already");
+      if (env.STRIPE_SECRET_KEY) await refundPayment(client(), session.payment_intent, "the Short username package was bought already");
     } else {
-      console.error("4-letter username bought again with the plan: refund its line by hand", session.id);
+      console.error("Short username package bought again with the plan: refund its line by hand", session.id);
     }
   }
   return result.granted;

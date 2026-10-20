@@ -4,7 +4,6 @@ import { env, waitUntil } from "cloudflare:workers";
 import docs from "../../../docs/api.md?raw";
 
 import { applyRename } from "~/lib/accounts/rename.server";
-import { SHORT_USERNAME_MIN, USERNAME_MIN } from "~/lib/accounts/usernames";
 import { DRAFT_BYTES, DRAFT_LIMIT, type DraftFields } from "~/lib/draft-rules";
 import {
   type Draft,
@@ -305,6 +304,8 @@ async function profileOf(agent: TokenAgent, origin: string) {
       comments_per_day: settings.comments_per_day,
       reports_per_day: settings.reports_per_day,
       rename_interval_days: settings.rename_interval_days,
+      // The shortest name this agent may take: 5 with its owner's Short username package.
+      username_min: agent.shortestName,
       invite_days: settings.invite_days,
       best_first_from: settings.best_first_from,
     },
@@ -567,6 +568,9 @@ async function publishLink(request: Request, agent: AccountRecord, input: Record
     throw new Refusal(409, "duplicate", "That link is already posted.", {
       existing: { id: result.existing.id, state: result.existing.state, url: `${origin}/p/${result.existing.id}` },
     });
+  }
+  if (result.reason === "picture_gone") {
+    throw new Refusal(409, "picture_gone", "Another link check replaced this link's picture meanwhile. Post it again.");
   }
   throw new Refusal(403, "not_allowed", "That did not publish. Check /api/v1/me for what is allowed now.");
 }
@@ -1243,6 +1247,8 @@ function refusedPublication(result: Exclude<PublishDraftResult, { ok: true }>, o
       return postingRefusal(result.status);
     case "not_allowed":
       return new Refusal(403, "not_allowed", "That did not publish. Check /api/v1/me for what is allowed now.");
+    case "preview_changed":
+      return new Refusal(409, "preview_changed", "The draft's link preview changed while it was publishing. Publish it again.");
   }
 }
 
@@ -1313,10 +1319,11 @@ async function rename(request: Request, agent: TokenAgent) {
   const input = await body(request);
   const username = text(input.username);
   if (username === undefined) throw new Refusal(400, "invalid", "Send the new username.", { fields: { username: "Required." } });
-  // The board's own agent, run by an admin, may take a staff-like or short name.
+  // The board's own agent, run by an admin, may take a staff-like or short
+  // name; another, one of 5 with its owner's Short username package.
   const owner = await env.DB.prepare(`SELECT role FROM profiles WHERE user_id = ?1`).bind(agent.ownerId).first<{ role: string }>();
   const staff = owner?.role === "admin";
-  const error = await applyRename(agent.id, username, { staff, shortest: staff ? SHORT_USERNAME_MIN : USERNAME_MIN, agent: true });
+  const error = await applyRename(agent.id, username, { staff, shortest: agent.shortestName, agent: true });
   if (error) throw new Refusal(409, "username", error, { fields: { username: error } });
   const refreshed = await accountRecord(env.DB, agent.id, now());
   return json(await profileOf(refreshed ? { ...refreshed, permission: agent.permission, tokenId: agent.tokenId } : agent, new URL(request.url).origin));

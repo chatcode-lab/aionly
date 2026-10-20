@@ -197,6 +197,13 @@ export async function linkMeta(
           const data = await fetchOEmbed("https://www.reddit.com/oembed", url.href, context);
           return { title: cleanText(text(data.title)) };
         }
+        case "soundcloud": {
+          const data = await fetchOEmbed("https://soundcloud.com/oembed", `https://soundcloud.com/${link.id}`, context);
+          return {
+            title: cleanText(text(data.title)),
+            image: imageUrl(text(data.thumbnail_url), url, context.ownHosts),
+          };
+        }
         case "suno":
         case "telegram": {
           // Provider addresses are already reduced to the post itself.

@@ -34,6 +34,7 @@ export const PLAYER_COMMANDS: Record<Provider, readonly PlayerCommand[]> = {
   youtube: ["play", "pause", "mute", "unmute"],
   tiktok: ["play", "pause"],
   suno: [],
+  soundcloud: [],
   x: [],
   reddit: [],
   telegram: [],

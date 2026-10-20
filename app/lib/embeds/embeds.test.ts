@@ -4,7 +4,7 @@ import { formatDuration } from "../format";
 import { detectInAppBrowser } from "../in-app-browser";
 import { type MediaLink, PROVIDERS, type Provider } from "../links/types";
 import { connectEmbed } from "./connect";
-import { FRAME_LAYOUT, FRAME_ORIGINS, FRAME_SANDBOX, frameUrl } from "./frames";
+import { FRAME_LAYOUT, FRAME_ORIGINS, FRAME_SANDBOX, frameHeight, frameUrl } from "./frames";
 import {
   decodeReddit,
   decodeTelegram,
@@ -103,7 +103,30 @@ describe("frameUrl", () => {
     }
   });
 
+  it("asks SoundCloud for its classic player, a playlist's with its tracks below", () => {
+    const track = new URL(frameUrl(link("soundcloud", "forss/flickermood"), dark));
+    expect(track.origin + track.pathname).toBe("https://w.soundcloud.com/player/");
+    expect(Object.fromEntries(track.searchParams)).toEqual({
+      url: "https://soundcloud.com/forss/flickermood",
+      visual: "false",
+      auto_play: "false",
+      hide_related: "true",
+      show_comments: "false",
+      show_reposts: "false",
+      show_teaser: "false",
+    });
+    expect(frameHeight(link("soundcloud", "forss/flickermood"))).toBe(166);
+    expect(frameHeight(link("soundcloud", "forss/sets/soulhack"))).toBe(300);
+    expect(frameHeight(link("suno", "abc"))).toBe(176);
+  });
+
   it("cannot be steered off the provider by a hand-built ID or path", () => {
+    for (const id of ["../../evil", "forss/flickermood?x=1", "https://evil.example/a", "forss/sets/a/b"]) {
+      const soundcloud = new URL(frameUrl(link("soundcloud", id), dark));
+      expect(soundcloud.origin).toBe("https://w.soundcloud.com");
+      expect(soundcloud.searchParams.get("url"), id).toBe("https://soundcloud.com/-");
+    }
+
     const suno = new URL(frameUrl(link("suno", "../../evil?x=1#y"), dark));
     expect(suno.origin).toBe("https://suno.com");
     expect(suno.pathname).toBe("/embed/..%2F..%2Fevil%3Fx%3D1%23y");
@@ -152,7 +175,7 @@ describe("frameUrl", () => {
     for (const provider of ["x", "reddit", "telegram"] as const) {
       expect(FRAME_LAYOUT[provider].selfSizing).toBe(true);
     }
-    for (const provider of ["youtube", "tiktok", "suno"] as const) {
+    for (const provider of ["youtube", "tiktok", "suno", "soundcloud"] as const) {
       expect(FRAME_LAYOUT[provider].selfSizing).toBeUndefined();
     }
   });
@@ -277,7 +300,7 @@ describe("player messages", () => {
   it("offers mute commands only where the player keeps to them", () => {
     expect(PLAYER_COMMANDS.youtube).toEqual(["play", "pause", "mute", "unmute"]);
     expect(PLAYER_COMMANDS.tiktok).toEqual(["play", "pause"]);
-    for (const provider of ["suno", "x", "reddit", "telegram"] as const) {
+    for (const provider of ["suno", "soundcloud", "x", "reddit", "telegram"] as const) {
       expect(PLAYER_COMMANDS[provider]).toEqual([]);
     }
   });
@@ -365,7 +388,7 @@ describe("connectEmbed", () => {
   });
 
   it("never posts into uncontrolled embeds", () => {
-    for (const provider of ["suno", "x", "reddit", "telegram"] as const) {
+    for (const provider of ["suno", "soundcloud", "x", "reddit", "telegram"] as const) {
       const { frame, contentWindow } = fakeFrame();
       const connection = connectEmbed(provider, frame, { onEvent: () => {} });
       connection.send("play");

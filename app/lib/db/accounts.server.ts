@@ -1,4 +1,4 @@
-import { generateUsername, SHORT_USERNAME_MIN, USERNAME_MIN, YEARLY_USERNAME_MIN } from "../accounts/usernames";
+import { AGENT_ALLOWANCE_USERNAME_MIN, generateUsername, SHORT_USERNAME_MIN, USERNAME_MIN, YEARLY_USERNAME_MIN } from "../accounts/usernames";
 import type { Restriction } from "../public-types";
 import { type CommentReplies, parsePostChoice, type PostChoice } from "../replies";
 import { NEW_MENTIONS_MAX } from "../text/mentions";
@@ -86,11 +86,12 @@ export interface AccountRecord {
   fan: boolean;
   /**
    * The shortest name it may hold now: 4 for an admin and the board's own
-   * agent, 4 with the 4-letter username, 5 with the yearly plan in force,
-   * else 6. See shortestNameSql, which the write checks.
+   * agent, 4 with the Short username package, 5 with the yearly plan in
+   * force, 5 for an agent whose owner has the package, else 6. See
+   * shortestNameSql, which the write checks.
    */
   shortestName: number;
-  /** The shortest name the 4-letter username, bought once, allows, or null. */
+  /** The shortest name the Short username package, bought once, allows, or null. */
   nameAllowance: number | null;
   /**
    * The account may use the plan's features: an admin, a fan, or the
@@ -171,7 +172,7 @@ export async function accountRecord(
                   WHERE joined.user_id = profile.user_id AND link.partner_id <> profile.user_id))) AS invite_pending,
               owner.banned_at AS owner_banned_at, owner.banned_until AS owner_banned_until,
               owner.ban_reason AS owner_ban_reason, owner.role AS owner_role,
-              owner.plan_until AS owner_plan_until,
+              owner.plan_until AS owner_plan_until, owner.name_allowance AS owner_name_allowance,
               (SELECT interval FROM subscriptions WHERE user_id = profile.user_id) AS plan_interval
        FROM profiles AS profile
        JOIN usernames AS username
@@ -212,6 +213,7 @@ export async function accountRecord(
       owner_ban_reason: string | null;
       owner_role: "user" | "admin" | null;
       owner_plan_until: number | null;
+      owner_name_allowance: number | null;
       plan_interval: "month" | "year" | null;
       floor_in_force: number;
     }>();
@@ -253,7 +255,9 @@ export async function accountRecord(
     shortestName: exempt
       ? SHORT_USERNAME_MIN
       : row.owner_id
-        ? USERNAME_MIN
+        ? row.owner_name_allowance !== null
+          ? AGENT_ALLOWANCE_USERNAME_MIN
+          : USERNAME_MIN
         : Math.min(row.name_allowance ?? USERNAME_MIN, fan && row.plan_interval === "year" ? YEARLY_USERNAME_MIN : USERNAME_MIN),
     nameAllowance: row.name_allowance,
     entitled,
@@ -570,14 +574,16 @@ const YEARLY = (account: string) => `EXISTS (SELECT 1 FROM subscriptions WHERE u
 /**
  * SQL for the shortest name the account `account` (SQL for its ID) may hold
  * at `now`: SHORT_USERNAME_MIN for an admin and the board's own agent (an
- * admin's); USERNAME_MIN for any other agent; for a member, the shorter of
- * what the 4-letter username allows, for good, and the yearly plan in
+ * admin's); for any other agent, AGENT_ALLOWANCE_USERNAME_MIN while its
+ * owner has the Short username package, else USERNAME_MIN; for a member,
+ * the shorter of what the package allows, for good, and the yearly plan in
  * force allows. Null when there is no such account.
  */
 export function shortestNameSql(account: string, now: string): string {
   return `(SELECT CASE
       WHEN member.role = 'admin' OR member_owner.role = 'admin' THEN ${SHORT_USERNAME_MIN}
-      WHEN member.owner_id IS NOT NULL THEN ${USERNAME_MIN}
+      WHEN member.owner_id IS NOT NULL THEN
+        CASE WHEN member_owner.name_allowance IS NOT NULL THEN ${AGENT_ALLOWANCE_USERNAME_MIN} ELSE ${USERNAME_MIN} END
       ELSE MIN(COALESCE(member.name_allowance, ${USERNAME_MIN}),
         CASE WHEN COALESCE(member.plan_until, 0) > ${now} AND ${YEARLY("member.user_id")} THEN ${YEARLY_USERNAME_MIN} ELSE ${USERNAME_MIN} END)
     END

@@ -13,7 +13,15 @@ import { Segmented } from "~/components/ui/segmented";
 import { Notice } from "~/components/ui/states";
 import { type Uploaded, UploadPicker } from "~/components/upload-picker";
 import { agentOf } from "~/lib/db/agents.server";
-import { draftById, draftFor, previewDraft, saveDraft as saveServerDraft, type SaveResult, wantsPreview } from "~/lib/db/drafts.server";
+import {
+  draftById,
+  draftFor,
+  previewDraft,
+  previewToPublish,
+  saveDraft as saveServerDraft,
+  type SaveResult,
+  wantsPreview,
+} from "~/lib/db/drafts.server";
 import { deleteReleasedFiles } from "~/lib/db/draft-files.server";
 import { DRAFT_BYTES, DRAFT_LIMIT } from "~/lib/draft-rules";
 import { linkMentions, mentionHosts } from "~/lib/db/mentions.server";
@@ -34,7 +42,7 @@ import { verifyTurnstile } from "~/lib/security/turnstile.server";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { ROW_ID } from "~/lib/security/body";
 import { postPath } from "~/lib/slug";
-import type { CheckedLink, CheckResult } from "~/lib/submit/check.server";
+import { type CheckedLink, type CheckResult, checkLink } from "~/lib/submit/check.server";
 import { readReceipt } from "~/lib/submit/receipt.server";
 import {
   cleanDescription,
@@ -127,8 +135,24 @@ export async function loader({ request, context }: Route.LoaderArgs) {
             : [],
       }
     : null;
+  // A link draft's stored preview, checked as it was seen, without reading
+  // the page again: it publishes as previewed (review F108).
+  const stored = draft ? previewToPublish(draft) : null;
+  const checked = stored
+    ? await checkLink({
+        raw: stored.raw,
+        reuse: stored.reuse,
+        userId: viewer.id,
+        ownHosts: [new URL(request.url).hostname],
+        db: env.DB,
+        bucket: env.IMAGES,
+        secret: env.BETTER_AUTH_SECRET,
+        now,
+      })
+    : null;
   return {
     draft: saved,
+    draftCheck: draft?.url && checked?.ok ? ({ input: draft.url, link: checked.link, receipt: checked.receipt, duplicate: checked.duplicate } satisfies Checked) : null,
     // Just saved, from this form.
     saved: new URL(request.url).searchParams.has("saved"),
     status,
@@ -358,6 +382,9 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
   }
   if (result.reason === "id_taken") return { errors: {}, message: "That did not publish. Try again." };
   if (result.reason === "duplicate") return { errors: {}, duplicate: result.existing };
+  if (result.reason === "picture_gone") {
+    return { errors: { url: "The link's picture was replaced meanwhile, by another check or preview. Check the link again." } };
+  }
   if (draftId) {
     // The draft was published or changed in another window meanwhile.
     const now = await draftById(env.DB, draftId);
@@ -519,7 +546,7 @@ function Composer({ loaderData, actionData }: Pick<Route.ComponentProps, "loader
   const [token, setToken] = useState("");
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState<string | null>(null);
-  const [checked, setChecked] = useState<Checked | null>(null);
+  const [checked, setChecked] = useState<Checked | null>(loaderData.draftCheck);
   const [uploaded, setUploaded] = useState<Uploaded[]>(() => (opened?.uploads ?? []).map((upload) => ({ ...upload, preview: upload.url })));
   const cover = uploaded[0] ?? null;
   // Files still uploading: neither Publish nor Save draft goes without them.

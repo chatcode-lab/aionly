@@ -11,6 +11,19 @@ const REDDIT_COMMUNITY = /^[A-Za-z0-9_]{2,21}$/;
 const REDDIT_USER = /^[A-Za-z0-9_-]{3,20}$/;
 const TELEGRAM_CHANNEL = /^[A-Za-z][A-Za-z0-9_]{3,31}$/;
 const TELEGRAM_POST = /^\d{1,10}$/;
+// SoundCloud's addresses for accounts, tracks, and playlists, which it keeps lowercase.
+const SOUNDCLOUD_NAME = /^[a-z0-9_-]{1,100}$/;
+// Its own pages, never an account's.
+const SOUNDCLOUD_SITE = new Set([
+  "charts", "creators", "discover", "feed", "for-artists", "home", "imprint", "jobs", "messages", "mobile",
+  "notifications", "pages", "people", "playlists", "premium", "pro", "search", "settings", "stations", "stream",
+  "tags", "terms-of-use", "upload", "you",
+]);
+// An account's own pages, never a track.
+const SOUNDCLOUD_ACCOUNT_PAGES = new Set([
+  "albums", "comments", "followers", "following", "likes", "playlists", "popular-tracks", "reposts", "sets",
+  "spotlight", "toptracks", "tracks",
+]);
 
 function segments(url: URL): string[] {
   return url.pathname.split("/").filter(Boolean);
@@ -162,6 +175,24 @@ function telegram(url: URL): ResolvedLink | null {
   });
 }
 
+function soundcloud(url: URL, host: string): ResolvedLink | null {
+  const parts = segments(url).map((part) => part.toLowerCase());
+  if (host === "on.soundcloud.com") {
+    return parts.length === 1 ? { kind: "short", provider: "soundcloud", url: url.href } : null;
+  }
+
+  const [account, second, third, ...rest] = parts;
+  if (!account || !second || SOUNDCLOUD_SITE.has(account) || !SOUNDCLOUD_NAME.test(account)) return null;
+  // A playlist or album: /<account>/sets/<name>. A private one's secret
+  // link, one segment longer, stays an ordinary page, as a private track's does.
+  if (second === "sets") {
+    if (!third || rest.length > 0 || !SOUNDCLOUD_NAME.test(third)) return null;
+    return media("soundcloud", `${account}/sets/${third}`, { aspect: "audio", controlled: false });
+  }
+  if (third !== undefined || SOUNDCLOUD_ACCOUNT_PAGES.has(second) || !SOUNDCLOUD_NAME.test(second)) return null;
+  return media("soundcloud", `${account}/${second}`, { aspect: "audio", controlled: false });
+}
+
 const HOSTS: Record<string, (url: URL, host: string) => ResolvedLink | null> = {
   "youtube.com": youtube,
   "m.youtube.com": youtube,
@@ -175,6 +206,9 @@ const HOSTS: Record<string, (url: URL, host: string) => ResolvedLink | null> = {
   "suno.com": suno,
   "suno.ai": suno,
   "app.suno.ai": suno,
+  "soundcloud.com": soundcloud,
+  "m.soundcloud.com": soundcloud,
+  "on.soundcloud.com": soundcloud,
   "x.com": x,
   "mobile.x.com": x,
   "twitter.com": x,
@@ -226,6 +260,8 @@ export function mediaUrl(link: MediaLink, url: URL): string {
         : `https://www.youtube.com/watch?v=${link.id}`;
     case "suno":
       return `https://suno.com/song/${link.id}`;
+    case "soundcloud":
+      return `https://soundcloud.com/${link.id}`;
     case "reddit":
       return `https://www.reddit.com/${link.embedPath}/`;
     case "telegram":

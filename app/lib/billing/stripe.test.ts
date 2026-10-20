@@ -113,7 +113,7 @@ describe("checkout", () => {
   });
 });
 
-describe("the 4-letter username", () => {
+describe("the Short username package", () => {
   const capture = () => {
     const sent: { form: URLSearchParams | null } = { form: null };
     const fetcher = (async (_url: string, init?: RequestInit) => {

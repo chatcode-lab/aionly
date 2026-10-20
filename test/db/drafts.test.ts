@@ -15,11 +15,15 @@ import {
   publishDraft,
   removeAgentDraft,
   previewDraft,
+  previewToPublish,
   removeAgentWork,
   saveDraft,
   saveDraftPreview,
 } from "../../app/lib/db/drafts.server";
+import { publishPost } from "../../app/lib/db/submit.server";
 import { sweepPendingImages } from "../../app/lib/images.server";
+import { checkLink } from "../../app/lib/submit/check.server";
+import { readReceipt } from "../../app/lib/submit/receipt.server";
 import { comment, DAY, db, NOW, post, reset, user } from "./fixtures";
 
 let agentId = "";
@@ -302,6 +306,89 @@ describe("previewing drafts", () => {
       page_title: "The guide's own title",
     });
     expect(await state(key("g", "jpg"))).toBe("attached");
+  });
+
+  it("publishes a title-only preview as seen too, and refetches one that found nothing (review F108)", async () => {
+    const url = "https://example.com/titled";
+    const saved = await save("owner", { kind: "link", url, origin: "found", title: "Titled" });
+    if (!saved.ok) throw new Error(JSON.stringify(saved));
+    const link = { url, host: "example.com", provider: null, aspect: null, pageTitle: "Its own title", thumbUrl: null, thumbKey: null, suggestedTitle: null };
+    await saveDraftPreview(db, { id: saved.draft.id, authorId: "owner", url, link, duplicate: null, snapshot: null, now: NOW });
+    const [titled] = await draftsOf(db, "owner");
+    expect(previewToPublish(titled!)).toEqual({ raw: url, reuse: { pageTitle: "Its own title", thumbKey: null } });
+    expect(previewToPublish({ ...titled!, preview: { ...titled!.preview!, pageTitle: null } })).toBeNull();
+    const published = await publish(saved.draft.id, "owner");
+    if (!published.ok) throw new Error(JSON.stringify(published));
+    expect(await db.prepare(`SELECT page_title, thumb_key FROM posts WHERE id = ?1`).bind(published.postId).first()).toEqual({
+      page_title: "Its own title",
+      thumb_key: null,
+    });
+  });
+
+  it("publishes a member's own draft through Submit as previewed, checked from what was stored (review F108)", async () => {
+    const url = "https://example.com/mine";
+    const saved = await save("owner", { kind: "link", url, origin: "found", title: "Mine" });
+    if (!saved.ok) throw new Error(JSON.stringify(saved));
+    const link = { url, host: "example.com", provider: null, aspect: null, pageTitle: "My page", thumbUrl: null, thumbKey: key("m", "jpg"), suggestedTitle: null };
+    await saveDraftPreview(db, { id: saved.draft.id, authorId: "owner", url, link, duplicate: null, snapshot: snapshot("m"), now: NOW });
+    // As Submit's loader checks it, and its action reads the receipt and publishes.
+    const stored = previewToPublish((await draftsOf(db, "owner"))[0]!)!;
+    const check = await checkLink({ ...stored, userId: "owner", ownHosts: ["aion.ly"], db, bucket: env.IMAGES, secret: env.BETTER_AUTH_SECRET, now: NOW });
+    if (!check.ok) throw new Error(check.error);
+    expect(check.link).toMatchObject({ pageTitle: "My page", thumbKey: key("m", "jpg") });
+    const receipt = (await readReceipt(check.receipt ?? "", env.BETTER_AUTH_SECRET, "owner", NOW))!;
+    const author = (await accountRecord(db, "owner", NOW))!;
+    const result = await publishPost(db, {
+      ...receipt,
+      kind: "link",
+      id: "mine1",
+      author,
+      origin: "found",
+      title: "Mine",
+      description: "",
+      draft: { id: saved.draft.id, revision: saved.draft.revision },
+      now: NOW,
+    });
+    expect(result).toMatchObject({ ok: true, freed: [] });
+    expect(await db.prepare(`SELECT page_title, thumb_key FROM posts WHERE id = 'mine1'`).first()).toEqual({ page_title: "My page", thumb_key: key("m", "jpg") });
+    expect(await state(key("m", "jpg"))).toBe("attached");
+  });
+
+  it("waits to be published again when a newer preview replaced the one it read, never going out without it (review F109)", async () => {
+    const url = "https://example.com/racing";
+    const saved = await save("owner", { kind: "link", url, origin: "found", title: "Racing" });
+    if (!saved.ok) throw new Error(JSON.stringify(saved));
+    const link = (letter: string) => ({ url, host: "example.com", provider: null, aspect: null, pageTitle: `Title ${letter}`, thumbUrl: null, thumbKey: key(letter, "jpg"), suggestedTitle: null });
+    await saveDraftPreview(db, { id: saved.draft.id, authorId: "owner", url, link: link("a"), duplicate: null, snapshot: snapshot("a"), now: NOW });
+    // Preview B lands just before the publication's one write.
+    let raced = false;
+    const racing = new Proxy(db, {
+      get(target, property) {
+        if (property === "batch") {
+          return async (statements: D1PreparedStatement[]) => {
+            if (!raced) {
+              raced = true;
+              await saveDraftPreview(db, { id: saved.draft.id, authorId: "owner", url, link: link("b"), duplicate: null, snapshot: snapshot("b"), now: NOW });
+            }
+            return target.batch(statements);
+          };
+        }
+        const value = Reflect.get(target, property) as unknown;
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    const input = { id: saved.draft.id, actorId: "owner", as: "author" as const, revision: null, bucket: env.IMAGES, secret: env.BETTER_AUTH_SECRET, ownHosts: ["aion.ly"], mentionHosts: ["aion.ly"], now: NOW };
+    expect(await publishDraft(racing, input)).toEqual({ ok: false, reason: "preview_changed" });
+    // Still a draft, with the newer preview and its file.
+    expect((await draftsOf(db, "owner"))[0]!.preview).toMatchObject({ pageTitle: "Title b", thumbKey: key("b", "jpg") });
+    expect([await state(key("a", "jpg")), await state(key("b", "jpg"))]).toEqual([null, "draft"]);
+    // Published again, it goes out as now previewed.
+    const published = await publishDraft(db, input);
+    if (!published.ok) throw new Error(JSON.stringify(published));
+    expect(await db.prepare(`SELECT page_title, thumb_key FROM posts WHERE id = ?1`).bind(published.postId).first()).toEqual({
+      page_title: "Title b",
+      thumb_key: key("b", "jpg"),
+    });
   });
 });
 

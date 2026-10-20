@@ -89,7 +89,7 @@ export async function checkLink(input: {
    * A draft's own preview of this address, to publish as it was seen instead
    * of reading the page again: its title, and its picture, one of its files.
    */
-  reuse?: { pageTitle: string | null; thumbKey: string };
+  reuse?: { pageTitle: string | null; thumbKey: string | null };
 }): Promise<CheckResult> {
   const parsed = parseSubmittedUrl(input.raw, { ownHosts: input.ownHosts });
   if (!parsed.ok) return { ok: false, error: REJECTION[parsed.reason] };
@@ -134,7 +134,8 @@ export async function checkLink(input: {
   if (input.fetchPreview === false) return { ok: true, link: base, duplicate: null, receipt: null };
   if (input.reuse) {
     const pageTitle = resolved.kind === "page" ? input.reuse.pageTitle : null;
-    const link: CheckedLink = { ...base, pageTitle, thumbUrl: imageAddress(input.reuse.thumbKey), thumbKey: input.reuse.thumbKey };
+    const { thumbKey } = input.reuse;
+    const link: CheckedLink = { ...base, pageTitle, thumbUrl: thumbKey ? imageAddress(thumbKey) : null, thumbKey };
     return { ok: true, link, duplicate: null, receipt: await receiptFor(link, resolved.canonicalKey, input) };
   }
 

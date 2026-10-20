@@ -145,7 +145,7 @@ describe("short names and given names", () => {
     expect(await renameUser(db, "past", "pixie", NOW)).toEqual({ ok: false, reason: "plan" });
   });
 
-  it("keeps 4 characters for the 4-letter username, bought once, for good, with or without the plan", async () => {
+  it("keeps 4 characters for the Short username package, bought once, for good, with or without the plan", async () => {
     // The yearly plan allows 5 characters, not 4.
     expect(await renameUser(db, "fan", "nova", NOW)).toEqual({ ok: false, reason: "plan" });
     const bought = { userId: "past", length: 4, sessionId: "cs_name", cents: 25000, currency: "usd", paidAt: NOW, paymentIntent: "pi_name" };
@@ -156,7 +156,7 @@ describe("short names and given names", () => {
     expect(await accountRecord(db, "past", NOW)).toMatchObject({ fan: false, shortestName: 4, nameAllowance: 4 });
     expect(await renameUser(db, "past", "nova", NOW)).toEqual({ ok: true });
     expect(await currentName("past")).toBe("nova");
-    // Never an agent's, except the board's own, run by an admin.
+    // Never bought for an agent; the board's own, run by an admin, may take 4.
     await user("bot", "fan_agent");
     await user("house", "aisha");
     await db.batch([
@@ -174,6 +174,28 @@ describe("short names and given names", () => {
     expect((await db.prepare(`SELECT session_id FROM name_allowances WHERE user_id = 'past'`).all()).results).toEqual([{ session_id: "cs_name" }]);
     expect(await accountRecord(db, "house", NOW)).toMatchObject({ shortestName: 4 });
     expect(await renameUser(db, "house", "aion", NOW)).toEqual({ ok: true });
+  });
+
+  it("gives the package's buyer's agent a name of 5 characters, under its owner's rules (owner's decision, 2026-10-20)", async () => {
+    await user("bot", "pulse_agent");
+    await user("other_bot", "fan_agent");
+    await db.batch([
+      db.prepare(`UPDATE profiles SET owner_id = 'monthly' WHERE user_id = 'bot'`),
+      db.prepare(`UPDATE profiles SET owner_id = 'fan' WHERE user_id = 'other_bot'`),
+    ]);
+    // Without the package, an agent's name is 6 or more, the yearly plan's owner's too.
+    expect(await accountRecord(db, "other_bot", NOW)).toMatchObject({ shortestName: 6 });
+    expect(await renameUser(db, "other_bot", "orbit", NOW)).toEqual({ ok: false, reason: "plan" });
+    expect(await accountRecord(db, "bot", NOW)).toMatchObject({ shortestName: 6 });
+    expect(await renameUser(db, "bot", "astro", NOW)).toEqual({ ok: false, reason: "plan" });
+
+    await grantNameAllowance(db, { userId: "monthly", length: 4, sessionId: "cs_name", cents: 25000, currency: "usd", paidAt: NOW, paymentIntent: "pi_name" });
+    expect(await accountRecord(db, "bot", NOW)).toMatchObject({ shortestName: 5 });
+    // 5, never 4, and only as often as anyone may change a name.
+    expect(await renameUser(db, "bot", "astr", NOW)).toEqual({ ok: false, reason: "plan" });
+    expect(await renameUser(db, "bot", "astro", NOW)).toEqual({ ok: true });
+    expect(await currentName("bot")).toBe("astro");
+    expect(await renameUser(db, "bot", "astra", NOW + DAY)).toEqual({ ok: false, reason: "too_soon" });
   });
 
   it("lets an admin take a name away, freeing it for its rightful owner", async () => {

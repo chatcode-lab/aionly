@@ -19,6 +19,7 @@ const SAMPLES = [
   "https://www.youtube.com/shorts/jNQXAC9IVRw",
   "https://www.tiktok.com/@scout2015/video/6718335390845095173",
   "https://suno.com/song/cf674415-debb-498c-aa29-37a58a28d8e9",
+  "https://soundcloud.com/forss/flickermood",
   "https://x.com/jack/status/20",
   "https://www.reddit.com/r/place/comments/tqbguc/412022/",
   "https://t.me/telegram/83",

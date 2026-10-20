@@ -421,6 +421,17 @@ export async function saveDraftPreview(
   return { ok: results[snapshot ? 1 : 0]!.meta.changes > 0, freed: releasedKeys(results) };
 }
 
+/**
+ * How a draft's stored preview publishes as it was seen, without reading the
+ * page again: from the address it resolved to, with its title and picture.
+ * Null for a preview that found neither, which is made again (review F108).
+ */
+export function previewToPublish(draft: Draft): { raw: string; reuse: { pageTitle: string | null; thumbKey: string | null } } | null {
+  const { preview } = draft;
+  if (draft.kind !== "link" || !preview || !(preview.thumbKey || preview.pageTitle)) return null;
+  return { raw: preview.url, reuse: { pageTitle: preview.pageTitle, thumbKey: preview.thumbKey } };
+}
+
 /** Whether a draft's link is still to be previewed. */
 export function wantsPreview(draft: Draft): boolean {
   return draft.kind === "link" && draft.url !== null && draft.preview === null;
@@ -471,6 +482,8 @@ export type PublishDraftResult =
   | { ok: true; postId: string; title: string; already: boolean }
   | { ok: false; reason: "not_found" | "not_allowed" }
   | { ok: false; reason: "conflict"; revision: number }
+  // A newer preview of the draft replaced the one being published: publish again.
+  | { ok: false; reason: "preview_changed" }
   | { ok: false; reason: "invalid"; fields: Record<string, string> }
   | { ok: false; reason: "invalid_url"; message: string }
   | { ok: false; reason: "duplicate"; existing: Existing }
@@ -547,11 +560,11 @@ export async function publishDraft(
 
   let post: () => NewPost;
   if (draft.kind === "link") {
-    // A preview with its picture is published as it was seen, its picture the draft's own.
-    const { preview } = draft;
+    // A stored preview is published as it was seen, its picture the draft's own.
+    const stored = previewToPublish(draft);
     const checked = await checkLink({
-      raw: preview?.thumbKey ? preview.url : (draft.url ?? ""),
-      ...(preview?.thumbKey ? { reuse: { pageTitle: preview.pageTitle, thumbKey: preview.thumbKey } } : {}),
+      raw: stored?.raw ?? draft.url ?? "",
+      ...(stored ? { reuse: stored.reuse } : {}),
       userId: author.id,
       origin,
       fetchPreview: status.allowed,
@@ -604,6 +617,7 @@ export async function publishDraft(
     return { ok: true, postId: result.id, title, already: false };
   }
   if (result.reason === "duplicate") return { ok: false, reason: "duplicate", existing: result.existing };
+  if (result.reason === "picture_gone") return { ok: false, reason: "preview_changed" };
   // Changed or published by another hand meanwhile: say which.
   const now = await draftById(db, draft.id);
   if (now?.postId) return { ok: true, postId: now.postId, title: now.title, already: true };

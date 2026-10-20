@@ -23,6 +23,6 @@ export async function applyRename(
   return result.reason === "taken"
     ? "That name is taken. Names are never reused, so try another."
     : result.reason === "plan"
-      ? USERNAME_PROBLEM[shortNameNeeds(name)]
+      ? USERNAME_PROBLEM[shortNameNeeds(name, options.agent)]
       : "You changed your name recently. Try again later.";
 }

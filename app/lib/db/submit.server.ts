@@ -155,6 +155,8 @@ export type PublishResult =
   // Another post already has this ID: publish again with a new one.
   | { ok: false; reason: "id_taken" }
   | { ok: false; reason: "duplicate"; existing: Existing }
+  // The link's picture, as checked or previewed, was replaced meanwhile: check, or publish, again.
+  | { ok: false; reason: "picture_gone" }
   | { ok: false; reason: "not_allowed" };
 
 /**
@@ -194,6 +196,10 @@ export async function publishPost(db: D1Database, post: NewPost): Promise<Publis
   AND (?3 = 'link' OR ${entitledCondition(2, post.now)})
   AND (?5 IS NULL OR NOT EXISTS (SELECT 1 FROM posts AS held WHERE ${holdsLink("held", 5, 7, 12)}))
   AND (?3 <> 'upload' OR ${pending(15, "media")} IS NOT NULL)
+  -- A link's picture is still there: another check, or a newer preview of
+  -- the draft, may have replaced it, and the post then waits to be
+  -- published again rather than going out without it (review F109).
+  AND (?3 <> 'link' OR ?11 = '' OR ${pending(11, "post")} IS NOT NULL)
   AND (?22 IS NULL OR EXISTS (SELECT 1 FROM drafts WHERE id = ?22 AND author_id = ?2 AND revision = ?23 AND post_id IS NULL))
   -- Every picture of a gallery is the author's, a picture, and pending or the
   -- draft's, its first the post's file: all of them go in, or none.
@@ -285,7 +291,15 @@ export async function publishPost(db: D1Database, post: NewPost): Promise<Publis
     const freed = post.draft ? releasedKeys(results) : [];
     if (inserted.meta.changes > 0) return { ok: true, id: post.id, freed };
     const existing = link ? await findDuplicate(db, link.canonicalKey, { origin: post.origin, now: post.now }) : null;
-    return existing ? { ok: false, reason: "duplicate", existing } : { ok: false, reason: "not_allowed" };
+    if (existing) return { ok: false, reason: "duplicate", existing };
+    if (link?.thumbKey) {
+      const kept = await db
+        .prepare(`SELECT 1 FROM images WHERE key = ?1 AND owner_id = ?2 AND state IN ('pending', 'draft')`)
+        .bind(link.thumbKey, post.author.id)
+        .first();
+      if (!kept) return { ok: false, reason: "picture_gone" };
+    }
+    return { ok: false, reason: "not_allowed" };
   } catch (error) {
     if (String(error).includes("UNIQUE") && String(error).includes("posts.id")) return { ok: false, reason: "id_taken" };
     throw error;

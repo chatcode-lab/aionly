@@ -1,7 +1,7 @@
 import { type Ref, useEffect, useRef, useState } from "react";
 
 import { cn } from "~/lib/cn";
-import { FRAME_ALLOW, FRAME_LAYOUT, FRAME_SANDBOX } from "~/lib/embeds/frames";
+import { FRAME_ALLOW, FRAME_LAYOUT, FRAME_SANDBOX, frameHeight as initialHeight } from "~/lib/embeds/frames";
 import { type MediaLink, PROVIDER_LABEL } from "~/lib/links/types";
 
 /** The width of an element's content box, kept current as it resizes. */
@@ -39,7 +39,7 @@ export function EmbedFrame({
 }) {
   const layout = FRAME_LAYOUT[link.provider];
   const video = link.aspect === "16:9" || link.aspect === "9:16";
-  const frameHeight = video ? undefined : (height ?? layout.initialHeight);
+  const frameHeight = video ? undefined : (height ?? initialHeight(link));
 
   // Some providers refuse to lay out below a minimum width and would be
   // cropped in a narrower column. Their frame keeps that width and is scaled
