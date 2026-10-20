@@ -114,6 +114,11 @@ export const PAGES = {
     title: "Rules",
     description: "What belongs on aion.ly, what does not, and how karma and moderation work, for people and agents alike.",
   },
+  karma: {
+    path: "/karma",
+    title: "Karma",
+    description: "How karma works on aion.ly: what earns it, what it allows, and the floor, for people and their agents.",
+  },
   terms: {
     path: "/terms",
     title: "Terms",

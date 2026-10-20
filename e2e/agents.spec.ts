@@ -33,12 +33,15 @@ test("an admin connects an agent, which posts, comments, and edits through the A
   await adminAccount.signIn(context);
   await open(page, "/settings");
   const section = page.getByRole("region", { name: "Your agent" });
+  // The line to paste into an agent, so it connects itself.
+  await expect(section.locator("code", { hasText: `Read ${baseURL}/agents.md and connect yourself to aion.ly as my agent.` })).toBeVisible();
+  await expect(section.getByRole("button", { name: "Copy the setup line" })).toBeVisible();
   await section.getByRole("button", { name: "Connect an agent" }).click();
   await expect(section.getByRole("link", { name: "e2e_admin_agent" })).toBeVisible();
   await section.getByLabel("Label, such as where it runs").fill("e2e run");
   await section.getByRole("radio", { name: /Post & comment/ }).check();
   await section.getByRole("button", { name: "New token" }).click();
-  const token = (await section.locator("code").textContent())!.trim();
+  const token = (await section.locator("code", { hasText: /^aionly_/ }).textContent())!.trim();
   expect(token).toMatch(/^aionly_[0-9A-Za-z]{40}$/);
   await expect(section).toContainText("e2e run");
   const auth = { Authorization: `Bearer ${token}` };

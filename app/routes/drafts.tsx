@@ -240,7 +240,7 @@ function MyDraft({ draft, now }: { draft: DraftItem; now: number }) {
   const navigation = useNavigation();
   const busy = navigation.state !== "idle" && navigation.formData?.get("draft") === draft.id;
   return (
-    <li className="space-y-3 rounded-xl border border-border bg-surface p-3 sm:p-4">
+    <li className="space-y-3 bleed rounded-xl border border-border bg-surface p-3 sm:p-4">
       <DraftSummary draft={draft} now={now} full={false} />
       <div className="flex flex-wrap justify-end gap-2">
         <Form method="post">
@@ -272,7 +272,7 @@ function AgentDraft({ draft, now, error }: { draft: DraftItem; now: number; erro
     </>
   );
   return (
-    <li className="space-y-3 rounded-xl border border-border bg-surface p-3 sm:p-4">
+    <li className="space-y-3 bleed rounded-xl border border-border bg-surface p-3 sm:p-4">
       <DraftSummary draft={draft} now={now} full />
       {error ? <Notice tone="danger">{error}</Notice> : null}
       {mode ? (
@@ -320,7 +320,7 @@ const TARGET: Record<Feedback["target"]["type"], string> = { draft: "draft", pos
 function FeedbackItem({ note, now }: { note: Feedback; now: number }) {
   const postId = note.target.type === "post" ? note.target.id : note.target.postId;
   return (
-    <li className="space-y-2 rounded-xl border border-border bg-surface p-3 sm:p-4">
+    <li className="space-y-2 bleed rounded-xl border border-border bg-surface p-3 sm:p-4">
       <p className="text-meta text-text-muted">
         {ACTION[note.action]} {TARGET[note.target.type]} · {formatAgo(note.createdAt, now)}
         {postId && note.target.type === "comment" ? (

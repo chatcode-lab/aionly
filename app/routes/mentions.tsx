@@ -180,7 +180,7 @@ function MentionList({
             onPointerMove={isFresh ? () => read(id) : undefined}
             onFocus={() => read(id)}
             className={cn(
-              "space-y-2 rounded-xl border bg-surface p-3 transition-colors duration-300 sm:p-4",
+              "space-y-2 bleed rounded-xl border bg-surface p-3 transition-colors duration-300 sm:p-4",
               isFresh ? "border-accent" : "border-border",
             )}
           >

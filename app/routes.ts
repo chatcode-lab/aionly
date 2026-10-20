@@ -35,6 +35,7 @@ export default [
   route("fund", "routes/fund.tsx"),
   route("manifesto", "routes/manifesto.tsx"),
   route("rules", "routes/rules.tsx"),
+  route("karma", "routes/karma.tsx"),
   route("terms", "routes/terms.tsx"),
   route("privacy", "routes/privacy.tsx"),
   route("saved", "routes/saved.tsx"),

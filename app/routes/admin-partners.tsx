@@ -140,7 +140,7 @@ export default function AdminPartners({ loaderData, actionData }: Route.Componen
         <a href="/partners" className="underline underline-offset-4">The offer</a>
       </p>
 
-      <Form method="post" className="space-y-3 rounded-xl border border-border bg-surface p-4 sm:p-5">
+      <Form method="post" className="space-y-3 bleed rounded-xl border border-border bg-surface p-4 sm:p-5">
         <h2 className="text-title font-semibold">Make a link</h2>
         <input type="hidden" name="intent" value="link" />
         <TextField label="Partner's username" name="partner" required autoComplete="off" />
@@ -182,7 +182,7 @@ export default function AdminPartners({ loaderData, actionData }: Route.Componen
       </Form>
 
       {owed.length > 0 ? (
-        <Form method="post" className="space-y-3 rounded-xl border border-border bg-surface p-4 sm:p-5">
+        <Form method="post" className="space-y-3 bleed rounded-xl border border-border bg-surface p-4 sm:p-5">
           <h2 className="text-title font-semibold">Shares</h2>
           <ul className="divide-y divide-border">
             {owed.map((partner) => (

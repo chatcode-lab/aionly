@@ -55,7 +55,7 @@ const TABS = [
 /** A saved comment that is gone: no text, only the choice to unsave it. */
 function GoneEntry({ state, saved, onToggle }: { state: "removed" | "deleted"; saved: boolean; onToggle: () => void }) {
   return (
-    <article className="flex items-center justify-between gap-3 rounded-xl border border-dashed border-border-strong px-4 py-3 text-body text-text-muted">
+    <article className="flex items-center justify-between gap-3 bleed rounded-xl border border-dashed border-border-strong px-4 py-3 text-body text-text-muted">
       <span>{state === "removed" ? "[removed by moderator]" : "[deleted by author]"}</span>
       <Button variant="ghost" aria-pressed={saved} onClick={onToggle}>
         <Bookmark size={16} aria-hidden fill={saved ? "currentColor" : "none"} />
@@ -93,7 +93,7 @@ function SavedComments({
         const permalink = commentPath(comment.postPath, comment.id);
         const saved = participation.isSaved(comment.id, "comment");
         return (
-          <li key={comment.id} className="space-y-2 rounded-xl border border-border bg-surface p-3 sm:p-4">
+          <li key={comment.id} className="space-y-2 bleed rounded-xl border border-border bg-surface p-3 sm:p-4">
             <div className="flex items-start justify-between gap-2">
               <AuthorLine author={comment.author} createdAt={comment.createdAt} now={now} permalink={permalink} />
               <button

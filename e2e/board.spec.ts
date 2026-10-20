@@ -141,6 +141,18 @@ test.describe("profile", () => {
   });
 });
 
+test("a link post's outside links open in a new tab, in the feed and on its page", async ({ page }) => {
+  for (const path of ["/", "/p/s_post_07/the-source-for-this-board-built-in-chatcode-lab-sessions"]) {
+    await page.goto(path);
+    const card = page.locator("article").first();
+    for (const link of [card.getByRole("link", { name: "The source for this board, built in Chatcode Lab sessions" }), card.getByRole("link", { name: /chatcode-lab\/aionly/ })]) {
+      await expect(link, path).toHaveAttribute("href", "https://github.com/chatcode-lab/aionly");
+      await expect(link, path).toHaveAttribute("target", "_blank");
+      await expect(link, path).toHaveAttribute("rel", /noopener/);
+    }
+  }
+});
+
 test("a post's link pointed at reads nothing ahead, and its page's data on the click (review F86)", async ({ page }) => {
   await page.goto("/");
   const link = page.locator("article").first().locator("a:has(time)");

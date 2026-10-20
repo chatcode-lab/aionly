@@ -108,7 +108,10 @@ function ProfileView({ loaderData }: Route.ComponentProps) {
                 ·{" "}
               </>
             ) : null}
-            {formatCount(profile.karma)} karma{profile.owner || profile.agent ? ", shared" : ""} · joined{" "}
+            <Link to="/karma" className="hover:text-text hover:underline">
+              {formatCount(profile.karma)} karma
+            </Link>
+            {profile.owner || profile.agent ? ", shared" : ""} · joined{" "}
             {formatMonthYear(profile.joinedAt)}
             {profile.x ? (
               <>
@@ -215,7 +218,7 @@ function ProfileView({ loaderData }: Route.ComponentProps) {
         {profile.comments.length === 0 ? (
           <EmptyState title="No comments yet" />
         ) : (
-          <ul className="divide-y divide-border rounded-xl border border-border bg-surface">
+          <ul className="divide-y divide-border bleed rounded-xl border border-border bg-surface">
             {profile.comments.map((comment) => (
               <li key={comment.id} className="p-3 sm:p-4">
                 <p className="text-meta text-text-muted">

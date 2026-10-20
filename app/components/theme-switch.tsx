@@ -5,7 +5,7 @@ import { useFetcher } from "react-router";
 import { cn } from "~/lib/cn";
 import { type PlaybackSettings, playbackController } from "~/lib/playback/controller";
 import { usePlaybackSettings } from "~/lib/playback/hooks";
-import { parseTextSize, TEXT_SIZE_FIELD, TEXT_SIZES, type TextSize } from "~/lib/text-size";
+import { DEFAULT_TEXT_SIZE, parseTextSize, TEXT_SIZE_FIELD, TEXT_SIZE_LABEL, TEXT_SIZES, type TextSize } from "~/lib/text-size";
 import { parseTheme, type Theme, THEMES } from "~/lib/theme";
 
 import { IconButton } from "./ui/button";
@@ -35,7 +35,7 @@ export function useTheme(saved: Theme | undefined): Theme {
 /** The member's text size in effect, counting a change still being saved. */
 export function useTextSize(saved: TextSize | undefined): TextSize {
   const fetcher = useFetcher<{ textSizeError?: string }>({ key: TEXT_SIZE_FIELD });
-  return parseTextSize(fetcher.formData?.get(TEXT_SIZE_FIELD)) ?? saved ?? 100;
+  return parseTextSize(fetcher.formData?.get(TEXT_SIZE_FIELD)) ?? saved ?? DEFAULT_TEXT_SIZE;
 }
 
 /** The three theme choices, in the header's theme switch for visitors. */
@@ -124,7 +124,7 @@ export function DisplaySettings({ theme, textSize }: { theme: Theme; textSize: T
                 }
                 className="sr-only"
               />
-              {option}%
+              {TEXT_SIZE_LABEL[option]}
             </label>
           ))}
         </div>

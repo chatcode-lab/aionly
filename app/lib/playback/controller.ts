@@ -284,6 +284,21 @@ export class PlaybackController {
         slot.ready = true;
         this.onState(slot, event.state);
         break;
+      case "refused": {
+        // The browser would not start it by itself. The frame stays, its own
+        // play button for the viewer, whose tap then counts as theirs; it is
+        // not asked to play again until focus moves on.
+        slot.ready = true;
+        slot.started = true;
+        slot.player = "paused";
+        slot.sent = { play: false, sound: false, at: performance.now() };
+        if (this.owner?.key === slot.key && this.owner.by !== "viewer") {
+          this.owner = null;
+          this.suppressed.add(slot.key);
+        }
+        this.schedule();
+        return;
+      }
       case "error": {
         // Unavailable, private, or not to be embedded: the card falls back
         // to its preview, with the way to the original.

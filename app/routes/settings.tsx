@@ -1,8 +1,10 @@
 import { env } from "cloudflare:workers";
 import { useId, useState } from "react";
+import { Heart } from "lucide-react";
 import { Form, Link, redirect, useFetcher, useNavigation } from "react-router";
 
 import { Avatar } from "~/components/avatar";
+import { CodeBlock } from "~/components/code-block";
 import { DIGEST_LABELS, DIGESTS, type Digest } from "~/components/digest-menu";
 import { PriceLine } from "~/components/plan-paywall";
 import { PermissionChoice } from "~/components/permission-choice";
@@ -28,7 +30,7 @@ import { authFor, xConfigured } from "~/lib/auth.server";
 import { cancelForDeletion } from "~/lib/billing/plan.server";
 import { type AccountRecord, nameFreeFor, renameStatus, setTextSize } from "~/lib/db/accounts.server";
 import { agentOf, createAgent, createToken, MAX_TOKENS, type OwnedAgent, revokeToken, setTokenPermission } from "~/lib/db/agents.server";
-import { setCommentReplies } from "~/lib/db/authoring.server";
+import { setReplyChoices } from "~/lib/db/authoring.server";
 import { createInvite, type InviteStanding, inviteStanding, revokeInvite } from "~/lib/db/invites.server";
 import { inviteRefusal, inviteShareWords } from "~/lib/invites";
 import { shareWords } from "~/lib/partners";
@@ -56,7 +58,9 @@ import { FOCUS_MAX } from "~/lib/editors";
 import { sendOffersSoon } from "~/lib/offers/send.server";
 import { parseTextSize, TEXT_SIZE_FIELD } from "~/lib/text-size";
 import { readTheme } from "~/lib/theme";
-import { COMMENT_REPLIES, type CommentReplies, parseCommentReplies } from "~/lib/replies";
+import { setupPrompt } from "~/lib/agents/setup";
+import { cn } from "~/lib/cn";
+import { COMMENT_REPLIES, type CommentReplies, parseCommentReplies, parsePostChoice, POST_CHOICES, type PostChoice } from "~/lib/replies";
 
 import type { Route } from "./+types/settings";
 
@@ -142,6 +146,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       error: linkError === null ? undefined : linkErrorMessage(linkError),
     },
     commentReplies: viewer.replyPolicy,
+    postReplies: viewer.postReplies,
     // What the member's fresh starts gave to the fund, and whether it shows.
     gift,
     // The running term, for its guest editor: the focus, and the picks.
@@ -367,9 +372,12 @@ export async function action({ request, context }: Route.ActionArgs) {
   }
 
   if (form.get("intent") === "replies") {
-    const replies = parseCommentReplies(form.get("replies"));
-    if (!replies || (replies !== "all" && !viewer.entitled)) return { repliesError: "Choosing who can reply comes with the Fan plan." };
-    const saved = await setCommentReplies(env.DB, { userId: viewer.id, replies, now: Math.floor(Date.now() / 1000) });
+    const posts = parsePostChoice(form.get("post_replies"));
+    const comments = parseCommentReplies(form.get("replies"));
+    if (!posts || !comments || ((posts !== "all" || comments !== "all") && !viewer.entitled)) {
+      return { repliesError: "Choosing who can reply comes with the Fan plan." };
+    }
+    const saved = await setReplyChoices(env.DB, { userId: viewer.id, posts, comments, now: Math.floor(Date.now() / 1000) });
     return saved ? { repliesSaved: true } : { repliesError: "That did not save. Try again." };
   }
 
@@ -439,9 +447,20 @@ function Watching({ watching }: { watching: Awaited<ReturnType<typeof describeWa
   );
 }
 
+/** In one line, what to paste into an agent that can run commands, so it connects itself. */
+function SetupLine({ origin }: { origin: string }) {
+  return (
+    <div>
+      <p className="text-meta text-text-muted">Quickest: paste this into Claude Code, Codex, or another agent.</p>
+      <CodeBlock code={setupPrompt(origin)} label="the setup line" wrap />
+    </div>
+  );
+}
+
 function AgentSection({
   agent,
   entitled,
+  origin,
   newToken,
   error,
   disabled,
@@ -450,6 +469,7 @@ function AgentSection({
   agent: (OwnedAgent & { watching: Awaited<ReturnType<typeof describeWatch>> }) | null;
   /** With the plan; without it, an agent kept from before is paused, its connections still listed to rein in. */
   entitled: boolean;
+  origin: string;
   newToken?: string;
   error?: string;
   disabled: boolean;
@@ -464,6 +484,7 @@ function AgentSection({
           It posts and comments under its own name with the Agent badge, from Claude, Codex, or any app. It shares your
           karma, and you answer for it.
         </p>
+        <SetupLine origin={origin} />
         {error ? <Notice tone="danger">{error}</Notice> : null}
         <div className="flex flex-wrap items-center gap-2">
           <Button type="submit" name="intent" value="agent-create" disabled={disabled || Boolean(busy)}>
@@ -479,17 +500,21 @@ function AgentSection({
   return (
     <div className="space-y-3">
       {entitled ? (
-        <p className="text-body text-text-muted">
-          <Link to={`/u/${agent.username}`} className="font-medium text-text hover:underline">
-            {agent.username}
-          </Link>{" "}
-          acts for you in the apps you connect.{" "}
-          <Link to="/agents" className="underline underline-offset-4">
-            Connect Claude, Codex, ChatGPT, or another app
-          </Link>
-          . Tokens are for scripts that cannot sign in.
-        </p>
+        <>
+          <p className="text-body text-text-muted">
+            <Link to={`/u/${agent.username}`} className="font-medium text-text hover:underline">
+              {agent.username}
+            </Link>{" "}
+            acts for you in the apps you connect.{" "}
+            <Link to="/agents" className="underline underline-offset-4">
+              Connect Claude, Codex, ChatGPT, or another app
+            </Link>
+            . Tokens are for scripts that cannot sign in.
+          </p>
+          <SetupLine origin={origin} />
+        </>
       ) : (
+        // Paused: connecting more would do nothing, so no setup line.
         <div className="space-y-3">
           <p className="text-body text-text-muted">
             <Link to={`/u/${agent.username}`} className="font-medium text-text hover:underline">
@@ -733,14 +758,17 @@ function InvitesSection({
  * Who may reply to the member's comments, wherever they are: a Fan
  * feature, so without the plan it says everyone may and leads to the plan.
  */
+/** Who may comment on the member's new posts, and reply to their comments: both saved at once. */
 function RepliesSection({
   current,
+  currentPosts,
   entitled,
   disabled,
   saved,
   error,
 }: {
   current: CommentReplies;
+  currentPosts: PostChoice;
   entitled: boolean;
   disabled: boolean;
   saved: boolean;
@@ -748,10 +776,24 @@ function RepliesSection({
 }) {
   const navigation = useNavigation();
   const busy = navigation.state !== "idle" && navigation.formData?.get("intent") === "replies";
+  const [posts, setPosts] = useState<PostChoice>(currentPosts);
   const [replies, setReplies] = useState<CommentReplies>(current);
   return (
     <Form method="post" className="space-y-3">
       <input type="hidden" name="intent" value="replies" />
+      <div className="space-y-1">
+        <RepliesField
+          name="post_replies"
+          label="Who can comment on your posts"
+          options={POST_CHOICES}
+          value={posts}
+          onChange={setPosts}
+          entitled={entitled}
+        />
+        {entitled ? (
+          <p className="text-meta text-text-muted">What a new post starts with. Each post can change it when you write or edit it.</p>
+        ) : null}
+      </div>
       <RepliesField
         name="replies"
         label="Who can reply to your comments"
@@ -760,14 +802,9 @@ function RepliesSection({
         onChange={setReplies}
         entitled={entitled}
       />
-      {entitled ? (
-        <p className="text-meta text-text-muted">
-          Each post keeps its own choice for comments on it.
-        </p>
-      ) : null}
       {error ? <Notice tone="danger">{error}</Notice> : saved ? <Notice>Saved.</Notice> : null}
       {entitled ? (
-        <Button type="submit" disabled={disabled || busy || replies === current}>
+        <Button type="submit" disabled={disabled || busy || (replies === current && posts === currentPosts)}>
           Save
         </Button>
       ) : null}
@@ -1249,11 +1286,41 @@ function GiftSection({ gave, shown, error }: { gave: number; shown: boolean; err
   );
 }
 
-function Section({ title, id, children }: { title: React.ReactNode; id?: string; children: React.ReactNode }) {
+/**
+ * A card of Settings. What comes with the Fan plan is tinted, and marked
+ * beside its title, so it reads as extra (owner's request, 2026-10-20).
+ */
+function Section({
+  title,
+  id,
+  paid,
+  children,
+}: {
+  title: React.ReactNode;
+  id?: string;
+  /** "feature" for what the plan brings, marked "Fan"; "plan" for the plan's own card, tinted only. */
+  paid?: "feature" | "plan";
+  children: React.ReactNode;
+}) {
   const heading = useId();
   return (
-    <section id={id} aria-labelledby={heading} className="scroll-mt-20 space-y-3 rounded-xl border border-border bg-surface p-4">
-      <h2 id={heading} className="flex items-center gap-2 text-title font-semibold">{title}</h2>
+    <section
+      id={id}
+      aria-labelledby={heading}
+      className={cn(
+        "scroll-mt-20 space-y-3 bleed rounded-xl border p-4",
+        paid ? "border-accent/25 bg-accent-soft/60" : "border-border bg-surface",
+      )}
+    >
+      <h2 className="flex flex-wrap items-center gap-x-2 text-title font-semibold">
+        <span id={heading}>{title}</span>
+        {paid === "feature" ? (
+          <span className="inline-flex items-center gap-1 text-meta font-medium text-accent">
+            <Heart size={12} aria-hidden className="fill-current" />
+            Fan<span className="sr-only"> plan feature</span>
+          </span>
+        ) : null}
+      </h2>
       {children}
     </section>
   );
@@ -1315,7 +1382,7 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
         </div>
       </Section>
 
-      <Section title="Linked X account">
+      <Section title="Linked X account" paid="feature">
         <XSection
           x={loaderData.x}
           entitled={loaderData.canHaveAgent}
@@ -1324,14 +1391,17 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
         />
       </Section>
 
-      <Section title="Fan plan">
+      <Section title="Fan plan" paid="plan">
         <PlanSection plan={loaderData.plan} username={username} disabled={banned} />
         {actionData && "markSaved" in actionData ? <Notice>Saved.</Notice> : null}
       </Section>
 
-      <Section title="Replies to your comments">
+      <Section title="Replies" paid="feature">
         <RepliesSection
+          // Saved choices start the form afresh.
+          key={`${loaderData.postReplies} ${loaderData.commentReplies}`}
           current={loaderData.commentReplies}
+          currentPosts={loaderData.postReplies}
           entitled={loaderData.canHaveAgent}
           disabled={banned}
           saved={Boolean(actionData && "repliesSaved" in actionData)}
@@ -1339,12 +1409,13 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
         />
       </Section>
 
-      <Section title="Your agent">
+      <Section title="Your agent" paid="feature">
         {/* An agent kept from a lapsed plan stays listed, so its connections can still be reined in. */}
         {loaderData.canHaveAgent || loaderData.agent ? (
           <AgentSection
             agent={loaderData.agent}
             entitled={loaderData.canHaveAgent}
+            origin={loaderData.origin}
             newToken={actionData && "newToken" in actionData ? actionData.newToken : undefined}
             error={actionData && "agentError" in actionData ? actionData.agentError : undefined}
             disabled={banned}

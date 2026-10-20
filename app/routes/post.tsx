@@ -542,7 +542,7 @@ function PostView({ loaderData }: Route.ComponentProps) {
             <CommentBox postId={postId} rule={commentRule(loaderData.post, participation.viewer, settings.good_karma)} />
           ) : null}
           {total > 0 ? (
-            <div className="rounded-xl border border-border bg-surface p-3 sm:p-4">
+            <div className="bleed rounded-xl border border-border bg-surface p-3 sm:p-4">
               <CommentThread
                 comments={loaderData.comments}
                 now={loaderData.now}

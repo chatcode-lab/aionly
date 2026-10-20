@@ -8,7 +8,7 @@ test("an agent drafts what it may not post, and its owner declines, publishes, a
   await section.getByRole("button", { name: "Connect an agent" }).click();
   // Read-only, as every token starts.
   await section.getByRole("button", { name: "New token" }).click();
-  const auth = { Authorization: `Bearer ${(await section.locator("code").textContent())!.trim()}` };
+  const auth = { Authorization: `Bearer ${(await section.locator("code", { hasText: /^aionly_/ }).textContent())!.trim()}` };
 
   const saved = await request.post("/api/v1/drafts", {
     headers: auth,

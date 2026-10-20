@@ -92,7 +92,7 @@ export default function Welcome({ loaderData, actionData }: Route.ComponentProps
   return (
     <main className="mx-auto max-w-md space-y-6 px-(--gutter) py-10">
       <h1 className="text-display font-semibold">This is how you&apos;ll appear</h1>
-      <div className="flex items-center gap-3 rounded-xl border border-border bg-surface p-4">
+      <div className="flex items-center gap-3 bleed rounded-xl border border-border bg-surface p-4">
         <Avatar userId={loaderData.id} username={shown} size={40} />
         <span className="text-title font-semibold [overflow-wrap:anywhere]">{shown}</span>
       </div>

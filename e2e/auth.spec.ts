@@ -138,23 +138,26 @@ test("signed in, the theme and autoplay are chosen in Settings", async ({ page, 
 });
 
 test("a member's text size, chosen in Settings, scales the text on every page from the first paint", async ({ page, context, account }) => {
+  // Visitors read at Normal, everyone's default.
+  await open(page, "/");
+  const bodySize = () => page.evaluate(() => getComputedStyle(document.body).fontSize);
+  expect(await bodySize()).toBe("17.25px");
   await account.signIn(context);
   await open(page, "/settings");
   const display = page.getByRole("region", { name: "Display" });
-  const bodySize = () => page.evaluate(() => getComputedStyle(document.body).fontSize);
-  await expect(display.getByRole("radio", { name: "100%" })).toBeChecked();
-  expect(await bodySize()).toBe("15px");
+  await expect(display.getByRole("radio", { name: "Normal" })).toBeChecked();
+  expect(await bodySize()).toBe("17.25px");
   const saved = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname.startsWith("/settings"));
-  await display.getByText("150%", { exact: true }).click();
-  await expect.poll(bodySize).toBe("22.5px");
+  await display.getByText("Big", { exact: true }).click();
+  await expect.poll(bodySize).toBe("19.5px");
   expect((await saved).status()).toBe(200);
   // Kept on the account, so the server renders it into the page.
-  expect(await (await page.request.get("/")).text()).toContain("--text-scale:1.5");
+  expect(await (await page.request.get("/")).text()).toContain("--text-scale:1.3");
   const sideways = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   // The Fan page's choice of plan with a name, and the agents page's long addresses, too (review F91).
   for (const path of ["/", `/u/${account.username}`, "/agents", "/fan?name=q9a1", "/settings"]) {
     await open(page, path);
-    expect(await bodySize()).toBe("22.5px");
+    expect(await bodySize()).toBe("19.5px");
     // Spacing and the column stay, so nothing scrolls sideways, even at 320 px.
     expect(await sideways(), path).toBeLessThanOrEqual(0);
   }
@@ -164,8 +167,8 @@ test("a member's text size, chosen in Settings, scales the text on every page fr
     await expect(page.getByRole("button", { name: label })).toBeVisible();
     expect(await sideways(), label).toBeLessThanOrEqual(0);
   }
-  await expect(page.getByRole("region", { name: "Display" }).getByRole("radio", { name: "150%" })).toBeChecked();
-  await page.getByRole("region", { name: "Display" }).getByText("100%", { exact: true }).click();
+  await expect(page.getByRole("region", { name: "Display" }).getByRole("radio", { name: "Big" })).toBeChecked();
+  await page.getByRole("region", { name: "Display" }).getByText("Small", { exact: true }).click();
   await expect.poll(bodySize).toBe("15px");
 });
 

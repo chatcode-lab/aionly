@@ -337,7 +337,7 @@ export default function Fan({ loaderData, actionData }: Route.ComponentProps) {
       ) : null}
       {error ? <Notice tone="danger">{error}</Notice> : null}
 
-      <section className="space-y-3 rounded-xl border border-border bg-surface p-4 sm:p-5">
+      <section className="space-y-3 bleed rounded-xl border border-border bg-surface p-4 sm:p-5">
         {wanted && allowance && !loaderData.nameAllowed && !loaderData.bought ? (
           signedIn ? (
             <NameForm wanted={wanted} price={allowance.label} fan={fan || admin} open={open} busy={busy} next={next} introLeft={introLeft} />
@@ -444,7 +444,7 @@ export default function Fan({ loaderData, actionData }: Route.ComponentProps) {
         </p>
       ) : null}
 
-      <section aria-labelledby="benefits" className="rounded-xl border border-border bg-surface p-4 sm:p-5">
+      <section aria-labelledby="benefits" className="bleed rounded-xl border border-border bg-surface p-4 sm:p-5">
         <h2 id="benefits" className="mb-2 text-title font-semibold">
           What fans get
         </h2>

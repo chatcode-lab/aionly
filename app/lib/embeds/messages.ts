@@ -19,6 +19,8 @@ export type EmbedEvent =
   | { type: "state"; state: PlayerState }
   | { type: "muted"; muted: boolean }
   | { type: "error"; detail: string }
+  /** The browser would not start it without a tap inside it; its own play button stays. */
+  | { type: "refused" }
   | { type: "height"; height: number };
 
 export type PlayerCommand = "play" | "pause" | "mute" | "unmute";
@@ -152,6 +154,9 @@ export function decodeTikTok(data: unknown): EmbedEvent[] {
         : [];
     case "onPlayerError": {
       const error = parseObject(message.value);
+      // Autoplay refused, as on an iPhone in Low Power Mode: the player shows
+      // its poster and play button, and plays from a tap on it.
+      if (error?.errorCode === 3002 || error?.errorType === "AUTOPLAY_ERROR") return [{ type: "refused" }];
       return [
         {
           type: "error",

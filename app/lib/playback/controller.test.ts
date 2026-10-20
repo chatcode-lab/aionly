@@ -71,3 +71,30 @@ describe("a frame that never answers", () => {
     expect(controller.state("v1").failed).toBeFalsy();
   });
 });
+
+describe("a TikTok whose autoplay the browser refuses", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    stubBrowser();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps its frame, and is not asked to play, before or after a tap on its own button", () => {
+    const controller = new PlaybackController();
+    const sent: string[] = [];
+    controller.register("t1", "p1", "tiktok", element());
+    controller.attach("t1", { send: (command: string) => sent.push(command), disconnect() {} });
+    controller.report("t1", { type: "ready" });
+    controller.report("t1", { type: "refused" });
+    vi.advanceTimersByTime(READY_DEADLINE_MS * 2);
+    expect(controller.state("t1").failed).toBeFalsy();
+    expect(sent).toEqual([]);
+    // A tap on its own play button.
+    controller.report("t1", { type: "state", state: "playing" });
+    expect(sent).toEqual([]);
+    expect(controller.state("t1").failed).toBeFalsy();
+  });
+});

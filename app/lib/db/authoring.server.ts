@@ -1,5 +1,5 @@
 import { MAX_DEPTH, THREAD_MAX } from "../comments/rules";
-import { type CommentReplies, policyAdmitsSql, type PostReplies } from "../replies";
+import { type CommentReplies, policyAdmitsSql, type PostChoice, type PostReplies } from "../replies";
 import { type Origin, TITLE_EDIT_SECONDS } from "../submit/rules";
 import { entitledCondition, participantCondition } from "./accounts.server";
 import { mentionStatements } from "./mentions.server";
@@ -408,6 +408,30 @@ export async function setCommentReplies(
          AND (?2 IS NULL OR ${entitledCondition(1, input.now)})`,
     )
     .bind(input.userId, policy)
+    .run();
+  return result.meta.changes > 0;
+}
+
+/**
+ * A member's reply choices in Settings, saved together: who may comment on
+ * their new posts, what Submit starts with (each post may change it), and
+ * who may reply to their comments, everywhere. Anything but everyone is a
+ * Fan feature. True when it holds.
+ */
+export async function setReplyChoices(
+  db: D1Database,
+  input: { userId: string; posts: PostChoice; comments: CommentReplies; now: number },
+): Promise<boolean> {
+  const posts = input.posts === "all" ? null : input.posts;
+  const comments = input.comments === "all" ? null : input.comments;
+  const result = await db
+    .prepare(
+      `UPDATE profiles SET post_replies = ?2, reply_policy = ?3
+       WHERE user_id = ?1 AND owner_id IS NULL
+         AND ${participantCondition(1, input.now)}
+         AND ((?2 IS NULL AND ?3 IS NULL) OR ${entitledCondition(1, input.now)})`,
+    )
+    .bind(input.userId, posts, comments)
     .run();
   return result.meta.changes > 0;
 }

@@ -30,28 +30,29 @@ beforeEach(async () => {
   await db.batch([db.prepare(`DELETE FROM sign_in_link_sends`), db.prepare(`DELETE FROM "user"`)]);
   await member("large", "large_reader");
   await member("plain", "plain_reader");
+  await member("small", "small_reader");
 });
 
 describe("a member's text size", () => {
-  it("is kept on the account, the default as none", async () => {
-    expect((await accountRecord(db, "large", NOW))?.textSize).toBe(100);
+  it("is kept on the account, Normal, everyone's default, as none", async () => {
+    expect((await accountRecord(db, "large", NOW))?.textSize).toBe(115);
     await setTextSize(db, "large", 130);
     expect((await accountRecord(db, "large", NOW))?.textSize).toBe(130);
-    await setTextSize(db, "large", 100);
+    await setTextSize(db, "large", 115);
     expect(await db.prepare(`SELECT text_size FROM profiles WHERE user_id = 'large'`).first()).toEqual({ text_size: null });
   });
 
   it("sets each email's type, each to its own member", async () => {
-    await setTextSize(db, "large", 150);
+    await setTextSize(db, "large", 130);
+    await setTextSize(db, "small", 100);
     const link = { url: "https://aion.ly/signin/email?token=t", origin: "https://aion.ly", now: NOW, secret: "s" };
-    await sendSignInLink(db, mailer, { ...link, email: "large@example.invalid" });
-    await sendSignInLink(db, mailer, { ...link, email: "plain@example.invalid" });
-    // The 15 px paragraphs, at 150% and as they are.
-    expect(sent.map((email) => [email.to, email.html.includes("font-size:23px;line-height:33px")])).toEqual([
-      ["large@example.invalid", true],
-      ["plain@example.invalid", false],
+    for (const name of ["large", "plain", "small"]) await sendSignInLink(db, mailer, { ...link, email: `${name}@example.invalid` });
+    // The 15 px paragraphs with 22 px lines: Big, Normal, and Small, as drawn.
+    expect(sent.map((email) => [email.to, /color:#55524c;font-size:(\d+)px;line-height:(\d+)px/.exec(email.html)?.slice(1)])).toEqual([
+      ["large@example.invalid", ["20", "29"]],
+      ["plain@example.invalid", ["17", "25"]],
+      ["small@example.invalid", ["15", "22"]],
     ]);
-    expect(sent[1]?.html).toContain("font-size:15px;line-height:22px");
 
     sent.length = 0;
     await setDigest(db, "large", "weekly", NOW - 8 * DAY);
@@ -60,7 +61,7 @@ describe("a member's text size", () => {
     expect(await sendDigests(db, mailer, { origin: "https://aion.ly", secret: "s", from: "digest@aion.ly", now: NOW })).toBe(2);
     const byReader = Object.fromEntries(sent.map((email) => [email.to, email.html]));
     // A post's 16 px title.
-    expect(byReader["large@example.invalid"]).toContain("font-size:24px;font-weight:600");
-    expect(byReader["plain@example.invalid"]).toContain("font-size:16px;font-weight:600");
+    expect(byReader["large@example.invalid"]).toContain("font-size:21px;font-weight:600");
+    expect(byReader["plain@example.invalid"]).toContain("font-size:18px;font-weight:600");
   });
 });

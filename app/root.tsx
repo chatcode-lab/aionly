@@ -33,7 +33,7 @@ import { imageAddress } from "./lib/media.server";
 import { detectInAppBrowser } from "./lib/in-app-browser";
 import type { ViewerSummary } from "./lib/public-types";
 import { writesSettled } from "./lib/pending-writes";
-import { textScale } from "./lib/text-size";
+import { DEFAULT_TEXT_SIZE, textScale } from "./lib/text-size";
 import { readTheme } from "./lib/theme";
 import { viewerOf } from "./lib/viewer.server";
 
@@ -75,7 +75,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
         newMentions: account.newMentions,
         ...(account.fan && account.showMark ? { fan: true } : {}),
         ...(term?.userId === account.id ? { editor: true } : {}),
-        ...(account.textSize !== 100 ? { textSize: account.textSize } : {}),
+        ...(account.textSize !== DEFAULT_TEXT_SIZE ? { textSize: account.textSize } : {}),
         // A new member's prices, while they last, for every paywall to show.
         ...(!account.entitled && !account.ownerId && Date.now() / 1000 < introEndsAt(account.createdAt)
           ? { introUntil: introEndsAt(account.createdAt) }
@@ -146,7 +146,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
     <html
       lang="en"
       data-theme={theme}
-      style={textSize === 100 ? undefined : ({ "--text-scale": textScale(textSize) } as React.CSSProperties)}
+      style={textSize === DEFAULT_TEXT_SIZE ? undefined : ({ "--text-scale": textScale(textSize) } as React.CSSProperties)}
     >
       <head>
         <meta charSet="utf-8" />

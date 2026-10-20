@@ -203,8 +203,12 @@ describe("player messages", () => {
     ]);
     expect(event("onMute", false)).toEqual([{ type: "muted", muted: false }]);
     expect(
+      event("onPlayerError", { errorCode: 2004, errorType: "VIDEO_UNAVAILABLE" }),
+    ).toEqual([{ type: "error", detail: "2004 VIDEO_UNAVAILABLE" }]);
+    // Autoplay refused, as on an iPhone in Low Power Mode, is no failure.
+    expect(
       event("onPlayerError", { errorCode: 3002, errorType: "AUTOPLAY_ERROR" }),
-    ).toEqual([{ type: "error", detail: "3002 AUTOPLAY_ERROR" }]);
+    ).toEqual([{ type: "refused" }]);
   });
 
   it("ignores TikTok-shaped messages without the player marker", () => {

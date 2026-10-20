@@ -5,15 +5,16 @@ import { atTextSize, composeLetter } from "./mail/layout";
 import { parseTextSize, storedTextSize, textScale } from "./text-size";
 
 describe("text size", () => {
-  it("is one of the four sizes, from a form or the profile, else the default", () => {
+  it("is Small, Normal, or Big, from a form or the profile, else Normal", () => {
     expect(parseTextSize("130")).toBe(130);
-    expect(parseTextSize(150)).toBe(150);
+    expect(parseTextSize(100)).toBe(100);
+    expect(parseTextSize("150")).toBeNull();
     expect(parseTextSize("120")).toBeNull();
     expect(parseTextSize("")).toBeNull();
     expect(parseTextSize(null)).toBeNull();
-    expect(storedTextSize(null)).toBe(100);
-    expect(storedTextSize(115)).toBe(115);
-    expect(storedTextSize(999)).toBe(100);
+    expect(storedTextSize(null)).toBe(115);
+    expect(storedTextSize(130)).toBe(130);
+    expect(storedTextSize(999)).toBe(115);
     expect(textScale(115)).toBe(1.15);
   });
 });
@@ -44,7 +45,7 @@ describe("an email at a member's text size", () => {
     expect(larger.text).toBe(letter.text);
   });
 
-  it("scales the email's own part too, and leaves the default size as it is", () => {
+  it("scales the email's own part too, and leaves Small as it was drawn", () => {
     const digest = composeDigest({
       frequency: "weekly",
       chosen: "weekly",
@@ -54,7 +55,8 @@ describe("an email at a member's text size", () => {
       origin: "https://aion.ly",
       unsubscribeUrl: "https://aion.ly/digest/unsubscribe?token=t",
     });
-    expect(atTextSize(digest, 150).html).toContain("font-size:24px;font-weight:600");
+    expect(atTextSize(digest, 130).html).toContain("font-size:21px;font-weight:600");
+    expect(atTextSize(digest, 115).html).toContain("font-size:18px;font-weight:600");
     expect(atTextSize(digest, 100)).toBe(digest);
   });
 });

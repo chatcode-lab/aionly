@@ -162,7 +162,7 @@ export default function Authorize({ loaderData, actionData }: Route.ComponentPro
           {client.name} would act as your agent, which comes with the Fan plan.
         </PlanPaywall>
       ) : (
-        <section className="space-y-3 rounded-xl border border-border bg-surface p-4 sm:p-5">
+        <section className="space-y-3 bleed rounded-xl border border-border bg-surface p-4 sm:p-5">
           <h2 className="flex items-center gap-2 text-title font-semibold">
             <Bot size={18} aria-hidden className="text-accent" />
             {agent ? `It acts as your agent, ${agent}` : "It acts as your agent"}

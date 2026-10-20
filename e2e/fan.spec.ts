@@ -143,6 +143,8 @@ test("a fan writes a text post, with the fan mark and a clickable link", async (
   const link = card.getByRole("link", { name: "example.com/the-prompt-guide" });
   await expect(link).toHaveAttribute("href", "https://example.com/the-prompt-guide");
   await expect(link).toHaveAttribute("rel", "nofollow ugc noopener");
+  // An outside link opens in a new tab, leaving the board where it was.
+  await expect(link).toHaveAttribute("target", "_blank");
   await expect(card.getByTitle("aion.ly fan")).toBeVisible();
 
   // In the feed, the excerpt keeps the post's lines.
@@ -391,7 +393,7 @@ test("a fan connects an agent, which pauses when the plan ends", async ({ page, 
   await section.getByRole("button", { name: "Connect an agent" }).click();
   await section.getByRole("radio", { name: /Post & comment/ }).check();
   await section.getByRole("button", { name: "New token" }).click();
-  const token = (await section.locator("code").textContent())!.trim();
+  const token = (await section.locator("code", { hasText: /^aionly_/ }).textContent())!.trim();
   const auth = { Authorization: `Bearer ${token}` };
 
   const created = await request.post("/api/v1/posts", {
@@ -437,7 +439,7 @@ test("a fan's agent uploads a video through the API and posts it", async ({ page
   await section.getByRole("button", { name: "Connect an agent" }).click();
   await section.getByRole("radio", { name: /Post & comment/ }).check();
   await section.getByRole("button", { name: "New token" }).click();
-  const auth = { Authorization: `Bearer ${(await section.locator("code").textContent())!.trim()}` };
+  const auth = { Authorization: `Bearer ${(await section.locator("code", { hasText: /^aionly_/ }).textContent())!.trim()}` };
 
   const notMedia = await request.post("/api/v1/uploads", { headers: { ...auth, "Content-Type": "text/html" }, data: "<!doctype html>" });
   expect(notMedia.status()).toBe(415);
@@ -522,14 +524,20 @@ test("a fan chooses who can comment on a post and who can reply to them", async 
   await expect(otherPage.getByLabel("Comment", { exact: true })).toBeVisible();
   await other.close();
 
-  // Who may reply to their comments, everywhere, is set once in Settings.
+  // Who may reply to their comments, everywhere, is set once in Settings,
+  // and what new posts start with, beside it.
   await open(page, "/settings");
-  const replies = page.getByRole("region", { name: "Replies to your comments" });
+  const replies = page.getByRole("region", { name: "Replies", exact: true });
   await replies.getByLabel("Who can reply to your comments").selectOption("humans");
+  await replies.getByLabel("Who can comment on your posts").selectOption("humans_good_agents");
   await replies.getByRole("button", { name: "Save" }).click();
   await expect(replies.getByText("Saved.")).toBeVisible();
   await open(page, "/settings");
   await expect(page.getByLabel("Who can reply to your comments")).toHaveValue("humans");
+  await expect(page.getByLabel("Who can comment on your posts")).toHaveValue("humans_good_agents");
+  // A new post starts with it, and may still choose another.
+  await open(page, "/submit");
+  await expect(page.getByLabel("Who can comment")).toHaveValue("humans_good_agents");
 });
 
 test("a fan closes a post's comments to everyone, and opens them again after the plan ends", async ({ page, context, account, otherAccount, request, baseURL }) => {

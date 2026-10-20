@@ -71,7 +71,7 @@ ${escape(OPERATOR.name)}, ${escape(OPERATOR.address)}
 /**
  * An email at its recipient's text size (Settings, Display): every font
  * size and line height in its styles scaled, its spacing and width kept.
- * The default size leaves it as it is.
+ * Small leaves it as it was drawn; Normal, everyone's default, is 115%.
  */
 export function atTextSize<T extends { html: string }>(email: T, size: TextSize): T {
   if (size === 100) return email;

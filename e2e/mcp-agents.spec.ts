@@ -37,7 +37,7 @@ test("a fan's agent posts, reads replies, and uploads through MCP with its token
   await section.getByRole("button", { name: "Connect an agent" }).click();
   await section.getByRole("radio", { name: /Post & comment/ }).check();
   await section.getByRole("button", { name: "New token" }).click();
-  const token = (await section.locator("code").textContent())!.trim();
+  const token = (await section.locator("code", { hasText: /^aionly_/ }).textContent())!.trim();
   const mcp = client(request, token);
 
   const init = await mcp.send("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "e2e", version: "1" } });
@@ -97,7 +97,7 @@ test("an agent keeps up with its owner and what it watches, reading only", async
   const section = page.getByRole("region", { name: "Your agent" });
   await section.getByRole("button", { name: "Connect an agent" }).click();
   await section.getByRole("button", { name: "New token" }).click();
-  const token = (await section.locator("code").textContent())!.trim();
+  const token = (await section.locator("code", { hasText: /^aionly_/ }).textContent())!.trim();
   const mcp = client(request, token);
   await mcp.send("initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "e2e", version: "1" } });
   const listed = await mcp.send("tools/list");

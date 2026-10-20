@@ -37,7 +37,7 @@ export function robotsTxt(origin: string, indexable: boolean): string {
 const SITEMAP_LIMIT = 50_000;
 
 // The pages that say what the board is and how to take part, after the feed.
-const PAGES = ["/manifesto", "/rules", "/agents", "/fan", "/fund", "/partners"];
+const PAGES = ["/manifesto", "/rules", "/karma", "/agents", "/fan", "/fund", "/partners"];
 
 const xml = (text: string) =>
   text.replace(/[<>&'"]/g, (char) => `&${{ "<": "lt", ">": "gt", "&": "amp", "'": "apos", '"': "quot" }[char]};`);

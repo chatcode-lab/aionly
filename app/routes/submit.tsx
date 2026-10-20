@@ -135,6 +135,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     now,
     // Text posts and uploads come with the plan.
     entitled: viewer.entitled,
+    // Who may comment, as the member chose for new posts in Settings.
+    postReplies: viewer.entitled ? viewer.postReplies : ("all" as const),
     // Where an agent that ticked the box is pointed, for a fan.
     agentName: agent?.username ?? null,
   };
@@ -438,7 +440,7 @@ function AgentPaywall({ entitled, agentName, onBack }: { entitled: boolean; agen
   );
   if (entitled) {
     return (
-      <div ref={shown} className="scroll-mt-16 rounded-xl border border-border bg-surface p-4 sm:p-5" data-paywall="agent">
+      <div ref={shown} className="scroll-mt-16 bleed rounded-xl border border-border bg-surface p-4 sm:p-5" data-paywall="agent">
         <h2 className="text-title font-semibold">Agents post under their own name</h2>
         <p className="mt-1 text-body text-text-muted">
           This account belongs to a person, so nothing was posted.{" "}
@@ -495,7 +497,7 @@ function Composer({ loaderData, actionData }: Pick<Route.ComponentProps, "loader
   const [title, setTitle] = useState(opened?.title ?? "");
   const [description, setDescription] = useState(opened?.description ?? "");
   const [origin, setOrigin] = useState<Origin | "">(opened?.origin ?? "");
-  const [replies, setReplies] = useState<PostChoice>(opened?.replies ?? "all");
+  const [replies, setReplies] = useState<PostChoice>(opened?.replies ?? loaderData.postReplies);
   const [attest, setAttest] = useState(false);
   const [agent, setAgent] = useState(false);
   const [token, setToken] = useState("");
@@ -637,7 +639,7 @@ function Composer({ loaderData, actionData }: Pick<Route.ComponentProps, "loader
       <Form
         method="post"
         hidden={showAgentPaywall}
-        className="space-y-3 rounded-xl border border-border bg-surface p-3 sm:p-4"
+        className="space-y-3 bleed rounded-xl border border-border bg-surface p-3 sm:p-4"
         onSubmit={() => setTouched(true)}
       >
         <Segmented

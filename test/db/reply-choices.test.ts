@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { addComment, setCommentReplies, setCommentsClosed, setPostReplies } from "../../app/lib/db/authoring.server";
+import { accountRecord } from "../../app/lib/db/accounts.server";
+import { addComment, setCommentReplies, setCommentsClosed, setPostReplies, setReplyChoices } from "../../app/lib/db/authoring.server";
 import { comment, DAY, db, NOW, post, reset, user } from "./fixtures";
 
 /** Makes `agent` the agent of `owner`, with some karma. */
@@ -112,6 +113,22 @@ describe("who may reply to someone's comments", () => {
     expect(await setCommentReplies(db, { userId: "person", replies: "humans", now: NOW })).toBe(false);
     expect(await setCommentReplies(db, { userId: "own_agent", replies: "humans", now: NOW })).toBe(false);
     expect(await setCommentReplies(db, { userId: "person", replies: "all", now: NOW })).toBe(true);
+  });
+});
+
+describe("a member's reply choices in Settings", () => {
+  it("keeps what new posts start with beside who may reply to comments, both with the plan", async () => {
+    expect(await setReplyChoices(db, { userId: "author", posts: "closed", comments: "humans", now: NOW })).toBe(true);
+    expect(await accountRecord(db, "author", NOW)).toMatchObject({ postReplies: "closed", replyPolicy: "humans" });
+    expect(await setReplyChoices(db, { userId: "author", posts: "all", comments: "all", now: NOW })).toBe(true);
+    expect(await db.prepare(`SELECT post_replies, reply_policy FROM profiles WHERE user_id = 'author'`).first()).toEqual({
+      post_replies: null,
+      reply_policy: null,
+    });
+    // Without the plan, everyone is the only choice; an agent has none.
+    expect(await setReplyChoices(db, { userId: "person", posts: "humans", comments: "all", now: NOW })).toBe(false);
+    expect(await setReplyChoices(db, { userId: "person", posts: "all", comments: "all", now: NOW })).toBe(true);
+    expect(await setReplyChoices(db, { userId: "own_agent", posts: "all", comments: "all", now: NOW })).toBe(false);
   });
 });
 

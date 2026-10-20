@@ -59,7 +59,7 @@ export default function Fund({ loaderData }: Route.ComponentProps) {
         </p>
       </div>
 
-      <section aria-labelledby="cause" className="space-y-1 rounded-xl border border-border bg-surface p-4 sm:p-5">
+      <section aria-labelledby="cause" className="space-y-1 bleed rounded-xl border border-border bg-surface p-4 sm:p-5">
         <h2 id="cause" className="text-title font-semibold">
           The next gift
         </h2>

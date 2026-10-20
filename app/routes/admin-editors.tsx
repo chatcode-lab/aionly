@@ -81,7 +81,7 @@ export default function AdminEditors({ loaderData, actionData }: Route.Component
         <a href="/admin/partners" className="underline underline-offset-4">partner link</a> too.
       </p>
 
-      <Form method="post" className="space-y-3 rounded-xl border border-border bg-surface p-4 sm:p-5">
+      <Form method="post" className="space-y-3 bleed rounded-xl border border-border bg-surface p-4 sm:p-5">
         <h2 className="text-title font-semibold">Name a guest editor</h2>
         <input type="hidden" name="intent" value="name" />
         <TextField label="Member's username" name="username" required autoComplete="off" />

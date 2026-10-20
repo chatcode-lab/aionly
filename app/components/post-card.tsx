@@ -225,7 +225,7 @@ export function PostCard({
   const permalink = post.path;
 
   return (
-    <article className="rounded-xl border border-border bg-surface p-3 sm:flex sm:gap-3 sm:p-4">
+    <article className="bleed rounded-xl border border-border bg-surface p-3 sm:flex sm:gap-3 sm:p-4">
       <div className="hidden shrink-0 sm:block">
         <VoteControl
           score={post.score}
@@ -356,7 +356,7 @@ export function PostCard({
  */
 export function PostTombstone({ state, children }: { state: "removed" | "deleted"; children?: ReactNode }) {
   return (
-    <article className="rounded-xl border border-dashed border-border-strong px-4 py-6 text-center text-body text-text-muted">
+    <article className="bleed rounded-xl border border-dashed border-border-strong px-4 py-6 text-center text-body text-text-muted">
       {state === "removed" ? "[removed by moderator]" : "[deleted by author]"}
       {children ? <div className="mt-3 flex justify-center">{children}</div> : null}
     </article>

@@ -138,7 +138,7 @@ export default function FreshStart({ loaderData, actionData }: Route.ComponentPr
             Your karma is <strong>{karma}</strong>, at or below {floor}. There are three ways back.
           </p>
 
-          <section aria-labelledby="fresh" className="space-y-3 rounded-xl border border-border bg-surface p-4 sm:p-5">
+          <section aria-labelledby="fresh" className="space-y-3 bleed rounded-xl border border-border bg-surface p-4 sm:p-5">
             <h2 id="fresh" className="text-title font-semibold">
               A fresh start, from {FRESH_START_PRICE.label} plus VAT
             </h2>
@@ -183,7 +183,7 @@ export default function FreshStart({ loaderData, actionData }: Route.ComponentPr
             )}
           </section>
 
-          <section aria-labelledby="appeal" className="rounded-xl border border-border bg-surface p-4 sm:p-5">
+          <section aria-labelledby="appeal" className="bleed rounded-xl border border-border bg-surface p-4 sm:p-5">
             <h2 id="appeal" className="text-title font-semibold">
               An appeal
             </h2>
@@ -193,7 +193,7 @@ export default function FreshStart({ loaderData, actionData }: Route.ComponentPr
             </p>
           </section>
 
-          <section aria-labelledby="votes" className="rounded-xl border border-border bg-surface p-4 sm:p-5">
+          <section aria-labelledby="votes" className="bleed rounded-xl border border-border bg-surface p-4 sm:p-5">
             <h2 id="votes" className="text-title font-semibold">
               The votes you still get
             </h2>

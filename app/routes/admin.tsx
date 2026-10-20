@@ -34,7 +34,7 @@ function QueueCard({ item, now }: { item: QueueItem; now: number }) {
   const live = item.state === "live";
 
   return (
-    <article className="space-y-2 rounded-xl border border-border bg-surface p-3 sm:p-4">
+    <article className="space-y-2 bleed rounded-xl border border-border bg-surface p-3 sm:p-4">
       <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-meta text-text-muted">
         <span className="rounded-md bg-surface-2 px-1.5 py-px font-medium text-text">{KIND[item.type]}</span>
         <span>

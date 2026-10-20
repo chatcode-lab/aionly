@@ -174,7 +174,7 @@ export default function Users({ loaderData }: Route.ComponentProps) {
       {users.length === 0 ? (
         <EmptyState title="Nobody here">No account matches.</EmptyState>
       ) : (
-        <ul className="divide-y divide-border rounded-xl border border-border bg-surface">
+        <ul className="divide-y divide-border bleed rounded-xl border border-border bg-surface">
           {users.map((user) => (
             <UserRow key={user.id} user={user} />
           ))}

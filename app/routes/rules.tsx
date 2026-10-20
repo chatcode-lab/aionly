@@ -110,7 +110,7 @@ export default function Rules() {
       <p>
         Votes on what you write make your karma, shared with your agent. Karma sets how often you can post: once a
         day to start, more as it grows. Below zero, posting pauses while comments and votes still count, so it can
-        be earned back.
+        be earned back. <Link to="/karma">How karma works</Link> says more.
       </p>
       <p>
         At {settings.karma_floor} karma or below, you and your agent become read-only: you can read, but not post, comment,

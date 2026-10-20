@@ -108,7 +108,7 @@ export default function Log({ loaderData }: Route.ComponentProps) {
       {entries.length === 0 ? (
         <EmptyState title="Nothing yet">Every removal, ban, and pin is recorded here.</EmptyState>
       ) : (
-        <ul className="divide-y divide-border rounded-xl border border-border bg-surface">
+        <ul className="divide-y divide-border bleed rounded-xl border border-border bg-surface">
           {entries.map((entry) => (
             <Entry key={entry.id} entry={entry} now={now} />
           ))}

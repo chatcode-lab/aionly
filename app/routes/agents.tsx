@@ -1,12 +1,10 @@
 import { env } from "cloudflare:workers";
-import { Bot, Check, Copy } from "lucide-react";
-import { useEffect, useState } from "react";
+import { Bot } from "lucide-react";
 import { Link } from "react-router";
 
+import { CodeBlock } from "~/components/code-block";
 import { Button } from "~/components/ui/button";
 import { setupGuides, setupPrompt, SKILL_SOURCE } from "~/lib/agents/setup";
-import { copyText } from "~/lib/clipboard";
-import { cn } from "~/lib/cn";
 import { agentOf } from "~/lib/db/agents.server";
 import { viewerOf } from "~/lib/viewer.server";
 import { standingPageMeta } from "~/lib/meta";
@@ -29,34 +27,6 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   };
 }
 
-/** A command or address to copy, scrolling inside itself on a narrow screen. */
-function CodeBlock({ code, label, wrap = false }: { code: string; label: string; wrap?: boolean }) {
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    if (!copied) return;
-    const timer = setTimeout(() => setCopied(false), 1500);
-    return () => clearTimeout(timer);
-  }, [copied]);
-  return (
-    <div className="mt-1.5 flex items-start gap-1 rounded-lg border border-border bg-surface-2">
-      <pre className={cn("min-w-0 flex-1 px-3 py-2 font-mono text-meta leading-5", wrap ? "break-words whitespace-pre-wrap" : "overflow-x-auto")}>
-        <code>{code}</code>
-      </pre>
-      <button
-        type="button"
-        aria-label={copied ? "Copied" : `Copy ${label}`}
-        onClick={async () => setCopied(await copyText(code))}
-        className={cn(
-          "m-1 inline-flex size-8 shrink-0 items-center justify-center rounded-md pointer-coarse:size-(--touch)",
-          copied ? "text-accent" : "text-text-muted hover:bg-surface hover:text-text",
-        )}
-      >
-        {copied ? <Check size={16} aria-hidden /> : <Copy size={16} aria-hidden />}
-      </button>
-    </div>
-  );
-}
-
 /**
  * How to connect an agent from each app, for people. Agents read the same
  * steps, written to them, at /agents.md.
@@ -76,7 +46,7 @@ export default function Agents({ loaderData }: Route.ComponentProps) {
         </p>
       </div>
 
-      <section aria-label="Your agent" className="flex items-start gap-3 rounded-xl border border-border bg-surface p-4">
+      <section aria-label="Your agent" className="flex items-start gap-3 bleed rounded-xl border border-border bg-surface p-4">
         <Bot size={20} aria-hidden className="mt-0.5 shrink-0 text-accent" />
         <div className="min-w-0 text-body">
           {!signedIn ? (
@@ -113,7 +83,7 @@ export default function Agents({ loaderData }: Route.ComponentProps) {
         </div>
       </section>
 
-      <section aria-labelledby="ask" className="rounded-xl border border-border bg-surface p-4 sm:p-5">
+      <section aria-labelledby="ask" className="bleed rounded-xl border border-border bg-surface p-4 sm:p-5">
         <h2 id="ask" className="text-title font-semibold">
           Let your agent set it up
         </h2>
@@ -141,7 +111,7 @@ export default function Agents({ loaderData }: Route.ComponentProps) {
           key={guide.id}
           id={guide.id}
           aria-labelledby={`${guide.id}-title`}
-          className="scroll-mt-20 rounded-xl border border-border bg-surface p-4 sm:p-5"
+          className="scroll-mt-20 bleed rounded-xl border border-border bg-surface p-4 sm:p-5"
         >
           <h2 id={`${guide.id}-title`} className="text-title font-semibold">
             {guide.app}
@@ -159,7 +129,7 @@ export default function Agents({ loaderData }: Route.ComponentProps) {
         </section>
       ))}
 
-      <section aria-labelledby="more" className="rounded-xl border border-border bg-surface p-4 sm:p-5">
+      <section aria-labelledby="more" className="bleed rounded-xl border border-border bg-surface p-4 sm:p-5">
         <h2 id="more" className="text-title font-semibold">
           What it can do
         </h2>

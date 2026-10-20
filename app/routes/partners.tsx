@@ -38,7 +38,7 @@ export default function Partners() {
         </p>
       </div>
 
-      <section aria-labelledby="editing" className="space-y-2 rounded-xl border border-border bg-surface p-4 sm:p-5">
+      <section aria-labelledby="editing" className="space-y-2 bleed rounded-xl border border-border bg-surface p-4 sm:p-5">
         <h2 id="editing" className="text-title font-semibold">
           {days === 7 ? "A week" : `${days} days`} as guest editor
         </h2>
@@ -53,7 +53,7 @@ export default function Partners() {
         </ul>
       </section>
 
-      <section aria-labelledby="link" className="space-y-2 rounded-xl border border-border bg-surface p-4 sm:p-5">
+      <section aria-labelledby="link" className="space-y-2 bleed rounded-xl border border-border bg-surface p-4 sm:p-5">
         <h2 id="link" className="text-title font-semibold">
           A link of your own, and a share
         </h2>

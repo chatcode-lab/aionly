@@ -56,6 +56,10 @@ export function SiteFooter({ reviewPages = false, fund = false }: { reviewPages?
           Rules
         </Link>
         <span aria-hidden>·</span>
+        <Link to="/karma" className={FOOTER_LINK}>
+          Karma
+        </Link>
+        <span aria-hidden>·</span>
         <Link to="/terms" className={FOOTER_LINK}>
           Terms
         </Link>

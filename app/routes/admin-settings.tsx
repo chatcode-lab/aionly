@@ -90,7 +90,7 @@ export default function AdminSettings({ loaderData, actionData }: Route.Componen
       {/* A failed save keeps what was typed; a new version of the values starts the form afresh. */}
       <Form method="post" className="space-y-4" key={JSON.stringify(loaderData.values)}>
         {GROUPS.map((group) => (
-          <section key={group} aria-labelledby={`group-${group}`} className="space-y-4 rounded-xl border border-border bg-surface p-4 sm:p-5">
+          <section key={group} aria-labelledby={`group-${group}`} className="space-y-4 bleed rounded-xl border border-border bg-surface p-4 sm:p-5">
             <h2 id={`group-${group}`} className="text-title font-semibold">
               {group}
             </h2>
@@ -116,7 +116,7 @@ export default function AdminSettings({ loaderData, actionData }: Route.Componen
 
       <Checks answer={actionData} busy={busy ? navigation.formData?.get("intent") : undefined} />
 
-      <section aria-labelledby="changes" className="rounded-xl border border-border bg-surface p-4 sm:p-5">
+      <section aria-labelledby="changes" className="bleed rounded-xl border border-border bg-surface p-4 sm:p-5">
         <h2 id="changes" className="mb-2 text-title font-semibold">
           Recent changes
         </h2>
@@ -147,7 +147,7 @@ export default function AdminSettings({ loaderData, actionData }: Route.Componen
  */
 function Checks({ answer, busy }: { answer: SaveAnswer | undefined; busy: FormDataEntryValue | null | undefined }) {
   return (
-    <section aria-labelledby="checks" className="space-y-3 rounded-xl border border-border bg-surface p-4 sm:p-5">
+    <section aria-labelledby="checks" className="space-y-3 bleed rounded-xl border border-border bg-surface p-4 sm:p-5">
       <h2 id="checks" className="text-title font-semibold">
         Checks
       </h2>

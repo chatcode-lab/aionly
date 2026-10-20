@@ -8,7 +8,7 @@ export function PostCardSkeleton() {
   return (
     <div
       aria-hidden
-      className="rounded-xl border border-border bg-surface p-3 sm:flex sm:gap-3 sm:p-4"
+      className="bleed rounded-xl border border-border bg-surface p-3 sm:flex sm:gap-3 sm:p-4"
     >
       <div className="hidden w-10 shrink-0 flex-col items-center gap-2 sm:flex">
         <div className="skeleton size-8" />

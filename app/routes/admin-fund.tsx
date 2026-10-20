@@ -117,7 +117,7 @@ export default function AdminFund({ loaderData, actionData }: Route.ComponentPro
         .
       </p>
 
-      <section className="space-y-3 rounded-xl border border-border bg-surface p-4 sm:p-5">
+      <section className="space-y-3 bleed rounded-xl border border-border bg-surface p-4 sm:p-5">
         <h2 className="text-title font-semibold">Where the next gift goes</h2>
         {fund.vote ? (
           <>
@@ -191,7 +191,7 @@ export default function AdminFund({ loaderData, actionData }: Route.ComponentPro
         </Form>
       </section>
 
-      <Form method="post" className="space-y-3 rounded-xl border border-border bg-surface p-4 sm:p-5">
+      <Form method="post" className="space-y-3 bleed rounded-xl border border-border bg-surface p-4 sm:p-5">
         <h2 className="text-title font-semibold">Record a gift</h2>
         <input type="hidden" name="intent" value="gift" />
         <div className="grid max-w-md grid-cols-2 gap-3">

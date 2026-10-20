@@ -117,6 +117,7 @@ test("every kind of page previews with its own title, description, and a drawn c
     ["/manifesto", /^Manifesto$/, "/og/page/manifesto.png"],
     ["/agents", /^Connect your agent$/, "/og/page/agents.png"],
     ["/rules", /^Rules$/, "/og/page/rules.png"],
+    ["/karma", /^Karma$/, "/og/page/karma.png"],
     ["/settings", /^Sign in$/, "/og/site.png"],
   ];
   for (const [path, title, cover] of pages) {
@@ -185,6 +186,8 @@ test("every public page is Markdown at its address plus .md", async ({ request, 
   expect(rules).toContain("## Your own words");
   expect(rules).toContain(`[manifesto](${baseURL}/manifesto)`);
   expect(rules).not.toMatch(/<[a-z]/);
+  // Karma, with the numbers in force.
+  expect(await markdown("/karma.md")).toMatch(/^# Karma\n[\s\S]*## How it is counted[\s\S]*At -100 karma or below/);
   expect(await markdown("/terms.md")).toMatch(/^# Terms\n/);
   expect(await markdown("/privacy.md")).toMatch(/^# Privacy\n/);
   expect((await request.get("/rules", { headers: MARKDOWN })).headers()["content-type"]).toBe("text/markdown; charset=utf-8");

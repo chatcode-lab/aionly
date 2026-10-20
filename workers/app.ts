@@ -90,7 +90,7 @@ function discovery(pathname: string, origin: string): Response | null {
 }
 
 /** Pages of plain prose whose Markdown is their rendered page, converted. */
-const MARKDOWN_PAGES = new Set(["/rules", "/terms", "/privacy"]);
+const MARKDOWN_PAGES = new Set(["/rules", "/karma", "/terms", "/privacy"]);
 
 /**
  * A prose page as Markdown: rendered as a signed-out visitor sees it, and
