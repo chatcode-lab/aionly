@@ -68,12 +68,9 @@ export async function deleteAccount(
   input: { userId: string; content: boolean; banned: boolean; identities: string[]; now: number },
 ): Promise<string[]> {
   const { userId, now } = input;
-  const agent = await db
-    .prepare(`SELECT user_id FROM profiles WHERE owner_id = ?1`)
-    .bind(userId)
-    .first<{ user_id: string }>();
-  const accounts = JSON.stringify(agent ? [userId, agent.user_id] : [userId]);
-  const inList = `(SELECT value FROM json_each(?1))`;
+  // The account and its agent, read by each write of the one batch, so an
+  // agent connected while this began goes with it too (review F105).
+  const inList = `(SELECT ?1 UNION ALL SELECT user_id FROM profiles WHERE owner_id = ?1)`;
   // Its files: its avatar, its drafts' files, and the files of its posts
   // deleted by their author, before or in this batch (the picture or
   // upload, a gallery's others, and a snapshot or poster). Read inside the
@@ -89,7 +86,7 @@ export async function deleteAccount(
   // Its files, queued for the bucket as their rows go; the keys come back.
   const queue = db
     .prepare(`INSERT INTO file_deletions (key, queued_at) SELECT key, ?2 FROM (${files}) WHERE key IS NOT NULL ON CONFLICT (key) DO NOTHING RETURNING key`)
-    .bind(accounts, now);
+    .bind(userId, now);
   const statements: D1PreparedStatement[] = input.identities.map((hash) =>
     db
       .prepare(
@@ -102,13 +99,13 @@ export async function deleteAccount(
     statements.push(
       db
         .prepare(`UPDATE posts SET deleted_at = ?2, title = '', description = '' WHERE author_id IN ${inList} AND ${LIVE}`)
-        .bind(accounts, now),
+        .bind(userId, now),
       db
         .prepare(
           `UPDATE comments SET deleted_at = ?2, body = ''
            WHERE author_id IN ${inList} AND deleted_at IS NULL AND removed_batch_id IS NULL`,
         )
-        .bind(accounts, now),
+        .bind(userId, now),
     );
   }
   statements.push(
@@ -117,29 +114,29 @@ export async function deleteAccount(
     // The deletion's hold on checkouts ends with the account, in the same write.
     db.prepare(`DELETE FROM checkout_claims WHERE user_id = ?1`).bind(userId),
     db.prepare(`DELETE FROM checkout_returns WHERE user_id = ?1`).bind(userId),
-    db.prepare(`UPDATE agent_tokens SET revoked_at = ?2 WHERE agent_id IN ${inList} AND revoked_at IS NULL`).bind(accounts, now),
+    db.prepare(`UPDATE agent_tokens SET revoked_at = ?2 WHERE agent_id IN ${inList} AND revoked_at IS NULL`).bind(userId, now),
     // Its files, queued, then their rows, and its deleted posts' hold on them.
     queue,
-    db.prepare(`DELETE FROM images WHERE key IN (${files})`).bind(accounts),
-    db.prepare(`DELETE FROM images WHERE kind = 'avatar' AND owner_id IN ${inList}`).bind(accounts),
-    db.prepare(`DELETE FROM images WHERE state = 'draft' AND owner_id IN ${inList}`).bind(accounts),
+    db.prepare(`DELETE FROM images WHERE key IN (${files})`).bind(userId),
+    db.prepare(`DELETE FROM images WHERE kind = 'avatar' AND owner_id IN ${inList}`).bind(userId),
+    db.prepare(`DELETE FROM images WHERE state = 'draft' AND owner_id IN ${inList}`).bind(userId),
     db
       .prepare(
         `UPDATE posts SET media_key = NULL, thumb_key = NULL, pictures = NULL
          WHERE author_id IN ${inList} AND deleted_at IS NOT NULL AND removed_batch_id IS NULL`,
       )
-      .bind(accounts),
+      .bind(userId),
     // The private copies of what it deleted.
-    db.prepare(`DELETE FROM deleted_texts WHERE author_id IN ${inList}`).bind(accounts),
-    db.prepare(`DELETE FROM drafts WHERE author_id IN ${inList}`).bind(accounts),
-    db.prepare(`DELETE FROM agent_feedback WHERE agent_id IN ${inList}`).bind(accounts),
+    db.prepare(`DELETE FROM deleted_texts WHERE author_id IN ${inList}`).bind(userId),
+    db.prepare(`DELETE FROM drafts WHERE author_id IN ${inList}`).bind(userId),
+    db.prepare(`DELETE FROM agent_feedback WHERE agent_id IN ${inList}`).bind(userId),
     db
       .prepare(
         `UPDATE profiles SET deleted_at = ?2, avatar_key = NULL, limits = NULL, digest = NULL,
            x_id = NULL, x_handle = NULL, x_photo_url = NULL
          WHERE user_id IN ${inList} AND deleted_at IS NULL`,
       )
-      .bind(accounts, now),
+      .bind(userId, now),
     // Sessions and sign-in accounts go with the user, by cascade.
     db.prepare(`DELETE FROM "user" WHERE "id" = ?1`).bind(userId),
     // Whoever invited this account no longer gains from it, and its

@@ -9,6 +9,7 @@ import {
   sweepDeletedIdentities,
 } from "../../app/lib/db/deletion.server";
 import { deleteComment, deletePost } from "../../app/lib/db/authoring.server";
+import { draftsOf, saveDraft } from "../../app/lib/db/drafts.server";
 import { comment, DAY, db, NOW, post, reset, user } from "./fixtures";
 
 const SECRET = "test-secret";
@@ -100,6 +101,43 @@ describe("account deletion", () => {
     expect(await agentForToken(db, issued.ok ? issued.token : "", NOW)).toBeNull();
     expect(await db.prepare(`SELECT deleted_at FROM profiles WHERE user_id = ?1`).bind(agentId).first()).toEqual({ deleted_at: NOW });
     expect(await db.prepare(`SELECT deleted_at FROM posts WHERE id = 'by_agent'`).first()).toEqual({ deleted_at: NOW });
+  });
+
+  it("takes an agent connected while it began, with all it did (review F105)", async () => {
+    let agentId = "";
+    let token = "";
+    // The agent, its token, a draft, and a post, all written just before the deletion's one write.
+    const racing = new Proxy(db, {
+      get(target, property) {
+        if (property === "batch") {
+          return async (statements: D1PreparedStatement[]) => {
+            const made = await createAgent(db, { ownerId: "leaver", ownerName: "quiet_otter", now: NOW });
+            if (!made.ok) throw new Error(made.reason);
+            agentId = made.agent.id;
+            const issued = await createToken(db, { agentId, label: null, permission: "read_write", now: NOW });
+            token = issued.ok ? issued.token : "";
+            const draft = { kind: "text", url: null, origin: null, title: "Private", description: "A private draft.", replies: null, mediaKey: null, width: null, height: null, duration: null, posterKey: null, pictures: null } as const;
+            expect((await saveDraft(db, { authorId: agentId, fields: draft, now: NOW })).ok).toBe(true);
+            await post("by_agent", { author: agentId });
+            return target.batch(statements);
+          };
+        }
+        const value = Reflect.get(target, property) as unknown;
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    await deleteAccount(racing, { userId: "leaver", content: true, banned: false, identities: [], now: NOW });
+    expect(await db.prepare(`SELECT deleted_at FROM profiles WHERE user_id = ?1`).bind(agentId).first()).toEqual({ deleted_at: NOW });
+    expect(await draftsOf(db, agentId)).toEqual([]);
+    expect(await db.prepare(`SELECT deleted_at, title FROM posts WHERE id = 'by_agent'`).first()).toEqual({ deleted_at: NOW, title: "" });
+    expect(await db.prepare(`SELECT COUNT(*) AS n FROM agent_tokens WHERE agent_id = ?1 AND revoked_at IS NULL`).bind(agentId).first()).toEqual({ n: 0 });
+    expect(await agentForToken(db, token, NOW)).toBeNull();
+  });
+
+  it("leaves no way to connect an agent once done (review F105)", async () => {
+    await leave(false);
+    expect(await createAgent(db, { ownerId: "leaver", ownerName: "quiet_otter", now: NOW })).toEqual({ ok: false, reason: "not_allowed" });
+    expect(await db.prepare(`SELECT COUNT(*) AS n FROM profiles WHERE owner_id = 'leaver'`).first()).toEqual({ n: 0 });
   });
 });
 

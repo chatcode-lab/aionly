@@ -37,9 +37,15 @@ const LINK = /^\[([^\]\n]{0,500})\]\(([^()\s]{1,2048})(?:[ \t]+"[^"\n]{0,200}")?
 const ESCAPABLE = /[\\`*_[\]()>#+\-.!~<@]/;
 const MENTION_TOKEN = /^<@([A-Za-z0-9_-]{1,32})>/;
 const BARE_URL = /^https?:\/\/[^\s<>"'`]+/;
-/** An email address, at most as long as one may be; its domain ends in letters, so a full stop after it stays out. */
-const EMAIL = /^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.[A-Za-z]{2,24}/;
-const EMAIL_CHAR = /[A-Za-z0-9._%+-]/;
+/**
+ * An email address, at most as long as one may be, an apostrophe within its
+ * name included (O'Connor's); its domain ends in letters, so a full stop
+ * after it stays out.
+ */
+const EMAIL = /^[A-Za-z0-9_%+-][A-Za-z0-9._%+'-]{0,63}@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.[A-Za-z]{2,24}/;
+const EMAIL_START = /[A-Za-z0-9_%+-]/;
+/** What an address can hold, its name's punctuation (RFC 5322's atext) and letters of any script. */
+const ADDRESS_CHAR = /[\p{L}\p{N}!#$%&'*+/=?^_`{|}~.@-]/u;
 
 /** The address a `mailto:` link writes to, when it is one address and nothing more. */
 export function mailtoAddress(href: string): string | null {
@@ -47,6 +53,27 @@ export function mailtoAddress(href: string): string | null {
   return address && EMAIL.exec(address)?.[0] === address ? address : null;
 }
 const WORD = /[\p{L}\p{N}]/u;
+
+/*
+ * An address is taken whole or not at all, so a link never names part of a
+ * longer one, a different mailbox (review F104): nothing an address's name
+ * can hold just before it, where an apostrophe is a quote only when not
+ * within a word; and nothing its domain can hold just after it, where a
+ * full stop ends the sentence.
+ */
+const holdsAddress = (char: string | undefined) => char !== undefined && ADDRESS_CHAR.test(char);
+const QUOTE_MARK = /['\u2019]/;
+const DOMAIN_GOES_ON = /[\p{L}\p{N}_@-]/u;
+
+function opensAddress(source: string, index: number): boolean {
+  const before = source[index - 1];
+  return before !== undefined && QUOTE_MARK.test(before) ? !holdsAddress(source[index - 2]) : !holdsAddress(before);
+}
+
+function closesAddress(source: string, end: number): boolean {
+  const after = source[end] === "." ? source[end + 1] : source[end];
+  return after === undefined || !DOMAIN_GOES_ON.test(after);
+}
 
 function isBlank(line: string): boolean {
   return line.trim() === "";
@@ -207,10 +234,10 @@ export function parseInline(source: string, nesting = 0): Inline[] {
       }
     }
 
-    // An email address, from where one could begin.
-    if (EMAIL_CHAR.test(char) && (index === 0 || !EMAIL_CHAR.test(source[index - 1]!))) {
+    // An email address, from where one could begin, and only a whole one.
+    if (EMAIL_START.test(char) && opensAddress(source, index)) {
       const email = EMAIL.exec(source.slice(index, index + 320));
-      if (email && !email[0].startsWith(".")) {
+      if (email && closesAddress(source, index + email[0].length)) {
         flush();
         out.push({ type: "email", address: email[0] });
         index += email[0].length;

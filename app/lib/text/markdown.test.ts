@@ -120,6 +120,18 @@ describe("email addresses", () => {
     expect(parseInline("ask @someone or name@host")).toEqual([{ type: "text", text: "ask @someone or name@host" }]);
   });
 
+  it("are taken whole or not at all, never the end of a longer one (review F104)", () => {
+    const address = (text: string) => parseInline(text).flatMap((node) => (node.type === "email" ? [node.address] : []));
+    expect(address("Mail o'connor@example.org today")).toEqual(["o'connor@example.org"]);
+    expect(address("Mail 'jane@example.org' or \u2018jane@example.org\u2019.")).toEqual(["jane@example.org", "jane@example.org"]);
+    expect(address("jane@example.org's inbox, (jane@example.org), <jane@example.org>")).toEqual(Array(3).fill("jane@example.org"));
+    // Valid, but beyond what is linked: left as written.
+    for (const text of ["team!alerts@example.org", "a&b@example.org", "O\u2019Connor@example.org", "andr\u00e9alice@example.org", "x=jane@example.org", "jane@example.org@else.org", "jane@example.orgx\u00e9", "jane@example.org.x"]) {
+      expect(parseInline(text), text).toEqual([{ type: "text", text }]);
+    }
+    expect(mailtoAddress("mailto:o'connor@example.org")).toBe("o'connor@example.org");
+  });
+
   it("read as themselves in plain text, and a mailto link names one address alone", () => {
     expect(plainText("Mail jane@example.org")).toBe("Mail jane@example.org");
     expect(mailtoAddress("mailto:jane@example.org")).toBe("jane@example.org");

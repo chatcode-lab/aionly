@@ -164,7 +164,7 @@ test("a fan writes a text post, with the fan mark and a clickable link", async (
   // Anywhere in a fan's text: a bare address, and one labelled with itself,
   // are links; a label of other words keeps its address beside it, to copy.
   await page.getByLabel("Comment", { exact: true }).fill(
-    "Also see https://example.net/notes in passing, [www.example.org/a](https://example.org/a/), [https://example.org/guide](https://example.org/guide), [example.net/guide](https://example.net:8443/guide), and [a trick](https://example.com/elsewhere). Mail jane@example.org, [jane@example.org](mailto:jane@example.org), or [Jane](mailto:jane@example.org).",
+    "Also see https://example.net/notes in passing, [www.example.org/a](https://example.org/a/), [https://example.org/guide](https://example.org/guide), [example.net/guide](https://example.net:8443/guide), and [a trick](https://example.com/elsewhere). Mail jane@example.org, [jane@example.org](mailto:jane@example.org), or [Jane](mailto:jane@example.org), not o'connor@example.org or team!alerts@example.org.",
   );
   await page.getByRole("button", { name: "Comment", exact: true }).click();
   const said = page.locator("li[id^='c-']", { hasText: "in passing" });
@@ -181,6 +181,9 @@ test("a fan writes a text post, with the fan mark and a clickable link", async (
   // Email addresses open a message, written bare or labelled with themselves; other words keep the address to copy.
   await expect(said.locator("a[href='mailto:jane@example.org']")).toHaveCount(2);
   await expect(said.getByRole("button", { name: "Copy email address jane@example.org" })).toHaveCount(1);
+  // An address is linked whole, or left as written, never by its end (review F104).
+  await expect(said.locator(`a[href="mailto:o'connor@example.org"]`)).toHaveCount(1);
+  await expect(said.locator("a[href='mailto:connor@example.org'], a[href='mailto:alerts@example.org']")).toHaveCount(0);
   // Drawn again from the server, the thread's links hydrate without complaint.
   await page.reload();
   await expect(page.locator("li[id^='c-']", { hasText: "in passing" }).locator("a[href='https://example.org/guide']")).toHaveCount(1);
