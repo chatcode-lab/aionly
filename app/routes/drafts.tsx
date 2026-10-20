@@ -22,8 +22,8 @@ import {
   feedbackOf,
   publishDraft,
   type PublishDraftResult,
+  previewDraft,
   removeAgentDraft,
-  saveDraftPreview,
 } from "~/lib/db/drafts.server";
 import { deleteReleasedFiles } from "~/lib/db/draft-files.server";
 import { mentionHosts, mentionNames } from "~/lib/db/mentions.server";
@@ -36,7 +36,6 @@ import { privatePageMeta } from "~/lib/meta";
 import { ROW_ID } from "~/lib/security/body";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import type { PostMedia } from "~/lib/public-types";
-import { checkLink } from "~/lib/submit/check.server";
 import { postPath } from "~/lib/slug";
 import { mentionIds } from "~/lib/text/mentions";
 import { requireAccount } from "~/lib/viewer.server";
@@ -63,8 +62,8 @@ interface DraftItem {
   pictures: string[] | null;
   /** What the post will show above its description, as the feed shows it; a link's page preview loads on asking. */
   media: PostMedia;
-  /** Whether a link's preview was made, and the post that has its link already, if one does. */
-  previewed: boolean;
+  /** A link's preview: none yet, made, or made without its page's title or picture; and the post that has its link already, if one does. */
+  preview: "none" | "made" | "empty";
   duplicate: { id: string; live: boolean } | null;
   updatedAt: number;
   declinedAt: number | null;
@@ -130,7 +129,7 @@ function itemOf(draft: Draft): DraftItem {
     file: draft.media ? { type: draft.media.type, src: imageAddress(draft.media.key) } : null,
     pictures: draft.pictures ? draft.pictures.map((picture) => imageAddress(picture.key)) : null,
     media: mediaOf(draft),
-    previewed: preview !== null,
+    preview: !preview ? "none" : preview.provider || preview.pageTitle || preview.thumbKey ? "made" : "empty",
     duplicate: preview?.duplicate ? { id: preview.duplicate.id, live: preview.duplicate.state === "live" } : null,
     updatedAt: draft.updatedAt,
     declinedAt: draft.declinedAt,
@@ -221,24 +220,17 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
   }
 
   if (intent === "preview") {
-    // A link draft's preview, made as Submit makes it, for its author, and kept with it.
+    // A link draft's preview, for its author or its agent's owner, kept with it.
     const found = await draftFor(env.DB, id, viewer.id);
     if (!found || found.draft.postId) return { draft: id, error: "This draft is gone." };
-    const { draft } = found;
-    if (draft.kind !== "link" || !draft.url) return { draft: id, error: "This draft has no link to preview." };
-    const checked = await checkLink({
-      raw: draft.url,
-      userId: draft.authorId,
-      ownHosts: [new URL(request.url).hostname],
-      db: env.DB,
+    const previewed = await previewDraft(env.DB, {
+      draft: found.draft,
       bucket: env.IMAGES,
+      ownHosts: [new URL(request.url).hostname],
       secret: env.BETTER_AUTH_SECRET,
       now,
     });
-    if (!checked.ok) return { draft: id, error: checked.error };
-    const saved = await saveDraftPreview(env.DB, { id, authorId: draft.authorId, url: draft.url, link: checked.link, duplicate: checked.duplicate });
-    await deleteReleasedFiles(env.DB, env.IMAGES, saved.freed);
-    return saved.ok ? { draft: id } : { draft: id, error: "This draft changed meanwhile. Preview it again." };
+    return previewed.ok ? { draft: id } : { draft: id, error: previewed.error };
   }
 
   const revision = Number(form.get("revision"));
@@ -306,9 +298,9 @@ function DraftSummary({ draft, now, full }: { draft: DraftItem; now: number; ful
 
 /**
  * A draft's picture, gallery, player, or link card, as its post will show
- * them. A link's page title and picture are fetched only when asked for,
- * with the same check Submit runs, as it reads the page, and kept with the
- * draft until its link changes.
+ * them. A link's page title and picture are fetched when the draft is saved
+ * with it, with the same check Submit runs, and kept with the draft until
+ * its link changes; Preview asks again, for a draft without them.
  */
 function DraftMedia({ draft }: { draft: DraftItem }) {
   const fetcher = useFetcher<ActionResult>();
@@ -348,18 +340,20 @@ function DraftMedia({ draft }: { draft: DraftItem }) {
           )}
         </p>
       ) : null}
-      {draft.kind === "link" && draft.url && !draft.previewed ? (
+      {draft.kind === "link" && draft.url && draft.preview !== "made" ? (
         <fetcher.Form method="post" className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <input type="hidden" name="draft" value={draft.id} />
           <Button type="submit" variant="ghost" className="-ml-2" name="intent" value="preview" disabled={loading}>
-            {loading ? "Loading the preview…" : "Preview"}
+            {loading ? "Loading the preview…" : draft.preview === "empty" ? "Preview again" : "Preview"}
           </Button>
           {error ? (
             <p role="alert" className="text-meta text-danger">
               {error}
             </p>
           ) : (
-            <p className="text-meta text-text-muted">Its page's title and picture, as the post will show them.</p>
+            <p className="text-meta text-text-muted">
+              {draft.preview === "empty" ? "Its page's title and picture did not load." : "Its page's title and picture, as the post will show them."}
+            </p>
           )}
         </fetcher.Form>
       ) : null}

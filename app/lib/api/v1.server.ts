@@ -1,5 +1,5 @@
 import { GALLERY_MAX, type Picture, readGallery, UPLOAD_SET } from "~/lib/gallery";
-import { env } from "cloudflare:workers";
+import { env, waitUntil } from "cloudflare:workers";
 
 import docs from "../../../docs/api.md?raw";
 
@@ -17,7 +17,9 @@ import {
   feedbackOf,
   publishDraft,
   type PublishDraftResult,
+  previewDraft,
   saveDraft,
+  wantsPreview,
   type SaveResult,
 } from "~/lib/db/drafts.server";
 import { deleteReleasedFiles } from "~/lib/db/draft-files.server";
@@ -1200,6 +1202,17 @@ async function writeDraft(request: Request, agent: AccountRecord, draftId: strin
   });
   if (!result.ok) throw refusedSave(result);
   await deleteReleasedFiles(env.DB, env.IMAGES, result.freed);
+  // A new link's preview is made meanwhile, for the owner's Drafts page.
+  if (wantsPreview(result.draft)) {
+    const work = previewDraft(env.DB, {
+      draft: result.draft,
+      bucket: env.IMAGES,
+      ownHosts: [new URL(request.url).hostname],
+      secret: env.BETTER_AUTH_SECRET,
+      now: now(),
+    });
+    waitUntil(work.catch((error) => console.error("draft preview", error)));
+  }
   return json(draftJson(result.draft, new URL(request.url).origin), draftId ? 200 : 201);
 }
 

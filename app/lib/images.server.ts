@@ -86,6 +86,28 @@ async function fetchImage(
   }
 }
 
+/** A preview picture in the bucket, its row still to be written by whoever keeps it. */
+export interface StoredSnapshot {
+  key: string;
+  type: string;
+  bytes: number;
+}
+
+/**
+ * Fetches a preview picture and puts it in the bucket under a new key. Null
+ * when it could not be fetched or is not an allowed image.
+ */
+export async function storeSnapshot(
+  bucket: R2Bucket,
+  input: { url: URL; signal: AbortSignal; ownHosts: readonly string[] },
+): Promise<StoredSnapshot | null> {
+  const image = await fetchImage(input.url, input.signal, input.ownHosts);
+  if (!image) return null;
+  const key = imageKey(image.type);
+  await bucket.put(key, image.bytes, storeOptions(image.type, "post"));
+  return { key, type: image.type, bytes: image.bytes.byteLength };
+}
+
 /**
  * Fetches a preview picture and keeps it as the account's one pending image,
  * replacing any earlier one. Returns its key, or null when the picture could
@@ -96,12 +118,9 @@ export async function snapshotImage(
   bucket: R2Bucket,
   input: { ownerId: string; url: URL; signal: AbortSignal; ownHosts: readonly string[]; now: number },
 ): Promise<string | null> {
-  const image = await fetchImage(input.url, input.signal, input.ownHosts);
-  if (!image) return null;
-  const { bytes, type } = image;
-
-  const key = imageKey(type);
-  await bucket.put(key, bytes, storeOptions(type, "post"));
+  const stored = await storeSnapshot(bucket, input);
+  if (!stored) return null;
+  const { key, type, bytes } = stored;
   // The rows this replaces come back from the same batch, so their files
   // are deleted even when two checks overlap.
   let displaced: string[];
@@ -115,7 +134,7 @@ export async function snapshotImage(
           `INSERT INTO images (key, owner_id, kind, state, content_type, bytes, created_at)
            VALUES (?1, ?2, 'post', 'pending', ?3, ?4, ?5)`,
         )
-        .bind(key, input.ownerId, type, bytes.byteLength, input.now),
+        .bind(key, input.ownerId, type, bytes, input.now),
     ]);
     displaced = (deleted!.results as Array<{ key: string }>).map((row) => row.key);
   } catch (error) {

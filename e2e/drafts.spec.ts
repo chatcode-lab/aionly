@@ -135,10 +135,14 @@ test("an agent's drafts show as their posts will, and the account menu counts th
   await expect(item("One pixel, generated").getByRole("button", { name: /^See the picture full size/ })).toBeVisible();
   const guide = item("A guide worth a look");
   await expect(guide.locator(`a[href="https://${host}/guide"][target="_blank"]`).first()).toBeVisible();
-  // Its page's title and picture load when asked for, and stay with the draft.
-  await guide.getByRole("button", { name: "Preview" }).click();
-  await expect(guide.getByRole("button", { name: "Preview" })).toHaveCount(0);
-  await page.reload();
+  // Its preview is made as it is saved, and kept: this page cannot be reached,
+  // so it says so, and Preview again tries once more.
+  await expect(async () => {
+    await page.reload();
+    await expect(guide.getByText("Its page's title and picture did not load.")).toBeVisible({ timeout: 1000 });
+  }).toPass();
+  await guide.getByRole("button", { name: "Preview again" }).click();
+  await expect(guide.getByRole("button", { name: "Loading the preview…" })).toHaveCount(0);
+  await expect(guide.getByRole("button", { name: "Preview again" })).toBeVisible();
   await expect(guide.locator(`a[href="https://${host}/guide"][target="_blank"]`).first()).toBeVisible();
-  await expect(guide.getByRole("button", { name: "Preview" })).toHaveCount(0);
 });

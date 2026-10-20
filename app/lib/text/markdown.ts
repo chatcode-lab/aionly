@@ -44,8 +44,15 @@ const BARE_URL = /^https?:\/\/[^\s<>"'`]+/;
  */
 const EMAIL = /^[A-Za-z0-9_%+-][A-Za-z0-9._%+'-]{0,63}@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*\.[A-Za-z]{2,24}/;
 const EMAIL_START = /[A-Za-z0-9_%+-]/;
-/** What an address can hold, its name's punctuation (RFC 5322's atext) and letters of any script. */
-const ADDRESS_CHAR = /[\p{L}\p{N}!#$%&'*+/=?^_`{|}~.@-]/u;
+/**
+ * What an address can hold: its name's ASCII punctuation (RFC 5322's atext),
+ * and, as an internationalized one may (RFC 6531), anything outside ASCII
+ * but punctuation and spaces: letters of any script, combining marks,
+ * numbers, symbols, and invisible joiners.
+ */
+const ADDRESS_CHAR = /[A-Za-z0-9!#$%&'*+/=?^_`{|}~.@-]|[^\0-\x7f\p{P}\p{Z}]/u;
+/** What can carry a domain on: the same outside ASCII, as a domain's name may hold it. */
+const DOMAIN_CHAR = /[A-Za-z0-9_@-]|[^\0-\x7f\p{P}\p{Z}]/u;
 
 /** The address a `mailto:` link writes to, when it is one address and nothing more. */
 export function mailtoAddress(href: string): string | null {
@@ -57,22 +64,39 @@ const WORD = /[\p{L}\p{N}]/u;
 /*
  * An address is taken whole or not at all, so a link never names part of a
  * longer one, a different mailbox (review F104): nothing an address's name
- * can hold just before it, where an apostrophe is a quote only when not
+ * can hold just before it, where a quotation mark opens it only when not
  * within a word; and nothing its domain can hold just after it, where a
- * full stop ends the sentence.
+ * full stop ends the sentence. Read by whole characters, a letter beyond
+ * the first 65,536 included.
  */
-const holdsAddress = (char: string | undefined) => char !== undefined && ADDRESS_CHAR.test(char);
-const QUOTE_MARK = /['\u2019]/;
-const DOMAIN_GOES_ON = /[\p{L}\p{N}_@-]/u;
+const QUOTE_MARK = /['\p{Pi}\p{Pf}]/u;
+
+/** The whole character that ends just before `index`, if any. */
+function charBefore(source: string, index: number): string | undefined {
+  if (index <= 0) return undefined;
+  const pair = index >= 2 ? source.slice(index - 2, index) : "";
+  return pair.length === 2 && pair.codePointAt(0)! > 0xffff ? pair : source[index - 1];
+}
+
+/** The whole character that starts at `index`, if any. */
+function charAt(source: string, index: number): string | undefined {
+  const code = source.codePointAt(index);
+  return code === undefined ? undefined : String.fromCodePoint(code);
+}
 
 function opensAddress(source: string, index: number): boolean {
-  const before = source[index - 1];
-  return before !== undefined && QUOTE_MARK.test(before) ? !holdsAddress(source[index - 2]) : !holdsAddress(before);
+  const before = charBefore(source, index);
+  if (before === undefined) return true;
+  if (QUOTE_MARK.test(before)) {
+    const outside = charBefore(source, index - before.length);
+    return outside === undefined || !ADDRESS_CHAR.test(outside);
+  }
+  return !ADDRESS_CHAR.test(before);
 }
 
 function closesAddress(source: string, end: number): boolean {
-  const after = source[end] === "." ? source[end + 1] : source[end];
-  return after === undefined || !DOMAIN_GOES_ON.test(after);
+  const after = charAt(source, source[end] === "." ? end + 1 : end);
+  return after === undefined || !DOMAIN_CHAR.test(after);
 }
 
 function isBlank(line: string): boolean {

@@ -132,6 +132,18 @@ describe("email addresses", () => {
     expect(mailtoAddress("mailto:o'connor@example.org")).toBe("o'connor@example.org");
   });
 
+  it("are read by whole characters, so an internationalized address is never cut to its ASCII end (review F104)", () => {
+    // A letter beyond the first 65,536, a decomposed accent, a joiner, a symbol, letters of another script.
+    for (const text of ["\u{1d49c}alice@example.org", "andre\u0301alice@example.org", "a\u200dalice@example.org", "\u{1f600}alice@example.org", "\u90ae\u4ef6alice@example.org", "jane@example.org\u0301", "jane@example.org\u{1d49c}", "jane@example.org.\u00e9"]) {
+      expect(parseInline(text), text).toEqual([{ type: "text", text }]);
+    }
+    // Punctuation and spaces of any script still set an address apart.
+    const address = (text: string) => parseInline(text).flatMap((node) => (node.type === "email" ? [node.address] : []));
+    for (const text of ["\u201cjane@example.org\u201d", "\u00abjane@example.org\u00bb", "\u8054\u7cfb\uff1ajane@example.org\u3002", "Contact\u2014jane@example.org", "\u00a0jane@example.org"]) {
+      expect(address(text), text).toEqual(["jane@example.org"]);
+    }
+  });
+
   it("read as themselves in plain text, and a mailto link names one address alone", () => {
     expect(plainText("Mail jane@example.org")).toBe("Mail jane@example.org");
     expect(mailtoAddress("mailto:jane@example.org")).toBe("jane@example.org");

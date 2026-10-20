@@ -1,5 +1,5 @@
 import { findDuplicate, type Existing } from "../db/submit.server";
-import { snapshotImage } from "../images.server";
+import { snapshotImage, type StoredSnapshot, storeSnapshot } from "../images.server";
 import { FetchRefused, fetchPublic } from "../links/fetch.server";
 import { linkMeta } from "../links/metadata.server";
 import { imageAddress } from "../media.server";
@@ -37,7 +37,14 @@ export interface CheckedLink {
 
 export type CheckResult =
   | { ok: false; error: string }
-  | { ok: true; link: CheckedLink; duplicate: Existing | null; receipt: string | null };
+  | {
+      ok: true;
+      link: CheckedLink;
+      duplicate: Existing | null;
+      receipt: string | null;
+      /** With `snapshot: "draft"`: the picture, in the bucket, for the draft to keep. */
+      snapshot?: StoredSnapshot | null;
+    };
 
 /** Follows a provider's short link to the address it stands for. */
 async function expandShortLink(url: URL, signal: AbortSignal, ownHosts: readonly string[]) {
@@ -73,6 +80,16 @@ export async function checkLink(input: {
    * for a poster with no allowance left, who still learns of a repeat.
    */
   fetchPreview?: boolean;
+  /**
+   * "draft" to keep the picture for a draft, which writes its row itself,
+   * instead of as the account's one pending image; no receipt then.
+   */
+  snapshot?: "pending" | "draft";
+  /**
+   * A draft's own preview of this address, to publish as it was seen instead
+   * of reading the page again: its title, and its picture, one of its files.
+   */
+  reuse?: { pageTitle: string | null; thumbKey: string };
 }): Promise<CheckResult> {
   const parsed = parseSubmittedUrl(input.raw, { ownHosts: input.ownHosts });
   if (!parsed.ok) return { ok: false, error: REJECTION[parsed.reason] };
@@ -115,6 +132,11 @@ export async function checkLink(input: {
   };
   if (duplicate) return { ok: true, link: base, duplicate, receipt: null };
   if (input.fetchPreview === false) return { ok: true, link: base, duplicate: null, receipt: null };
+  if (input.reuse) {
+    const pageTitle = resolved.kind === "page" ? input.reuse.pageTitle : null;
+    const link: CheckedLink = { ...base, pageTitle, thumbUrl: imageAddress(input.reuse.thumbKey), thumbKey: input.reuse.thumbKey };
+    return { ok: true, link, duplicate: null, receipt: await receiptFor(link, resolved.canonicalKey, input) };
+  }
 
   const meta = await linkMeta(resolved, new URL(address), {
     signal: AbortSignal.timeout(5000),
@@ -136,15 +158,18 @@ export async function checkLink(input: {
       address = cleanPageUrl(meta.canonical);
     }
   }
-  const thumbKey = meta.image
-    ? await snapshotImage(input.db, input.bucket, {
-        ownerId: input.userId,
-        url: meta.image,
-        signal: AbortSignal.timeout(5000),
-        ownHosts: input.ownHosts,
-        now: input.now,
-      })
-    : null;
+  // Submit's check keeps the picture as the account's one pending image; a draft keeps its own.
+  let snapshot: StoredSnapshot | null = null;
+  let thumbKey: string | null = null;
+  if (meta.image) {
+    const picture = { url: meta.image, signal: AbortSignal.timeout(5000), ownHosts: input.ownHosts };
+    if (input.snapshot === "draft") {
+      snapshot = await storeSnapshot(input.bucket, picture);
+      thumbKey = snapshot?.key ?? null;
+    } else {
+      thumbKey = await snapshotImage(input.db, input.bucket, { ...picture, ownerId: input.userId, now: input.now });
+    }
+  }
 
   const checked: CheckedLink = {
     ...base,
@@ -156,18 +181,23 @@ export async function checkLink(input: {
     thumbKey,
     suggestedTitle: meta.title ?? null,
   };
-  const receipt = await signReceipt(
+  if (input.snapshot === "draft") return { ok: true, link: checked, duplicate: null, receipt: null, snapshot };
+  return { ok: true, link: checked, duplicate: null, receipt: await receiptFor(checked, resolved.canonicalKey, input) };
+}
+
+/** The signed receipt that lets the checked link be published, for a while. */
+function receiptFor(link: CheckedLink, canonicalKey: string, input: { userId: string; secret: string; now: number }): Promise<string> {
+  return signReceipt(
     {
       userId: input.userId,
-      url: checked.url,
-      canonicalKey: resolved.canonicalKey,
-      provider: checked.provider,
-      aspect: checked.aspect,
-      pageTitle: checked.pageTitle,
-      thumbKey,
+      url: link.url,
+      canonicalKey,
+      provider: link.provider,
+      aspect: link.aspect,
+      pageTitle: link.pageTitle,
+      thumbKey: link.thumbKey,
       expiresAt: input.now + RECEIPT_SECONDS,
     },
     input.secret,
   );
-  return { ok: true, link: checked, duplicate: null, receipt };
 }

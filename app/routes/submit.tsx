@@ -1,5 +1,5 @@
 import { GALLERY_MAX, readGallery } from "~/lib/gallery";
-import { env } from "cloudflare:workers";
+import { env, waitUntil } from "cloudflare:workers";
 import { useEffect, useRef, useState } from "react";
 import { Form, Link, redirect, useNavigation } from "react-router";
 
@@ -13,7 +13,7 @@ import { Segmented } from "~/components/ui/segmented";
 import { Notice } from "~/components/ui/states";
 import { type Uploaded, UploadPicker } from "~/components/upload-picker";
 import { agentOf } from "~/lib/db/agents.server";
-import { draftById, draftFor, saveDraft as saveServerDraft, type SaveResult } from "~/lib/db/drafts.server";
+import { draftById, draftFor, previewDraft, saveDraft as saveServerDraft, type SaveResult, wantsPreview } from "~/lib/db/drafts.server";
 import { deleteReleasedFiles } from "~/lib/db/draft-files.server";
 import { DRAFT_BYTES, DRAFT_LIMIT } from "~/lib/draft-rules";
 import { linkMentions, mentionHosts } from "~/lib/db/mentions.server";
@@ -233,6 +233,17 @@ async function saveAction(request: Request, context: Route.ActionArgs["context"]
   });
   if (!result.ok) return saveRefusal(result);
   await deleteReleasedFiles(env.DB, env.IMAGES, result.freed);
+  // A new link's preview is made meanwhile, for the Drafts page to show.
+  if (wantsPreview(result.draft)) {
+    const work = previewDraft(env.DB, {
+      draft: result.draft,
+      bucket: env.IMAGES,
+      ownHosts: [new URL(request.url).hostname],
+      secret: env.BETTER_AUTH_SECRET,
+      now: Math.floor(Date.now() / 1000),
+    });
+    waitUntil(work.catch((error) => console.error("draft preview", error)));
+  }
   throw redirect(`/submit?draft=${result.draft.id}&saved`);
 }
 

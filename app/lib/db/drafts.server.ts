@@ -2,12 +2,13 @@ import { type Picture, storedGallery } from "../gallery";
 import { newId, newPostId } from "../ids";
 import { cleanDraft, DRAFT_BYTES, DRAFT_LIMIT, type DraftFields, draftProblems } from "../draft-rules";
 import { type PostChoice, parsePostChoice, type PostReplies } from "../replies";
+import type { StoredSnapshot } from "../images.server";
 import { type CheckedLink, checkLink } from "../submit/check.server";
 import { readReceipt } from "../submit/receipt.server";
 import { cleanDescription, cleanTitle, DESCRIPTION_MAX, descriptionProblem, type Origin, type PostKind, TEXT_BODY_MAX, titleProblem } from "../submit/rules";
 import type { Aspect, Provider } from "../links/types";
 import { mediaTypeOf } from "../uploads";
-import { accountRecord } from "./accounts.server";
+import { accountRecord, participantCondition } from "./accounts.server";
 import { deleteReleasedFiles, releasedKeys, releaseUnusedDraftFiles } from "./draft-files.server";
 import { linkMentions } from "./mentions.server";
 import { type Existing, type NewPost, postingStatus, type PostingStatus, publishPost } from "./submit.server";
@@ -380,16 +381,17 @@ export async function deleteDraft(db: D1Database, input: { id: string; authorId:
 }
 
 /**
- * Keeps a link draft's preview, as the Drafts page's Preview checked it for
- * the draft's author: its snapshot becomes one of the draft's files, in place
- * of any earlier one, which is let go. Nothing is kept once the draft's link
- * changed or it was published. The keys let go come back for the bucket.
+ * Keeps a link draft's preview, as the Submit check found its link for the
+ * draft's author: its snapshot, already in the bucket, becomes one of the
+ * draft's files, in place of any earlier one, which is let go; so does the
+ * new one when the draft's link changed meanwhile or it was published. The
+ * keys let go come back for the bucket.
  */
 export async function saveDraftPreview(
   db: D1Database,
-  input: { id: string; authorId: string; url: string; link: CheckedLink; duplicate: Existing | null },
+  input: { id: string; authorId: string; url: string; link: CheckedLink; duplicate: Existing | null; snapshot: StoredSnapshot | null; now: number },
 ): Promise<{ ok: boolean; freed: string[] }> {
-  const { link } = input;
+  const { link, snapshot } = input;
   const preview = JSON.stringify({
     for: input.url,
     url: link.url,
@@ -400,19 +402,69 @@ export async function saveDraftPreview(
     duplicate: input.duplicate,
   });
   const results = await db.batch([
+    ...(snapshot
+      ? [
+          db
+            .prepare(`INSERT INTO images (key, owner_id, kind, state, content_type, bytes, created_at) VALUES (?1, ?2, 'post', 'draft', ?3, ?4, ?5)`)
+            .bind(snapshot.key, input.authorId, snapshot.type, snapshot.bytes, input.now),
+        ]
+      : []),
     db
-      .prepare(`UPDATE drafts SET preview = ?3, preview_thumb_key = ?4 WHERE id = ?1 AND author_id = ?2 AND post_id IS NULL AND url = ?5`)
-      .bind(input.id, input.authorId, preview, link.thumbKey, input.url),
-    db
+      // Only while its author may take part, as checked before reading the page (review F106).
       .prepare(
-        `UPDATE images SET state = 'draft'
-         WHERE key = ?1 AND owner_id = ?2 AND state = 'pending'
-           AND EXISTS (SELECT 1 FROM drafts WHERE id = ?3 AND post_id IS NULL AND preview_thumb_key = ?1)`,
+        `UPDATE drafts SET preview = ?3, preview_thumb_key = ?4
+         WHERE id = ?1 AND author_id = ?2 AND post_id IS NULL AND url = ?5 AND ${participantCondition(2, input.now)}`,
       )
-      .bind(link.thumbKey ?? "", input.authorId, input.id),
+      .bind(input.id, input.authorId, preview, snapshot?.key ?? null, input.url),
     ...releaseUnusedDraftFiles(db, input.authorId),
   ]);
-  return { ok: results[0]!.meta.changes > 0, freed: releasedKeys(results) };
+  return { ok: results[snapshot ? 1 : 0]!.meta.changes > 0, freed: releasedKeys(results) };
+}
+
+/** Whether a draft's link is still to be previewed. */
+export function wantsPreview(draft: Draft): boolean {
+  return draft.kind === "link" && draft.url !== null && draft.preview === null;
+}
+
+/**
+ * Previews a link draft as Submit checks a link, for the draft's author, and
+ * keeps what it found with the draft: on saving it, in the background, and
+ * on asking from the Drafts page (owner's request, 2026-10-20). Its picture
+ * is the draft's own file, never the account's one pending image, so no
+ * other check can take it away meanwhile (review F107). Only while the
+ * author may take part; saving and reading drafts need not.
+ */
+export async function previewDraft(
+  db: D1Database,
+  input: { draft: Draft; bucket: R2Bucket; ownHosts: readonly string[]; secret: string; now: number },
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const { draft } = input;
+  if (draft.kind !== "link" || !draft.url) return { ok: false, error: "This draft has no link to preview." };
+  // Reading a page and keeping its picture is taking part, as Check link on Submit is (review F106);
+  // an agent's draft, by the agent's standing, which holds its owner's.
+  const standing = await db.prepare(`SELECT ${participantCondition(1, input.now)} AS ok`).bind(draft.authorId).first<{ ok: number }>();
+  if (!standing?.ok) return { ok: false, error: "Link previews wait while the account is read-only." };
+  const checked = await checkLink({
+    raw: draft.url,
+    userId: draft.authorId,
+    ownHosts: input.ownHosts,
+    db,
+    bucket: input.bucket,
+    secret: input.secret,
+    now: input.now,
+    snapshot: "draft",
+  });
+  if (!checked.ok) return { ok: false, error: checked.error };
+  const snapshot = checked.snapshot ?? null;
+  let saved: { ok: boolean; freed: string[] };
+  try {
+    saved = await saveDraftPreview(db, { id: draft.id, authorId: draft.authorId, url: draft.url, link: checked.link, duplicate: checked.duplicate, snapshot, now: input.now });
+  } catch (error) {
+    if (snapshot) await input.bucket.delete(snapshot.key);
+    throw error;
+  }
+  await deleteReleasedFiles(db, input.bucket, saved.freed);
+  return saved.ok ? { ok: true } : { ok: false, error: "This draft changed meanwhile. Preview it again." };
 }
 
 export type PublishDraftResult =
@@ -495,8 +547,11 @@ export async function publishDraft(
 
   let post: () => NewPost;
   if (draft.kind === "link") {
+    // A preview with its picture is published as it was seen, its picture the draft's own.
+    const { preview } = draft;
     const checked = await checkLink({
-      raw: draft.url ?? "",
+      raw: preview?.thumbKey ? preview.url : (draft.url ?? ""),
+      ...(preview?.thumbKey ? { reuse: { pageTitle: preview.pageTitle, thumbKey: preview.thumbKey } } : {}),
       userId: author.id,
       origin,
       fetchPreview: status.allowed,

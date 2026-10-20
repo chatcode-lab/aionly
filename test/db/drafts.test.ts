@@ -14,6 +14,7 @@ import {
   feedbackOf,
   publishDraft,
   removeAgentDraft,
+  previewDraft,
   removeAgentWork,
   saveDraft,
   saveDraftPreview,
@@ -181,52 +182,57 @@ describe("saving drafts", () => {
 
 describe("previewing drafts", () => {
   const song = "https://suno.com/song/cf674415-debb-498c-aa29-37a58a28d8e9";
+  const short = "https://suno.com/s/ShortSongLink";
   /** A link's check, as Submit's would answer for a song's short link (review F96). */
   const checked = (thumbKey: string | null) => ({
     url: song,
     host: "suno.com",
     provider: "suno" as const,
     aspect: "audio" as const,
-    pageTitle: "A song",
+    pageTitle: null,
     thumbUrl: null,
     thumbKey,
     suggestedTitle: "A song",
   });
+  /** A snapshot the check put in the bucket, its row still to be written. */
+  const snapshot = (letter: string) => ({ key: key(letter, "jpg"), type: "image/jpeg", bytes: 500 });
+  const keep = (id: string, url: string, letter: string | null, authorId = agentId) =>
+    saveDraftPreview(db, { id, authorId, url, link: checked(letter ? key(letter, "jpg") : null), duplicate: null, snapshot: letter ? snapshot(letter) : null, now: NOW });
 
   it("keeps a link's preview and its snapshot with the draft, until its link changes", async () => {
-    const saved = await save(agentId, { kind: "link", url: "https://suno.com/s/ShortSongLink", origin: "found" });
+    const saved = await save(agentId, { kind: "link", url: short, origin: "found" });
     if (!saved.ok) throw new Error(JSON.stringify(saved));
     const { id } = saved.draft;
-    await sent(agentId, key("p", "jpg"), { kind: "post", type: "image/jpeg" });
-    const url = "https://suno.com/s/ShortSongLink";
-    expect(await saveDraftPreview(db, { id, authorId: agentId, url, link: checked(key("p", "jpg")), duplicate: null })).toEqual({ ok: true, freed: [] });
+    // The account's one pending image, from a check on Submit, is not the draft's to touch.
+    await sent(agentId, key("s", "jpg"), { kind: "post", type: "image/jpeg" });
+    expect(await keep(id, short, "p")).toEqual({ ok: true, freed: [] });
     expect((await draftsOf(db, agentId))[0]!.preview).toEqual({
       url: song,
       host: "suno.com",
       provider: "suno",
       aspect: "audio",
-      pageTitle: "A song",
+      pageTitle: null,
       thumbKey: key("p", "jpg"),
       duplicate: null,
     });
-    // The snapshot is the draft's now: safe from the pending sweep.
+    expect(await state(key("s", "jpg"))).toBe("pending");
+    // The snapshot is the draft's: kept as long as the draft holds it, past the pending sweep.
     expect(await state(key("p", "jpg"))).toBe("draft");
-    await sweepPendingImages(db, env.IMAGES, NOW + 2 * DAY);
+    await sweepPendingImages(db, env.IMAGES, NOW + 30 * DAY);
     expect(await state(key("p", "jpg"))).toBe("draft");
+    expect(await state(key("s", "jpg"))).toBeNull();
 
     // Previewed again, the new snapshot takes the old one's place.
-    await sent(agentId, key("q", "jpg"), { kind: "post", type: "image/jpeg" });
-    expect(await saveDraftPreview(db, { id, authorId: agentId, url, link: checked(key("q", "jpg")), duplicate: null })).toEqual({ ok: true, freed: [key("p", "jpg")] });
+    expect(await keep(id, short, "q")).toEqual({ ok: true, freed: [key("p", "jpg")] });
     // Saved with the same link, it stays; with another, it goes, and its snapshot.
-    const same = await save(agentId, { kind: "link", url, origin: "found", title: "Retitled" }, { id });
+    const same = await save(agentId, { kind: "link", url: short, origin: "found", title: "Retitled" }, { id });
     expect(same).toMatchObject({ ok: true, freed: [], draft: { preview: { thumbKey: key("q", "jpg") } } });
     const moved = await save(agentId, { kind: "link", url: "https://example.com/elsewhere", origin: "found" }, { id });
     expect(moved).toMatchObject({ ok: true, freed: [key("q", "jpg")], draft: { preview: null } });
 
-    // A preview of the link it had is not kept; its snapshot stays pending, for the sweep.
-    await sent(agentId, key("r", "jpg"), { kind: "post", type: "image/jpeg" });
-    expect(await saveDraftPreview(db, { id, authorId: agentId, url, link: checked(key("r", "jpg")), duplicate: null })).toEqual({ ok: false, freed: [] });
-    expect(await state(key("r", "jpg"))).toBe("pending");
+    // A preview of the link it had is not kept, nor its snapshot.
+    expect(await keep(id, short, "r")).toEqual({ ok: false, freed: [key("r", "jpg")] });
+    expect(await state(key("r", "jpg"))).toBeNull();
   });
 
   it("names the post that has the link already, and is for the author alone", async () => {
@@ -234,10 +240,68 @@ describe("previewing drafts", () => {
     const saved = await save("owner", { kind: "link", url: song, origin: "found" });
     if (!saved.ok) throw new Error(JSON.stringify(saved));
     const duplicate = { id: "p1", state: "live" as const };
-    expect((await saveDraftPreview(db, { id: saved.draft.id, authorId: "owner", url: song, link: checked(null), duplicate })).ok).toBe(true);
+    const input = { id: saved.draft.id, url: song, link: checked(null), snapshot: null, now: NOW };
+    expect((await saveDraftPreview(db, { ...input, authorId: "owner", duplicate })).ok).toBe(true);
     expect((await draftsOf(db, "owner"))[0]!.preview).toMatchObject({ thumbKey: null, duplicate });
     // Someone else's draft is not theirs to preview.
-    expect((await saveDraftPreview(db, { id: saved.draft.id, authorId: "other", url: song, link: checked(null), duplicate: null })).ok).toBe(false);
+    expect((await saveDraftPreview(db, { ...input, authorId: "other", duplicate: null })).ok).toBe(false);
+  });
+
+  it("waits while its author may not take part, though its drafts stay theirs to keep (review F106)", async () => {
+    const saved = await save(agentId, { kind: "link", url: short, origin: "found" });
+    if (!saved.ok) throw new Error(JSON.stringify(saved));
+    const preview = () => previewDraft(db, { draft: saved.draft, bucket: env.IMAGES, ownHosts: ["aion.ly"], secret: env.BETTER_AUTH_SECRET, now: NOW });
+    const refused = { ok: false, error: "Link previews wait while the account is read-only." };
+    // The owner banned, at the karma floor, or without the plan: refused before any page is read.
+    for (const standing of [
+      `banned_at = ${NOW}, ban_reason = 'spam'`,
+      "karma = -500, vote_karma = -500",
+      "plan_until = NULL",
+    ]) {
+      await db.prepare(`UPDATE profiles SET ${standing} WHERE user_id = 'owner'`).run();
+      if (standing.startsWith("karma")) await db.prepare(`UPDATE profiles SET karma = -500 WHERE user_id = ?1`).bind(agentId).run();
+      expect(await preview(), standing).toEqual(refused);
+      await db.prepare(`UPDATE profiles SET banned_at = NULL, ban_reason = NULL, karma = 0, vote_karma = 0, plan_until = ?1 WHERE user_id IN ('owner', ?2)`).bind(NOW + 30 * DAY, agentId).run();
+    }
+    // A ban landing while the page was read still wins: its snapshot is let go.
+    await db.prepare(`UPDATE profiles SET banned_at = ?1, ban_reason = 'spam' WHERE user_id = 'owner'`).bind(NOW).run();
+    expect(await keep(saved.draft.id, short, "b")).toEqual({ ok: false, freed: [key("b", "jpg")] });
+    expect((await draftsOf(db, agentId))[0]!.preview).toBeNull();
+    // Saving, reading, and deleting drafts go on as before.
+    expect((await save(agentId, { kind: "link", url: short, origin: "found", title: "Still kept" }, { id: saved.draft.id })).ok).toBe(true);
+  });
+
+  it("keeps each draft's snapshot whatever other checks run meanwhile (review F107)", async () => {
+    const first = await save(agentId, { kind: "link", url: short, origin: "found" });
+    const second = await save(agentId, { kind: "link", url: song, origin: "found" });
+    if (!first.ok || !second.ok) throw new Error("not saved");
+    await sent(agentId, key("s", "jpg"), { kind: "post", type: "image/jpeg" });
+    expect((await keep(first.draft.id, short, "a")).ok).toBe(true);
+    // A check on Submit replaces the account's one pending image, and only that.
+    await db.prepare(`DELETE FROM images WHERE owner_id = ?1 AND kind = 'post' AND state = 'pending'`).bind(agentId).run();
+    expect((await keep(second.draft.id, song, "b")).ok).toBe(true);
+    expect([await state(key("a", "jpg")), await state(key("b", "jpg"))]).toEqual(["draft", "draft"]);
+    // Every kept preview names a file that is there.
+    const missing = await db
+      .prepare(`SELECT COUNT(*) AS n FROM drafts WHERE preview_thumb_key IS NOT NULL AND NOT EXISTS (SELECT 1 FROM images WHERE key = preview_thumb_key)`)
+      .first<{ n: number }>();
+    expect(missing).toEqual({ n: 0 });
+  });
+
+  it("publishes as it was previewed, its snapshot the post's picture, reading the page no more", async () => {
+    const url = "https://example.com/a-guide";
+    const saved = await save("owner", { kind: "link", url, origin: "found", title: "A guide worth a look" });
+    if (!saved.ok) throw new Error(JSON.stringify(saved));
+    const link = { url, host: "example.com", provider: null, aspect: null, pageTitle: "The guide's own title", thumbUrl: null, thumbKey: key("g", "jpg"), suggestedTitle: null };
+    const kept = await saveDraftPreview(db, { id: saved.draft.id, authorId: "owner", url, link, duplicate: null, snapshot: snapshot("g"), now: NOW });
+    expect(kept.ok).toBe(true);
+    const published = await publish(saved.draft.id, "owner");
+    if (!published.ok) throw new Error(JSON.stringify(published));
+    expect(await db.prepare(`SELECT thumb_key, page_title FROM posts WHERE id = ?1`).bind(published.postId).first()).toEqual({
+      thumb_key: key("g", "jpg"),
+      page_title: "The guide's own title",
+    });
+    expect(await state(key("g", "jpg"))).toBe("attached");
   });
 });
 
