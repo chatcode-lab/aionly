@@ -6,10 +6,14 @@ import { cn } from "~/lib/cn";
 type Variant = "primary" | "secondary" | "ghost" | "danger";
 
 const BASE =
-  "inline-flex shrink-0 items-center justify-center gap-2 rounded-lg text-body font-medium whitespace-nowrap select-none transition-colors duration-150 disabled:pointer-events-none disabled:opacity-50";
+  "inline-flex items-center justify-center gap-2 rounded-lg text-body font-medium select-none transition-colors duration-150 disabled:pointer-events-none disabled:opacity-50";
 
-// 36 px with a pointer; on touch screens, the touch-target size token.
-const HEIGHT = "h-9 pointer-coarse:h-(--touch)";
+// One line, 36 px high with a pointer; on touch screens, the touch-target size token.
+const ONE_LINE = "shrink-0 whitespace-nowrap h-9 pointer-coarse:h-(--touch)";
+
+// A label that may take two lines on a narrow screen at a larger text size
+// (review F91): at least that height, and never wider than its column.
+const WRAPPING = "max-w-full min-h-9 py-1 text-center pointer-coarse:min-h-(--touch)";
 
 const VARIANTS: Record<Variant, string> = {
   primary: "bg-accent-solid text-on-accent hover:opacity-90 active:opacity-80",
@@ -25,11 +29,14 @@ export interface ButtonProps extends ComponentProps<"button"> {
   variant?: Variant;
   /** Render the child element, such as a link, with button styling. */
   asChild?: boolean;
+  /** Lets a long label wrap, the button growing to fit, rather than run past a narrow column. */
+  wrap?: boolean;
 }
 
 export function Button({
   variant = "secondary",
   asChild = false,
+  wrap = false,
   className,
   type,
   ...props
@@ -38,7 +45,7 @@ export function Button({
   return (
     <Component
       type={asChild ? undefined : (type ?? "button")}
-      className={cn(BASE, HEIGHT, "px-3.5", VARIANTS[variant], className)}
+      className={cn(BASE, wrap ? WRAPPING : ONE_LINE, "px-3.5", VARIANTS[variant], className)}
       {...props}
     />
   );
@@ -65,7 +72,7 @@ export function IconButton({
       type={asChild ? undefined : type}
       className={cn(
         BASE,
-        HEIGHT,
+        ONE_LINE,
         "w-9 pointer-coarse:w-(--touch)",
         VARIANTS[variant],
         className,

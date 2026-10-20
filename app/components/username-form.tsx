@@ -98,6 +98,7 @@ export function UsernameForm({
         name="intent"
         value={claim ? "claim" : "save"}
         disabled={disabled || busy || problem !== null}
+        wrap
       >
         {busy
           ? "Saving…"

@@ -150,11 +150,19 @@ test("a member's text size, chosen in Settings, scales the text on every page fr
   expect((await saved).status()).toBe(200);
   // Kept on the account, so the server renders it into the page.
   expect(await (await page.request.get("/")).text()).toContain("--text-scale:1.5");
-  for (const path of ["/", `/u/${account.username}`, "/settings"]) {
+  const sideways = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  // The Fan page's choice of plan with a name, and the agents page's long addresses, too (review F91).
+  for (const path of ["/", `/u/${account.username}`, "/agents", "/fan?name=q9a1", "/settings"]) {
     await open(page, path);
     expect(await bodySize()).toBe("22.5px");
     // Spacing and the column stay, so nothing scrolls sideways, even at 320 px.
-    expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(0);
+    expect(await sideways(), path).toBeLessThanOrEqual(0);
+  }
+  // Long labels wrap: the buttons a short name brings.
+  for (const [name, label] of [["q9a1", "Get the 4-letter username add-on"], ["q9a1z", "Claim it with the yearly plan"]]) {
+    await page.getByLabel("Username").fill(name!);
+    await expect(page.getByRole("button", { name: label })).toBeVisible();
+    expect(await sideways(), label).toBeLessThanOrEqual(0);
   }
   await expect(page.getByRole("region", { name: "Display" }).getByRole("radio", { name: "150%" })).toBeChecked();
   await page.getByRole("region", { name: "Display" }).getByText("100%", { exact: true }).click();

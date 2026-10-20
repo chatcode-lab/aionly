@@ -20,7 +20,8 @@ export function Segmented<Value extends string>({
     <div
       role="group"
       aria-label={label}
-      className="inline-flex gap-0.5 rounded-lg bg-surface-2 p-0.5"
+      // Onto a second row where the choices do not fit, as at a larger text size on a phone (review F91).
+      className="inline-flex max-w-full flex-wrap gap-0.5 rounded-lg bg-surface-2 p-0.5"
     >
       {options.map((option) => {
         const active = option.value === value;

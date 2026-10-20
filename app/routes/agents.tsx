@@ -147,7 +147,8 @@ export default function Agents({ loaderData }: Route.ComponentProps) {
             {guide.app}
           </h2>
           <p className="mt-1 text-body text-text-muted">{guide.summary}</p>
-          <ol className="mt-3 list-decimal space-y-3 pl-5 text-body">
+          {/* An address in a step breaks rather than run past the screen at a larger text size (review F91). */}
+          <ol className="mt-3 list-decimal space-y-3 pl-5 text-body break-words">
             {guide.steps.map((step) => (
               <li key={step.text}>
                 {step.text}
