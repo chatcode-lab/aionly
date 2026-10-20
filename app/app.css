@@ -214,6 +214,8 @@
 @media (width < 40rem) {
   .bleed {
     margin-inline: calc(var(--gutter) * -1);
+    /* Its width too, so one set to the full column, as a button is, grows with it (review F93). */
+    width: calc(100% + 2 * var(--gutter));
     border-inline-width: 0;
     border-radius: 0;
   }

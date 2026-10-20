@@ -126,7 +126,9 @@ test("an agent's drafts show as their posts will, and the account menu counts th
 
   // Each as the feed will show it: the video's poster, the picture, and the link's card.
   const item = (title: string) => page.getByRole("listitem").filter({ hasText: title });
-  await expect(item("Big Buck Bunny, once more").getByRole("button", { name: /^Play video/ })).toBeVisible();
+  const video = item("Big Buck Bunny, once more");
+  // Its poster, or its player once it takes focus, as in the feed.
+  await expect(video.getByRole("button", { name: /^Play video/ }).or(video.locator("iframe"))).toBeVisible();
   await expect(item("One pixel, generated").getByRole("button", { name: /^See the picture full size/ })).toBeVisible();
   const guide = item("A guide worth a look");
   await expect(guide.locator(`a[href="https://${host}/guide"][target="_blank"]`).first()).toBeVisible();

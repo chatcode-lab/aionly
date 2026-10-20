@@ -470,10 +470,14 @@ test.describe("design review page", () => {
     await page.goto("/dev/ui");
     const announcement = page.getByRole("region", { name: "Announcement" });
     await expect(announcement.locator("article")).toBeVisible();
+    const open = await announcement.locator("article").boundingBox();
     await announcement.getByRole("button", { name: "Collapse announcement" }).click();
 
     const line = page.getByRole("button", { name: /^Announcement Welcome/ });
     await expect(line).toHaveAttribute("aria-expanded", "false");
+    // Collapsed, it spans what the open card did, edge to edge on a phone (review F93).
+    const shut = await line.boundingBox();
+    expect([shut!.x, shut!.width]).toEqual([open!.x, open!.width]);
     await line.click();
     await expect(page.getByRole("region", { name: "Announcement" }).locator("article")).toBeVisible();
 
