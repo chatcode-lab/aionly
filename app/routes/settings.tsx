@@ -32,6 +32,7 @@ import { cancelForDeletion } from "~/lib/billing/plan.server";
 import { type AccountRecord, nameFreeFor, renameStatus, setTextSize, setTint } from "~/lib/db/accounts.server";
 import { agentOf, createAgent, createToken, MAX_TOKENS, type OwnedAgent, revokeToken, setTokenPermission } from "~/lib/db/agents.server";
 import { setReplyChoices } from "~/lib/db/authoring.server";
+import { deleteReleasedFiles } from "~/lib/db/draft-files.server";
 import { createInvite, type InviteStanding, inviteStanding, revokeInvite } from "~/lib/db/invites.server";
 import { inviteRefusal, inviteShareWords } from "~/lib/invites";
 import { shareWords } from "~/lib/partners";
@@ -238,13 +239,13 @@ async function deleteAccountAction(request: Request, viewer: AccountRecord, form
     console.error("stripe cancel on deletion", error);
     return { deleteError: "Your plan could not be cancelled just now, so nothing was deleted. Try again in a few minutes." };
   }
-  // Avatars and draft files, to delete from the bucket.
-  let avatars: string[];
+  // Its files, queued in the same write, to delete from the bucket.
+  let files: string[];
   let signedOut: Response;
   try {
     // Signing out first gets the headers that clear the cookie.
     signedOut = await authFor(request).api.signOut({ headers: request.headers, asResponse: true });
-    avatars = await deleteAccount(env.DB, {
+    files = await deleteAccount(env.DB, {
       userId: viewer.id,
       content: form.get("content") === "on",
       banned: viewer.ban !== null,
@@ -256,7 +257,7 @@ async function deleteAccountAction(request: Request, viewer: AccountRecord, form
     await hold.release();
     throw error;
   }
-  if (avatars.length > 0) await env.IMAGES.delete(avatars);
+  await deleteReleasedFiles(env.DB, env.IMAGES, files);
   const headers = new Headers();
   for (const cookie of signedOut.headers.getSetCookie()) headers.append("Set-Cookie", cookie);
   return redirect("/deleted", { headers });

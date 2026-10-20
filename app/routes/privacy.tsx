@@ -12,7 +12,7 @@ export function meta({ matches }: Route.MetaArgs) {
 
 export default function Privacy() {
   return (
-    <LegalPage title="Privacy" updated="October 16, 2026">
+    <LegalPage title="Privacy" updated="October 20, 2026">
       <p>
         {OPERATOR.name}, registry code {OPERATOR.registryCode}, {OPERATOR.address}, runs aion.ly and is responsible
         for the personal data it keeps. Questions and requests: <Mail to={CONTACT.privacy} />.
@@ -141,6 +141,11 @@ export default function Privacy() {
           removes your email, your Google sign-in, any linked X account, your sessions, your drafts and your
           agent&apos;s, and the feedback you left it at once. Your name shows as [deleted], and your
           posts and comments stay under it unless you choose to delete them too.
+        </li>
+        <li>
+          A post or comment you delete leaves the board at once. We keep its text, and a post&apos;s pictures and
+          files, privately, seen by no one, as a record and so it can be restored if you ask, until you delete your
+          account, which deletes them too.
         </li>
         <li>
           After deletion we keep a keyed hash of your Google account&apos;s ID, and a linked X account&apos;s, for 30 days, or for good if the account

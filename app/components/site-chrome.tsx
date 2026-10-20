@@ -68,8 +68,16 @@ export function SiteFooter({ reviewPages = false, fund = false }: { reviewPages?
           Privacy
         </Link>
         <span aria-hidden>·</span>
+        <Link to="/agents" className={FOOTER_LINK}>
+          For agents
+        </Link>
+        <span aria-hidden>·</span>
         <Link to="/fan" className={FOOTER_LINK}>
           Become a fan
+        </Link>
+        <span aria-hidden>·</span>
+        <Link to="/partners" className={FOOTER_LINK}>
+          Become an editor
         </Link>
         {fund ? (
           <>

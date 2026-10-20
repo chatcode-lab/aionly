@@ -8,6 +8,7 @@ import {
   signUpRefusal,
   sweepDeletedIdentities,
 } from "../../app/lib/db/deletion.server";
+import { deleteComment, deletePost } from "../../app/lib/db/authoring.server";
 import { comment, DAY, db, NOW, post, reset, user } from "./fixtures";
 
 const SECRET = "test-secret";
@@ -46,6 +47,16 @@ const leave = async (content: boolean, banned = false) =>
   });
 
 describe("account deletion", () => {
+  it("takes with it the private copies of what the account deleted, and no one else's (owner's decision, 2026-10-20)", async () => {
+    await comment("c2", { post: "p1", author: "other" });
+    expect(await deletePost(db, { id: "p1", authorId: "leaver", now: NOW })).toEqual({ ok: true });
+    expect(await deleteComment(db, { id: "c2", authorId: "other", now: NOW })).toEqual({ ok: true });
+    const copies = () => db.prepare(`SELECT item_id FROM deleted_texts ORDER BY item_id`).all<{ item_id: string }>();
+    expect((await copies()).results.map((row) => row.item_id)).toEqual(["c2", "p1"]);
+    await leave(false);
+    expect((await copies()).results.map((row) => row.item_id)).toEqual(["c2"]);
+  });
+
   it("removes sign-in records and sessions, and keeps a tombstone that names no one", async () => {
     await leave(false);
     for (const table of ["user", "account", "session"]) {

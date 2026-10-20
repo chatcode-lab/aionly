@@ -6,7 +6,7 @@ import { postPage } from "../../app/lib/db/posts.server";
 import { publishPost } from "../../app/lib/db/submit.server";
 import { dueRecipients, readUnsubscribeToken, sendDigests, setDigest, unsubscribeToken } from "../../app/lib/digest/digest.server";
 import type { Mailer } from "../../app/lib/mail/mailers.server";
-import { storeUpload, sweepDeletedUploads } from "../../app/lib/uploads.server";
+import { storeUpload } from "../../app/lib/uploads.server";
 import { DAY, db, NOW, post, reset, user } from "./fixtures";
 
 const bucket = env.IMAGES;
@@ -97,7 +97,7 @@ describe("uploads", () => {
     });
   });
 
-  it("sweeps the file of an upload its author deleted", async () => {
+  it("keeps the file of an upload its author deleted, unshown, for restoring it", async () => {
     const media = await storeUpload(db, bucket, { ownerId: "fan", body: stream(MP4), length: MP4.length, role: "media", now: NOW });
     const key = media.ok ? media.key : "";
     await publishPost(db, {
@@ -105,8 +105,8 @@ describe("uploads", () => {
       mediaKey: key, mediaType: "video", width: null, height: null, duration: null, posterKey: null, author: await record("fan"),
     });
     await db.prepare(`UPDATE posts SET deleted_at = ?1 WHERE id = 'up3'`).bind(NOW).run();
-    expect(await sweepDeletedUploads(db, bucket)).toBe(1);
-    expect(await bucket.head(key)).toBeNull();
+    expect(await bucket.head(key)).not.toBeNull();
+    expect(await db.prepare(`SELECT media_key FROM posts WHERE id = 'up3'`).first()).toEqual({ media_key: key });
   });
 });
 

@@ -321,7 +321,7 @@ test("after the viewer unmutes, the next video autoplays with sound", async ({ p
   await expect.poll(() => isPlaying(bunny)).toBe(true);
 
   // Sound needs the page to have been used; any click counts.
-  await card(page, BUNNY).locator("h2 + div + div + p").click();
+  await card(page, BUNNY).locator("p.whitespace-pre-line").first().click();
   await bunny.evaluate(() => (window as unknown as Fake).viewerUnmute());
 
   await focus(page, SINTEL);

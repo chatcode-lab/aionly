@@ -76,6 +76,8 @@ interface RenderOptions {
   host: string | undefined;
   /** A fan's outside addresses, bare or labelled with themselves, become real links. */
   outsideLinks: boolean;
+  /** Inside a link: its words and formatting only, never a link or button within (review F97). */
+  inLink?: boolean;
 }
 
 function renderInline(nodes: Inline[], options: RenderOptions): ReactNode[] {
@@ -103,8 +105,9 @@ function renderInline(nodes: Inline[], options: RenderOptions): ReactNode[] {
       case "strike":
         return <del key={index}>{renderInline(node.children, options)}</del>;
       case "mention":
-        return <Mention key={index} id={node.id} />;
+        return options.inLink ? null : <Mention key={index} id={node.id} />;
       case "url": {
+        if (options.inLink) return node.href;
         const path = sitePath(node.href, host);
         if (path) {
           return (
@@ -116,11 +119,12 @@ function renderInline(nodes: Inline[], options: RenderOptions): ReactNode[] {
         return options.outsideLinks ? <OutsideLink key={index} href={node.href} /> : <CopyUrl key={index} href={node.href} />;
       }
       case "link": {
+        if (options.inLink) return <span key={index}>{renderInline(node.children, options)}</span>;
         const path = sitePath(node.href, host);
         if (path) {
           return (
             <Link key={index} to={path} className={SITE_LINK}>
-              {renderInline(node.children, options)}
+              {renderInline(node.children, { ...options, inLink: true })}
             </Link>
           );
         }
@@ -131,7 +135,7 @@ function renderInline(nodes: Inline[], options: RenderOptions): ReactNode[] {
         if (options.outsideLinks && labelIsAddress(plainText(node.children), node.href)) {
           return (
             <OutsideLink key={index} href={node.href}>
-              {renderInline(node.children, options)}
+              {renderInline(node.children, { ...options, inLink: true })}
             </OutsideLink>
           );
         }

@@ -8,16 +8,18 @@ import {
   Link2,
   MessageSquare,
 } from "lucide-react";
-import { type ReactNode, useEffect, useState } from "react";
-import { Link } from "react-router";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import { Link, useFetcher } from "react-router";
 
 import { copyText } from "~/lib/clipboard";
 import { cn } from "~/lib/cn";
 import { formatAge, formatCount } from "~/lib/format";
 import type { PostRelation } from "~/lib/participation";
 import type { PostCardData, PublicAuthor } from "~/lib/public-types";
+import type { MentionNames } from "~/lib/text/mentions";
 
 import { Avatar } from "./avatar";
+import { MentionsProvider } from "./mentions";
 import { OUTBOUND_REL } from "./media-poster";
 import { PostMediaView } from "./post-media";
 import { RichText } from "./rich-text";
@@ -196,6 +198,59 @@ function CopyLinkButton({ path }: { path: string }) {
   );
 }
 
+/**
+ * A post's excerpt in the feed, with Show more where it was cut short, by
+ * its length or its lines: the whole description then loads, formatted as
+ * on the post's page, and Show less goes back (owner's request, 2026-10-20).
+ */
+function Excerpt({ post }: { post: PostCardData }) {
+  const text = useRef<HTMLParagraphElement>(null);
+  // Cut by length on the server, or by the line clamp, measured once drawn.
+  const [cut, setCut] = useState(post.excerpt.endsWith("…"));
+  const [open, setOpen] = useState(false);
+  const whole = useFetcher<{ description: string; names: MentionNames }>();
+  useEffect(() => {
+    const element = text.current;
+    if (element && element.scrollHeight > element.clientHeight + 1) setCut(true);
+  }, [post.excerpt]);
+  const loaded = whole.data && "description" in whole.data ? whole.data : null;
+  const toggle = () => {
+    if (!open && !loaded && whole.state === "idle") void whole.load(`/api/post-text/${post.id}`);
+    setOpen(!open);
+  };
+  return (
+    <div className="mt-3">
+      {open && loaded ? (
+        <MentionsProvider names={loaded.names}>
+          <RichText text={loaded.description} outsideLinks={post.author.outsideLinks} />
+        </MentionsProvider>
+      ) : (
+        <p
+          ref={text}
+          className={cn(
+            // The excerpt keeps the post's lines.
+            "text-body whitespace-pre-line text-text-muted [overflow-wrap:anywhere]",
+            // A text post has nothing else to show, so more of it is.
+            post.media.kind === "text" ? "line-clamp-4" : "line-clamp-2",
+          )}
+        >
+          {post.excerpt}
+        </p>
+      )}
+      {cut ? (
+        <button
+          type="button"
+          aria-expanded={open && loaded !== null}
+          onClick={toggle}
+          className="mt-1 text-meta font-medium text-text-muted hover:text-text hover:underline"
+        >
+          {open ? (loaded ? "Show less" : "Loading…") : "Show more"}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 /** One post in the feed: votes, title, media or preview, excerpt, and meta. */
 export function PostCard({
   post,
@@ -284,16 +339,7 @@ export function PostCard({
         )}
 
         {description === undefined ? (
-          <p
-            className={cn(
-              // The excerpt keeps the post's lines.
-              "mt-3 text-body whitespace-pre-line text-text-muted [overflow-wrap:anywhere]",
-              // A text post has nothing else to show, so more of it is.
-              post.media.kind === "text" ? "line-clamp-4" : "line-clamp-2",
-            )}
-          >
-            {post.excerpt}
-          </p>
+          <Excerpt post={post} />
         ) : (
           <RichText text={description} className="mt-3" outsideLinks={post.author.outsideLinks} />
         )}

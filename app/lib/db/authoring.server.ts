@@ -210,24 +210,27 @@ export async function editComment(
 export type DeleteResult = { ok: true } | { ok: false; reason: "not_found" | "closed" | "not_allowed" };
 
 /**
- * Deletes the author's own comment for good. It keeps its place in the
- * thread as [deleted by author], with its replies; its text is wiped.
+ * Deletes the author's own comment. It keeps its place in the thread as
+ * [deleted by author], with its replies; its text is wiped from the board
+ * and kept privately, in the same write, as a post's is.
  */
 export async function deleteComment(
   db: D1Database,
   input: { id: string; authorId: string; now: number },
 ): Promise<DeleteResult> {
   const { id, authorId, now } = input;
-  const updated = await db
-    .prepare(
-      `UPDATE comments SET deleted_at = ?3, body = ''
-       WHERE id = ?1 AND author_id = ?2
-         AND deleted_at IS NULL AND removed_batch_id IS NULL
-         AND ${participantCondition(2, now)}`,
-    )
-    .bind(id, authorId, now)
-    .run();
-  if (updated.meta.changes > 0) return { ok: true };
+  const which = `id = ?1 AND author_id = ?2 AND deleted_at IS NULL AND removed_batch_id IS NULL AND ${participantCondition(2, now)}`;
+  const [, updated] = await db.batch([
+    db
+      .prepare(
+        `INSERT INTO deleted_texts (item_type, item_id, author_id, title, body, deleted_at)
+         SELECT 'comment', id, author_id, NULL, body, ?3 FROM comments WHERE ${which}
+         ON CONFLICT (item_type, item_id) DO NOTHING`,
+      )
+      .bind(id, authorId, now),
+    db.prepare(`UPDATE comments SET deleted_at = ?3, body = '' WHERE ${which}`).bind(id, authorId, now),
+  ]);
+  if (updated!.meta.changes > 0) return { ok: true };
   return refusedDelete(db, "comments", id, authorId);
 }
 
@@ -437,24 +440,28 @@ export async function setReplyChoices(
 }
 
 /**
- * Deletes the author's own post for good. It leaves the feed and profile,
- * its permalink becomes [deleted by author], its comments stay read-only,
- * and its link can be posted again. Its title and description are wiped;
- * its picture is swept away later.
+ * Deletes the author's own post. It leaves the feed and profile, its
+ * permalink becomes [deleted by author], its comments stay read-only, and
+ * its link can be posted again. Its title and description are wiped from
+ * the board and kept privately, in the same write, for the record and for
+ * restoring it; its files stay, unshown, until its author's account goes.
  */
 export async function deletePost(
   db: D1Database,
   input: { id: string; authorId: string; now: number },
 ): Promise<DeleteResult> {
   const { id, authorId, now } = input;
-  const updated = await db
-    .prepare(
-      `UPDATE posts SET deleted_at = ?3, title = '', description = ''
-       WHERE id = ?1 AND author_id = ?2 AND ${LIVE}
-         AND ${participantCondition(2, now)}`,
-    )
-    .bind(id, authorId, now)
-    .run();
-  if (updated.meta.changes > 0) return { ok: true };
+  const which = `id = ?1 AND author_id = ?2 AND ${LIVE} AND ${participantCondition(2, now)}`;
+  const [, updated] = await db.batch([
+    db
+      .prepare(
+        `INSERT INTO deleted_texts (item_type, item_id, author_id, title, body, deleted_at)
+         SELECT 'post', id, author_id, title, description, ?3 FROM posts WHERE ${which}
+         ON CONFLICT (item_type, item_id) DO NOTHING`,
+      )
+      .bind(id, authorId, now),
+    db.prepare(`UPDATE posts SET deleted_at = ?3, title = '', description = '' WHERE ${which}`).bind(id, authorId, now),
+  ]);
+  if (updated!.meta.changes > 0) return { ok: true };
   return refusedDelete(db, "posts", id, authorId);
 }

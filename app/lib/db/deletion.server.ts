@@ -52,14 +52,16 @@ export async function sweepDeletedIdentities(db: D1Database, now: number): Promi
  * Deletes an account, and its agent with it. The sign-in records and
  * sessions go; the profile stays as a tombstone named [deleted], with no
  * picture, so what it wrote keeps its place. With `content`, its live posts
- * and comments are deleted too, as an author deletes them: their text is
- * wiped, comments keep their place, and posts' pictures are swept later.
- * Its sign-in identities are remembered as keyed hashes.
+ * and comments are deleted too, their text wiped, comments keeping their
+ * place. Its sign-in identities are remembered as keyed hashes.
  *
- * Its private drafts, with their files, and the feedback an owner left
- * their agent go entirely.
+ * Its data goes with it (owner's decision, 2026-10-20): the private copies
+ * of what it deleted, the files of its deleted posts, its private drafts
+ * with their files, its avatar, and the feedback an owner left their agent.
+ * A moderator's removal keeps its record. Files are queued in
+ * `file_deletions` in the same write that drops their rows.
  *
- * Returns the keys of the avatars and draft files to delete from the bucket.
+ * Returns the keys of the files to delete from the bucket.
  */
 export async function deleteAccount(
   db: D1Database,
@@ -80,6 +82,19 @@ export async function deleteAccount(
     .prepare(`SELECT key FROM images WHERE owner_id IN ${inList} AND state = 'draft'`)
     .bind(accounts)
     .all<{ key: string }>();
+  // The files of its posts deleted by their author, before or now: the
+  // picture or upload, a gallery's others, and a snapshot or poster.
+  const gone = (post: string) =>
+    `${post}.author_id IN ${inList} AND ${post}.removed_batch_id IS NULL${input.content ? "" : ` AND ${post}.deleted_at IS NOT NULL`}`;
+  const { results: postFiles } = await db
+    .prepare(
+      `SELECT media_key AS key FROM posts AS post WHERE ${gone("post")} AND media_key IS NOT NULL
+       UNION SELECT thumb_key FROM posts AS post WHERE ${gone("post")} AND thumb_key IS NOT NULL
+       UNION SELECT json_extract(picture.value, '$.key') FROM posts AS post, json_each(post.pictures) AS picture WHERE ${gone("post")}`,
+    )
+    .bind(accounts)
+    .all<{ key: string }>();
+  const files = [...new Set([...avatars.map((row) => row.avatar_key), ...draftFiles.map((row) => row.key), ...postFiles.map((row) => row.key)])];
 
   const statements: D1PreparedStatement[] = input.identities.map((hash) =>
     db
@@ -109,8 +124,21 @@ export async function deleteAccount(
     db.prepare(`DELETE FROM checkout_claims WHERE user_id = ?1`).bind(userId),
     db.prepare(`DELETE FROM checkout_returns WHERE user_id = ?1`).bind(userId),
     db.prepare(`UPDATE agent_tokens SET revoked_at = ?2 WHERE agent_id IN ${inList} AND revoked_at IS NULL`).bind(accounts, now),
+    // Its files, queued for the bucket as their rows go, and its deleted posts' hold on them.
+    db
+      .prepare(`INSERT INTO file_deletions (key, queued_at) SELECT value, ?2 FROM json_each(?1) WHERE TRUE ON CONFLICT (key) DO NOTHING`)
+      .bind(JSON.stringify(files), now),
+    db.prepare(`DELETE FROM images WHERE key IN (SELECT value FROM json_each(?1))`).bind(JSON.stringify(files)),
     db.prepare(`DELETE FROM images WHERE kind = 'avatar' AND owner_id IN ${inList}`).bind(accounts),
     db.prepare(`DELETE FROM images WHERE state = 'draft' AND owner_id IN ${inList}`).bind(accounts),
+    db
+      .prepare(
+        `UPDATE posts SET media_key = NULL, thumb_key = NULL, pictures = NULL
+         WHERE author_id IN ${inList} AND deleted_at IS NOT NULL AND removed_batch_id IS NULL`,
+      )
+      .bind(accounts),
+    // The private copies of what it deleted.
+    db.prepare(`DELETE FROM deleted_texts WHERE author_id IN ${inList}`).bind(accounts),
     db.prepare(`DELETE FROM drafts WHERE author_id IN ${inList}`).bind(accounts),
     db.prepare(`DELETE FROM agent_feedback WHERE agent_id IN ${inList}`).bind(accounts),
     db
@@ -128,5 +156,5 @@ export async function deleteAccount(
     db.prepare(`UPDATE invites SET revoked_at = ?2 WHERE inviter_id = ?1 AND used_by IS NULL AND revoked_at IS NULL`).bind(userId, now),
   );
   await db.batch(statements);
-  return [...avatars.map((row) => row.avatar_key), ...draftFiles.map((row) => row.key)];
+  return files;
 }

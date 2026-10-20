@@ -13,8 +13,7 @@ import { bulkMailer, transactionalMailer } from "../app/lib/mail/mailers.server"
 import { SENDERS } from "../app/lib/mail/senders";
 import { sendPlanEndNotices, sendReadOnlyNotices, sweepSignInLinkSends } from "../app/lib/notices/notices.server";
 import { sendOfferEmails } from "../app/lib/offers/offers.server";
-import { sweepDeletedUploads } from "../app/lib/uploads.server";
-import { sweepDeletedPostImages, sweepPendingImages } from "../app/lib/images.server";
+import { sweepPendingImages } from "../app/lib/images.server";
 import { createNonce } from "../app/lib/security/csp";
 import { withSecurityHeaders } from "../app/lib/security/headers";
 import { isSameOriginRequest } from "../app/lib/security/request";
@@ -240,20 +239,19 @@ export default {
     return OPEN_PATHS.has(new URL(request.url).pathname) ? withCors(response) : response;
   },
 
-  // Hourly: removes preview snapshots never published, pictures and uploads
-  // of deleted posts, sign-in states that expired unused, deleted accounts'
-  // identities once they may sign up again, OAuth codes and apps no longer
-  // needed, drafts published a month ago, and draft files nothing uses;
-  // and sends the digests that are due.
+  // Hourly: removes preview snapshots never published, sign-in states that
+  // expired unused, deleted accounts' identities once they may sign up
+  // again, OAuth codes and apps no longer needed, drafts published a month
+  // ago, and draft files nothing uses, with every file queued for deletion;
+  // and sends the digests that are due. A post its author deleted keeps
+  // its files until the account goes.
   async scheduled(_controller, workerEnv, ctx) {
     ctx.waitUntil(
       sweepPendingImages(workerEnv.DB, workerEnv.IMAGES, Math.floor(Date.now() / 1000)),
     );
-    ctx.waitUntil(sweepDeletedPostImages(workerEnv.DB, workerEnv.IMAGES));
     ctx.waitUntil(sweepExpiredVerifications(workerEnv.DB, new Date()));
     ctx.waitUntil(sweepSignInLinkSends(workerEnv.DB, Math.floor(Date.now() / 1000)));
     ctx.waitUntil(sweepDeletedIdentities(workerEnv.DB, Math.floor(Date.now() / 1000)));
-    ctx.waitUntil(sweepDeletedUploads(workerEnv.DB, workerEnv.IMAGES));
     ctx.waitUntil(sweepOAuth(workerEnv.DB, Math.floor(Date.now() / 1000)));
     ctx.waitUntil(sweepPublishedDrafts(workerEnv.DB, Math.floor(Date.now() / 1000)));
     // Draft files no draft or post uses any more (review F92).

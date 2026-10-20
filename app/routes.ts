@@ -56,6 +56,7 @@ export default [
   route("api/auth/*", "routes/api-auth.ts"),
   route("api/vote", "routes/api-vote.ts"),
   route("api/save", "routes/api-save.ts"),
+  route("api/post-text/:id", "routes/api-post-text.ts"),
   route("api/report", "routes/api-report.ts"),
   route("api/moderate", "routes/api-moderate.ts"),
   route("api/pick", "routes/api-pick.ts"),

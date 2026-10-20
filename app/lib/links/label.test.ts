@@ -18,4 +18,13 @@ describe("a link labelled with its own address", () => {
     }
     expect(labelIsAddress("example.com", "https://example.com.evil.net/")).toBe(false);
   });
+
+  it("counts a port other than the scheme's own (review F98)", () => {
+    expect(labelIsAddress("example.org/guide", "https://example.org:8443/guide")).toBe(false);
+    expect(labelIsAddress("example.org:443/guide", "https://example.org:8443/guide")).toBe(false);
+    expect(labelIsAddress("example.org:8443/guide", "https://example.org:9443/guide")).toBe(false);
+    expect(labelIsAddress("example.org:8443/guide", "https://example.org:8443/guide")).toBe(true);
+    // The scheme's own port, written or not, is the same address.
+    expect(labelIsAddress("example.org:443/guide", "https://example.org/guide")).toBe(true);
+  });
 });

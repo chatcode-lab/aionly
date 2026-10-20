@@ -123,5 +123,33 @@ describe("upgrading a database with data in it", () => {
     ]);
     expect(db.prepare(`SELECT show_gift FROM profiles`).get()).toEqual({ show_gift: 0 });
   });
-});
 
+  it("takes a declined draft's revision from its decline's record, so one changed in the same second still waits (review F95)", () => {
+    const db = new DatabaseSync(":memory:");
+    migrate(db, "", "0041_tint.sql");
+    db.exec(`
+      INSERT INTO profiles (user_id, created_at) VALUES ('agent', 0);
+      -- Each declined at revision 1: one unchanged since, one changed a second later, one in the same second.
+      INSERT INTO drafts (id, author_id, kind, revision, created_at, updated_at, declined_at) VALUES
+        ('unchanged', 'agent', 'text', 1, ${NOW - 100}, ${NOW - 50}, ${NOW - 50}),
+        ('later', 'agent', 'text', 2, ${NOW - 100}, ${NOW - 49}, ${NOW - 50}),
+        ('same', 'agent', 'text', 2, ${NOW - 100}, ${NOW - 50}, ${NOW - 50}),
+        ('never', 'agent', 'text', 1, ${NOW - 100}, ${NOW - 100}, NULL);
+      INSERT INTO agent_feedback (id, agent_id, action, target_type, target_id, revision, body, created_at) VALUES
+        ('f1', 'agent', 'declined', 'draft', 'unchanged', 1, '', ${NOW - 50}),
+        ('f2', 'agent', 'declined', 'draft', 'later', 1, '', ${NOW - 50}),
+        ('f3', 'agent', 'declined', 'draft', 'same', 1, '', ${NOW - 50});
+    `);
+    migrate(db, "0041_tint.sql", MIGRATIONS[MIGRATIONS.length - 1]!);
+    expect(
+      db
+        .prepare(`SELECT id, declined_revision, (declined_revision IS NULL OR revision > declined_revision) AS waiting FROM drafts ORDER BY id`)
+        .all(),
+    ).toEqual([
+      { id: "later", declined_revision: 1, waiting: 1 },
+      { id: "never", declined_revision: null, waiting: 1 },
+      { id: "same", declined_revision: 1, waiting: 1 },
+      { id: "unchanged", declined_revision: 1, waiting: 0 },
+    ]);
+  });
+});

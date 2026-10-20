@@ -13,7 +13,6 @@ import {
   editPost,
 } from "../../app/lib/db/authoring.server";
 import { findDuplicate } from "../../app/lib/db/submit.server";
-import { sweepDeletedPostImages } from "../../app/lib/images.server";
 import { comment, DAY, db, NOW, post, reset, user } from "./fixtures";
 
 beforeEach(async () => {
@@ -44,6 +43,9 @@ const add = (id: string, fields: { post?: string; parent?: string | null; author
     body: `Body of ${id}`,
     now: fields.now ?? NOW,
   });
+
+const archived = (type: "post" | "comment", id: string) =>
+  db.prepare(`SELECT author_id, title, body, deleted_at FROM deleted_texts WHERE item_type = ?1 AND item_id = ?2`).bind(type, id).first();
 
 describe("addComment", () => {
   it("adds a comment and a reply one level deeper, and recounts the post", async () => {
@@ -149,11 +151,13 @@ describe("editComment", () => {
 });
 
 describe("deleteComment", () => {
-  it("deletes the author's own comment for good, wiping its text but keeping its replies", async () => {
+  it("deletes the author's own comment, wiping its text from the board, kept privately, and keeping its replies", async () => {
     await comment("mine", { author: "u2" });
+    const said = (await row("mine"))!.body;
     await comment("reply", { author: "u1", parent: "mine", depth: 1 });
     expect(await deleteComment(db, { id: "mine", authorId: "u2", now: NOW })).toEqual({ ok: true });
     expect(await row("mine")).toMatchObject({ body: "", deleted_at: NOW });
+    expect(await archived("comment", "mine")).toEqual({ author_id: "u2", title: null, body: said, deleted_at: NOW });
     expect((await row("reply"))!.deleted_at).toBeNull();
     expect(await deleteComment(db, { id: "mine", authorId: "u2", now: NOW })).toEqual({ ok: false, reason: "closed" });
   });
@@ -207,13 +211,14 @@ describe("editPost", () => {
 });
 
 describe("deletePost", () => {
-  it("deletes the author's own post for good, wiping its text and freeing its link", async () => {
-    await post("mine", { author: "u1", key: "url:example.com/shared" });
+  it("deletes the author's own post, wiping its text from the board, kept privately, and freeing its link", async () => {
+    await post("mine", { author: "u1", key: "url:example.com/shared", title: "Kept for the record", description: "Words the author took back." });
     expect(await findDuplicate(db, "url:example.com/shared", { origin: "found", now: NOW })).toEqual({ id: "mine", state: "live" });
     expect(await deletePost(db, { id: "mine", authorId: "u1", now: NOW })).toEqual({ ok: true });
     expect(
       await db.prepare(`SELECT title, description, deleted_at FROM posts WHERE id = 'mine'`).first(),
     ).toEqual({ title: "", description: "", deleted_at: NOW });
+    expect(await archived("post", "mine")).toEqual({ author_id: "u1", title: "Kept for the record", body: "Words the author took back.", deleted_at: NOW });
     expect(await findDuplicate(db, "url:example.com/shared", { origin: "found", now: NOW })).toBeNull();
     await post("again", { author: "u2", key: "url:example.com/shared" });
     expect(await deletePost(db, { id: "mine", authorId: "u1", now: NOW })).toEqual({ ok: false, reason: "closed" });
@@ -225,36 +230,23 @@ describe("deletePost", () => {
     expect(await deletePost(db, { id: "p1", authorId: "u2", now: NOW })).toEqual({ ok: false, reason: "not_found" });
     expect(await deletePost(db, { id: "removed", authorId: "u1", now: NOW })).toEqual({ ok: false, reason: "closed" });
     expect(await deletePost(db, { id: "theirs", authorId: "banned", now: NOW })).toEqual({ ok: false, reason: "not_allowed" });
+    // Nothing refused is copied.
+    expect(await db.prepare(`SELECT COUNT(*) AS n FROM deleted_texts`).first()).toEqual({ n: 0 });
   });
 });
 
-describe("sweepDeletedPostImages", () => {
-  it("deletes the pictures of author-deleted posts and keeps a removed post's", async () => {
-    const bucket = env.IMAGES;
-    for (const key of ["deleted_pic", "removed_pic", "live_pic"]) {
-      await bucket.put(key, new Uint8Array([0xff, 0xd8, 0xff]));
-      await db
-        .prepare(
-          `INSERT INTO images (key, owner_id, kind, state, content_type, bytes, created_at)
-           VALUES (?1, 'u1', 'post', 'attached', 'image/jpeg', 3, ?2)`,
-        )
-        .bind(key, NOW)
-        .run();
-    }
-    await post("deleted", { deleted: true });
-    await post("removed", { removed: true });
-    await db.batch([
-      db.prepare(`UPDATE posts SET thumb_key = 'deleted_pic' WHERE id = 'deleted'`),
-      db.prepare(`UPDATE posts SET thumb_key = 'removed_pic' WHERE id = 'removed'`),
-      db.prepare(`UPDATE posts SET thumb_key = 'live_pic' WHERE id = 'p1'`),
-    ]);
-
-    expect(await sweepDeletedPostImages(db, bucket)).toBe(1);
-    expect(await bucket.head("deleted_pic")).toBeNull();
-    expect(await bucket.head("removed_pic")).not.toBeNull();
-    expect(await bucket.head("live_pic")).not.toBeNull();
-    const { results } = await db.prepare(`SELECT key FROM images ORDER BY key`).all<{ key: string }>();
-    expect(results.map((image) => image.key)).toEqual(["live_pic", "removed_pic"]);
-    expect(await db.prepare(`SELECT thumb_key FROM posts WHERE id = 'deleted'`).first()).toEqual({ thumb_key: null });
+describe("a deleted post's picture", () => {
+  it("stays, unshown, so the post can be restored whole, as a removed post's does", async () => {
+    await env.IMAGES.put("deleted_pic", new Uint8Array([0xff, 0xd8, 0xff]));
+    await db
+      .prepare(`INSERT INTO images (key, owner_id, kind, state, content_type, bytes, created_at) VALUES ('deleted_pic', 'u1', 'post', 'attached', 'image/jpeg', 3, ?1)`)
+      .bind(NOW)
+      .run();
+    await post("mine", { author: "u1" });
+    await db.prepare(`UPDATE posts SET thumb_key = 'deleted_pic' WHERE id = 'mine'`).run();
+    expect(await deletePost(db, { id: "mine", authorId: "u1", now: NOW })).toEqual({ ok: true });
+    expect(await db.prepare(`SELECT thumb_key FROM posts WHERE id = 'mine'`).first()).toEqual({ thumb_key: "deleted_pic" });
+    expect(await env.IMAGES.head("deleted_pic")).not.toBeNull();
   });
 });
+

@@ -138,7 +138,7 @@ test("Stripe's webhook refuses an unsigned or wrongly signed event", async ({ re
   expect(forged.status()).toBe(400);
 });
 
-test("a fan writes a text post, with the fan mark and a clickable link", async ({ page, context, account, request }) => {
+test("a fan writes a text post, with the fan mark and a clickable link", async ({ page, context, account, request, problems }) => {
   await setPlan(request, account);
   await account.signIn(context);
   await open(page, "/settings");
@@ -164,7 +164,7 @@ test("a fan writes a text post, with the fan mark and a clickable link", async (
   // Anywhere in a fan's text: a bare address, and one labelled with itself,
   // are links; a label of other words keeps its address beside it, to copy.
   await page.getByLabel("Comment", { exact: true }).fill(
-    "Also see https://example.net/notes in passing, [www.example.org/a](https://example.org/a/), and [a trick](https://example.com/elsewhere).",
+    "Also see https://example.net/notes in passing, [www.example.org/a](https://example.org/a/), [https://example.org/guide](https://example.org/guide), [example.net/guide](https://example.net:8443/guide), and [a trick](https://example.com/elsewhere).",
   );
   await page.getByRole("button", { name: "Comment", exact: true }).click();
   const said = page.locator("li[id^='c-']", { hasText: "in passing" });
@@ -172,6 +172,16 @@ test("a fan writes a text post, with the fan mark and a clickable link", async (
   await expect(said.getByRole("link", { name: "www.example.org/a" })).toHaveAttribute("href", "https://example.org/a/");
   await expect(said.locator("a[href='https://example.com/elsewhere']")).toHaveCount(0);
   await expect(said.getByRole("button", { name: "Copy link https://example.com/elsewhere" })).toBeVisible();
+  // A label with its scheme is one link, never one inside another (review F97).
+  await expect(said.locator("a[href='https://example.org/guide']")).toHaveCount(1);
+  await expect(said.locator("a a")).toHaveCount(0);
+  // A port the label leaves out is not hidden behind it (review F98).
+  await expect(said.locator("a[href='https://example.net:8443/guide']")).toHaveCount(0);
+  await expect(said.getByRole("button", { name: "Copy link https://example.net:8443/guide" })).toBeVisible();
+  // Drawn again from the server, the thread's links hydrate without complaint.
+  await page.reload();
+  await expect(page.locator("li[id^='c-']", { hasText: "in passing" }).locator("a[href='https://example.org/guide']")).toHaveCount(1);
+  expect(problems.errors).toEqual([]);
 
   // In the feed, the excerpt keeps the post's lines.
   await open(page, "/?sort=new&range=all");
@@ -186,6 +196,31 @@ test("a fan writes a text post, with the fan mark and a clickable link", async (
   await expect(page.getByText("The fan mark is hidden beside your name.")).toBeVisible();
   await open(page, `/u/${account.username}`);
   await expect(page.getByTitle("aion.ly fan")).toHaveCount(0);
+});
+
+test("a long post's excerpt in the feed opens to its whole text, and closes again", async ({ page, context, account, request }) => {
+  await setPlan(request, account);
+  await account.signIn(context);
+  await open(page, "/submit");
+  await page.getByRole("button", { name: "Text", exact: true }).click();
+  const title = `A long read by ${account.username}`;
+  const opening = "What a week of prompts taught me about small models.";
+  const ending = `The last line, past the excerpt, with https://example.org/${account.id} to follow.`;
+  await finishPost(page, title, `${opening}\n\n${"The middle goes on at length, as notes do. ".repeat(8)}\n\n${ending}`);
+
+  await open(page, "/?sort=new&range=all");
+  const card = page.locator("article").filter({ has: page.getByRole("link", { name: title }) });
+  await expect(card).toContainText(opening);
+  await expect(card.getByText(ending)).toHaveCount(0);
+  await card.getByRole("button", { name: "Show more" }).click();
+  // The whole of it, formatted as on its page: the fan's address is a link.
+  await expect(card.getByRole("link", { name: `example.org/${account.id}` })).toBeVisible();
+  await expect(card.getByRole("button", { name: "Show less" })).toHaveAttribute("aria-expanded", "true");
+  await card.getByRole("button", { name: "Show less" }).click();
+  await expect(card.getByRole("link", { name: `example.org/${account.id}` })).toHaveCount(0);
+  await expect(card.getByRole("button", { name: "Show more" })).toBeVisible();
+  // A short one has nothing more to show.
+  await expect(page.locator("article").filter({ hasText: "Sample post: a post on X" }).getByRole("button", { name: "Show more" })).toHaveCount(0);
 });
 
 test("a fan's tint stands in for orange on every page, from the first paint, in either scheme", async ({ page, context, account, request }) => {

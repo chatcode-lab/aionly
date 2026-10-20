@@ -1,5 +1,5 @@
 import { entitledCondition, participantCondition } from "./db/accounts.server";
-import { GALLERY_MAX, storedGallery, UPLOAD_SET } from "./gallery";
+import { GALLERY_MAX, UPLOAD_SET } from "./gallery";
 import { newId } from "./ids";
 import { MAX_IMAGE_BYTES } from "./images.server";
 import { type MediaType, sniffMedia, stripJpegMetadata, UPLOAD_LIMITS } from "./uploads";
@@ -175,34 +175,3 @@ export async function releaseUpload(db: D1Database, bucket: R2Bucket, input: { o
   return released !== null;
 }
 
-/**
- * Deletes the files of upload posts their authors deleted, every picture
- * of a gallery included, as the snapshot sweep does for link posts, a few
- * dozen posts a run. A moderator's removal keeps them.
- */
-export async function sweepDeletedUploads(db: D1Database, bucket: R2Bucket): Promise<number> {
-  const { results } = await db
-    .prepare(
-      `SELECT post.id, post.media_key, post.pictures FROM posts AS post
-       WHERE post.deleted_at IS NOT NULL AND post.removed_batch_id IS NULL
-         AND (post.media_key IS NOT NULL OR post.pictures IS NOT NULL) AND post.kind = 'upload'
-       LIMIT 50`,
-    )
-    .all<{ id: string; media_key: string | null; pictures: string | null }>();
-  if (results.length === 0) return 0;
-  const named = results.flatMap((row) => [row.media_key, ...(storedGallery(row.pictures) ?? []).map((picture) => picture.key)]);
-  const keys = [...new Set(named.filter((key): key is string => key !== null))];
-  // Only files the board holds as media; a key no longer held is forgotten all the same.
-  const { results: held } = await db
-    .prepare(`SELECT key FROM images WHERE kind = 'media' AND key IN (SELECT value FROM json_each(?1))`)
-    .bind(JSON.stringify(keys))
-    .all<{ key: string }>();
-  if (held.length > 0) await bucket.delete(held.map((row) => row.key));
-  await db.batch([
-    db
-      .prepare(`UPDATE posts SET media_key = NULL, pictures = NULL WHERE id IN (SELECT value FROM json_each(?1))`)
-      .bind(JSON.stringify(results.map((row) => row.id))),
-    db.prepare(`DELETE FROM images WHERE kind = 'media' AND key IN (SELECT value FROM json_each(?1))`).bind(JSON.stringify(keys)),
-  ]);
-  return held.length;
-}

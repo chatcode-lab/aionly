@@ -8,7 +8,8 @@ import { type NewPost, publishPost } from "../../app/lib/db/submit.server";
 import type { DraftFields } from "../../app/lib/draft-rules";
 import { GALLERY_MAX, type Picture, pictureAlt, readGallery } from "../../app/lib/gallery";
 import { deleteReleasedFiles, sweepUnusedDraftFiles } from "../../app/lib/db/draft-files.server";
-import { releaseUpload, storeUpload, sweepDeletedUploads } from "../../app/lib/uploads.server";
+import { deleteAccount } from "../../app/lib/db/deletion.server";
+import { releaseUpload, storeUpload } from "../../app/lib/uploads.server";
 import { DAY, db, NOW, reset, user } from "./fixtures";
 
 const bucket = env.IMAGES;
@@ -138,15 +139,16 @@ describe("publishing a gallery", () => {
     expect(await db.prepare(`SELECT COUNT(*) AS n FROM posts`).first()).toEqual({ n: 0 });
   });
 
-  it("is swept whole once its author deletes it, and kept while a moderator's removal stands", async () => {
+  it("keeps every picture once its author deletes it, and lets them all go with the author's account", async () => {
     const keys = [await send("u1", "set-one-aaaa"), await send("u1", "set-one-aaaa")];
     await galleryPost("u1", keys);
     await db.prepare(`UPDATE posts SET deleted_at = ?1 WHERE id = 'gallery'`).bind(NOW + DAY).run();
-    expect(await sweepDeletedUploads(db, bucket)).toBe(2);
-    for (const key of keys) {
-      expect(await bucket.get(key)).toBeNull();
-      expect(await stateOf(key)).toBeNull();
-    }
+    for (const key of keys) expect(await stateOf(key)).toBe("attached");
+    // The account goes, keeping its live posts: the deleted one's files are queued for the bucket.
+    const files = await deleteAccount(db, { userId: "u1", content: false, banned: false, identities: [], now: NOW + 2 * DAY });
+    expect([...files].sort()).toEqual([...keys].sort());
+    for (const key of keys) expect(await stateOf(key)).toBeNull();
+    expect((await db.prepare(`SELECT key FROM file_deletions ORDER BY key`).all<{ key: string }>()).results.map((row) => row.key)).toEqual([...keys].sort());
     expect(await db.prepare(`SELECT media_key, pictures FROM posts WHERE id = 'gallery'`).first()).toEqual({ media_key: null, pictures: null });
   });
 });

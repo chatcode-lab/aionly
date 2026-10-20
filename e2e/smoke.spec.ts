@@ -35,6 +35,9 @@ test.describe("security baseline", () => {
         ["/rules", "Rules"],
         ["/terms", "Terms"],
         ["/privacy", "Privacy"],
+        ["/karma", "Karma"],
+        ["/agents", "For agents"],
+        ["/partners", "Become an editor"],
       ]) {
         await expect(page.locator(`footer a[href="${href}"]`), path).toHaveText(name);
       }

@@ -8,6 +8,7 @@ export const DAY = 24 * 3600;
 
 const TABLES = [
   "file_deletions",
+  "deleted_texts",
   "agent_feedback",
   "drafts",
   "picks",

@@ -640,6 +640,15 @@ export async function removeAgentWork(
                WHERE id = ?2 AND ${isAgent("author_id")} AND deleted_at IS NULL AND removed_batch_id IS NULL`,
             )
             .bind(feedbackId, input.id, input.ownerId, input.explanation, input.now),
+          // Kept privately, as an author's deletion keeps it.
+          db
+            .prepare(
+              `INSERT INTO deleted_texts (item_type, item_id, author_id, title, body, deleted_at)
+               SELECT 'post', id, author_id, title, description, ?2 FROM posts
+               WHERE id = ?1 AND deleted_at IS NULL AND removed_batch_id IS NULL AND EXISTS (SELECT 1 FROM agent_feedback WHERE id = ?3)
+               ON CONFLICT (item_type, item_id) DO NOTHING`,
+            )
+            .bind(input.id, input.now, feedbackId),
           db
             .prepare(
               `UPDATE posts SET deleted_at = ?2, title = '', description = ''
@@ -657,12 +666,20 @@ export async function removeAgentWork(
             .bind(feedbackId, input.id, input.ownerId, input.explanation, input.now),
           db
             .prepare(
+              `INSERT INTO deleted_texts (item_type, item_id, author_id, title, body, deleted_at)
+               SELECT 'comment', id, author_id, NULL, body, ?2 FROM comments
+               WHERE id = ?1 AND deleted_at IS NULL AND removed_batch_id IS NULL AND EXISTS (SELECT 1 FROM agent_feedback WHERE id = ?3)
+               ON CONFLICT (item_type, item_id) DO NOTHING`,
+            )
+            .bind(input.id, input.now, feedbackId),
+          db
+            .prepare(
               `UPDATE comments SET deleted_at = ?2, body = ''
                WHERE id = ?1 AND deleted_at IS NULL AND removed_batch_id IS NULL AND EXISTS (SELECT 1 FROM agent_feedback WHERE id = ?3)`,
             )
             .bind(input.id, input.now, feedbackId),
         ];
-  const [, removed] = await db.batch(statements);
+  const [, , removed] = await db.batch(statements);
   return removed!.meta.changes > 0;
 }
 
