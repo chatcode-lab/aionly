@@ -82,7 +82,7 @@ describe("uploads", () => {
       duration: 40,
       posterKey: poster.ok ? poster.key : null,
     };
-    expect(await publishPost(db, { ...upload, author: await record("fan") })).toEqual({ ok: true, id: "up1" });
+    expect(await publishPost(db, { ...upload, author: await record("fan") })).toEqual({ ok: true, id: "up1", freed: [] });
     const page = await postPage(db, "up1");
     expect(page?.state === "live" && page.post.media).toMatchObject({ kind: "video", aspect: "9:16", duration: 40 });
     expect(page?.state === "live" && page.post.host).toBeUndefined();
@@ -121,13 +121,13 @@ describe("text posts", () => {
   });
 
   it("publish for a fan or an admin, never for a free member", async () => {
-    expect(await publishPost(db, { ...text("t1"), author: await record("fan") })).toEqual({ ok: true, id: "t1" });
+    expect(await publishPost(db, { ...text("t1"), author: await record("fan") })).toEqual({ ok: true, id: "t1", freed: [] });
     const page = await postPage(db, "t1");
     const shown = page?.state === "live" ? page.post : null;
     expect(shown).toMatchObject({ url: shown?.path, media: { kind: "text" } });
     expect(await publishPost(db, { ...text("t2"), author: await record("free") })).toEqual({ ok: false, reason: "not_allowed" });
     await user("boss", "head_admin", { role: "admin" });
-    expect(await publishPost(db, { ...text("t3"), author: await record("boss") })).toEqual({ ok: true, id: "t3" });
+    expect(await publishPost(db, { ...text("t3"), author: await record("boss") })).toEqual({ ok: true, id: "t3", freed: [] });
   });
 });
 

@@ -73,6 +73,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
         entitled: account.entitled,
         digest: account.digest,
         newMentions: account.newMentions,
+        ...(account.drafts.own + account.drafts.fromAgent > 0 ? { drafts: account.drafts } : {}),
         ...(account.fan && account.showMark ? { fan: true } : {}),
         ...(term?.userId === account.id ? { editor: true } : {}),
         ...(account.textSize !== DEFAULT_TEXT_SIZE ? { textSize: account.textSize } : {}),

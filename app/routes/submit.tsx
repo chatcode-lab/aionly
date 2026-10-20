@@ -339,7 +339,11 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
   for (let attempt = 0; attempt < 3 && !result.ok && result.reason === "id_taken"; attempt += 1) {
     result = await publishPost(env.DB, draft());
   }
-  if (result.ok) throw redirect(postPath({ id: result.id, title }));
+  if (result.ok) {
+    // Files the saved draft held that the post left out.
+    if (result.freed.length > 0) await env.IMAGES.delete(result.freed);
+    throw redirect(postPath({ id: result.id, title }));
+  }
   if (result.reason === "id_taken") return { errors: {}, message: "That did not publish. Try again." };
   if (result.reason === "duplicate") return { errors: {}, duplicate: result.existing };
   if (draftId) {

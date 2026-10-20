@@ -48,6 +48,8 @@ export interface ViewerSummary extends PublicAuthor {
   digest: "daily" | "weekly" | "monthly" | null;
   /** Posts and comments mentioning them or their agent since they last looked, up to 99. */
   newMentions: number;
+  /** Drafts waiting, when any: their own, and their agent's for them to review. */
+  drafts?: { own: number; fromAgent: number };
   /** Until when, in seconds, a member without the plan gets a new member's prices. */
   introUntil?: number;
   /** The guest editor of the running term, who picks posts. */

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Form, Link, redirect, useNavigation } from "react-router";
 
 import { MentionsProvider } from "~/components/mentions";
+import { PostMediaView } from "~/components/post-media";
 import { RichText } from "~/components/rich-text";
 import { Button } from "~/components/ui/button";
 import { TextArea } from "~/components/ui/field";
@@ -25,11 +26,13 @@ import {
 import { mentionHosts, mentionNames } from "~/lib/db/mentions.server";
 import { cleanExplanation, DRAFT_LIMIT, EXPLANATION_MAX } from "~/lib/draft-rules";
 import { formatAgo, formatWait } from "~/lib/format";
+import { resolveLink } from "~/lib/links/resolve";
 import { displayHost } from "~/lib/links/url";
 import { imageAddress } from "~/lib/media.server";
 import { privatePageMeta } from "~/lib/meta";
 import { ROW_ID } from "~/lib/security/body";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
+import type { PostMedia } from "~/lib/public-types";
 import { postPath } from "~/lib/slug";
 import { mentionIds } from "~/lib/text/mentions";
 import { requireAccount } from "~/lib/viewer.server";
@@ -54,8 +57,44 @@ interface DraftItem {
   file: { type: "image" | "video" | "audio"; src: string } | null;
   /** A gallery's pictures, in order, the first being `file`. */
   pictures: string[] | null;
+  /** What the post will show above its description, as the feed shows it; a link's page preview loads on asking. */
+  media: PostMedia;
   updatedAt: number;
   declinedAt: number | null;
+}
+
+/** A draft's media as its post's will be: the file itself, or what its link is, read from the address alone. */
+function mediaOf(draft: Draft): PostMedia {
+  if (draft.kind === "text") return { kind: "text" };
+  if (draft.kind === "upload") {
+    if (!draft.media) return { kind: "text" };
+    const src = imageAddress(draft.media.key);
+    const thumbUrl = draft.posterKey ? imageAddress(draft.posterKey) : undefined;
+    const duration = draft.media.duration ?? undefined;
+    switch (draft.media.type) {
+      case "image":
+        return {
+          kind: "image",
+          src,
+          width: draft.media.width ?? 1200,
+          height: draft.media.height ?? 900,
+          ...(draft.pictures
+            ? { pictures: draft.pictures.map((picture) => ({ src: imageAddress(picture.key), width: picture.width, height: picture.height })) }
+            : {}),
+        };
+      case "video":
+        return { kind: "video", aspect: (draft.media.height ?? 0) > (draft.media.width ?? 0) ? "9:16" : "16:9", src, thumbUrl, duration };
+      case "audio":
+        return { kind: "audio", aspect: "audio", src, thumbUrl, duration };
+    }
+  }
+  try {
+    const link = resolveLink(new URL(draft.url ?? ""));
+    if (link.kind === "media") return { kind: "media", provider: link.provider, aspect: link.aspect };
+  } catch {
+    // An unfinished link shows as typed.
+  }
+  return { kind: "page" };
 }
 
 function itemOf(draft: Draft): DraftItem {
@@ -75,6 +114,7 @@ function itemOf(draft: Draft): DraftItem {
     host,
     file: draft.media ? { type: draft.media.type, src: imageAddress(draft.media.key) } : null,
     pictures: draft.pictures ? draft.pictures.map((picture) => imageAddress(picture.key)) : null,
+    media: mediaOf(draft),
     updatedAt: draft.updatedAt,
     declinedAt: draft.declinedAt,
   };
@@ -201,14 +241,17 @@ const KIND: Record<Draft["kind"], string> = { link: "Link", text: "Text", upload
 
 function DraftSummary({ draft, now, full }: { draft: DraftItem; now: number; full: boolean }) {
   return (
-    <div className="min-w-0 space-y-1">
-      <h3 className="text-body font-semibold break-words">{draft.title || <span className="text-text-muted">Untitled</span>}</h3>
-      <p className="text-meta text-text-muted">
-        {KIND[draft.kind]}
-        {draft.pictures ? ` · a gallery of ${draft.pictures.length}` : ""}
-        {draft.host ? ` · ${draft.host}` : draft.url ? ` · ${draft.url}` : ""} · saved {formatAgo(draft.updatedAt, now)}
-        {draft.declinedAt ? ` · declined ${formatAgo(draft.declinedAt, now)}` : ""}
-      </p>
+    <div className="min-w-0 space-y-2">
+      <div className="space-y-1">
+        <h3 className="text-body font-semibold break-words">{draft.title || <span className="text-text-muted">Untitled</span>}</h3>
+        <p className="text-meta text-text-muted">
+          {KIND[draft.kind]}
+          {draft.pictures ? ` · a gallery of ${draft.pictures.length}` : ""}
+          {draft.host ? ` · ${draft.host}` : draft.url ? ` · ${draft.url}` : ""} · saved {formatAgo(draft.updatedAt, now)}
+          {draft.declinedAt ? ` · declined ${formatAgo(draft.declinedAt, now)}` : ""}
+        </p>
+      </div>
+      <DraftMedia draft={draft} />
       {draft.description ? <RichText text={draft.description} className={full ? undefined : "line-clamp-3"} /> : null}
       {full && draft.url ? (
         <p className="text-meta break-all">
@@ -217,20 +260,74 @@ function DraftSummary({ draft, now, full }: { draft: DraftItem; now: number; ful
           </a>
         </p>
       ) : null}
-      {draft.pictures ? (
-        <p className="flex flex-wrap gap-x-3 text-meta">
-          {draft.pictures.map((src, index) => (
-            <a key={src} href={src} target="_blank" rel="noopener" className="underline underline-offset-4">
-              {index === 0 ? "Open the cover" : `Picture ${index + 1}`}
-            </a>
-          ))}
-        </p>
-      ) : draft.file ? (
-        <p className="text-meta">
-          <a href={draft.file.src} target="_blank" rel="noopener" className="underline underline-offset-4">
-            Open the {draft.file.type === "image" ? "picture" : draft.file.type}
-          </a>
-        </p>
+    </div>
+  );
+}
+
+/**
+ * A draft's picture, gallery, player, or link card, as its post will show
+ * them. A link's page title and picture are fetched only when asked for,
+ * with the same check Submit runs, as it reads the page.
+ */
+function DraftMedia({ draft }: { draft: DraftItem }) {
+  const [checked, setChecked] = useState<PostMedia | null>(null);
+  const [state, setState] = useState<"idle" | "loading" | string>("idle");
+  if (draft.media.kind === "text") return null;
+  const media = checked ?? draft.media;
+  const preview = async () => {
+    setState("loading");
+    try {
+      const response = await fetch("/submit/check", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: draft.url }),
+      });
+      const data = (await response.json()) as
+        | { ok: true; link: { provider: string | null; aspect: string | null; pageTitle: string | null; thumbUrl: string | null } }
+        | { ok: false; error?: string; message?: string };
+      if (!data.ok) return setState(("error" in data && data.error) || ("message" in data && data.message) || "The preview did not load.");
+      const { link } = data;
+      setChecked(
+        draft.media.kind === "media"
+          ? { ...draft.media, thumbUrl: link.thumbUrl ?? undefined }
+          : { kind: "page", pageTitle: link.pageTitle ?? undefined, thumbUrl: link.thumbUrl ?? undefined },
+      );
+      setState("idle");
+    } catch {
+      setState("The preview did not load. Try again.");
+    }
+  };
+  return (
+    <div className="space-y-1.5">
+      <PostMediaView
+        post={{
+          id: `draft-${draft.id}`,
+          path: "/drafts",
+          title: draft.title,
+          url: draft.url ?? "/drafts",
+          host: draft.host ?? undefined,
+          origin: "found",
+          author: { id: "draft", username: "draft" },
+          createdAt: 0,
+          score: 0,
+          commentCount: 0,
+          excerpt: "",
+          media,
+        }}
+      />
+      {draft.kind === "link" && draft.url && !checked ? (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <Button variant="ghost" className="-ml-2" onClick={() => void preview()} disabled={state === "loading"}>
+            {state === "loading" ? "Loading the preview…" : "Preview"}
+          </Button>
+          {state !== "idle" && state !== "loading" ? (
+            <p role="alert" className="text-meta text-danger">
+              {state}
+            </p>
+          ) : (
+            <p className="text-meta text-text-muted">Its page's title and picture, as the post will show them.</p>
+          )}
+        </div>
       ) : null}
     </div>
   );

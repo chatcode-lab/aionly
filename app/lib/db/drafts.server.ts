@@ -7,6 +7,7 @@ import { readReceipt } from "../submit/receipt.server";
 import { cleanDescription, cleanTitle, DESCRIPTION_MAX, descriptionProblem, type Origin, type PostKind, TEXT_BODY_MAX, titleProblem } from "../submit/rules";
 import { mediaTypeOf } from "../uploads";
 import { accountRecord } from "./accounts.server";
+import { unusedDraftFiles } from "./draft-files.server";
 import { linkMentions } from "./mentions.server";
 import { type Existing, type NewPost, postingStatus, type PostingStatus, publishPost } from "./submit.server";
 
@@ -334,22 +335,6 @@ function bytesAfterSql(id: number, author: number, media: number, poster: number
             OR EXISTS (SELECT 1 FROM json_each(other.pictures) AS kept WHERE json_extract(kept.value, '$.key') = file.key))))))`;
 }
 
-/**
- * Deletes an account's draft files no unpublished draft uses any more,
- * returning their keys for the bucket.
- */
-function unusedDraftFiles(db: D1Database, ownerId: string): D1PreparedStatement {
-  return db
-    .prepare(
-      `DELETE FROM images WHERE owner_id = ?1 AND state = 'draft'
-         AND NOT EXISTS (SELECT 1 FROM drafts WHERE author_id = ?1 AND post_id IS NULL
-                           AND (media_key = images.key OR poster_key = images.key
-                             OR EXISTS (SELECT 1 FROM json_each(drafts.pictures) AS kept WHERE json_extract(kept.value, '$.key') = images.key)))
-       RETURNING key`,
-    )
-    .bind(ownerId);
-}
-
 /** Deletes the author's own unpublished draft, and its files: their keys come back for the bucket. */
 export async function deleteDraft(db: D1Database, input: { id: string; authorId: string }): Promise<{ ok: boolean; freed: string[] }> {
   const [deleted, freed] = await db.batch([
@@ -488,7 +473,10 @@ export async function publishDraft(
 
   let result = await publishPost(db, post());
   for (let attempt = 0; attempt < 3 && !result.ok && result.reason === "id_taken"; attempt += 1) result = await publishPost(db, post());
-  if (result.ok) return { ok: true, postId: result.id, title, already: false };
+  if (result.ok) {
+    if (result.freed.length > 0) await input.bucket.delete(result.freed);
+    return { ok: true, postId: result.id, title, already: false };
+  }
   if (result.reason === "duplicate") return { ok: false, reason: "duplicate", existing: result.existing };
   // Changed or published by another hand meanwhile: say which.
   const now = await draftById(db, draft.id);

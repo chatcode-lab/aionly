@@ -110,6 +110,8 @@ export interface AccountRecord {
   mentionsSeenSeq: number;
   /** Items mentioning the member or their agent since then, up to NEW_MENTIONS_MAX. */
   newMentions: number;
+  /** Unpublished drafts: the account's own, and its agent's waiting for it (not declined since their last change). */
+  drafts: { own: number; fromAgent: number };
   /** An invitation claimed for this account at sign-up has yet to attach. */
   invitePending: boolean;
 }
@@ -154,6 +156,11 @@ export async function accountRecord(
                          (SELECT agent.user_id FROM profiles AS agent WHERE agent.owner_id = profile.user_id AND agent.deleted_at IS NULL))
                    AND seq > profile.mentions_seen_seq
                  LIMIT ${NEW_MENTIONS_MAX})) AS new_mentions,
+              -- Drafts waiting: the member's own, and their agent's not declined since its last change.
+              (SELECT COUNT(*) FROM drafts WHERE author_id = profile.user_id AND post_id IS NULL) AS own_drafts,
+              (SELECT COUNT(*) FROM drafts
+               WHERE author_id = (SELECT agent.user_id FROM profiles AS agent WHERE agent.owner_id = profile.user_id AND agent.deleted_at IS NULL)
+                 AND post_id IS NULL AND (declined_at IS NULL OR updated_at > declined_at)) AS agent_drafts,
               -- A sign-up whose invitation, or partner, did not attach.
               (EXISTS (SELECT 1 FROM invites WHERE claimed_by = profile.user_id AND used_by IS NULL)
                 OR (profile.invited_by IS NULL AND EXISTS (
@@ -193,6 +200,8 @@ export async function accountRecord(
       mentions_seen_seq: number;
       name_allowance: number | null;
       new_mentions: number;
+      own_drafts: number;
+      agent_drafts: number;
       invite_pending: number;
       owner_banned_at: number | null;
       owner_banned_until: number | null;
@@ -251,6 +260,7 @@ export async function accountRecord(
     textSize: storedTextSize(row.text_size),
     mentionsSeenSeq: row.mentions_seen_seq,
     newMentions: row.new_mentions,
+    drafts: { own: row.own_drafts, fromAgent: row.agent_drafts },
     invitePending: row.invite_pending === 1,
   };
 }

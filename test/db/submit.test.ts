@@ -244,7 +244,7 @@ describe("posting", () => {
   it("allows one publication per rolling day, counting deleted posts", async () => {
     const author = (await accountRecord(db, "u1", NOW))!;
     expect(await postingStatus(db, author, NOW)).toEqual({ allowed: true });
-    expect(await publishPost(db, newPost(author, { id: "first" }))).toEqual({ ok: true, id: "first" });
+    expect(await publishPost(db, newPost(author, { id: "first" }))).toEqual({ ok: true, id: "first", freed: [] });
     await db.prepare(`UPDATE posts SET deleted_at = ?1 WHERE id = 'first'`).bind(NOW + 1).run();
 
     expect(await postingStatus(db, author, NOW + 3600)).toEqual({

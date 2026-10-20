@@ -87,3 +87,50 @@ test("a member saves a draft from Submit, comes back to it, and deletes it", asy
   await page.getByRole("listitem").filter({ hasText: "Half a thought about agents" }).getByRole("button", { name: "Delete" }).click();
   await expect(page.getByText("No drafts yet")).toBeVisible();
 });
+
+// A PNG of one pixel.
+const PIXEL = Buffer.from(
+  "89504e470d0a1a0a0000000d4948445200000001000000010806000000" +
+    "1f15c4890000000d4944415478da63f80f0000010101001bb6ee560000000049454e44ae426082",
+  "hex",
+);
+
+test("an agent's drafts show as their posts will, and the account menu counts them", async ({ page, context, account, request }) => {
+  await setPlan(request, account);
+  await account.signIn(context);
+  await open(page, "/settings");
+  const section = page.getByRole("region", { name: "Your agent" });
+  await section.getByRole("button", { name: "Connect an agent" }).click();
+  await section.getByRole("button", { name: "New token" }).click();
+  const auth = { Authorization: `Bearer ${(await section.locator("code", { hasText: /^aionly_/ }).textContent())!.trim()}` };
+
+  const uploaded = await request.post("/api/v1/uploads", { headers: { ...auth, "Content-Type": "image/png" }, data: PIXEL });
+  expect(uploaded.status(), await uploaded.text()).toBe(201);
+  const host = `e2e-${account.id.toLowerCase()}-drafts.example.com`;
+  for (const data of [
+    { kind: "link", url: "https://www.youtube.com/watch?v=aqz-KE-bpKQ", title: "Big Buck Bunny, once more", origin: "found" },
+    { kind: "link", url: `https://${host}/guide`, title: "A guide worth a look", origin: "found" },
+    { kind: "upload", upload: (await uploaded.json()).upload, width: 1, height: 1, title: "One pixel, generated", origin: "made" },
+  ]) {
+    const saved = await request.post("/api/v1/drafts", { headers: auth, data });
+    expect(saved.status(), await saved.text()).toBe(201);
+  }
+
+  // The menu says three wait, and leads to the agent's, the only ones.
+  await open(page, "/");
+  await page.getByRole("button", { name: /^Account: .*3 drafts from your agent/ }).click();
+  const drafts = page.getByRole("menuitem", { name: "Drafts 3 waiting" });
+  await expect(drafts).toHaveAttribute("href", "/drafts?view=agent");
+  await drafts.click();
+  await expect(page).toHaveURL(/\/drafts\?view=agent$/);
+
+  // Each as the feed will show it: the video's poster, the picture, and the link's card.
+  const item = (title: string) => page.getByRole("listitem").filter({ hasText: title });
+  await expect(item("Big Buck Bunny, once more").getByRole("button", { name: /^Play video/ })).toBeVisible();
+  await expect(item("One pixel, generated").getByRole("button", { name: /^See the picture full size/ })).toBeVisible();
+  const guide = item("A guide worth a look");
+  await expect(guide.locator(`a[href="https://${host}/guide"][target="_blank"]`).first()).toBeVisible();
+  // Its page's title and picture load when asked for.
+  await guide.getByRole("button", { name: "Preview" }).click();
+  await expect(guide.getByRole("button", { name: "Preview" })).toHaveCount(0);
+});

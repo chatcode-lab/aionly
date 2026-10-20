@@ -3,6 +3,7 @@ import type { PostReplies } from "../replies";
 import { nextTier, type Origin, postsPerDayFor, REPOST_SECONDS } from "../submit/rules";
 import type { AccountRecord } from "./accounts.server";
 import { entitledCondition, participantCondition } from "./accounts.server";
+import { unusedDraftFiles } from "./draft-files.server";
 import { mentionStatements } from "./mentions.server";
 
 const DAY = 24 * 3600;
@@ -149,7 +150,8 @@ export interface UploadPost extends PostBase {
 export type NewPost = LinkPost | TextPost | UploadPost;
 
 export type PublishResult =
-  | { ok: true; id: string }
+  // `freed`: files the published draft held and the post left out, for the bucket.
+  | { ok: true; id: string; freed: string[] }
   // Another post already has this ID: publish again with a new one.
   | { ok: false; reason: "id_taken" }
   | { ok: false; reason: "duplicate"; existing: Existing }
@@ -201,7 +203,7 @@ export async function publishPost(db: D1Database, post: NewPost): Promise<Publis
       = json_array_length(?24)))`;
 
   try {
-    const [inserted] = await db.batch([
+    const results = await db.batch([
       db
         .prepare(
           `INSERT INTO posts (id, author_id, kind, url, canonical_key, provider, origin,
@@ -272,8 +274,14 @@ export async function publishPost(db: D1Database, post: NewPost): Promise<Publis
           ]
         : []),
       ...mentionStatements(db, { type: "post", id: post.id, text: post.description, authorId: post.author.id, now: post.now }),
+      // A file the draft held that the post left out goes, once no other
+      // draft uses it; refused, the draft is still unpublished and keeps
+      // its files (review F92).
+      ...(post.draft ? [unusedDraftFiles(db, post.author.id, { draftId: post.draft.id, postId: post.id })] : []),
     ]);
-    if (inserted.meta.changes > 0) return { ok: true, id: post.id };
+    const inserted = results[0]!;
+    const freed = post.draft ? ((results.at(-1)?.results ?? []) as Array<{ key: string }>).map((row) => row.key) : [];
+    if (inserted.meta.changes > 0) return { ok: true, id: post.id, freed };
     const existing = link ? await findDuplicate(db, link.canonicalKey, { origin: post.origin, now: post.now }) : null;
     return existing ? { ok: false, reason: "duplicate", existing } : { ok: false, reason: "not_allowed" };
   } catch (error) {

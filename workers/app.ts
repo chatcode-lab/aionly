@@ -6,6 +6,7 @@ import { sweepExpiredVerifications } from "../app/lib/db/accounts.server";
 import { sweepInviteClaims } from "../app/lib/db/invites.server";
 import { sweepPartnerJoins } from "../app/lib/db/partners.server";
 import { sweepDeletedIdentities } from "../app/lib/db/deletion.server";
+import { sweepUnusedDraftFiles } from "../app/lib/db/draft-files.server";
 import { sweepPublishedDrafts } from "../app/lib/db/drafts.server";
 import { sendDigests } from "../app/lib/digest/digest.server";
 import { bulkMailer, transactionalMailer } from "../app/lib/mail/mailers.server";
@@ -242,8 +243,8 @@ export default {
   // Hourly: removes preview snapshots never published, pictures and uploads
   // of deleted posts, sign-in states that expired unused, deleted accounts'
   // identities once they may sign up again, OAuth codes and apps no longer
-  // needed, and drafts published a month ago; and sends the digests that
-  // are due.
+  // needed, drafts published a month ago, and draft files nothing uses;
+  // and sends the digests that are due.
   async scheduled(_controller, workerEnv, ctx) {
     ctx.waitUntil(
       sweepPendingImages(workerEnv.DB, workerEnv.IMAGES, Math.floor(Date.now() / 1000)),
@@ -255,6 +256,8 @@ export default {
     ctx.waitUntil(sweepDeletedUploads(workerEnv.DB, workerEnv.IMAGES));
     ctx.waitUntil(sweepOAuth(workerEnv.DB, Math.floor(Date.now() / 1000)));
     ctx.waitUntil(sweepPublishedDrafts(workerEnv.DB, Math.floor(Date.now() / 1000)));
+    // Draft files no draft or post uses any more (review F92).
+    ctx.waitUntil(sweepUnusedDraftFiles(workerEnv.DB, workerEnv.IMAGES, Math.floor(Date.now() / 1000)));
     // Invitation and partner claims whose sign-up never finished.
     ctx.waitUntil(sweepInviteClaims(workerEnv.DB, Math.floor(Date.now() / 1000)));
     ctx.waitUntil(sweepPartnerJoins(workerEnv.DB, Math.floor(Date.now() / 1000)));

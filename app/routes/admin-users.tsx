@@ -6,6 +6,7 @@ import { AdminHeader } from "~/components/admin-nav";
 import { BanDialog } from "~/components/ban-dialog";
 import { useNotify } from "~/components/notify";
 import { Button } from "~/components/ui/button";
+import { Select } from "~/components/ui/select";
 import { EmptyState } from "~/components/ui/states";
 import { LinkTabs } from "~/components/ui/tabs";
 import { useModerate } from "~/components/use-moderate";
@@ -77,8 +78,8 @@ function UserRow({ user }: { user: AdminUser }) {
       <div className="flex flex-wrap items-center gap-2">
         <label className="flex items-center gap-2 text-meta text-text-muted">
           Posts
-          <select
-            className="h-9 rounded-lg border border-border-strong bg-surface px-2 text-body text-text"
+          <Select
+            className="h-9 rounded-lg border border-border-strong bg-surface pl-2 text-body text-text"
             value={limitValue(user)}
             disabled={busy}
             onChange={(event) => {
@@ -93,7 +94,7 @@ function UserRow({ user }: { user: AdminUser }) {
                 {label}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
         {user.role === "admin" ? null : user.ban ? (
           <Button disabled={busy} onClick={() => run({ action: "unban", userId: user.id }, () => notify(`${user.username} is unbanned.`))}>

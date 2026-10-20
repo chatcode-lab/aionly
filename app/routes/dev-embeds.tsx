@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { EmbedFrame } from "~/components/embed-frame";
 import { Button } from "~/components/ui/button";
+import { Select } from "~/components/ui/select";
 import { TextField } from "~/components/ui/field";
 import { Notice } from "~/components/ui/states";
 import { connectEmbed, type EmbedConnection } from "~/lib/embeds/connect";
@@ -224,15 +225,16 @@ function ProviderSpike({
         {provider === "youtube" ? (
           <label className="flex h-9 max-w-full min-w-0 items-center gap-2 text-body pointer-coarse:h-(--touch)">
             Start
-            <select
+            <Select
               value={start}
               onChange={(event) => setStart(event.target.value as Start)}
-              className="h-9 min-w-0 flex-1 rounded-lg border border-border-strong bg-surface px-2 text-body pointer-coarse:h-(--touch) pointer-coarse:text-[length:max(1rem,var(--text-body))]"
+              frame="min-w-0 flex-1"
+              className="h-9 rounded-lg border border-border-strong bg-surface pl-2 text-body pointer-coarse:h-(--touch) pointer-coarse:text-[length:max(1rem,var(--text-body))]"
             >
               <option value="paused">Paused</option>
               <option value="muted">Autoplay muted (card in focus)</option>
               <option value="sound">Autoplay with sound (tap on poster)</option>
-            </select>
+            </Select>
           </label>
         ) : null}
       </div>

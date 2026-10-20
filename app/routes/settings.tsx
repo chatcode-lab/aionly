@@ -13,6 +13,7 @@ import { CopyButton, XLogo } from "~/components/sign-in";
 import { RepliesField } from "~/components/replies-field";
 import { DisplaySettings, useTextSize, useTheme } from "~/components/theme-switch";
 import { UsernameForm } from "~/components/username-form";
+import { Select } from "~/components/ui/select";
 import { Button } from "~/components/ui/button";
 import { TextArea } from "~/components/ui/field";
 import { Notice } from "~/components/ui/states";
@@ -605,7 +606,7 @@ function TokenPermission({
     <Form method="post">
       <input type="hidden" name="token" value={tokenId} />
       <input type="hidden" name="intent" value="token-permission" />
-      <select
+      <Select
         // Back to what is stored when a change is refused.
         key={permission}
         name="permission"
@@ -613,14 +614,14 @@ function TokenPermission({
         defaultValue={permission}
         disabled={disabled}
         onChange={(event) => event.currentTarget.form?.requestSubmit()}
-        className="h-9 rounded-lg border border-border-strong bg-surface px-2 text-meta text-text pointer-coarse:h-(--touch)"
+        className="h-9 rounded-lg border border-border-strong bg-surface pl-2 text-meta text-text pointer-coarse:h-(--touch)"
       >
         {PERMISSIONS.map((option, index) => (
           <option key={option} value={option} disabled={!mayRaise && index > current}>
             {PERMISSION_LABELS[option]}
           </option>
         ))}
-      </select>
+      </Select>
     </Form>
   );
 }
@@ -1109,18 +1110,20 @@ function EmailSection({
       {banned ? null : (
         <label className="block text-body font-medium">
           Digest of top posts
-          <select
+          <Select
             name="digest"
             value={digest}
             onChange={(event) => digestFetcher.submit({ digest: event.target.value }, { method: "post", action: "/api/digest" })}
-            className="mt-1 block h-9 w-full max-w-sm rounded-lg border border-border-strong bg-surface px-2 text-body font-normal text-text pointer-coarse:h-(--touch)"
+            frame="mt-1 w-full max-w-sm"
+            block
+            className="h-9 rounded-lg border border-border-strong bg-surface pl-2 text-body font-normal text-text pointer-coarse:h-(--touch)"
           >
             {DIGESTS.map((option) => (
               <option key={option} value={option}>
                 {DIGEST_LABELS[option]}
               </option>
             ))}
-          </select>
+          </Select>
         </label>
       )}
       <Form method="post" className="border-t border-border pt-3">
@@ -1294,10 +1297,13 @@ function Section({
   title,
   id,
   paid,
+  note,
   children,
 }: {
   title: React.ReactNode;
   id?: string;
+  /** A short word beside the title, such as how many invitations are left. */
+  note?: string;
   /** "feature" for what the plan brings, marked "Fan"; "plan" for the plan's own card, tinted only. */
   paid?: "feature" | "plan";
   children: React.ReactNode;
@@ -1314,6 +1320,7 @@ function Section({
     >
       <h2 className="flex flex-wrap items-center gap-x-2 text-title font-semibold">
         <span id={heading}>{title}</span>
+        {note ? <span className="text-meta font-normal text-text-muted">{note}</span> : null}
         {paid === "feature" ? (
           <span className="inline-flex items-center gap-1 text-meta font-medium text-accent">
             <Heart size={12} aria-hidden className="fill-current" />
@@ -1434,7 +1441,15 @@ export default function Settings({ loaderData, actionData }: Route.ComponentProp
         )}
       </Section>
 
-      <Section title="Invitations">
+      <Section
+        title="Invitations"
+        // How many are left, at a glance; the button says it again.
+        note={
+          loaderData.invites.allowance === null
+            ? "No limit"
+            : `${Math.max(loaderData.invites.allowance - loaderData.invites.spent, 0)} left`
+        }
+      >
         <InvitesSection
           standing={loaderData.invites}
           origin={loaderData.origin}

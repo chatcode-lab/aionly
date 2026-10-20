@@ -4,6 +4,7 @@ import { Form, useNavigation } from "react-router";
 import { AdminHeader } from "~/components/admin-nav";
 import { CopyButton } from "~/components/sign-in";
 import { Button } from "~/components/ui/button";
+import { Select } from "~/components/ui/select";
 import { TextField } from "~/components/ui/field";
 import { Notice } from "~/components/ui/states";
 import {
@@ -198,17 +199,19 @@ export default function AdminPartners({ loaderData, actionData }: Route.Componen
           <input type="hidden" name="intent" value="payout" />
           <label className="block text-body font-medium">
             Partner
-            <select
+            <Select
               name="partner_id"
               required
-              className="mt-1 block h-10 w-full max-w-sm rounded-lg border border-border-strong bg-surface px-2 text-body font-normal text-text pointer-coarse:h-(--touch)"
+              frame="mt-1 w-full max-w-sm"
+              block
+              className="h-10 rounded-lg border border-border-strong bg-surface pl-2 text-body font-normal text-text pointer-coarse:h-(--touch)"
             >
               {owed.map((partner) => (
                 <option key={partner.partnerId} value={partner.partnerId}>
                   {partner.partner}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
           <div className="grid max-w-md grid-cols-2 gap-3">
             <TextField label="Amount, USD" name="amount" inputMode="decimal" required />

@@ -25,14 +25,18 @@ function Count({ value, label }: { value: number; label: string }) {
  * autoplay live in Settings, which keeps the top bar to four controls on a
  * narrow phone.
  */
-export function AccountMenu({ user }: { user: PublicAuthor & { newMentions: number } }) {
+export function AccountMenu({ user }: { user: PublicAuthor & { newMentions: number; drafts?: { own: number; fromAgent: number } } }) {
   const focus = useMenuFocus();
   const submit = useSubmit();
   const moderation = useModeration();
   const waiting = moderation?.openReports ?? 0;
   const mentions = user.newMentions;
+  // The menu counts every draft waiting; only the agent's, for review, light the dot.
+  const drafts = (user.drafts?.own ?? 0) + (user.drafts?.fromAgent ?? 0);
+  const fromAgent = user.drafts?.fromAgent ?? 0;
   const status = [
     mentions > 0 ? `${mentions >= NEW_MENTIONS_MAX ? `${NEW_MENTIONS_MAX}+` : mentions} new mentions` : null,
+    fromAgent > 0 ? `${fromAgent} ${fromAgent === 1 ? "draft" : "drafts"} from your agent` : null,
     waiting > 0 ? `${waiting} open reports` : null,
   ].filter(Boolean);
   return (
@@ -84,9 +88,11 @@ export function AccountMenu({ user }: { user: PublicAuthor & { newMentions: numb
             </Link>
           </MenuItem>
           <MenuItem asChild>
-            <Link to="/drafts" prefetch="intent">
+            {/* Straight to the agent's, when only those wait. */}
+            <Link to={fromAgent > 0 && !user.drafts?.own ? "/drafts?view=agent" : "/drafts"} prefetch="intent">
               <FilePen size={16} aria-hidden className="text-text-muted" />
               Drafts
+              {drafts > 0 ? <Count value={drafts} label="waiting" /> : null}
             </Link>
           </MenuItem>
           <MenuItem asChild>

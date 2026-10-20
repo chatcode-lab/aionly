@@ -234,7 +234,8 @@ function NameForm({
           refunded.
         </span>
       </label>
-      <Button type="submit" variant="primary" disabled={!open || busy}>
+      {/* "Claim q9a1 and become a fan" may take two lines on a phone (review F91). */}
+      <Button type="submit" variant="primary" disabled={!open || busy} wrap>
         {busy
           ? "Opening checkout…"
           : !open
@@ -412,7 +413,7 @@ export default function Fan({ loaderData, actionData }: Route.ComponentProps) {
             ) : null}
             {admin ? <p className="text-meta text-text-muted">As an admin, you have every feature without a plan.</p> : null}
             {signedIn ? (
-              <Button type="submit" variant="primary" disabled={!open || busy}>
+              <Button type="submit" variant="primary" disabled={!open || busy} wrap>
                 {busy
                   ? "Opening checkout…"
                   : !open

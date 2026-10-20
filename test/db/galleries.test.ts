@@ -7,6 +7,7 @@ import { postPage } from "../../app/lib/db/posts.server";
 import { type NewPost, publishPost } from "../../app/lib/db/submit.server";
 import type { DraftFields } from "../../app/lib/draft-rules";
 import { GALLERY_MAX, type Picture, pictureAlt, readGallery } from "../../app/lib/gallery";
+import { sweepUnusedDraftFiles } from "../../app/lib/db/draft-files.server";
 import { releaseUpload, storeUpload, sweepDeletedUploads } from "../../app/lib/uploads.server";
 import { DAY, db, NOW, reset, user } from "./fixtures";
 
@@ -111,7 +112,7 @@ describe("pictures sent for a gallery", () => {
 describe("publishing a gallery", () => {
   it("attaches every picture in one write, and reads back in order with the first as cover", async () => {
     const keys = [await send("u1", "set-one-aaaa"), await send("u1", "set-one-aaaa"), await send("u1", "set-one-aaaa")];
-    expect(await galleryPost("u1", [keys[2]!, keys[0]!, keys[1]!])).toEqual({ ok: true, id: "gallery" });
+    expect(await galleryPost("u1", [keys[2]!, keys[0]!, keys[1]!])).toEqual({ ok: true, id: "gallery", freed: [] });
     for (const key of keys) expect(await stateOf(key)).toBe("attached");
     const page = await postPage(db, "gallery");
     const media = page?.state === "live" ? page.post.media : null;
@@ -213,6 +214,7 @@ describe("a gallery in a draft", () => {
     expect(await publishPost(db, fromForm("reordered", [keys[1]!, keys[0]!, keys[2]!], { id: saved.draft.id, revision: 1 }))).toEqual({
       ok: true,
       id: "reordered",
+      freed: [],
     });
     for (const key of keys) expect(await stateOf(key)).toBe("attached");
 
@@ -221,9 +223,35 @@ describe("a gallery in a draft", () => {
     const second = await saveDraft(db, { authorId: "u1", fields: fields(more), now: NOW });
     if (!second.ok) throw new Error(JSON.stringify(second));
     await db.prepare(`DELETE FROM posts`).run();
-    expect(await publishPost(db, fromForm("single", [more[1]!], { id: second.draft.id, revision: 1 }))).toEqual({ ok: true, id: "single" });
+    // The cover it left out goes with it, for the bucket (review F92).
+    expect(await publishPost(db, fromForm("single", [more[1]!], { id: second.draft.id, revision: 1 }))).toEqual({
+      ok: true,
+      id: "single",
+      freed: [more[0]],
+    });
     expect(await db.prepare(`SELECT media_key, pictures FROM posts WHERE id = 'single'`).first()).toEqual({ media_key: more[1], pictures: null });
     expect(await stateOf(more[1]!)).toBe("attached");
+    expect(await stateOf(more[0]!)).toBeNull();
+  });
+
+  it("keeps every file while a publication is refused, and lets go only of what the post left out (review F92)", async () => {
+    const keys = [await send("u1", "set-one-aaaa"), await send("u1", "set-one-aaaa")];
+    const saved = await saveDraft(db, { authorId: "u1", fields: fields(keys), now: NOW });
+    if (!saved.ok) throw new Error(JSON.stringify(saved));
+    // Another draft's picture stays, whatever this one does.
+    const other = await saveDraft(db, { authorId: "u1", fields: fields([await send("u1", "set-two-bbbb")]), now: NOW });
+    if (!other.ok) throw new Error(JSON.stringify(other));
+    const author = (await accountRecord(db, "u1", NOW))!;
+    const single = (revision: number): NewPost => ({
+      kind: "upload", id: `p${revision}`, author, origin: "made", title: "Rain on a street that never was", description: "Four frames from one prompt, a minute apart.",
+      mediaKey: keys[1]!, mediaType: "image", width: 1000, height: 800, duration: null, posterKey: null, pictures: null,
+      draft: { id: saved.draft.id, revision }, now: NOW,
+    });
+    // Changed in another window meanwhile: refused, and nothing goes.
+    expect(await publishPost(db, single(7))).toEqual({ ok: false, reason: "not_allowed" });
+    for (const key of keys) expect(await stateOf(key)).toBe("draft");
+    expect(await publishPost(db, single(1))).toEqual({ ok: true, id: "p1", freed: [keys[0]] });
+    expect(await stateOf(other.draft.media!.key)).toBe("draft");
   });
 
   it("refuses a picture that is not the author's, or not a picture", async () => {
@@ -238,5 +266,36 @@ describe("a gallery in a draft", () => {
       .run();
     expect(await saveDraft(db, { authorId: "u1", fields: fields([mine, video]), now: NOW })).toEqual({ ok: false, reason: "file" });
     expect(await galleryPost("u1", [mine, video])).toEqual({ ok: false, reason: "not_allowed" });
+  });
+});
+
+describe("draft files nothing uses", () => {
+  it("go hourly once a day old, with their objects; a draft's, a post's, and a new one stay (review F92)", async () => {
+    const old = NOW - 2 * DAY;
+    // One a saved draft keeps, and one a post names, both old.
+    const kept = await send("u1", null);
+    const saved = await saveDraft(db, {
+      authorId: "u1",
+      fields: { kind: "upload", url: null, origin: "made", title: "A title", description: "", replies: null, mediaKey: kept, width: 10, height: 10, duration: null, posterKey: null, pictures: null },
+      now: NOW,
+    });
+    if (!saved.ok) throw new Error(JSON.stringify(saved));
+    const shown = await send("u2", "set-one-aaaa");
+    await galleryPost("u2", [shown, await send("u2", "set-one-aaaa")], "shown");
+    await db.prepare(`UPDATE images SET state = 'draft', created_at = ?2 WHERE key IN (?1, ?3)`).bind(kept, old, shown).run();
+    // Left over, as publishing once left a file out: each held as a draft's
+    // at once, since the next upload replaces a pending one.
+    const leftOver = async (createdAt: number) => {
+      const key = await send("u1", null);
+      await db.prepare(`UPDATE images SET state = 'draft', created_at = ?2 WHERE key = ?1`).bind(key, createdAt).run();
+      return key;
+    };
+    const orphan = await leftOver(old);
+    const fresh = await leftOver(NOW);
+
+    expect(await sweepUnusedDraftFiles(db, bucket, NOW)).toBe(1);
+    expect(await stateOf(orphan)).toBeNull();
+    expect(await bucket.get(orphan)).toBeNull();
+    for (const key of [fresh, kept, shown]) expect(await stateOf(key)).toBe("draft");
   });
 });
