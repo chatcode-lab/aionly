@@ -4,7 +4,7 @@ import { Link, useRouteLoaderData } from "react-router";
 
 import { copyText } from "~/lib/clipboard";
 import { cn } from "~/lib/cn";
-import { labelIsAddress } from "~/lib/links/label";
+import { labelIsAddress, labelNamesAddress } from "~/lib/links/label";
 import { sitePath } from "~/lib/links/site-path";
 import { type Block, type Inline, mailtoAddress, parseBlocks } from "~/lib/text/markdown";
 
@@ -12,9 +12,10 @@ import { Mention } from "./mentions";
 
 /**
  * An outside address: shown, never followed. A tap copies it, so it can be
- * pasted somewhere on purpose. A long one is cut short with an ellipsis.
+ * pasted somewhere on purpose. A long one is cut short with an ellipsis. With
+ * `children`, a link's label of other words stands in for it.
  */
-function CopyUrl({ href, email = false }: { href: string; email?: boolean }) {
+function CopyUrl({ href, email = false, words, children }: { href: string; email?: boolean; words?: string; children?: ReactNode }) {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
@@ -26,11 +27,11 @@ function CopyUrl({ href, email = false }: { href: string; email?: boolean }) {
     <button
       type="button"
       title={href}
-      aria-label={email ? `Copy email address ${href}` : `Copy link ${href}`}
+      aria-label={`${words ? `${words}, copy` : "Copy"} ${email ? "email address" : "link"} ${href}`}
       onClick={async () => setCopied(await copyText(href))}
       className="inline-flex max-w-full items-baseline gap-1 rounded-sm align-bottom text-text-muted underline decoration-dotted decoration-border-strong underline-offset-4 hover:text-text"
     >
-      <span className="truncate">{href.replace(/^https?:\/\//, "")}</span>
+      {children === undefined ? <span className="truncate">{href.replace(/^https?:\/\//, "")}</span> : <span>{children}</span>}
       {copied ? (
         <Check size={13} aria-hidden className="shrink-0 self-center text-accent" />
       ) : (
@@ -99,6 +100,28 @@ interface RenderOptions {
   inLink?: boolean;
 }
 
+/**
+ * A written link copied on a tap: its label of other words, which copies its
+ * address (owner's request, 2026-10-20). A label that reads as an address
+ * names some other one, so the real one is shown beside it to copy instead.
+ */
+function CopyText({ href, label, options, email = false }: { href: string; label: Inline[]; options: RenderOptions; email?: boolean }) {
+  const words = plainText(label).trim();
+  if (!words) return <CopyUrl href={href} email={email} />;
+  if (!labelNamesAddress(words)) {
+    return (
+      <CopyUrl href={href} email={email} words={words}>
+        {renderInline(label, { ...options, inLink: true })}
+      </CopyUrl>
+    );
+  }
+  return (
+    <span>
+      {renderInline(label, options)} <CopyUrl href={href} email={email} />
+    </span>
+  );
+}
+
 function renderInline(nodes: Inline[], options: RenderOptions): ReactNode[] {
   const { host } = options;
   return nodes.map((node, index) => {
@@ -161,12 +184,7 @@ function renderInline(nodes: Inline[], options: RenderOptions): ReactNode[] {
               </MailLink>
             );
           }
-          return (
-            <span key={index}>
-              {node.children.length > 0 ? <>{renderInline(node.children, options)} </> : null}
-              <CopyUrl href={address} email />
-            </span>
-          );
+          return <CopyText key={index} href={address} label={node.children} options={options} email />;
         }
         if (!/^https?:\/\//.test(node.href)) {
           return <span key={index}>{renderInline(node.children, options)} ({node.href})</span>;
@@ -179,13 +197,7 @@ function renderInline(nodes: Inline[], options: RenderOptions): ReactNode[] {
             </OutsideLink>
           );
         }
-        // The label, then the address it hides, so nothing is disguised.
-        return (
-          <span key={index}>
-            {node.children.length > 0 ? <>{renderInline(node.children, options)} </> : null}
-            <CopyUrl href={node.href} />
-          </span>
-        );
+        return <CopyText key={index} href={node.href} label={node.children} options={options} />;
       }
     }
   });
@@ -227,7 +239,8 @@ function renderBlocks(blocks: Block[], options: RenderOptions): ReactNode[] {
 /**
  * A description or comment in the board's limited Markdown. Everything is
  * rendered as elements and text. Links to the board itself are followed;
- * any other address is shown and copied on a tap, never followed, except
+ * any other address, or a link's label of other words, is shown and copied
+ * on a tap, never followed, except
  * that in a fan's text, with `outsideLinks`, a bare address, or a link
  * whose label is its own address, is a real link (owner's decision,
  * 2026-10-20, replacing the address alone on its line).

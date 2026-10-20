@@ -1,7 +1,7 @@
 import { env } from "cloudflare:workers";
 import { useId, useState } from "react";
 import { Heart } from "lucide-react";
-import { Form, Link, redirect, useFetcher, useNavigation } from "react-router";
+import { Form, Link, redirect, useActionData, useFetcher, useNavigation } from "react-router";
 
 import { Avatar } from "~/components/avatar";
 import { CodeBlock } from "~/components/code-block";
@@ -28,7 +28,7 @@ import {
 } from "~/lib/accounts/usernames";
 import { wantedShortName } from "~/lib/accounts/wanted-name";
 import { authFor, xConfigured } from "~/lib/auth.server";
-import { billingOpen, cancelForDeletion, keepPlan, switchPlan } from "~/lib/billing/plan.server";
+import { billingOpen, cancelForDeletion, keepPlan, quoteYearly, switchPlan } from "~/lib/billing/plan.server";
 import { type AccountRecord, nameFreeFor, renameStatus, setTextSize, setTint } from "~/lib/db/accounts.server";
 import { agentOf, createAgent, createToken, MAX_TOKENS, type OwnedAgent, revokeToken, setTokenPermission } from "~/lib/db/agents.server";
 import { setReplyChoices } from "~/lib/db/authoring.server";
@@ -263,6 +263,64 @@ async function deleteAccountAction(request: Request, viewer: AccountRecord, form
   return redirect("/deleted", { headers });
 }
 
+/**
+ * Switching between monthly and yearly: up to yearly now, at the amount
+ * quoted first, down to monthly when the year ends. Or keeping the plan as
+ * it is.
+ */
+async function planAction(viewer: AccountRecord, form: FormData, planIntent: "plan-quote" | "plan-switch" | "plan-keep") {
+  if (!billingOpen()) return { planError: "Payments open soon." };
+  const busy = "Another change to your plan is being made. Try again in a minute.";
+  const refused = (reason: "no_plan" | "ending" | "same" | "trial" | "busy", to: PlanInterval) =>
+    reason === "ending"
+      ? "Your plan is set to end. Renew it in Manage billing first, then switch."
+      : reason === "same"
+        ? `Your plan is ${to === "year" ? "yearly" : "monthly"} already.`
+        : reason === "trial"
+          ? "Your plan is in a trial. Switching opens once it is paid for."
+          : reason === "busy"
+            ? busy
+            : "There is no running plan to switch.";
+  try {
+    if (planIntent === "plan-keep") {
+      return (await keepPlan(viewer)) ? { planNotice: "Your plan stays as it is." } : { planError: busy };
+    }
+    if (planIntent === "plan-quote") {
+      const quote = await quoteYearly(viewer);
+      return quote.ok ? { planQuote: { cents: quote.cents, taxed: quote.taxed, at: quote.at } } : { planError: refused(quote.reason, "year") };
+    }
+    const to = form.get("to");
+    if (to !== "month" && to !== "year") return { planError: "That was not understood." };
+    const later = form.get("at") === "period_end";
+    const at = Number(form.get("at"));
+    const result = await switchPlan(viewer, to, later ? "period_end" : Number.isInteger(at) && at > 0 ? at : undefined);
+    if (result.ok) {
+      return {
+        planNotice:
+          to === "month" || later
+            ? `Your plan switches to ${to === "year" ? "yearly" : "monthly"} when this period ends.`
+            : "Your plan is yearly now. The receipt is under Manage billing.",
+      };
+    }
+    if (result.reason === "stale") return { planError: "That amount was worked out a while ago. Choose Switch to yearly again to see it as of now." };
+    if (result.reason === "confirm") {
+      return {
+        planError: "Your bank asks to confirm this payment, which can't be done here. Nothing was charged, and your plan stays monthly. You can switch when this month ends instead.",
+        planLater: true,
+      };
+    }
+    if (result.reason === "declined") {
+      return {
+        planError: `${result.message ?? "The payment did not go through."} Nothing was charged, and your plan stays monthly. Check your card under Manage billing, then try again.`,
+      };
+    }
+    return { planError: refused(result.reason, to) };
+  } catch (error) {
+    console.error("plan switch", error);
+    return { planError: "That did not go through. Try again in a minute." };
+  }
+}
+
 export async function action({ request, context }: Route.ActionArgs) {
   const form = await request.formData();
   if (form.get("intent") === "account-delete") {
@@ -319,6 +377,17 @@ export async function action({ request, context }: Route.ActionArgs) {
     const account = await requireAccount(request, context);
     if (!(await withinLimits(request, "write", account.id))) return { agentError: RATE_LIMITED_MESSAGE };
     return restrictAction(account, form);
+  }
+  // The plan is billing, which a read-only member keeps (review F113):
+  // keeping it as it is, and switching down. Switching up buys more, which,
+  // as a checkout does, waits until they can take part again.
+  const planIntent = form.get("intent");
+  if (planIntent === "plan-quote" || planIntent === "plan-switch" || planIntent === "plan-keep") {
+    const account = await requireAccount(request, context);
+    if (!(await withinLimits(request, "write", account.id))) return { planError: RATE_LIMITED_MESSAGE };
+    const up = planIntent === "plan-quote" || (planIntent === "plan-switch" && form.get("to") === "year");
+    if (up && account.ban) return { planError: "Switching to yearly waits until your account can take part again. Keeping the plan as it is, switching to monthly, and Manage billing still work." };
+    return planAction(account, form, planIntent);
   }
   const viewer = await requireParticipant(request, context);
   if (!(await withinLimits(request, "write", viewer.id))) {
@@ -384,31 +453,6 @@ export async function action({ request, context }: Route.ActionArgs) {
     return { markSaved: true };
   }
 
-  // Switching between monthly and yearly, at the end of the period paid for, or keeping the plan as it is.
-  if (form.get("intent") === "plan-switch" || form.get("intent") === "plan-keep") {
-    if (!billingOpen()) return { planError: "Payments open soon." };
-    try {
-      if (form.get("intent") === "plan-keep") {
-        await keepPlan(viewer);
-        return { planNotice: "Your plan stays as it is." };
-      }
-      const to = form.get("to");
-      if (to !== "month" && to !== "year") return { planError: "That was not understood." };
-      const result = await switchPlan(viewer, to);
-      if (result.ok) return { planNotice: `Your plan switches to ${to === "year" ? "yearly" : "monthly"} when this period ends.` };
-      return {
-        planError:
-          result.reason === "ending"
-            ? "Your plan is set to end. Renew it in Manage billing first, then switch."
-            : result.reason === "same"
-              ? `Your plan is ${to === "year" ? "yearly" : "monthly"} already.`
-              : "There is no running plan to switch.",
-      };
-    } catch (error) {
-      console.error("plan switch", error);
-      return { planError: "That did not go through. Try again in a minute." };
-    }
-  }
 
   if (form.get("intent") === "replies") {
     const posts = parsePostChoice(form.get("post_replies"));
@@ -917,16 +961,21 @@ function intervalOfKey(key: string | null): PlanInterval | null {
 }
 
 /**
- * Switching between monthly and yearly, either way, at the end of the
- * period paid for: nothing is charged or credited before then (owner's
- * decision, 2026-10-20). A switch waiting can be undone, and a plan set to
- * end is renewed first.
+ * Switching between monthly and yearly (owner's decision, 2026-10-20). Up
+ * to yearly comes at once, once the member has seen what it charges today;
+ * down to monthly waits for the year's end, nothing charged or credited
+ * before then, and can be undone while it waits. A plan set to end is
+ * renewed first. A read-only member, `disabled`, can still keep the plan
+ * or switch down, being billing (review F113), but not buy more.
  */
 function PlanSwitch({ plan, disabled }: { plan: PlanStatus; disabled: boolean }) {
   const navigation = useNavigation();
+  const actionData = useActionData<typeof action>();
+  const quote = actionData && "planQuote" in actionData ? actionData.planQuote : undefined;
+  const [dismissed, setDismissed] = useState<number | null>(null);
   const busy = navigation.state !== "idle" && String(navigation.formData?.get("intent") ?? "").startsWith("plan-");
   const word = (interval: PlanInterval) => (interval === "year" ? "yearly" : "monthly");
-  if (!plan.interval || !plan.periodEnd || (plan.status !== "active" && plan.status !== "trialing") || plan.cancelAtPeriodEnd) return null;
+  if (!plan.interval || !plan.periodEnd || plan.status !== "active" || plan.cancelAtPeriodEnd) return null;
   const next = intervalOfKey(plan.nextPriceKey);
   if (next && plan.nextAt) {
     return (
@@ -936,24 +985,73 @@ function PlanSwitch({ plan, disabled }: { plan: PlanStatus; disabled: boolean })
           Switching to {word(next)} on {formatDate(plan.nextAt)}, at {priceWords(plan.nextPriceKey)}.{" "}
           <span className="text-text-muted">Until then, Manage billing can&apos;t change or cancel the plan; keep it {word(plan.interval)} first to do that.</span>
         </p>
-        <Button type="submit" disabled={disabled || busy}>
+        <Button type="submit" disabled={busy}>
           Keep it {word(plan.interval)}
         </Button>
       </Form>
     );
   }
-  const other: PlanInterval = plan.interval === "year" ? "month" : "year";
   const intro = Object.values(INTRO_PRICES).some((price) => price.lookupKey === plan.priceKey);
-  const price = (intro ? INTRO_PRICES : PLAN_PRICES)[other];
+  if (plan.interval === "year") {
+    const monthly = (intro ? INTRO_PRICES : PLAN_PRICES).month;
+    return (
+      <Form method="post" className="flex flex-wrap items-center justify-between gap-3">
+        <input type="hidden" name="intent" value="plan-switch" />
+        <input type="hidden" name="to" value="month" />
+        <p className="min-w-0 flex-1 basis-60 text-body text-text-muted">
+          Switch to monthly, {monthly.label} a month, from {formatDate(plan.periodEnd)}, when this year ends. Nothing is charged before then.
+        </p>
+        <Button type="submit" disabled={busy}>
+          Switch to monthly
+        </Button>
+      </Form>
+    );
+  }
+  const yearly = (intro ? INTRO_PRICES : PLAN_PRICES).year;
+  if (actionData && "planLater" in actionData) {
+    return (
+      <Form method="post" className="flex flex-wrap items-center justify-between gap-3">
+        <input type="hidden" name="intent" value="plan-switch" />
+        <input type="hidden" name="to" value="year" />
+        <input type="hidden" name="at" value="period_end" />
+        <p className="min-w-0 flex-1 basis-60 text-body text-text-muted">
+          Switch to yearly, {yearly.label} a year, from {formatDate(plan.periodEnd)}, when this month ends. Nothing is charged before then.
+        </p>
+        <Button type="submit" disabled={disabled || busy}>
+          Switch when this month ends
+        </Button>
+      </Form>
+    );
+  }
+  if (quote && dismissed !== quote.at) {
+    return (
+      <Form method="post" className="flex flex-wrap items-center justify-between gap-3">
+        <input type="hidden" name="intent" value="plan-switch" />
+        <input type="hidden" name="to" value="year" />
+        <input type="hidden" name="at" value={quote.at} />
+        <p className="min-w-0 flex-1 basis-60 text-body">
+          Switching to yearly now charges {formatMoney(quote.cents)} today{quote.taxed ? ", tax included" : null}: {yearly.label} for a year from
+          today, less what&apos;s left of this month.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" variant="primary" disabled={disabled || busy}>
+            Pay {formatMoney(quote.cents)} and switch
+          </Button>
+          <Button type="button" disabled={busy} onClick={() => setDismissed(quote.at)}>
+            Not now
+          </Button>
+        </div>
+      </Form>
+    );
+  }
   return (
     <Form method="post" className="flex flex-wrap items-center justify-between gap-3">
-      <input type="hidden" name="intent" value="plan-switch" />
-      <input type="hidden" name="to" value={other} />
+      <input type="hidden" name="intent" value="plan-quote" />
       <p className="min-w-0 flex-1 basis-60 text-body text-text-muted">
-        Switch to {word(other)}, {price.label} a {other}, from {formatDate(plan.periodEnd)}, when this period ends. Nothing is charged before then.
+        Switch to yearly, {yearly.label} a year, from today. What&apos;s left of this month counts toward it.
       </p>
       <Button type="submit" disabled={disabled || busy}>
-        Switch to {word(other)}
+        Switch to yearly…
       </Button>
     </Form>
   );

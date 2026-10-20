@@ -11,6 +11,7 @@ import {
   paidNameAllowance,
   periodEnd,
   planCentsOf,
+  releaseFinishedSchedule,
   releaseSchedule,
   schedulePlanSwitch,
   scheduledSwitch,
@@ -350,13 +351,21 @@ describe("switching the plan at the period's end", () => {
     phases: [phase(START, END, "price_m", "aionly_fan_monthly"), phase(END, END + 365 * 24 * 3600, "price_y", "aionly_fan_yearly")],
   });
 
-  /** A Stripe that answers the subscription as given, then as switched, recording every call. */
-  function fakeStripe(before: StripeSubscription, after: StripeSubscription) {
+  /**
+   * A Stripe that answers the subscription as given, then as switched,
+   * recording every call. `failing` makes setting the phases fail, with an
+   * answer or with the answer lost.
+   */
+  function fakeStripe(before: StripeSubscription, after: StripeSubscription, failing?: "answered" | "lost") {
     const calls: Array<{ method: string; path: string; form: URLSearchParams }> = [];
     let reads = 0;
     const fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = new URL(String(input));
       calls.push({ method: init?.method ?? "GET", path: url.pathname, form: new URLSearchParams(init?.method === "POST" ? String(init.body) : url.search) });
+      if (url.pathname === "/v1/subscription_schedules/sub_sched_1" && failing === "answered") {
+        return Response.json({ error: { message: "Service unavailable" } }, { status: 503 });
+      }
+      if (url.pathname === "/v1/subscription_schedules/sub_sched_1" && failing === "lost") throw new TypeError("network connection lost");
       if (url.pathname === "/v1/subscriptions/sub_1") return Response.json(reads++ === 0 ? before : after);
       if (url.pathname === "/v1/subscription_schedules") return Response.json({ ...scheduled({}), phases: [scheduled().phases[0]] });
       return Response.json({});
@@ -404,6 +413,35 @@ describe("switching the plan at the period's end", () => {
     const after = await releaseSchedule(kept.client, "sub_1");
     expect(kept.calls.map((call) => `${call.method} ${call.path}`)).toContain("POST /v1/subscription_schedules/sub_sched_1/release");
     expect(scheduledSwitch(after)).toBeNull();
+  });
+
+  it("lets go of a schedule it made when setting its phases fails, and keeps one there before (review F114)", async () => {
+    const unset = { ...scheduled({}), phases: [scheduled().phases[0]!] };
+    const failed = fakeStripe(subscription(null), subscription(unset), "answered");
+    await expect(schedulePlanSwitch(failed.client, "sub_1", "price_y")).rejects.toThrow("Service unavailable");
+    expect(failed.calls.map((call) => `${call.method} ${call.path}`)).toContain("POST /v1/subscription_schedules/sub_sched_1/release");
+
+    const before = fakeStripe(subscription(scheduled()), subscription(scheduled()), "answered");
+    await expect(schedulePlanSwitch(before.client, "sub_1", "price_m")).rejects.toThrow("Service unavailable");
+    expect(before.calls.some((call) => call.path.endsWith("/release"))).toBe(false);
+
+    // The answer lost, but the phases set: read back, it is a switch made.
+    const lost = fakeStripe(subscription(null), subscription(scheduled()), "lost");
+    expect(scheduledSwitch(await schedulePlanSwitch(lost.client, "sub_1", "price_y"))).toEqual({ priceKey: "aionly_fan_yearly", at: END });
+    expect(lost.calls.some((call) => call.path.endsWith("/release"))).toBe(false);
+  });
+
+  it("lets go of a finished switch only when a fresh read still finds it finished (review F116)", async () => {
+    const made = { ...scheduled(), current_phase: { start_date: END, end_date: END + 365 * 24 * 3600 } };
+    const asked = { ...made, phases: [...made.phases, phase(END + 365 * 24 * 3600, END + 395 * 24 * 3600, "price_m", "aionly_fan_monthly")] };
+    const since = fakeStripe(subscription(asked, "aionly_fan_yearly"), subscription(asked, "aionly_fan_yearly"));
+    expect(await releaseFinishedSchedule(since.client, "sub_1", "sub_sched_1")).toBeNull();
+    expect(since.calls.some((call) => call.path.endsWith("/release"))).toBe(false);
+    const other = fakeStripe(subscription({ ...made, id: "sub_sched_2" }, "aionly_fan_yearly"), subscription(null));
+    expect(await releaseFinishedSchedule(other.client, "sub_1", "sub_sched_1")).toBeNull();
+    const finished = fakeStripe(subscription(made, "aionly_fan_yearly"), subscription(null, "aionly_fan_yearly"));
+    expect(await releaseFinishedSchedule(finished.client, "sub_1", "sub_sched_1")).toMatchObject({ schedule: null });
+    expect(finished.calls.map((call) => `${call.method} ${call.path}`)).toContain("POST /v1/subscription_schedules/sub_sched_1/release");
   });
 
   it("reads a switch only from a schedule it can see, and knows its own once made", () => {

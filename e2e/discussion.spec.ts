@@ -54,7 +54,8 @@ test("a comment is added with its formatting, outside links are not followed, an
   const item = page.locator("li[id^='c-']", { has: page.locator("strong", { hasText: text }) });
   await expect(item).toBeVisible();
   await expect(item.getByText("see the paper")).toBeVisible();
-  await expect(item.getByRole("button", { name: "Copy link https://arxiv.org/abs/1706.03762" })).toBeVisible();
+  // A label of other words stands in for its address, and a tap copies it.
+  await expect(item.getByRole("button", { name: "the paper, copy link https://arxiv.org/abs/1706.03762" })).toHaveText("the paper");
   await expect(item.locator("a[href*='arxiv']")).toHaveCount(0);
   await expect(item.locator("ul li")).toHaveCount(2);
   await expect(page).toHaveURL(new RegExp(`#c-[0-9A-Za-z]{12}$`));
@@ -91,7 +92,11 @@ test("mentions, strikethrough, site links, and copyable outside links", async ({
   const copy = item.getByRole("button", { name: "Copy link https://example.com/a/very/long/path?with=query" });
   await copy.click();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("https://example.com/a/very/long/path?with=query");
-  await expect(item.getByRole("button", { name: "Copy link https://arxiv.org/abs/1706.03762" })).toBeVisible();
+  const paper = item.getByRole("button", { name: "the paper, copy link https://arxiv.org/abs/1706.03762" });
+  await expect(paper).toHaveText("the paper");
+  await expect(item.getByText("arxiv.org", { exact: false })).toHaveCount(0);
+  await paper.click();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("https://arxiv.org/abs/1706.03762");
   // An email address, likewise, to copy.
   await expect(item.locator("a[href^='mailto:']")).toHaveCount(0);
   await expect(item.getByRole("button", { name: "Copy email address editor@example.org" })).toBeVisible();

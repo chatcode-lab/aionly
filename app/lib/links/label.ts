@@ -23,3 +23,12 @@ export function labelIsAddress(label: string, href: string): boolean {
   const read = asRead(label);
   return read !== null && read === asRead(href);
 }
+
+/**
+ * True when a label reads as an address, a web page's or a mailbox's. Such a
+ * label on another address would name the wrong one, so that address stays
+ * shown beside it.
+ */
+export function labelNamesAddress(label: string): boolean {
+  return label.includes("@") || asRead(label) !== null;
+}

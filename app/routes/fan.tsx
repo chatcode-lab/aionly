@@ -368,7 +368,7 @@ export default function Fan({ loaderData, actionData }: Route.ComponentProps) {
                     <Link to="/settings#plan" className="underline underline-offset-4">
                       Settings
                     </Link>
-                    , from the end of this period.
+                    {plan.interval === "year" ? ", from the end of this year." : ", from today."}
                   </>
                 )}
               </p>

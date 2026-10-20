@@ -1,10 +1,10 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { checkoutUrl, keepPlan, portalUrl, switchPlan } from "../../app/lib/billing/plan.server";
-import type { StripeSubscription } from "../../app/lib/billing/stripe";
+import { checkoutUrl, handleWebhook, keepPlan, portalUrl, QUOTE_SECONDS, quoteYearly, switchPlan } from "../../app/lib/billing/plan.server";
+import { signWebhook, type StripeSchedule, type StripeSubscription } from "../../app/lib/billing/stripe";
 import { accountRecord } from "../../app/lib/db/accounts.server";
-import { applySubscription, planStatus, rememberCustomer } from "../../app/lib/db/subscriptions.server";
+import { applySubscription, claimCheckout, planStatus, releaseCheckout, rememberCustomer } from "../../app/lib/db/subscriptions.server";
 import { db, NOW, reset, user } from "./fixtures";
 
 function subscription(lookupKey: string): StripeSubscription {
@@ -96,9 +96,10 @@ describe("the billing portal", () => {
   });
 });
 
-describe("switching the plan at the period's end (owner's decision, 2026-10-20)", () => {
+describe("switching the plan: up to yearly now, down to monthly at the year's end (owner's decision, 2026-10-20)", () => {
   const original = env.STRIPE_SECRET_KEY;
   const END = NOW + 30 * 86400;
+  const YEAR_END = NOW + 365 * 86400;
   beforeEach(async () => {
     await reset();
     await user("member", "paying_member");
@@ -110,39 +111,63 @@ describe("switching the plan at the period's end (owner's decision, 2026-10-20)"
     vi.restoreAllMocks();
   });
 
-  /** A Stripe holding the subscription, scheduling or releasing switches as asked; the prices asked for are recorded. */
-  function switchingStripe(key: string) {
+  const member = async () => (await accountRecord(db, "member"))!;
+
+  /**
+   * A Stripe holding one subscription at `key`: it schedules or releases
+   * switches, quotes and makes a switch now, or declines its card, as asked.
+   * Every call is recorded, with the prices looked up.
+   */
+  function switchingStripe(start: string, { refusal = null as "declined" | "confirm" | null, scheduledTo = null as string | null } = {}) {
+    let key = start;
+    let end = start.includes("yearly") ? YEAR_END : END;
+    let next: string | null = scheduledTo;
     const asked: string[] = [];
-    let next: { id: string; key: string } | null = null;
-    const current = () => ({
+    const calls: Array<{ call: string; form: URLSearchParams }> = [];
+    const current = (): StripeSubscription => ({
       ...subscription(key),
       schedule: next
         ? {
             id: "sub_sched_1",
             metadata: { aionly: "plan_switch" },
-            current_phase: { start_date: NOW, end_date: END },
+            current_phase: { start_date: NOW, end_date: end },
             phases: [
-              { start_date: NOW, end_date: END, items: [{ price: { id: "price_1", lookup_key: key }, quantity: 1 }] },
-              { start_date: END, end_date: END + 365 * 86400, items: [{ price: { id: next.id, lookup_key: next.key }, quantity: 1 }] },
+              { start_date: NOW, end_date: end, items: [{ price: { id: `price_${key}`, lookup_key: key }, quantity: 1 }] },
+              { start_date: end, end_date: end + 30 * 86400, items: [{ price: { id: `price_${next}`, lookup_key: next }, quantity: 1 }] },
             ],
           }
         : null,
+      items: {
+        data: [{ id: "si_1", current_period_end: end, price: { id: `price_${key}`, lookup_key: key, recurring: { interval: key.includes("yearly") ? "year" : "month" } } }],
+      },
     });
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = new URL(String(input instanceof Request ? input.url : input));
       const form = new URLSearchParams(String(init?.body ?? ""));
+      const method = init?.method ?? "GET";
+      calls.push({ call: `${method} ${url.pathname}`, form });
       if (url.pathname === "/v1/prices") {
         const wanted = url.searchParams.get("lookup_keys[0]") ?? "";
         asked.push(wanted);
         return Response.json({ object: "list", data: [{ id: `price_${wanted}`, lookup_key: wanted, product: "prod_fan", unit_amount: 1 }], has_more: false });
       }
+      if (url.pathname === "/v1/subscriptions/sub_1" && method === "POST") {
+        if (refusal === "declined") return Response.json({ error: { type: "card_error", code: "card_declined", message: "Your card was declined." } }, { status: 402 });
+        if (refusal === "confirm") {
+          const message = "Payment for this subscription requires additional user action, but the requested payment behavior doesn't save the invoice or PaymentIntent.";
+          return Response.json({ error: { type: "card_error", code: "subscription_payment_intent_requires_action", message } }, { status: 402 });
+        }
+        key = form.get("items[0][price]")!.replace(/^price_/, "");
+        end = YEAR_END;
+        return Response.json(current());
+      }
       if (url.pathname === "/v1/subscriptions/sub_1") return Response.json(current());
+      if (url.pathname === "/v1/invoices/create_preview") return Response.json({ amount_due: 9000, total: 9000, total_excluding_tax: 9000 });
       if (url.pathname === "/v1/subscription_schedules") {
-        return Response.json({ id: "sub_sched_1", current_phase: { start_date: NOW, end_date: END }, phases: [current().schedule?.phases[0] ?? { start_date: NOW, end_date: END, items: [{ price: "price_1", quantity: 1 }] }] });
+        return Response.json({ id: "sub_sched_1", current_phase: { start_date: NOW, end_date: end }, phases: [{ start_date: NOW, end_date: end, items: [{ price: `price_${key}`, quantity: 1 }] }] });
       }
       if (url.pathname === "/v1/subscription_schedules/sub_sched_1") {
-        const price = form.get("phases[1][items][0][price]")!;
-        next = { id: price, key: price.replace(/^price_/, "") };
+        next = form.get("phases[1][items][0][price]")!.replace(/^price_/, "");
         return Response.json({});
       }
       if (url.pathname === "/v1/subscription_schedules/sub_sched_1/release") {
@@ -151,37 +176,208 @@ describe("switching the plan at the period's end (owner's decision, 2026-10-20)"
       }
       return Response.json({ error: { message: `unexpected ${url.pathname}` } }, { status: 404 });
     });
-    return asked;
+    return { asked, calls, current };
   }
 
-  it("switches monthly to yearly, or back, from the period's end, and keeps it as it is on asking", async () => {
-    const asked = switchingStripe("aionly_fan_monthly");
-    await applySubscription(db, subscription("aionly_fan_monthly"), { eventAt: NOW, now: NOW });
-    const member = async () => (await accountRecord(db, "member"))!;
-    expect(await switchPlan(await member(), "month")).toEqual({ ok: false, reason: "same" });
-    expect(await switchPlan(await member(), "year")).toEqual({ ok: true });
+  it("switches monthly up to yearly now, charging what it quoted, the year from today", async () => {
+    const stripe = switchingStripe("aionly_fan_monthly");
+    await applySubscription(db, stripe.current(), { eventAt: NOW, now: NOW });
+    const quote = await quoteYearly(await member());
+    expect(quote).toMatchObject({ ok: true, cents: 9000, taxed: false });
+    const at = quote.ok ? quote.at : 0;
+    const change = {
+      "items[0][id]": "si_1",
+      "items[0][price]": "price_aionly_fan_yearly",
+      proration_behavior: "always_invoice",
+      proration_date: String(at),
+      billing_cycle_anchor: "now",
+    };
+    const preview = stripe.calls.find((call) => call.call === "POST /v1/invoices/create_preview")!;
+    expect(Object.fromEntries(preview.form)).toEqual({
+      subscription: "sub_1",
+      "subscription_details[items][0][id]": "si_1",
+      "subscription_details[items][0][price]": "price_aionly_fan_yearly",
+      "subscription_details[proration_behavior]": "always_invoice",
+      "subscription_details[proration_date]": String(at),
+      "subscription_details[billing_cycle_anchor]": "now",
+    });
+
+    // Only at the amount just quoted.
+    expect(await switchPlan(await member(), "year")).toEqual({ ok: false, reason: "stale" });
+    expect(await switchPlan(await member(), "year", at - QUOTE_SECONDS - 1)).toEqual({ ok: false, reason: "stale" });
+    expect(stripe.calls.some((call) => call.call === "POST /v1/subscriptions/sub_1")).toBe(false);
+
+    expect(await switchPlan(await member(), "year", at)).toEqual({ ok: true });
+    const made = stripe.calls.find((call) => call.call === "POST /v1/subscriptions/sub_1")!;
+    expect(Object.fromEntries(made.form)).toEqual({ ...change, payment_behavior: "error_if_incomplete" });
+    expect(await planStatus(db, "member")).toMatchObject({ priceKey: "aionly_fan_yearly", interval: "year", periodEnd: YEAR_END, nextPriceKey: null });
+    expect(await switchPlan(await member(), "year", at)).toEqual({ ok: false, reason: "same" });
+  });
+
+  it("leaves the plan as it was when the card is declined", async () => {
+    const stripe = switchingStripe("aionly_fan_monthly", { refusal: "declined" });
+    await applySubscription(db, stripe.current(), { eventAt: NOW, now: NOW });
+    const quote = await quoteYearly(await member());
+    expect(await switchPlan(await member(), "year", quote.ok ? quote.at : 0)).toEqual({ ok: false, reason: "declined", message: "Your card was declined." });
+    expect(await planStatus(db, "member")).toMatchObject({ priceKey: "aionly_fan_monthly", periodEnd: END });
+  });
+
+  it("offers the switch at the month's end when the bank asks to confirm a payment now", async () => {
+    const stripe = switchingStripe("aionly_fan_monthly", { refusal: "confirm" });
+    await applySubscription(db, stripe.current(), { eventAt: NOW, now: NOW });
+    const quote = await quoteYearly(await member());
+    expect(await switchPlan(await member(), "year", quote.ok ? quote.at : 0)).toEqual({ ok: false, reason: "confirm" });
+    expect((await planStatus(db, "member")).priceKey).toBe("aionly_fan_monthly");
+    expect(await switchPlan(await member(), "year", "period_end")).toEqual({ ok: true });
     expect(await planStatus(db, "member")).toMatchObject({ priceKey: "aionly_fan_monthly", nextPriceKey: "aionly_fan_yearly", nextAt: END });
+  });
+
+  it("lets go of a switch waiting for the period's end before switching now", async () => {
+    const stripe = switchingStripe("aionly_fan_monthly", { scheduledTo: "aionly_fan_yearly" });
+    await applySubscription(db, stripe.current(), { eventAt: NOW, now: NOW });
+    expect((await planStatus(db, "member")).nextPriceKey).toBe("aionly_fan_yearly");
+    const quote = await quoteYearly(await member());
+    expect(await switchPlan(await member(), "year", quote.ok ? quote.at : 0)).toEqual({ ok: true });
+    const order = stripe.calls.map((call) => call.call);
+    expect(order.indexOf("POST /v1/subscription_schedules/sub_sched_1/release")).toBeLessThan(order.lastIndexOf("POST /v1/subscriptions/sub_1"));
+    expect(await planStatus(db, "member")).toMatchObject({ priceKey: "aionly_fan_yearly", nextPriceKey: null });
+  });
+
+  it("switches yearly down to monthly from the year's end, nothing charged now, and keeps it as it is on asking", async () => {
+    const stripe = switchingStripe("aionly_fan_yearly");
+    await applySubscription(db, stripe.current(), { eventAt: NOW, now: NOW });
+    expect(await switchPlan(await member(), "month")).toEqual({ ok: true });
+    expect(await planStatus(db, "member")).toMatchObject({ priceKey: "aionly_fan_yearly", nextPriceKey: "aionly_fan_monthly", nextAt: YEAR_END });
+    expect(stripe.calls.some((call) => call.call === "POST /v1/subscriptions/sub_1" || call.call === "POST /v1/invoices/create_preview")).toBe(false);
     await keepPlan(await member());
-    expect(await planStatus(db, "member")).toMatchObject({ priceKey: "aionly_fan_monthly", nextPriceKey: null, nextAt: null });
-    expect(asked).toEqual(["aionly_fan_yearly"]);
+    expect(await planStatus(db, "member")).toMatchObject({ priceKey: "aionly_fan_yearly", nextPriceKey: null, nextAt: null });
+    expect(stripe.asked).toEqual(["aionly_fan_monthly"]);
   });
 
   it("keeps a new member's price in the switch, and asks a plan set to end to be renewed first", async () => {
-    const asked = switchingStripe("aionly_fan_yearly_intro");
-    await applySubscription(db, { ...subscription("aionly_fan_yearly_intro"), items: { data: [{ current_period_end: END, price: { id: "price_1", lookup_key: "aionly_fan_yearly_intro", recurring: { interval: "year" } } }] } }, { eventAt: NOW, now: NOW });
-    expect(await switchPlan((await accountRecord(db, "member"))!, "month")).toEqual({ ok: true });
-    expect(asked).toEqual(["aionly_fan_monthly_intro"]);
-    await applySubscription(db, { ...subscription("aionly_fan_yearly_intro"), cancel_at_period_end: true }, { eventAt: NOW + 1, now: NOW + 1 });
-    expect(await switchPlan((await accountRecord(db, "member"))!, "month")).toEqual({ ok: false, reason: "ending" });
+    const yearly = switchingStripe("aionly_fan_yearly_intro");
+    await applySubscription(db, yearly.current(), { eventAt: NOW, now: NOW });
+    expect(await switchPlan(await member(), "month")).toEqual({ ok: true });
+    expect(yearly.asked).toEqual(["aionly_fan_monthly_intro"]);
+    await applySubscription(db, { ...yearly.current(), cancel_at_period_end: true }, { eventAt: NOW + 1, now: NOW + 1 });
+    expect(await switchPlan(await member(), "month")).toEqual({ ok: false, reason: "ending" });
+    expect(await quoteYearly(await member())).toEqual({ ok: false, reason: "ending" });
+
+    vi.restoreAllMocks();
+    await reset();
+    await user("member", "paying_member");
+    await rememberCustomer(db, { userId: "member", customerId: "cus_1", now: NOW });
+    const monthly = switchingStripe("aionly_fan_monthly_intro");
+    await applySubscription(db, monthly.current(), { eventAt: NOW, now: NOW });
+    const quote = await quoteYearly(await member());
+    expect(await switchPlan(await member(), "year", quote.ok ? quote.at : 0)).toEqual({ ok: true });
+    expect(monthly.asked).toEqual(["aionly_fan_yearly_intro", "aionly_fan_yearly_intro"]);
+    expect((await planStatus(db, "member")).priceKey).toBe("aionly_fan_yearly_intro");
+  });
+
+  it("refuses a plan in a trial, which a switch would not keep (review F115)", async () => {
+    const stripe = switchingStripe("aionly_fan_yearly");
+    await applySubscription(db, { ...stripe.current(), status: "trialing" }, { eventAt: NOW, now: NOW });
+    expect(await switchPlan(await member(), "month")).toEqual({ ok: false, reason: "trial" });
+    expect(await quoteYearly(await member())).toEqual({ ok: false, reason: "trial" });
+    expect(stripe.calls.some((call) => call.call.startsWith("POST"))).toBe(false);
+  });
+
+  it("waits while another change holds the plan", async () => {
+    const stripe = switchingStripe("aionly_fan_yearly");
+    await applySubscription(db, stripe.current(), { eventAt: NOW, now: NOW });
+    const claim = (await claimCheckout(db, "member", "plan", Math.floor(Date.now() / 1000)))!;
+    expect(await switchPlan(await member(), "month")).toEqual({ ok: false, reason: "busy" });
+    expect(await keepPlan(await member())).toBe(false);
+    await releaseCheckout(db, claim);
+    expect(await switchPlan(await member(), "month")).toEqual({ ok: true });
   });
 
   it("keeps the switch it knows when a subscription comes without its schedule read", async () => {
-    switchingStripe("aionly_fan_monthly");
-    await applySubscription(db, subscription("aionly_fan_monthly"), { eventAt: NOW, now: NOW });
-    await switchPlan((await accountRecord(db, "member"))!, "year");
-    await applySubscription(db, { ...subscription("aionly_fan_monthly"), schedule: "sub_sched_1" }, { eventAt: NOW + 5, now: NOW + 5 });
-    expect((await planStatus(db, "member")).nextPriceKey).toBe("aionly_fan_yearly");
-    await applySubscription(db, { ...subscription("aionly_fan_monthly"), schedule: null }, { eventAt: NOW + 6, now: NOW + 6 });
+    const stripe = switchingStripe("aionly_fan_yearly");
+    await applySubscription(db, stripe.current(), { eventAt: NOW, now: NOW });
+    await switchPlan(await member(), "month");
+    await applySubscription(db, { ...stripe.current(), schedule: "sub_sched_1" }, { eventAt: NOW + 5, now: NOW + 5 });
+    expect((await planStatus(db, "member")).nextPriceKey).toBe("aionly_fan_monthly");
+    await applySubscription(db, { ...stripe.current(), schedule: null }, { eventAt: NOW + 6, now: NOW + 6 });
     expect((await planStatus(db, "member")).nextPriceKey).toBeNull();
+  });
+});
+
+describe("letting go of a switch once made (review F116)", () => {
+  const SECRET = "whsec_test_switch";
+  const vars = env as unknown as Record<string, string | undefined>;
+  const saved = { secret: vars.STRIPE_WEBHOOK_SECRET, key: vars.STRIPE_SECRET_KEY };
+  const START = NOW - 365 * 86400;
+  beforeEach(async () => {
+    await reset();
+    await user("member", "paying_member");
+    await rememberCustomer(db, { userId: "member", customerId: "cus_1", now: NOW });
+    vars.STRIPE_WEBHOOK_SECRET = SECRET;
+    vars.STRIPE_SECRET_KEY = "sk_test_fake";
+  });
+  afterEach(() => {
+    vars.STRIPE_WEBHOOK_SECRET = saved.secret;
+    vars.STRIPE_SECRET_KEY = saved.key;
+    vi.restoreAllMocks();
+  });
+
+  const phase = (start: number, end: number, key: string) => ({ start_date: start, end_date: end, items: [{ price: { id: `price_${key}`, lookup_key: key }, quantity: 1 }] });
+  /** Yearly, then monthly from NOW: the switch is made, the monthly phase the last. */
+  const made: StripeSchedule = {
+    id: "sub_sched_1",
+    metadata: { aionly: "plan_switch" },
+    current_phase: { start_date: NOW, end_date: NOW + 30 * 86400 },
+    phases: [phase(START, NOW, "aionly_fan_yearly"), phase(NOW, NOW + 30 * 86400, "aionly_fan_monthly")],
+  };
+  /** The same, with a switch back to yearly asked for since. */
+  const asked: StripeSchedule = { ...made, phases: [...made.phases, phase(NOW + 30 * 86400, NOW + 395 * 86400, "aionly_fan_yearly")] };
+
+  /** A Stripe whose subscription shows each schedule in turn, read after read, recording releases. */
+  function stripeShowing(...schedules: Array<StripeSchedule | null>) {
+    const released: string[] = [];
+    let reads = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = new URL(String(input instanceof Request ? input.url : input));
+      if (url.pathname === "/v1/subscriptions/sub_1") {
+        const schedule = released.length > 0 ? null : schedules[Math.min(reads++, schedules.length - 1)]!;
+        return Response.json({ ...subscription("aionly_fan_monthly"), schedule });
+      }
+      if (url.pathname === "/v1/subscription_schedules/sub_sched_1/release" && init?.method === "POST") {
+        released.push("sub_sched_1");
+        return Response.json({});
+      }
+      return Response.json({ error: { message: `unexpected ${url.pathname}` } }, { status: 404 });
+    });
+    return released;
+  }
+
+  async function deliver(): Promise<Response> {
+    const created = Math.floor(Date.now() / 1000);
+    const payload = JSON.stringify({ type: "customer.subscription.updated", created, data: { object: subscription("aionly_fan_monthly") } });
+    const signature = await signWebhook(payload, SECRET, created);
+    return handleWebhook(new Request("https://aion.ly/api/stripe", { method: "POST", body: payload, headers: { "Stripe-Signature": signature } }));
+  }
+
+  it("lets go of the board's schedule once its last phase starts", async () => {
+    const released = stripeShowing(made);
+    expect((await deliver()).status).toBe(200);
+    expect(released).toEqual(["sub_sched_1"]);
+  });
+
+  it("keeps a switch asked for after the webhook's own read", async () => {
+    const released = stripeShowing(made, asked);
+    expect((await deliver()).status).toBe(200);
+    expect(released).toEqual([]);
+  });
+
+  it("asks Stripe to send the event again while another change holds the plan", async () => {
+    const released = stripeShowing(made);
+    const claim = (await claimCheckout(db, "member", "plan", Math.floor(Date.now() / 1000)))!;
+    expect((await deliver()).status).toBe(503);
+    expect(released).toEqual([]);
+    await releaseCheckout(db, claim);
+    expect((await deliver()).status).toBe(200);
+    expect(released).toEqual(["sub_sched_1"]);
   });
 });

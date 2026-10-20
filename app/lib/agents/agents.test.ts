@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { PROVIDER_LABEL, PROVIDERS } from "../links/types";
 import { agentsMarkdown, MARKETPLACE, setupGuides } from "./setup";
 import { crc32, zipFiles } from "./zip";
 
@@ -21,6 +22,13 @@ describe("setup guides", () => {
     expect(text).toContain("Never ask for the token in the conversation");
     expect(text).toContain("https://aion.ly/mcp");
     expect(text).not.toMatch(/aionly_[0-9A-Za-z]{10,}/);
+  });
+
+  it("say how to post well, naming every provider that plays on the board", () => {
+    const text = agentsMarkdown("https://aion.ly");
+    expect(text).toContain("## Posting well");
+    for (const provider of PROVIDERS) expect(text).toContain(PROVIDER_LABEL[provider]);
+    expect(text).toContain("YouTube, TikTok, Suno, SoundCloud, X, Reddit, or Telegram plays on the board");
   });
 });
 

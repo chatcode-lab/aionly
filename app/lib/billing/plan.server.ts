@@ -39,17 +39,21 @@ import {
   paidNameAllowance,
   planCentsOf,
   portalConfigurationFor,
+  previewSwitchNow,
   pricesByLookupKey,
   refundPayment,
+  releaseFinishedSchedule,
   releaseSchedule,
   runningSubscriptions,
   schedulePlanSwitch,
   type StripeCharge,
   type StripeCheckoutSession,
   type StripeInvoice,
+  StripeError,
   type StripeSubscription,
   stripeClient,
   switchDone,
+  switchNow,
   verifyWebhook,
 } from "./stripe";
 
@@ -332,35 +336,134 @@ export async function finishFreshStart(viewer: AccountRecord, sessionId: string)
   return settleFreshStart(session, viewer.id);
 }
 
-export type SwitchOutcome = { ok: true } | { ok: false; reason: "no_plan" | "ending" | "same" };
+type SwitchRefusal = { ok: false; reason: "no_plan" | "ending" | "same" | "trial" | "busy" };
+
+export type SwitchOutcome =
+  | { ok: true }
+  | SwitchRefusal
+  /** A quote too old to charge, or the bank asking to confirm, which the board cannot do. */
+  | { ok: false; reason: "stale" | "confirm" }
+  /** The card's own words, when Stripe gives them. */
+  | { ok: false; reason: "declined"; message: string | null };
+
+export type SwitchQuote = { ok: true; cents: number; taxed: boolean; at: number } | SwitchRefusal;
+
+/** How long a quote for switching now holds: the credit for the period left shrinks by the minute. */
+export const QUOTE_SECONDS = 15 * 60;
 
 /**
- * Switches a fan's plan between monthly and yearly at the end of the
- * period paid for (owner's decision, 2026-10-20): nothing is charged or
- * credited now, and the new price bills from then on. A new member's
- * price switches to its own other interval, the plan's to the plan's. A
+ * The plan a fan can switch to, and the subscription to switch: a new
+ * member's price to its own other interval, the plan's to the plan's. A
  * plan set to end is renewed first, in Manage billing.
  */
-export async function switchPlan(viewer: AccountRecord, interval: PlanInterval): Promise<SwitchOutcome> {
+async function switchTarget(viewer: AccountRecord, interval: PlanInterval): Promise<{ ok: true; subscriptionId: string; priceId: string } | SwitchRefusal> {
   const [subscriptionId, plan] = await Promise.all([runningSubscription(env.DB, viewer.id), planStatus(env.DB, viewer.id)]);
-  if (!subscriptionId || (plan.status !== "active" && plan.status !== "trialing")) return { ok: false, reason: "no_plan" };
+  // The board makes no trials, and a switch would not keep one (review F115).
+  if (subscriptionId && plan.status === "trialing") return { ok: false, reason: "trial" };
+  if (!subscriptionId || plan.status !== "active") return { ok: false, reason: "no_plan" };
   if (plan.cancelAtPeriodEnd) return { ok: false, reason: "ending" };
   if (plan.interval === interval) return { ok: false, reason: "same" };
   const intro = plan.priceKey !== null && Object.values(INTRO_PRICES).some((price) => price.lookupKey === plan.priceKey);
   const key = (intro ? INTRO_PRICES : PLAN_PRICES)[interval].lookupKey;
   const price = await priceByLookupKey(client(), key);
   if (!price) throw new Error(`no active price has the lookup key ${key}`);
-  const subscription = await schedulePlanSwitch(client(), subscriptionId, price.id);
+  return { ok: true, subscriptionId, priceId: price.id };
+}
+
+/** What switching a monthly plan to yearly now charges today, for `switchPlan` to charge the same. */
+export async function quoteYearly(viewer: AccountRecord): Promise<SwitchQuote> {
+  const target = await switchTarget(viewer, "year");
+  if (!target.ok) return target;
+  const at = now();
+  return { ok: true, ...(await previewSwitchNow(client(), target.subscriptionId, target.priceId, at)), at };
+}
+
+/**
+ * Switches a fan's plan between monthly and yearly (owner's decision,
+ * 2026-10-20). Up to yearly comes at once, with the year from today and
+ * what is left of the month credited against it, charging what
+ * `quoteYearly` quoted at `at`, within `QUOTE_SECONDS`. Down to monthly
+ * waits for the year's end: nothing is charged or credited now, and the
+ * monthly price bills from then on. `at: "period_end"` makes an upgrade
+ * wait so too, for a card whose bank asks to confirm a payment made now.
+ */
+export async function switchPlan(viewer: AccountRecord, interval: PlanInterval, at?: number | "period_end"): Promise<SwitchOutcome> {
+  const later = interval === "month" || at === "period_end";
+  if (!later && (typeof at !== "number" || at > now() || now() - at > QUOTE_SECONDS)) return { ok: false, reason: "stale" };
+  return changingPlan(viewer.id, () => switchHeld(viewer, interval, later, at));
+}
+
+/**
+ * Runs a change to the member's plan while holding the plan's claim, the
+ * one its checkout holds, so changes from two tabs, a checkout, a deletion,
+ * and the webhook's cleanup never interleave (review F116).
+ */
+async function changingPlan<T>(userId: string, change: () => Promise<T>): Promise<T | { ok: false; reason: "busy" }> {
+  try {
+    return await holdingCheckout(userId, "plan", change);
+  } catch (error) {
+    if (error instanceof CheckoutBusy) return { ok: false, reason: "busy" };
+    throw error;
+  }
+}
+
+/** `switchPlan`'s change itself, made under the plan's claim. */
+async function switchHeld(viewer: AccountRecord, interval: PlanInterval, later: boolean, at: number | "period_end" | undefined): Promise<SwitchOutcome> {
+  const target = await switchTarget(viewer, interval);
+  if (!target.ok) return target;
+  let subscription: StripeSubscription;
+  if (!later) {
+    try {
+      subscription = await switchNow(client(), target.subscriptionId, target.priceId, at as number);
+    } catch (error) {
+      // The card was declined, or the bank asks to confirm: Stripe changed nothing.
+      if (error instanceof StripeError && error.status === 402) {
+        // Stripe's words for this one are for developers.
+        if (error.code === "subscription_payment_intent_requires_action") return { ok: false, reason: "confirm" };
+        return { ok: false, reason: "declined", message: error.type === "card_error" ? error.message : null };
+      }
+      throw error;
+    }
+  } else {
+    subscription = await schedulePlanSwitch(client(), target.subscriptionId, target.priceId);
+  }
   await applySubscription(env.DB, subscription, { eventAt: await freshEventAt(env.DB, viewer.id, now()), now: now() });
   return { ok: true };
 }
 
-/** Keeps a fan's plan as it is, letting go of a switch asked for. */
-export async function keepPlan(viewer: AccountRecord): Promise<void> {
-  const subscriptionId = await runningSubscription(env.DB, viewer.id);
-  if (!subscriptionId) return;
-  const subscription = await releaseSchedule(client(), subscriptionId);
-  await applySubscription(env.DB, subscription, { eventAt: await freshEventAt(env.DB, viewer.id, now()), now: now() });
+/** Keeps a fan's plan as it is, letting go of a switch asked for. False while another change holds the plan. */
+export async function keepPlan(viewer: AccountRecord): Promise<boolean> {
+  const kept = await changingPlan(viewer.id, async () => {
+    const subscriptionId = await runningSubscription(env.DB, viewer.id);
+    if (!subscriptionId) return true;
+    const subscription = await releaseSchedule(client(), subscriptionId);
+    await applySubscription(env.DB, subscription, { eventAt: await freshEventAt(env.DB, viewer.id, now()), now: now() });
+    return true;
+  });
+  return kept === true;
+}
+
+/**
+ * Lets go of the board's schedule once its switch is made, so the portal
+ * can change or end the plan again, which it cannot on a scheduled
+ * subscription. Judged again under the plan's claim on a fresh read, so a
+ * switch asked for meanwhile stays (review F116). False while another
+ * change holds the plan, for Stripe to send the event again.
+ */
+async function finishSwitch(subscription: StripeSubscription): Promise<boolean> {
+  const schedule = subscription.schedule;
+  // An ended plan, as a deleted account's, has nothing left to free.
+  if (!schedule || typeof schedule === "string" || !isRunning(subscription)) return true;
+  const member = await env.DB.prepare(`SELECT user_id FROM subscriptions WHERE customer_id = ?1`)
+    .bind(subscription.customer)
+    .first<{ user_id: string }>();
+  if (!member) return true;
+  const done = await changingPlan(member.user_id, async () => {
+    const after = await releaseFinishedSchedule(client(), subscription.id, schedule.id);
+    if (after) await applySubscription(env.DB, after, { eventAt: await freshEventAt(env.DB, member.user_id, now()), now: now() });
+    return true;
+  });
+  return done === true;
 }
 
 /** Stripe's customer portal, where a fan changes or cancels the plan. */
@@ -528,9 +631,11 @@ export async function handleWebhook(request: Request): Promise<Response> {
     const subscription = env.STRIPE_SECRET_KEY ? await getSubscription(client(), snapshot.id) : snapshot;
     await applySubscription(env.DB, subscription, { eventAt: event.created, now: now() });
     // A switch made at the period's end leaves the plan on its schedule's
-    // last phase: let go of it, so the plan can change or end in the
-    // portal again, which cannot touch a scheduled subscription.
-    if (env.STRIPE_SECRET_KEY && switchDone(subscription)) await releaseSchedule(client(), subscription.id);
+    // last phase: let go of it. While another change holds the plan, Stripe
+    // is asked to send the event again.
+    if (env.STRIPE_SECRET_KEY && switchDone(subscription) && !(await finishSwitch(subscription))) {
+      return Response.json({ error: "busy" }, { status: 503 });
+    }
   }
   if (event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded") {
     const session = event.data.object as StripeCheckoutSession;

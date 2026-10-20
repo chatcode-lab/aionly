@@ -162,7 +162,7 @@ test("a fan writes a text post, with the fan mark and a clickable link", async (
   await expect(card.getByTitle("aion.ly fan")).toBeVisible();
 
   // Anywhere in a fan's text: a bare address, and one labelled with itself,
-  // are links; a label of other words keeps its address beside it, to copy.
+  // are links; a label of other words stands in for its address, to copy.
   await page.getByLabel("Comment", { exact: true }).fill(
     "Also see https://example.net/notes in passing, [www.example.org/a](https://example.org/a/), [https://example.org/guide](https://example.org/guide), [example.net/guide](https://example.net:8443/guide), and [a trick](https://example.com/elsewhere). Mail jane@example.org, [jane@example.org](mailto:jane@example.org), or [Jane](mailto:jane@example.org), not o'connor@example.org, team!alerts@example.org, \u{1d49c}alice@example.org, or andre\u0301alice@example.org.",
   );
@@ -171,16 +171,17 @@ test("a fan writes a text post, with the fan mark and a clickable link", async (
   await expect(said.getByRole("link", { name: "example.net/notes" })).toHaveAttribute("href", "https://example.net/notes");
   await expect(said.getByRole("link", { name: "www.example.org/a" })).toHaveAttribute("href", "https://example.org/a/");
   await expect(said.locator("a[href='https://example.com/elsewhere']")).toHaveCount(0);
-  await expect(said.getByRole("button", { name: "Copy link https://example.com/elsewhere" })).toBeVisible();
+  await expect(said.getByRole("button", { name: "a trick, copy link https://example.com/elsewhere" })).toHaveText("a trick");
   // A label with its scheme is one link, never one inside another (review F97).
   await expect(said.locator("a[href='https://example.org/guide']")).toHaveCount(1);
   await expect(said.locator("a a")).toHaveCount(0);
-  // A port the label leaves out is not hidden behind it (review F98).
+  // A port the label leaves out is not hidden behind it (review F98): a label
+  // that reads as another address keeps the real one beside it.
   await expect(said.locator("a[href='https://example.net:8443/guide']")).toHaveCount(0);
-  await expect(said.getByRole("button", { name: "Copy link https://example.net:8443/guide" })).toBeVisible();
-  // Email addresses open a message, written bare or labelled with themselves; other words keep the address to copy.
+  await expect(said.getByRole("button", { name: "Copy link https://example.net:8443/guide" })).toHaveText("example.net:8443/guide");
+  // Email addresses open a message, written bare or labelled with themselves; other words copy the address.
   await expect(said.locator("a[href='mailto:jane@example.org']")).toHaveCount(2);
-  await expect(said.getByRole("button", { name: "Copy email address jane@example.org" })).toHaveCount(1);
+  await expect(said.getByRole("button", { name: "Jane, copy email address jane@example.org" })).toHaveText("Jane");
   // An address is linked whole, or left as written, never by its end (review F104).
   await expect(said.locator(`a[href="mailto:o'connor@example.org"]`)).toHaveCount(1);
   await expect(said.locator("a[href='mailto:connor@example.org'], a[href='mailto:alerts@example.org'], a[href='mailto:alice@example.org']")).toHaveCount(0);
@@ -766,26 +767,59 @@ test("a plan set to end says what stops then, and that a short name is no longer
   await expect(page.getByText(/no longer for certain/).first()).toBeVisible();
 });
 
-test("a fan switches between monthly and yearly from the end of the period, and can keep the plan as it is", async ({ page, context, account, request }) => {
+test("a fan switches up to yearly now and down to monthly at the year's end, and can keep the plan as it is", async ({ page, context, account, request }) => {
   await setPlan(request, account);
   await account.signIn(context);
   await open(page, "/settings");
   const plan = page.getByRole("region", { name: "Fan plan" });
-  await expect(plan).toContainText(/Switch to yearly, \$100 a year, from .+, when this period ends\. Nothing is charged before then\./);
+  // Up to yearly comes at once, once its charge today is shown.
+  await expect(plan).toContainText("Switch to yearly, $100 a year, from today. What's left of this month counts toward it.");
   // Without Stripe, as in tests, the switch waits for payments to open.
-  await plan.getByRole("button", { name: "Switch to yearly" }).click();
+  await plan.getByRole("button", { name: "Switch to yearly…" }).click();
+  await expect(page.getByText("Payments open soon.")).toBeVisible();
+
+  // Down to monthly waits for the year's end.
+  await setPlan(request, account, "active", "year");
+  await open(page, "/settings");
+  await expect(plan).toContainText(/Switch to monthly, \$10 a month, from .+, when this year ends\. Nothing is charged before then\./);
+  await plan.getByRole("button", { name: "Switch to monthly" }).click();
   await expect(page.getByText("Payments open soon.")).toBeVisible();
 
   // A switch asked for shows until it is made, with the way to keep the plan.
-  await setPlan(request, account, "active", "month", false, true);
+  await setPlan(request, account, "active", "year", false, true);
   await open(page, "/settings");
-  await expect(plan).toContainText(/Switching to yearly on .+, at \$100 a year\./);
-  await expect(plan.getByRole("button", { name: "Keep it monthly" })).toBeVisible();
-  await expect(plan.getByRole("button", { name: "Switch to yearly" })).toHaveCount(0);
+  await expect(plan).toContainText(/Switching to monthly on .+, at \$10 a month\./);
+  await expect(plan.getByRole("button", { name: "Keep it yearly" })).toBeVisible();
+  await expect(plan.getByRole("button", { name: /^Switch to/ })).toHaveCount(0);
 
   // The plan's page points to it too.
   await open(page, "/fan");
+  await expect(page.getByText("Switch to monthly in Settings, from the end of this year.")).toBeVisible();
   await expect(page.getByRole("link", { name: "Settings" }).filter({ hasText: "Settings" }).last()).toHaveAttribute("href", "/settings#plan");
+});
+
+test("a read-only fan keeps the plan's billing: keeping it and switching down, though not up (review F113)", async ({ page, context, lowKarmaAccount, request, baseURL }) => {
+  await setPlan(request, lowKarmaAccount, "active", "year", false, true);
+  await lowKarmaAccount.signIn(context);
+  await open(page, "/settings");
+  const plan = page.getByRole("region", { name: "Fan plan" });
+  await expect(plan).toContainText(/Switching to monthly on .+, at \$10 a month\./);
+  // Past the participation guard: without Stripe, as in tests, it says payments open soon rather than refusing.
+  await plan.getByRole("button", { name: "Keep it yearly" }).click();
+  await expect(page.getByText("Payments open soon.")).toBeVisible();
+
+  await setPlan(request, lowKarmaAccount, "active", "year");
+  await open(page, "/settings");
+  await expect(plan.getByRole("button", { name: "Switch to monthly" })).toBeEnabled();
+
+  // Up to yearly buys more, so it waits, as a checkout does.
+  await setPlan(request, lowKarmaAccount, "active", "month");
+  await open(page, "/settings");
+  await expect(plan.getByRole("button", { name: "Switch to yearly…" })).toBeDisabled();
+  for (const form of [{ intent: "plan-quote" }, { intent: "plan-keep" }]) {
+    const answer = await page.request.post("/settings", { form, headers: { Origin: baseURL! } });
+    expect(answer.status(), form.intent).toBe(200);
+  }
 });
 
 test("a name of 5 characters comes with the yearly plan", async ({ page, context, account, request }) => {

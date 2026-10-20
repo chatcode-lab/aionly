@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { labelIsAddress } from "./label";
+import { labelIsAddress, labelNamesAddress } from "./label";
 
 describe("a link labelled with its own address", () => {
   it("matches without its scheme, www., trailing slash, or the host's case", () => {
@@ -26,5 +26,16 @@ describe("a link labelled with its own address", () => {
     expect(labelIsAddress("example.org:8443/guide", "https://example.org:8443/guide")).toBe(true);
     // The scheme's own port, written or not, is the same address.
     expect(labelIsAddress("example.org:443/guide", "https://example.org/guide")).toBe(true);
+  });
+});
+
+describe("a label that names an address", () => {
+  it("is any web or email address, but not words", () => {
+    for (const label of ["example.org", "www.example.org/a", "https://example.com/guide", "jane@example.org", "bob@"]) {
+      expect(labelNamesAddress(label), label).toBe(true);
+    }
+    for (const label of ["Creator's source and build notes", "the paper", "Play it", ""]) {
+      expect(labelNamesAddress(label), label).toBe(false);
+    }
   });
 });
