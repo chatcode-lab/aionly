@@ -176,6 +176,8 @@ interface ActionResult {
   duplicate?: Existing;
   /** The agent box was ticked: nothing was posted, and the paywall shows. */
   agentPaywall?: boolean;
+  /** The link's check went stale, its picture replaced: it is to be checked again (review F110). */
+  recheck?: boolean;
 }
 
 /** An upload's key, as the upload endpoint makes them. */
@@ -385,7 +387,7 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
   if (result.reason === "id_taken") return { errors: {}, message: "That did not publish. Try again." };
   if (result.reason === "duplicate") return { errors: {}, duplicate: result.existing };
   if (result.reason === "picture_gone") {
-    return { errors: { url: "The link's picture was replaced meanwhile, by another check or preview. Check the link again." } };
+    return { errors: { url: "The link's picture was replaced meanwhile, by another check or preview. Check the link again." }, recheck: true };
   }
   if (draftId) {
     // The draft was published or changed in another window meanwhile.
@@ -549,6 +551,8 @@ function Composer({ loaderData, actionData }: Pick<Route.ComponentProps, "loader
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState<string | null>(null);
   const [checked, setChecked] = useState<Checked | null>(loaderData.draftCheck);
+  // The answer a newer check replaced, whose word about the link no longer stands.
+  const [rechecked, setRechecked] = useState<ActionResult | undefined>(undefined);
   const [uploaded, setUploaded] = useState<Uploaded[]>(() => (opened?.uploads ?? []).map((upload) => ({ ...upload, preview: upload.url })));
   const cover = uploaded[0] ?? null;
   // Files still uploading: neither Publish nor Save draft goes without them.
@@ -558,6 +562,12 @@ function Composer({ loaderData, actionData }: Pick<Route.ComponentProps, "loader
   // A server answer that the agent box was ticked, before scripts ran.
   const [agentAnswered, setAgentAnswered] = useState(false);
   useEffect(() => setAgentAnswered(Boolean(result?.agentPaywall)), [result]);
+  // A stale check is let go, here and in this tab's copy, so Check link works again (review F110).
+  useEffect(() => {
+    if (!result?.recheck) return;
+    setChecked(null);
+    sessionStorage.removeItem(CHECK_STORAGE);
+  }, [result]);
 
   const blocked = statusMessage(loaderData.status, loaderData.now);
   const submitting = navigation.state === "submitting" && navigation.formAction?.startsWith("/submit") === true;
@@ -617,6 +627,7 @@ function Composer({ loaderData, actionData }: Pick<Route.ComponentProps, "loader
       }
       const next: Checked = { input: url, link: data.link, receipt: data.receipt, duplicate: data.duplicate };
       setChecked(next);
+      setRechecked(result);
       sessionStorage.setItem(CHECK_STORAGE, JSON.stringify(next));
       if (!title && data.link.suggestedTitle) setTitle(data.link.suggestedTitle.slice(0, TITLE_MAX));
     } catch {
@@ -748,7 +759,7 @@ function Composer({ loaderData, actionData }: Pick<Route.ComponentProps, "loader
                       if (url.trim()) void check();
                     }
                   }}
-                  error={checkError ?? result?.errors.url}
+                  error={checkError ?? (rechecked === result ? undefined : result?.errors.url)}
                 />
               </div>
               {/* Lines up with the input, above the field's message row. */}

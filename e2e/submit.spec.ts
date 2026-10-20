@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 
 import { expect, open, test, type TestAccount } from "./fixtures";
+import { localDb } from "./support/local-db";
 
 // Links on subdomains that do not exist: the server's preview fetch fails at
 // once, as a dead page would, and no test traffic reaches a real site.
@@ -55,6 +56,48 @@ test("a link is checked, previewed, published, and then the day's allowance show
 
   // The draft was cleared on publishing.
   await expect(page.getByLabel("Title")).toHaveValue("");
+});
+
+test("a saved draft opens checked from its preview, and one whose picture went meanwhile is checked again (review F108, F110)", async ({ page, context, account }) => {
+  await account.signIn(context);
+  await open(page, "/submit");
+  const url = linkFor(account, "previewed");
+  await page.getByLabel("Link", { exact: true }).fill(url);
+  await page.getByLabel("Title").fill("A previewed page");
+  await page.getByRole("button", { name: "Save draft" }).click();
+  await expect(page.getByText("Draft saved.")).toBeVisible();
+  const draftId = new URL(page.url()).searchParams.get("draft")!;
+
+  // Once its own preview of this unreachable page is in, it is given one a
+  // reachable page's would be: a title and a picture, kept with the draft.
+  const db = localDb();
+  const previewed = () => (db.prepare(`SELECT preview IS NOT NULL AS done FROM drafts WHERE id = ?`).get(draftId) as { done: number }).done;
+  await expect.poll(previewed).toBe(1);
+  const picture = `${draftId}${"x".repeat(24)}`.slice(0, 24) + ".png";
+  db.prepare(`INSERT INTO images (key, owner_id, kind, state, content_type, bytes, created_at) VALUES (?, ?, 'post', 'draft', 'image/png', 68, unixepoch())`).run(picture, account.id);
+  const host = new URL(url).host;
+  const preview = { for: url, url, host, provider: null, aspect: null, pageTitle: "The page's own title", duplicate: null };
+  db.prepare(`UPDATE drafts SET preview = ?, preview_thumb_key = ? WHERE id = ?`).run(JSON.stringify(preview), picture, draftId);
+
+  // Opened again, it is checked from what was stored, with no new check.
+  await open(page, `/submit?draft=${draftId}`);
+  await expect(page.getByRole("button", { name: "Checked" })).toBeDisabled();
+  await expect(page.getByText("The page's own title")).toBeVisible();
+
+  // Its picture goes before it is published, as when a newer preview replaces it.
+  db.prepare(`DELETE FROM images WHERE key = ?`).run(picture);
+  db.close();
+  await fillPost(page, "A previewed page");
+  await page.getByRole("button", { name: "Publish" }).click();
+  const stale = page.getByText(/The link's picture was replaced meanwhile/);
+  await expect(stale).toBeVisible();
+  // Check link works again, its word replaces the refusal's, and it publishes.
+  await page.getByRole("button", { name: "Check link" }).click();
+  await expect(page.getByRole("button", { name: "Checked" })).toBeVisible();
+  await expect(stale).toHaveCount(0);
+  await expect(page.getByText("Turnstile stand-in")).toBeVisible();
+  await page.getByRole("button", { name: "Publish" }).click();
+  await expect(page).toHaveURL(/\/p\/[0-9a-z]{7}\/[0-9a-z-]+$/);
 });
 
 test("an already posted link points to the post instead", async ({ page, context, account }) => {
