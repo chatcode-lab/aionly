@@ -4,12 +4,14 @@ import {
   attachPartner,
   claimPartnerJoin,
   createPartnerLink,
+  forgetSharedJoin,
   partnerLinkByCode,
   partnerLinks,
   partnersOwed,
   partnerStanding,
   recordPayout,
   revokePartnerLink,
+  sharedJoinCode,
   sweepPartnerJoins,
 } from "../../app/lib/db/partners.server";
 import { recordPayment } from "../../app/lib/db/payments.server";
@@ -182,6 +184,26 @@ describe("partner links", () => {
     expect(await sweepPartnerJoins(db, NOW + 3600)).toBe(2);
     expect((await db.prepare(`SELECT user_id FROM partner_joins ORDER BY user_id`).all()).results).toEqual([{ user_id: "half" }]);
     expect(await db.prepare(`SELECT invited_by FROM profiles WHERE user_id = 'half'`).first()).toEqual({ invited_by: "star" });
+  });
+});
+
+describe("the link offered to anyone signing up (owner's request, 2026-10-21)", () => {
+  beforeEach(async () => {
+    await reset();
+    forgetSharedJoin();
+    await user("boss", "head_admin", { role: "admin" });
+    await user("founder", "boris");
+  });
+
+  it("is offered while it is open, and not once it is revoked, as of the next minute", async () => {
+    expect(await sharedJoinCode(db, NOW * 1000)).toBeNull();
+    forgetSharedJoin();
+    expect(await link("boris", { partner: "boris" })).toBeNull();
+    expect(await sharedJoinCode(db, NOW * 1000)).toBe("boris");
+    expect(await revokePartnerLink(db, { code: "boris", now: NOW })).toBe(true);
+    // Kept a minute per instance, then asked again.
+    expect(await sharedJoinCode(db, NOW * 1000 + 30_000)).toBe("boris");
+    expect(await sharedJoinCode(db, NOW * 1000 + 61_000)).toBeNull();
   });
 });
 

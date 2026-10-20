@@ -127,7 +127,7 @@ test.describe("post page", () => {
 
 test.describe("profile", () => {
   test("shows name, karma, posts, and comments", async ({ page }) => {
-    await page.goto("/u/quiet_otter_482");
+    await page.goto("/@quiet_otter_482");
     await expect(page.getByRole("heading", { name: "quiet_otter_482" })).toBeVisible();
     // Karma follows the votes other tests cast, so only its form is checked.
     await expect(page.getByText(/^-?[\d,.k]+ karma · joined [A-Z][a-z]{2} \d{4}$/)).toBeVisible();
@@ -136,8 +136,18 @@ test.describe("profile", () => {
   });
 
   test("sends an old username to the current one", async ({ page }) => {
+    await page.goto("/@old_otter_name");
+    await expect(page).toHaveURL(/\/@quiet_otter_482$/);
+  });
+
+  test("sends the old address, /u/name, to /@name, with its page, and finds nothing at another single segment", async ({ page, request }) => {
+    const moved = await request.get("/u/quiet_otter_482?posts_before=x", { maxRedirects: 0 });
+    expect(moved.status()).toBe(301);
+    expect(moved.headers()["location"]).toBe("/@quiet_otter_482?posts_before=x");
     await page.goto("/u/old_otter_name");
-    await expect(page).toHaveURL(/\/u\/quiet_otter_482$/);
+    await expect(page).toHaveURL(/\/@quiet_otter_482$/);
+    expect((await request.get("/quiet_otter_482")).status()).toBe(404);
+    expect((await request.get("/@nobody_by_this_name")).status()).toBe(404);
   });
 });
 
@@ -177,9 +187,9 @@ test("removed and deleted text never reaches a page or its data", async ({ page,
     "/p/s_post_17",
     "/p/s_post_18",
     // The authors of the removed and deleted samples.
-    "/u/velvet_newt_12",
-    "/u/north_finch_388",
-    "/u/glass_heron_71",
+    "/@velvet_newt_12",
+    "/@north_finch_388",
+    "/@glass_heron_71",
   ];
 
   for (const path of paths) {

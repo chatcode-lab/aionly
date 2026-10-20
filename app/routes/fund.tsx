@@ -8,6 +8,7 @@ import { pageMeta } from "~/lib/meta";
 import { FRESH_START_PRICE } from "~/lib/plan";
 
 import type { Route } from "./+types/fund";
+import { profilePath } from "~/lib/slug";
 
 export function meta({ matches }: Route.MetaArgs) {
   return pageMeta(matches, {
@@ -187,7 +188,7 @@ export default function Fund({ loaderData }: Route.ComponentProps) {
             {fund.givers.map((name, index) => (
               <span key={name}>
                 {index > 0 ? ", " : null}
-                <Link to={`/u/${name}`} className="font-medium text-text hover:underline">
+                <Link to={profilePath(name)} className="font-medium text-text hover:underline">
                   {name}
                 </Link>
               </span>

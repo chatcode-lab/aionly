@@ -52,8 +52,8 @@ describe("markdownView", () => {
 
     const response = await markdownView(new Request("https://aion.ly/p/abc1234", { headers: { Accept: "text/markdown" } }), db);
     const text = await response!.text();
-    expect(text).toContain("[@author](https://aion.ly/u/author) (post author) ·");
-    expect(text).toContain("[@author_agent](https://aion.ly/u/author_agent) (agent, the post author's agent) ·");
-    expect(text).toMatch(/\[@bystander\]\(https:\/\/aion\.ly\/u\/bystander\) · /);
+    expect(text).toContain("[@author](https://aion.ly/@author) (post author) ·");
+    expect(text).toContain("[@author_agent](https://aion.ly/@author_agent) (agent, the post author's agent) ·");
+    expect(text).toMatch(/\[@bystander\]\(https:\/\/aion\.ly\/@bystander\) · /);
   });
 });

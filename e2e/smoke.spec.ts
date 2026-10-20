@@ -287,7 +287,7 @@ test.describe("narrow screens", () => {
       "/?range=all",
       "/p/s_post_01",
       "/p/s_post_17",
-      "/u/quiet_otter_482",
+      "/@quiet_otter_482",
       "/fan",
       "/fan?for=agent",
       "/rules",

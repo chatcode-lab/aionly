@@ -11,13 +11,13 @@ import {
   paidNameAllowance,
   periodEnd,
   planCentsOf,
-  releaseFinishedSchedule,
+  releaseIdleSchedule,
   releaseSchedule,
   schedulePlanSwitch,
   scheduledSwitch,
   type StripeInvoice,
   runningSubscriptions,
-  switchDone,
+  scheduleIdle,
   signWebhook,
   stripeClient,
   type StripeSubscription,
@@ -347,6 +347,7 @@ describe("switching the plan at the period's end", () => {
   const scheduled = (metadata: Record<string, string> = { aionly: "plan_switch" }) => ({
     id: "sub_sched_1",
     metadata,
+    end_behavior: "release",
     current_phase: { start_date: START, end_date: END },
     phases: [phase(START, END, "price_m", "aionly_fan_monthly"), phase(END, END + 365 * 24 * 3600, "price_y", "aionly_fan_yearly")],
   });
@@ -356,7 +357,7 @@ describe("switching the plan at the period's end", () => {
    * recording every call. `failing` makes setting the phases fail, with an
    * answer or with the answer lost.
    */
-  function fakeStripe(before: StripeSubscription, after: StripeSubscription, failing?: "answered" | "lost") {
+  function fakeStripe(before: StripeSubscription, after: StripeSubscription, failing?: "answered" | "lost" | "made unanswered") {
     const calls: Array<{ method: string; path: string; form: URLSearchParams }> = [];
     let reads = 0;
     const fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -366,6 +367,7 @@ describe("switching the plan at the period's end", () => {
         return Response.json({ error: { message: "Service unavailable" } }, { status: 503 });
       }
       if (url.pathname === "/v1/subscription_schedules/sub_sched_1" && failing === "lost") throw new TypeError("network connection lost");
+      if (url.pathname === "/v1/subscription_schedules" && failing === "made unanswered") throw new TypeError("network connection lost");
       if (url.pathname === "/v1/subscriptions/sub_1") return Response.json(reads++ === 0 ? before : after);
       if (url.pathname === "/v1/subscription_schedules") return Response.json({ ...scheduled({}), phases: [scheduled().phases[0]] });
       return Response.json({});
@@ -431,27 +433,49 @@ describe("switching the plan at the period's end", () => {
     expect(lost.calls.some((call) => call.path.endsWith("/release"))).toBe(false);
   });
 
+  it("carries on with a schedule made though the answer was lost, and gives up only when none was made (review F114)", async () => {
+    const unset = { ...scheduled({}), phases: [scheduled().phases[0]!] };
+    // Read back, the schedule is there: its phases are set as asked.
+    const made = fakeStripe(subscription(null), subscription(unset), "made unanswered");
+    await schedulePlanSwitch(made.client, "sub_1", "price_y");
+    expect(made.calls.map((call) => `${call.method} ${call.path}`)).toEqual([
+      "GET /v1/subscriptions/sub_1",
+      "POST /v1/subscription_schedules",
+      "GET /v1/subscriptions/sub_1",
+      "POST /v1/subscription_schedules/sub_sched_1",
+      "GET /v1/subscriptions/sub_1",
+    ]);
+    expect(made.calls[3]!.form.get("phases[1][items][0][price]")).toBe("price_y");
+    // None was made: the error stands, with nothing to undo.
+    const none = fakeStripe(subscription(null), subscription(null), "made unanswered");
+    await expect(schedulePlanSwitch(none.client, "sub_1", "price_y")).rejects.toThrow("network connection lost");
+    expect(none.calls.some((call) => call.path.startsWith("/v1/subscription_schedules/"))).toBe(false);
+  });
+
   it("lets go of a finished switch only when a fresh read still finds it finished (review F116)", async () => {
     const made = { ...scheduled(), current_phase: { start_date: END, end_date: END + 365 * 24 * 3600 } };
     const asked = { ...made, phases: [...made.phases, phase(END + 365 * 24 * 3600, END + 395 * 24 * 3600, "price_m", "aionly_fan_monthly")] };
     const since = fakeStripe(subscription(asked, "aionly_fan_yearly"), subscription(asked, "aionly_fan_yearly"));
-    expect(await releaseFinishedSchedule(since.client, "sub_1", "sub_sched_1")).toBeNull();
+    expect(await releaseIdleSchedule(since.client, "sub_1", "sub_sched_1")).toBeNull();
     expect(since.calls.some((call) => call.path.endsWith("/release"))).toBe(false);
     const other = fakeStripe(subscription({ ...made, id: "sub_sched_2" }, "aionly_fan_yearly"), subscription(null));
-    expect(await releaseFinishedSchedule(other.client, "sub_1", "sub_sched_1")).toBeNull();
+    expect(await releaseIdleSchedule(other.client, "sub_1", "sub_sched_1")).toBeNull();
     const finished = fakeStripe(subscription(made, "aionly_fan_yearly"), subscription(null, "aionly_fan_yearly"));
-    expect(await releaseFinishedSchedule(finished.client, "sub_1", "sub_sched_1")).toMatchObject({ schedule: null });
+    expect(await releaseIdleSchedule(finished.client, "sub_1", "sub_sched_1")).toMatchObject({ schedule: null });
     expect(finished.calls.map((call) => `${call.method} ${call.path}`)).toContain("POST /v1/subscription_schedules/sub_sched_1/release");
   });
 
   it("reads a switch only from a schedule it can see, and knows its own once made", () => {
     expect(scheduledSwitch(subscription("sub_sched_1"))).toBeUndefined();
     expect(scheduledSwitch(subscription(null))).toBeNull();
-    // In its last phase, the switch is made: nothing more to come, and the board lets go of its own schedule.
+    // In its last phase, the switch is made: nothing more to come, and the board lets go of the schedule.
     const made = { ...scheduled(), current_phase: { start_date: END, end_date: END + 365 * 24 * 3600 } };
     expect(scheduledSwitch(subscription(made, "aionly_fan_yearly"))).toBeNull();
-    expect(switchDone(subscription(made, "aionly_fan_yearly"))).toBe(true);
-    expect(switchDone(subscription(scheduled()))).toBe(false);
-    expect(switchDone(subscription({ ...made, metadata: {} }, "aionly_fan_yearly"))).toBe(false);
+    expect(scheduleIdle(subscription(made, "aionly_fan_yearly"))).toBe(true);
+    expect(scheduleIdle(subscription(scheduled()))).toBe(false);
+    // As is one begun and never set, without the board's mark (review F114), but not one that ends the plan.
+    const unset = { ...scheduled({}), phases: [scheduled().phases[0]!] };
+    expect(scheduleIdle(subscription(unset))).toBe(true);
+    expect(scheduleIdle(subscription({ ...unset, end_behavior: "cancel" }))).toBe(false);
   });
 });

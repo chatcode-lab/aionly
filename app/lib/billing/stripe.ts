@@ -77,6 +77,8 @@ interface PhasePrice {
 export interface StripeSchedule {
   id: string;
   metadata?: Record<string, string>;
+  /** What becomes of the subscription when the last phase ends. */
+  end_behavior?: string;
   current_phase: { start_date: number; end_date: number } | null;
   phases: Array<{
     start_date: number;
@@ -564,7 +566,7 @@ export function getSubscription(client: StripeClient, id: string): Promise<Strip
   return client.request<StripeSubscription>("GET", `/subscriptions/${encodeURIComponent(id)}`, { expand: ["schedule.phases.items.price"] });
 }
 
-/** Schedules the board makes, so it lets go only of its own. */
+/** Marks the schedules the board makes, for anyone looking at them in Stripe. */
 const SWITCH_METADATA = { aionly: "plan_switch" };
 
 const phasePriceKey = (price: string | PhasePrice | undefined) => (price && typeof price === "object" ? price.lookup_key : null);
@@ -586,13 +588,15 @@ export function scheduledSwitch(subscription: StripeSubscription): { priceKey: s
 }
 
 /**
- * Whether the subscription's schedule is the board's own, its switch made:
- * in its last phase, nothing more to come, so it can be let go and leave
+ * Whether the subscription's schedule has nothing to come: in its last
+ * phase, releasing the plan when it ends. The board's own once its switch
+ * is made, or one it began and never set (review F114), since the board
+ * alone makes schedules: letting go of it changes no billing, and leaves
  * the plan free to change or cancel in the portal again.
  */
-export function switchDone(subscription: StripeSubscription): boolean {
+export function scheduleIdle(subscription: StripeSubscription): boolean {
   const schedule = subscription.schedule;
-  if (!schedule || typeof schedule === "string" || schedule.metadata?.aionly !== SWITCH_METADATA.aionly) return false;
+  if (!schedule || typeof schedule === "string" || schedule.end_behavior !== "release") return false;
   const last = schedule.phases.at(-1);
   return last !== undefined && schedule.current_phase?.start_date === last.start_date;
 }
@@ -602,16 +606,27 @@ export function switchDone(subscription: StripeSubscription): boolean {
  * a schedule: this period stays as it is, nothing is charged or credited
  * now, and the new price bills from then on (owner's decision, 2026-10-20:
  * a downgrade waits for the period's end). A switch already asked for is
- * replaced. Answers with the subscription as
- * it is after.
+ * replaced. Answers with the subscription as it is after.
  */
 export async function schedulePlanSwitch(client: StripeClient, subscriptionId: string, priceId: string): Promise<StripeSubscription> {
   const subscription = await getSubscription(client, subscriptionId);
   const existing = subscription.schedule;
   const created = !(existing && typeof existing === "object");
-  const schedule = created
-    ? await client.request<StripeSchedule>("POST", "/subscription_schedules", { from_subscription: subscriptionId })
-    : existing;
+  let schedule: StripeSchedule;
+  if (!created) {
+    schedule = existing;
+  } else {
+    try {
+      schedule = await client.request<StripeSchedule>("POST", "/subscription_schedules", { from_subscription: subscriptionId });
+    } catch (error) {
+      // Made though the answer was lost: carry on with it (review F114).
+      // Unread, any schedule left has nothing to come, and the webhook lets
+      // go of it, as attaching it sends an event.
+      const attached = (await getSubscription(client, subscriptionId).catch(() => null))?.schedule;
+      if (!attached || typeof attached === "string") throw error;
+      schedule = attached;
+    }
+  }
   const phase =
     schedule.phases.find((candidate) => candidate.start_date === schedule.current_phase?.start_date) ?? schedule.phases[0]!;
   const current = phase.items[0]!;
@@ -676,48 +691,45 @@ function switchNowChange(subscription: StripeSubscription, priceId: string, at: 
   return { items: [{ id: item, price: priceId }], proration_behavior: "always_invoice", proration_date: at, billing_cycle_anchor: "now" };
 }
 
-/** What switching to `priceId` now would charge today, after any balance, and whether that includes tax. */
+/** What switching `subscription` to `priceId` now would charge today, after any balance, and whether that includes tax. */
 export async function previewSwitchNow(
   client: StripeClient,
-  subscriptionId: string,
+  subscription: StripeSubscription,
   priceId: string,
   at: number,
 ): Promise<{ cents: number; taxed: boolean }> {
-  const subscription = await getSubscription(client, subscriptionId);
   const invoice = await client.request<{ amount_due: number; total: number; total_excluding_tax?: number | null }>("POST", "/invoices/create_preview", {
-    subscription: subscriptionId,
+    subscription: subscription.id,
     subscription_details: switchNowChange(subscription, priceId, at),
   });
   return { cents: invoice.amount_due, taxed: invoice.total_excluding_tax != null && invoice.total > invoice.total_excluding_tax };
 }
 
 /**
- * Switches the plan to `priceId` now, charging what `previewSwitchNow`
- * quoted for the same `at` (owner's decision, 2026-10-20: an upgrade comes
- * at once). A switch waiting for the period's end is let go first. If the
- * charge fails, Stripe answers 402 and changes nothing. Answers with the
- * subscription as it is after.
+ * Switches `subscription`, as just read, to `priceId` now, charging what
+ * `previewSwitchNow` quotes for the same `at` (owner's decision,
+ * 2026-10-20: an upgrade comes at once). The caller settles any schedule
+ * first. If the charge fails, Stripe answers 402 and changes nothing.
+ * Answers with the subscription as it is after.
  */
-export async function switchNow(client: StripeClient, subscriptionId: string, priceId: string, at: number): Promise<StripeSubscription> {
-  let subscription = await getSubscription(client, subscriptionId);
-  if (subscription.schedule) subscription = await releaseSchedule(client, subscriptionId);
-  await client.request("POST", `/subscriptions/${encodeURIComponent(subscriptionId)}`, {
+export async function switchNow(client: StripeClient, subscription: StripeSubscription, priceId: string, at: number): Promise<StripeSubscription> {
+  await client.request("POST", `/subscriptions/${encodeURIComponent(subscription.id)}`, {
     ...switchNowChange(subscription, priceId, at),
     payment_behavior: "error_if_incomplete",
   });
-  return getSubscription(client, subscriptionId);
+  return getSubscription(client, subscription.id);
 }
 
 /**
- * Lets go of the board's schedule `scheduleId` once its switch is made,
- * judged again on a fresh read, so a switch asked for since the caller's
- * own read is kept (review F116). Answers with the subscription as it is
- * after, or null when there was nothing to let go.
+ * Lets go of the schedule `scheduleId` once it has nothing to come
+ * (`scheduleIdle`), judged again on a fresh read, so a switch asked for
+ * since the caller's own read is kept (review F116). Answers with the
+ * subscription as it is after, or null when there was nothing to let go.
  */
-export async function releaseFinishedSchedule(client: StripeClient, subscriptionId: string, scheduleId: string): Promise<StripeSubscription | null> {
+export async function releaseIdleSchedule(client: StripeClient, subscriptionId: string, scheduleId: string): Promise<StripeSubscription | null> {
   const fresh = await getSubscription(client, subscriptionId);
   const schedule = fresh.schedule;
-  if (!schedule || typeof schedule === "string" || schedule.id !== scheduleId || !switchDone(fresh)) return null;
+  if (!schedule || typeof schedule === "string" || schedule.id !== scheduleId || !scheduleIdle(fresh)) return null;
   await client.request("POST", `/subscription_schedules/${encodeURIComponent(scheduleId)}/release`);
   return getSubscription(client, subscriptionId);
 }

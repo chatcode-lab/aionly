@@ -2,7 +2,7 @@
  * The one layout of every email the board sends, the digest, offers, and
  * notices alike: the wordmark, a heading, a few paragraphs, the email's own
  * part (an offer, the digest's posts), one button, quieter lines after it,
- * and a footer saying why it came, with its links and the operator's
+ * a signature on a person's letter, and a footer saying why it came, with its links and the operator's
  * address. HTML that mail clients render alike, with a text version beside
  * it. Pure, so it is unit-tested.
  */
@@ -26,6 +26,8 @@ export interface Letter {
   button?: { label: string; url: string };
   /** After the button, quieter: what to do if it was not expected, and so on. */
   after?: string[];
+  /** Who signs it, with their picture and where to reach them, as a person's letter. */
+  signature?: { name: string; photoUrl?: string | null; links: Array<{ label: string; url: string }> };
   /** Why this came, at the foot. */
   why: string;
   /** At the foot after why: unsubscribe, choose your emails. */
@@ -36,7 +38,7 @@ export interface Letter {
 const MUTED = "color:#6f6b64;font-size:12px;line-height:18px";
 
 export function composeLetter(letter: Letter): { subject: string; html: string; text: string } {
-  const { subject, preview, heading, paragraphs = [], block, button, after = [], why, links = [], origin } = letter;
+  const { subject, preview, heading, paragraphs = [], block, button, after = [], signature, why, links = [], origin } = letter;
   const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(subject)}</title></head>
 <body style="margin:0;background:#f7f6f3">
@@ -49,6 +51,7 @@ ${paragraphs.map((paragraph) => `<p style="color:#55524c;font-size:15px;line-hei
 ${block ? `<tr><td style="padding:18px 0 0">${block.html}</td></tr>` : ""}
 ${button ? `<tr><td style="padding:18px 0 0"><a href="${escape(button.url)}" style="display:inline-block;background:#c2410c;color:#ffffff;border-radius:8px;padding:11px 18px;font-size:15px;font-weight:600;text-decoration:none">${escape(button.label)}</a></td></tr>` : ""}
 ${after.map((line) => `<tr><td style="padding:12px 0 0;color:#6f6b64;font-size:13px;line-height:19px">${escape(line)}</td></tr>`).join("\n")}
+${signature ? signatureHtml(signature) : ""}
 <tr><td style="padding-top:20px"><div style="border-top:1px solid #e7e5e0;padding-top:14px;${MUTED}">
 ${escape(why)}${links.length > 0 ? `<br>\n${links.map((link) => `<a href="${escape(link.url)}" style="color:#6f6b64">${escape(link.label)}</a>`).join(" · ")}` : ""}<br>
 ${escape(OPERATOR.name)}, ${escape(OPERATOR.address)}
@@ -62,11 +65,24 @@ ${escape(OPERATOR.name)}, ${escape(OPERATOR.address)}
     ...(block ? [...block.text, ""] : []),
     ...(button ? [`${button.label}: ${button.url}`, ""] : []),
     ...after.flatMap((line) => [line, ""]),
+    ...(signature ? [signature.name, ...signature.links.map((link) => `${link.label}: ${link.url}`), ""] : []),
     why,
     ...links.map((link) => `${link.label}: ${link.url}`),
     `${OPERATOR.name}, ${OPERATOR.address}`,
   ].join("\n");
   return { subject, html, text };
+}
+
+/** A signature: the picture, round, beside the name and the ways to reach its writer. */
+function signatureHtml(signature: NonNullable<Letter["signature"]>): string {
+  const photo = signature.photoUrl
+    ? `<td style="padding-right:12px;vertical-align:middle"><img src="${escape(signature.photoUrl)}" width="44" height="44" alt="" style="display:block;width:44px;height:44px;border-radius:22px"></td>`
+    : "";
+  const links = signature.links.map((link) => `<a href="${escape(link.url)}" style="color:#6f6b64">${escape(link.label)}</a>`).join(" · ");
+  return `<tr><td style="padding:20px 0 0"><table role="presentation" cellpadding="0" cellspacing="0"><tr>${photo}<td style="vertical-align:middle">
+<div style="color:#1f1d1a;font-size:15px;line-height:20px;font-weight:600">${escape(signature.name)}</div>
+<div style="color:#6f6b64;font-size:13px;line-height:19px">${links}</div>
+</td></tr></table></td></tr>`;
 }
 
 /**

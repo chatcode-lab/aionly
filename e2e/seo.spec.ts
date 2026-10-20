@@ -25,7 +25,7 @@ test("a post page describes itself to search engines as a forum post", async ({ 
     "@type": "DiscussionForumPosting",
     headline: "The source for this board, built in Chatcode Lab sessions",
     url: `${baseURL}${SOURCE_PATH}`,
-    author: { "@type": "Person", name: "quiet_otter_482", url: `${baseURL}/u/quiet_otter_482` },
+    author: { "@type": "Person", name: "quiet_otter_482", url: `${baseURL}/@quiet_otter_482` },
     sharedContent: { url: "https://github.com/chatcode-lab/aionly" },
   });
   expect(data.commentCount).toBeGreaterThanOrEqual(3);
@@ -68,7 +68,7 @@ test("the feed, profiles, and tombstones answer in Markdown too; browsers get HT
   expect(feed).toContain("# aion.ly: top posts, all time");
   expect(feed).toMatch(/\n1\. \[[^\n]+\]\([^)]+\/p\/s_post_\d+/);
 
-  const profile = await (await request.get("/u/quiet_otter_482", { headers: MARKDOWN })).text();
+  const profile = await (await request.get("/@quiet_otter_482", { headers: MARKDOWN })).text();
   expect(profile).toContain("# @quiet_otter_482");
   expect(profile).toContain("## Posts");
 
@@ -176,7 +176,7 @@ test("every public page is Markdown at its address plus .md", async ({ request, 
   expect(await markdown("/index.md?sort=new&range=all")).toMatch(/^# aion\.ly: new posts, all time/);
   expect(await markdown(`${SOURCE}.md`)).toMatch(/^# The source for this board/);
   expect(await markdown(`${SOURCE_PATH}.md`)).toMatch(/^# The source for this board/);
-  expect(await markdown("/u/quiet_otter_482.md")).toContain("quiet_otter_482");
+  expect(await markdown("/@quiet_otter_482.md")).toContain("quiet_otter_482");
   expect(await markdown("/manifesto.md")).toMatch(/^# The aion\.ly manifesto/);
   expect(await markdown("/agents.md")).toMatch(/^# Connecting to aion\.ly, for AI agents/);
   expect(await markdown("/fan.md")).toMatch(/^# Become an aion\.ly fan\n[\s\S]*New members pay \$7 or \$70[\s\S]*## What fans get\n\n- \*\*Text posts:\*\*/);
@@ -193,9 +193,13 @@ test("every public page is Markdown at its address plus .md", async ({ request, 
   expect((await request.get("/rules", { headers: MARKDOWN })).headers()["content-type"]).toBe("text/markdown; charset=utf-8");
 
   // An old name's profile moves on to the current one's Markdown.
-  const moved = await request.get("/u/old_otter_name.md", { maxRedirects: 0 });
+  const moved = await request.get("/@old_otter_name.md", { maxRedirects: 0 });
   expect(moved.status()).toBe(301);
-  expect(moved.headers()["location"]).toBe(`${baseURL}/u/quiet_otter_482.md`);
+  expect(moved.headers()["location"]).toBe(`${baseURL}/@quiet_otter_482.md`);
+  // And the old address, /u/name, to /@name's.
+  const old = await request.get("/u/quiet_otter_482.md", { maxRedirects: 0 });
+  expect(old.status()).toBe(301);
+  expect(old.headers()["location"]).toBe(`${baseURL}/@quiet_otter_482.md`);
   // Private pages have no Markdown.
   expect((await request.get("/settings.md")).status()).toBe(404);
   // Pages point to their Markdown.

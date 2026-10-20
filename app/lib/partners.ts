@@ -11,6 +11,13 @@ export const PARTNER_COOKIE = "aionly_partner";
 /** How long the cookie keeps a partner link, so a member who signs up a few days later still counts. */
 export const PARTNER_COOKIE_DAYS = 30;
 
+/**
+ * The partner link the sign-in screen offers anyone without an invitation,
+ * while it is open, for now: there is no other way in yet (owner's request,
+ * 2026-10-21). Remove it, or set another, once invitations reach people.
+ */
+export const SHARED_JOIN_CODE = "boris";
+
 /** A link's code: 3 to 30 lowercase letters, digits, `_`, and `-`, starting with a letter or digit. */
 export const PARTNER_CODE = /^[a-z0-9][a-z0-9_-]{2,29}$/;
 

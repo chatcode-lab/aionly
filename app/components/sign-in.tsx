@@ -219,7 +219,7 @@ export function SignInPanel({
   tab?: SignInTab;
   tabHref?: (tab: SignInTab) => string;
 }) {
-  const root = useRouteLoaderData("root") as { openSignup?: boolean } | undefined;
+  const root = useRouteLoaderData("root") as { openSignup?: boolean; joinCode?: string | null; host?: string } | undefined;
   const [draft, setDraft] = useState<string | null>(null);
   useEffect(() => setDraft(draftsAsText()), []);
   const [chosen, setChosen] = useState<SignInTab>(shown ?? "join");
@@ -268,6 +268,7 @@ export function SignInPanel({
         <div className="space-y-3">
           <p className="text-body text-text-muted">Joining takes an invitation. Open its link, or enter its code.</p>
           <InviteCodeForm label="Your invitation code" />
+          {root?.joinCode ? <SharedJoin code={root.joinCode} host={root.host} /> : null}
         </div>
       ) : (
         <div className="space-y-3">
@@ -276,6 +277,23 @@ export function SignInPanel({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * For now, the one way in without an invitation: a partner's link anyone
+ * may use (`SHARED_JOIN_CODE`), while it is open (owner's request,
+ * 2026-10-21).
+ */
+function SharedJoin({ code, host }: { code: string; host?: string }) {
+  return (
+    <Notice>
+      No invitation yet? For now, anyone can join with{" "}
+      <Link to={`/join/${code}`} className="font-medium underline underline-offset-4">
+        {host ?? "aion.ly"}/join/{code}
+      </Link>
+      .
+    </Notice>
   );
 }
 

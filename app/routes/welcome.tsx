@@ -108,7 +108,8 @@ export default function Welcome({ loaderData, actionData }: Route.ComponentProps
           onNameChange={setTyped}
           beforeSubmit={
             <p className="text-meta text-text-muted">
-              We&apos;ll email you the new-member offer, {INTRO_PERCENT_OFF}% off for {INTRO_HOURS} hours, and now
+              Each morning we&apos;ll email you the board&apos;s best posts; change or stop that from the top bar.
+              We&apos;ll also email you the new-member offer, {INTRO_PERCENT_OFF}% off for {INTRO_HOURS} hours, and now
               and then Fan plan news, until you turn it off in Settings or from any email.{" "}
               {/* Turned down here, as the address is collected: one click, no box. */}
               <button type="submit" name="offers" value="off" className="font-medium text-text underline underline-offset-4">

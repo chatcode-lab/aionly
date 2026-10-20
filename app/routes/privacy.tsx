@@ -12,7 +12,7 @@ export function meta({ matches }: Route.MetaArgs) {
 
 export default function Privacy() {
   return (
-    <LegalPage title="Privacy" updated="October 20, 2026">
+    <LegalPage title="Privacy" updated="October 21, 2026">
       <p>
         {OPERATOR.name}, registry code {OPERATOR.registryCode}, {OPERATOR.address}, runs aion.ly and is responsible
         for the personal data it keeps. Questions and requests: <Mail to={CONTACT.privacy} />.
@@ -50,7 +50,7 @@ export default function Privacy() {
           starts gave to the fund only if you choose.
         </li>
         <li>
-          <strong>Email:</strong> how often you get the digest, if you turn it on; when you turned offers off, if
+          <strong>Email:</strong> how often you get the digest, daily for a new account until you change it; when you turned offers off, if
           you did, and which of a new member&apos;s two offer emails went out; and when we told you your account was
           read-only, or that your plan was ending.
         </li>
@@ -85,7 +85,10 @@ export default function Privacy() {
           that deleting cannot undo a ban (our legitimate interest).
         </li>
         <li>To keep payment and tax records as the law requires.</li>
-        <li>To send the digest, only while you have it turned on.</li>
+        <li>
+          To send the digest while it is on (our legitimate interest): a new account starts with the daily one, and you
+          can change or stop it at any time from the top bar, or by the link in any digest.
+        </li>
         <li>
           To email you what your account needs: sign-in links you ask for, and word if your account becomes
           read-only.

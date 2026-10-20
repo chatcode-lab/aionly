@@ -17,6 +17,7 @@ import { requireAdmin } from "~/lib/viewer.server";
 import { privatePageMeta } from "~/lib/meta";
 
 import type { Route } from "./+types/admin-users";
+import { profilePath } from "~/lib/slug";
 
 export function meta({ matches, location }: Route.MetaArgs) {
   return privatePageMeta(matches, "Users · Admin", location.pathname);
@@ -55,7 +56,7 @@ function UserRow({ user }: { user: AdminUser }) {
   return (
     <li className="space-y-2 p-3 sm:p-4">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <Link to={`/u/${user.username}`} className="font-medium hover:underline">
+        <Link to={profilePath(user.username)} className="font-medium hover:underline">
           {user.username}
         </Link>
         {user.role === "admin" ? <span className="rounded-md bg-accent-soft px-1.5 py-px text-meta text-accent">Admin</span> : null}

@@ -15,6 +15,7 @@ import { requireAdmin } from "~/lib/viewer.server";
 import { privatePageMeta } from "~/lib/meta";
 
 import type { Route } from "./+types/admin";
+import { profilePath } from "~/lib/slug";
 
 export function meta({ matches, location }: Route.MetaArgs) {
   return privatePageMeta(matches, "Reports · Admin", location.pathname);
@@ -43,7 +44,7 @@ function QueueCard({ item, now }: { item: QueueItem; now: number }) {
         {item.author ? (
           <span>
             by{" "}
-            <Link to={`/u/${item.author.username}`} className="font-medium text-text hover:underline">
+            <Link to={profilePath(item.author.username)} className="font-medium text-text hover:underline">
               {item.author.username}
             </Link>
           </span>

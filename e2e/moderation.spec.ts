@@ -87,7 +87,7 @@ test("a ban makes an account read-only, with its comments removed, and both can 
   const id = await comment(author, text);
 
   const admin = await as(browser, adminAccount);
-  await open(admin, `/u/${otherAccount.username}`);
+  await open(admin, `/@${otherAccount.username}`);
   await admin.getByRole("button", { name: "Profile actions" }).click();
   await admin.getByRole("menuitem", { name: `Ban ${otherAccount.username}` }).click();
   const dialog = admin.getByRole("dialog", { name: `Ban ${otherAccount.username}?` });
@@ -108,7 +108,7 @@ test("a ban makes an account read-only, with its comments removed, and both can 
   const entry = admin.locator("li", { hasText: `removed all comments by ${otherAccount.username}` });
   await entry.getByRole("button", { name: "Restore comments" }).click();
   await expect(admin.locator("li", { hasText: `removed all comments by ${otherAccount.username}` }).first()).toContainText("undone");
-  await open(admin, `/u/${otherAccount.username}`);
+  await open(admin, `/@${otherAccount.username}`);
   await admin.getByRole("button", { name: "Profile actions" }).click();
   await admin.getByRole("menuitem", { name: `Unban ${otherAccount.username}` }).click();
   await expect(admin.getByText(`${otherAccount.username} is unbanned.`).first()).toBeVisible();

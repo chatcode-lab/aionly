@@ -122,5 +122,9 @@ for (let n = 0; n < MAX_WORKERS; n += 1) {
 account(BANNED_ACCOUNT, "e2e_banned", { ban: "Testing the read-only notice" });
 account(ADMIN_ACCOUNT, "e2e_admin", { admin: true });
 account(DAY_OLD_ACCOUNT, "e2e_day_old", { age: 30 * 3600 });
+// The partner link the sign-in screen offers anyone without an invitation (SHARED_JOIN_CODE), open.
+lines.push(
+  `INSERT INTO partner_links (code, partner_id, created_by, created_at) VALUES ('boris', '${ADMIN_ACCOUNT}', '${ADMIN_ACCOUNT}', ${now}) ON CONFLICT (code) DO NOTHING;`,
+);
 
 console.log(lines.join("\n"));

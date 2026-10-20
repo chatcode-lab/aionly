@@ -22,6 +22,7 @@ import { normalizePartnerCode, PARTNER_STEPS_MAX, type PartnerStep, partnerSteps
 import { requireAdmin } from "~/lib/viewer.server";
 
 import type { Route } from "./+types/admin-partners";
+import { profilePath } from "~/lib/slug";
 
 export function meta({ matches, location }: Route.MetaArgs) {
   return privatePageMeta(matches, "Partners · Admin", location.pathname);
@@ -268,7 +269,7 @@ export default function AdminPartners({ loaderData, actionData }: Route.Componen
                         {joined.get(link.code)!.map((member, index) => (
                           <span key={member.username}>
                             {index > 0 ? ", " : null}
-                            <a href={`/u/${member.username}`} className="font-medium text-text hover:underline">
+                            <a href={profilePath(member.username)} className="font-medium text-text hover:underline">
                               {member.username}
                             </a>
                             {member.fan ? " (fan)" : null}

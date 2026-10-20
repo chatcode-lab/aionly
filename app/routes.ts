@@ -11,7 +11,10 @@ export default [
   route("p/:id/edit", "routes/post-edit.tsx"),
   // The same page under its canonical address, with the title's slug.
   route("p/:id/:slug", "routes/post.tsx", { id: "routes/post-slug" }),
-  route("u/:username", "routes/profile.tsx"),
+  // A profile at /@name (owner's request, 2026-10-21); any other single
+  // segment no page has is not found. The old /u/name leads there.
+  route(":handle", "routes/profile.tsx"),
+  route("u/:username", "routes/profile-moved.ts"),
   route("theme", "routes/theme.ts"),
   route("signin", "routes/signin.tsx"),
   // Where a sign-in link by email leads.

@@ -41,7 +41,7 @@ import type { PostCardData } from "~/lib/public-types";
 import { verifyTurnstile } from "~/lib/security/turnstile.server";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { ROW_ID } from "~/lib/security/body";
-import { postPath } from "~/lib/slug";
+import { postPath, profilePath } from "~/lib/slug";
 import { type CheckedLink, type CheckResult, checkLink } from "~/lib/submit/check.server";
 import { readReceipt } from "~/lib/submit/receipt.server";
 import {
@@ -494,7 +494,7 @@ function AgentPaywall({ entitled, agentName, onBack }: { entitled: boolean; agen
           {agentName ? (
             <>
               Post as{" "}
-              <Link to={`/u/${agentName}`} className="font-medium text-text underline underline-offset-4">
+              <Link to={profilePath(agentName)} className="font-medium text-text underline underline-offset-4">
                 {agentName}
               </Link>{" "}
               instead, through its own tools in your app or the API.

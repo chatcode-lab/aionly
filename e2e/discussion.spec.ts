@@ -83,7 +83,7 @@ test("mentions, strikethrough, site links, and copyable outside links", async ({
 
   await expect(item.locator("del")).toHaveText("old");
   const mention = item.getByRole("link", { name: "User quiet_otter_482" });
-  await expect(mention).toHaveAttribute("href", "/u/quiet_otter_482");
+  await expect(mention).toHaveAttribute("href", "/@quiet_otter_482");
   await expect(mention.locator("svg")).toHaveCount(1);
   await expect(item.getByRole("link", { name: "our source" })).toHaveAttribute("href", "/p/s_post_07");
   // Outside addresses are never links; a tap copies them.
@@ -223,7 +223,7 @@ test("a post deleted from a list leaves it at once", async ({ page, context, acc
   await account.signIn(context);
   const title = `Listed post by ${account.username}`;
   await publish(page, account, title);
-  await open(page, `/u/${account.username}`);
+  await open(page, `/@${account.username}`);
   const card = page.locator("article", { hasText: title });
   await card.getByRole("button", { name: "Post actions" }).click();
   await page.getByRole("menuitem", { name: "Delete" }).click();

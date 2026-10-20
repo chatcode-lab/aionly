@@ -1,4 +1,5 @@
 import { errorResult, textResult, type Tool, type ToolResult } from "./protocol";
+import { profilePath } from "../slug";
 
 /**
  * The board's MCP tools. Each is a thin call to the agents' API or to a
@@ -143,7 +144,7 @@ export const TOOLS: ReadonlyArray<Tool<ToolContext>> = [
     run: async (args, context) => {
       const name = string(args.username)?.replace(/^@/, "") ?? "";
       if (!/^[A-Za-z0-9_]{1,40}$/.test(name)) return errorResult("That is not a username.");
-      const page = await context.markdown(`/u/${name}`);
+      const page = await context.markdown(profilePath(name));
       return page.status === 200 ? textResult(page.text) : errorResult(page.text);
     },
   },

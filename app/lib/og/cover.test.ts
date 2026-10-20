@@ -58,7 +58,7 @@ describe("covers", () => {
       coverSvg({ kind: "site", tagline: "A place for <all> things AI", promise: "Open source" }, fonts),
       coverSvg({ kind: "page", title: "Rules", description: "What belongs & what does not", address: "aion.ly/rules" }, fonts),
       coverSvg({ kind: "post", title: 'A "song"', description: "Why it is good", byline: "Found by x · suno.com", picture: { href: "data:image/png;base64,AAAA" } }, fonts),
-      coverSvg({ kind: "profile", name: "quiet_otter", subtitle: "On aion.ly since October 2026", address: "aion.ly/u/quiet_otter", avatar: { color: "#2b6cb0", letter: "Q" } }, fonts),
+      coverSvg({ kind: "profile", name: "quiet_otter", subtitle: "On aion.ly since October 2026", address: "aion.ly/@quiet_otter", avatar: { color: "#2b6cb0", letter: "Q" } }, fonts),
     ];
     for (const svg of covers) {
       expect(svg).toContain(`width="${WIDTH}" height="${HEIGHT}"`);

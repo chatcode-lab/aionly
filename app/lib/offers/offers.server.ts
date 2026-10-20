@@ -3,7 +3,9 @@ import type { Mailer } from "../mail/mailers.server";
 import { forReader } from "../mail/layout";
 import { recipientOf } from "../mail/recipient.server";
 import { SENDERS } from "../mail/senders";
+import { imageAddress } from "../media.server";
 import { INTRO_HOURS, introEndsAt } from "../plan";
+import { FOUNDER } from "../site";
 import { composeOfferEmail, type OfferEmailKind } from "./compose";
 
 /** The reminder goes once this little of a new member's price is left. */
@@ -19,6 +21,24 @@ const BATCH = 100;
 export async function offersUnsubscribeUrl(origin: string, secret: string, userId: string): Promise<string> {
   return `${origin}/unsubscribe?${new URLSearchParams({ list: "offers", token: await unsubscribeToken(secret, userId) })}`;
 }
+
+/**
+ * The founder's picture on the board, at an address mail clients can load,
+ * for the welcome's signature: null while they have none.
+ */
+async function founderPhoto(db: D1Database, origin: string): Promise<string | null> {
+  const row = await db
+    .prepare(
+      `SELECT profile.avatar_key FROM usernames AS name JOIN profiles AS profile ON profile.user_id = name.user_id
+       WHERE name.name = ?1 AND name.is_current = 1 AND profile.deleted_at IS NULL`,
+    )
+    .bind(FOUNDER.username)
+    .first<{ avatar_key: string | null }>();
+  return row?.avatar_key ? new URL(imageAddress(row.avatar_key), origin).href : null;
+}
+
+/** Who an offer email comes from: the welcome, from the founder in their own name. */
+const senderOf = (kind: OfferEmailKind) => (kind === "welcome" ? SENDERS.welcome : SENDERS.offers);
 
 /** Which email is due for an account at this stage, with this much of its offer left, if any. */
 export function offerDue(stage: number, left: number): { kind: OfferEmailKind; next: number } | null {
@@ -110,6 +130,7 @@ export async function sendOfferEmails(
     .all<{ user_id: string; created_at: number; offer_emails: number }>();
 
   let sent = 0;
+  const photo = results.length > 0 ? await founderPhoto(db, input.origin) : null;
   for (const row of results) {
     const left = introEndsAt(row.created_at) - now;
     const due = offerDue(row.offer_emails, left);
@@ -122,10 +143,10 @@ export async function sendOfferEmails(
     const account = await recipientOf(db, row.user_id, now);
     if (!account) continue;
     const unsubscribeUrl = await offersUnsubscribeUrl(input.origin, input.secret, row.user_id);
-    const email = forReader(composeOfferEmail({ kind: due.kind, left, origin: input.origin, unsubscribeUrl }), account);
+    const email = forReader(composeOfferEmail({ kind: due.kind, left, origin: input.origin, unsubscribeUrl, founderPhoto: photo }), account);
     try {
       await mailer.send({
-        ...SENDERS.offers,
+        ...senderOf(due.kind),
         to: account.email,
         subject: email.subject,
         html: email.html,
@@ -165,11 +186,12 @@ export async function sendTestOfferEmails(
     ["welcome", INTRO_HOURS * 3600],
     ["reminder", REMINDER_HOURS * 3600],
   ];
+  const photo = await founderPhoto(db, input.origin);
   try {
     for (const [kind, left] of samples) {
-      const email = forReader(composeOfferEmail({ kind, left, origin: input.origin, unsubscribeUrl }), account);
+      const email = forReader(composeOfferEmail({ kind, left, origin: input.origin, unsubscribeUrl, founderPhoto: photo }), account);
       await mailer.send({
-        ...SENDERS.offers,
+        ...senderOf(kind),
         to: account.email,
         subject: `[Test] ${email.subject}`,
         html: email.html,

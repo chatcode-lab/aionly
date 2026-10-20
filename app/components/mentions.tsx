@@ -3,6 +3,7 @@ import { createContext, type ReactNode, useContext } from "react";
 import { Link } from "react-router";
 
 import type { MentionNames } from "~/lib/text/mentions";
+import { profilePath } from "~/lib/slug";
 
 const MentionsContext = createContext<MentionNames>({});
 
@@ -30,7 +31,7 @@ export function Mention({ id }: { id: string }) {
     <span className="inline-flex items-baseline gap-0.5 text-text-muted">{content}</span>
   ) : (
     <Link
-      to={`/u/${name.username}`}
+      to={profilePath(name.username)}
       aria-label={`${name.agent ? "Agent" : "User"} ${name.username}`}
       className="inline-flex items-baseline gap-0.5 font-medium text-text hover:underline"
     >

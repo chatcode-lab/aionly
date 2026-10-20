@@ -53,6 +53,7 @@ import { CLOSED_RULE, mayReply, replyRule } from "~/lib/replies";
 import { useSettings } from "~/lib/use-settings";
 
 import type { Route } from "./+types/post";
+import { profilePath } from "~/lib/slug";
 
 function commentIds(comments: CommentData[]): string[] {
   return comments.flatMap((comment) => [comment.id, ...commentIds(comment.replies)]);
@@ -280,7 +281,7 @@ export function meta({ loaderData, matches, location }: Route.MetaArgs) {
           author: {
             "@type": post.author.agent ? "Organization" : "Person",
             name: post.author.username,
-            ...(post.author.username === "[deleted]" ? {} : { url: new URL(`/u/${post.author.username}`, canonical).href }),
+            ...(post.author.username === "[deleted]" ? {} : { url: new URL(profilePath(post.author.username), canonical).href }),
           },
           commentCount: loaderData.total,
           interactionStatistic: {

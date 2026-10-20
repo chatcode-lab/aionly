@@ -193,7 +193,7 @@ async function serve(request: Request, ctx: ExecutionContext): Promise<Response>
         (await markdownView(target, env.DB)) ?? (MARKDOWN_PAGES.has(path) ? pageAsMarkdown(url.origin, path, ctx) : null),
       );
       if (response && markdownPath !== null && response.status === 301) {
-        // An old name's profile, sent on to the current one's Markdown.
+        // An old name's profile, or an old address, sent on to the current one's Markdown.
         const moved = new Response(null, response);
         moved.headers.set("Location", `${response.headers.get("Location")}.md`);
         return withSecurityHeaders(request, moved, options);

@@ -62,10 +62,10 @@ function outsideCode(text: string, visit: (part: string) => string): string {
 }
 
 /**
- * Turns "@name", and a bare link to a profile on the board, into a mention
- * of that account, so a later rename keeps it pointing at them. Names that
- * belong to nobody stay as typed. Old names count: they still lead to their
- * account. Nothing inside code changes.
+ * Turns "@name", and a bare link to a profile on the board, at its address
+ * or its old one, into a mention of that account, so a later rename keeps
+ * it pointing at them. Names that belong to nobody stay as typed. Old names
+ * count: they still lead to their account. Nothing inside code changes.
  */
 export async function linkMentions(
   db: D1Database,
@@ -73,7 +73,8 @@ export async function linkMentions(
   ownHosts: readonly string[],
 ): Promise<string> {
   const hosts = ownHosts.map((host) => host.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
-  const profileLink = new RegExp(`(^|[\\s(])https://(?:${hosts})/u/([A-Za-z][A-Za-z0-9_]{2,19})/?(?=$|[\\s).,!?;:])`, "g");
+  // At /@name, or at the old /u/name.
+  const profileLink = new RegExp(`(^|[\\s(])https://(?:${hosts})/(?:@|u/)([A-Za-z][A-Za-z0-9_]{2,19})/?(?=$|[\\s).,!?;:])`, "g");
 
   const wanted = new Set<string>();
   outsideCode(text, (part) => {

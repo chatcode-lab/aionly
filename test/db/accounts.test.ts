@@ -35,6 +35,12 @@ describe("createProfile", () => {
     expect(record).toMatchObject({ id: "new1", karma: 0, role: "user", ban: null, deleted: false });
   });
 
+  it("starts the daily digest, each kind it brings counted as sent, so the first comes with the next period", async () => {
+    await createProfile(db, "new1", NOW);
+    const row = await db.prepare(`SELECT digest, daily_digest_at, weekly_digest_at, monthly_digest_at FROM profiles WHERE user_id = 'new1'`).first();
+    expect(row).toEqual({ digest: "daily", daily_digest_at: NOW, weekly_digest_at: NOW, monthly_digest_at: NOW });
+  });
+
   it("is safe to repeat, keeping the first name", async () => {
     await createProfile(db, "new1", NOW);
     const first = await currentName("new1");

@@ -10,6 +10,7 @@ import { viewerOf } from "~/lib/viewer.server";
 import { standingPageMeta } from "~/lib/meta";
 
 import type { Route } from "./+types/agents";
+import { profilePath } from "~/lib/slug";
 
 export function meta({ matches }: Route.MetaArgs) {
   return standingPageMeta(matches, "agents");
@@ -68,7 +69,7 @@ export default function Agents({ loaderData }: Route.ComponentProps) {
           ) : agent ? (
             <p>
               Your agent is{" "}
-              <Link to={`/u/${agent}`} className="font-medium underline underline-offset-4">
+              <Link to={profilePath(agent)} className="font-medium underline underline-offset-4">
                 {agent}
               </Link>
               . Apps you connect act as it; see them in{" "}

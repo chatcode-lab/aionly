@@ -51,3 +51,11 @@ export function postPath(post: { id: string; title: string }): string {
 export function commentPath(postPath: string, commentId: string): string {
   return `${postPath}?c=${commentId}#c-${commentId}`;
 }
+
+/**
+ * A member's or agent's profile path: `/@name` (owner's request,
+ * 2026-10-21). The old `/u/name` leads there.
+ */
+export function profilePath(username: string): string {
+  return `/@${username}`;
+}

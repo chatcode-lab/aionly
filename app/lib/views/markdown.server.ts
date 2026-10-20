@@ -16,7 +16,7 @@ import { type CommentOrder, parseOrder } from "../comments/rules";
 import { CLOSED_RULE, replyRule } from "../replies";
 import { TAGLINE } from "../site";
 import { mentionIds, type MentionNames, replaceMentions } from "../text/mentions";
-import { commentPath } from "../slug";
+import { commentPath, profilePath } from "../slug";
 
 /**
  * True when a request asks for Markdown ahead of HTML, as AI agents and
@@ -46,12 +46,12 @@ const linkText = (text: string) => text.replace(/([\\[\]])/g, "\\$1");
 
 function withMentions(text: string, names: MentionNames, origin: string): string {
   return replaceMentions(text, names, (name) =>
-    name.deleted ? "@[deleted]" : `[@${name.username}](${origin}/u/${name.username})`,
+    name.deleted ? "@[deleted]" : `[@${name.username}](${origin}${profilePath(name.username)})`,
   );
 }
 
 function author(username: string, origin: string): string {
-  return username === "[deleted]" ? "[deleted]" : `[@${username}](${origin}/u/${username})`;
+  return username === "[deleted]" ? "[deleted]" : `[@${username}](${origin}${profilePath(username)})`;
 }
 
 /** Where a post leads: its outside link, or the file the board hosts for it. */
@@ -242,7 +242,7 @@ async function postMarkdown(
 async function profileMarkdown(db: D1Database, name: string, origin: string): Promise<{ status: number; body: string; location?: string } | null> {
   const found = await profileByName(db, name);
   if (!found) return null;
-  if (found.kind === "renamed") return { status: 301, body: "", location: `${origin}/u/${found.username}` };
+  if (found.kind === "renamed") return { status: 301, body: "", location: `${origin}${profilePath(found.username)}` };
   const { profile } = found;
   const names = await mentionNames(db, mentionIds(...profile.posts.map((post) => post.excerpt), ...profile.comments.map((comment) => comment.body)));
   const lines = [
@@ -307,7 +307,9 @@ function fanMarkdown(origin: string): string {
 export async function markdownView(request: Request, db: D1Database): Promise<Response | null> {
   const url = new URL(request.url);
   const post = /^\/p\/([A-Za-z0-9_-]{1,32})(?:\/[a-z0-9-]*)?\/?$/.exec(url.pathname);
-  const profile = /^\/u\/([A-Za-z0-9_]{1,40})\/?$/.exec(url.pathname);
+  const profile = /^\/@([A-Za-z0-9_]{1,40})\/?$/.exec(url.pathname);
+  // A profile's old address, /u/name.
+  const moved = /^\/u\/([A-Za-z0-9_]{1,40})\/?$/.exec(url.pathname);
 
   let status = 200;
   let body: string;
@@ -340,6 +342,9 @@ export async function markdownView(request: Request, db: D1Database): Promise<Re
       status = 404;
       body = NOT_FOUND;
     }
+  } else if (moved) {
+    headers.set("Location", `${url.origin}${profilePath(moved[1]!)}`);
+    return new Response(null, { status: 301, headers });
   } else if (profile) {
     const view = await profileMarkdown(db, profile[1]!, url.origin);
     if (view?.location) {

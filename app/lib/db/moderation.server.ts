@@ -2,7 +2,7 @@ import { storedGallery } from "../gallery";
 import { newId } from "../ids";
 import { LOW_KARMA } from "../moderation";
 import { isSettingKey, settingSpec } from "../settings";
-import { commentPath, postPath } from "../slug";
+import { commentPath, postPath, profilePath } from "../slug";
 import { givenNameStatements, participantCondition, withGivenName } from "./accounts.server";
 import { applyFreshStart } from "./fresh-starts.server";
 import { settingSql } from "./setting-sql.server";
@@ -630,7 +630,7 @@ export async function moderationLog(db: D1Database, input: { before?: number; li
     let link: string | null = null;
     if (row.target_type === "post" && row.post_id) link = postPath({ id: row.post_id, title: row.label ?? "" });
     if (row.target_type === "comment" && row.post_id) link = commentPath(postPath({ id: row.post_id, title: row.post_title ?? "" }), row.target_id);
-    if (row.target_type === "user" && row.label) link = `/u/${row.label}`;
+    if (row.target_type === "user" && row.label) link = profilePath(row.label);
     // A setting by its name on the settings page, with "old → new" as the reason.
     const setting = row.target_type === "setting" && isSettingKey(row.target_id) ? settingSpec(row.target_id) : null;
     if (setting) link = "/admin/settings";

@@ -1,5 +1,5 @@
 import { newId } from "../ids";
-import type { PartnerStep } from "../partners";
+import { type PartnerStep, SHARED_JOIN_CODE } from "../partners";
 import type { PublicAuthor } from "../public-types";
 import { AUTHOR_COLUMNS, AUTHOR_JOINS, toPublicAuthor } from "./rows.server";
 import { settleKarma } from "./votes.server";
@@ -28,6 +28,29 @@ function openSql(link: string, now: string): string {
 /** The link `link`'s steps in order, as JSON: [{percent, months}], months null for good (SQL). */
 const STEPS_SQL = `(SELECT json_group_array(json_object('percent', share_percent, 'months', until_month - from_month))
   FROM (SELECT * FROM partner_link_steps WHERE code = link.code ORDER BY from_month))`;
+
+const SHARED_CACHE_MS = 60 * 1000;
+let shared: { code: string | null; at: number } | null = null;
+
+/**
+ * The partner link offered to anyone signing up (`SHARED_JOIN_CODE`), while
+ * it is open, or null. Kept a minute per instance, since every page a
+ * visitor opens asks.
+ */
+export async function sharedJoinCode(db: D1Database, now = Date.now()): Promise<string | null> {
+  if (shared && now - shared.at < SHARED_CACHE_MS) return shared.code;
+  const row = await db
+    .prepare(`SELECT ${openSql("link", "?2")} AS open FROM partner_links AS link WHERE link.code = ?1`)
+    .bind(SHARED_JOIN_CODE, Math.floor(now / 1000))
+    .first<{ open: number }>();
+  shared = { code: row?.open ? SHARED_JOIN_CODE : null, at: now };
+  return shared.code;
+}
+
+/** Forgets this instance's answer, as tests need. */
+export function forgetSharedJoin(): void {
+  shared = null;
+}
 
 export type PartnerLinkState = "open" | "full" | "ended" | "revoked" | "paused";
 

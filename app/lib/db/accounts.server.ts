@@ -15,7 +15,10 @@ function nowSeconds(): number {
 
 /**
  * Gives an account its public profile and a generated name. Safe to call
- * again: an existing profile or current name is kept.
+ * again: an existing profile or current name is kept. A new member starts
+ * with the daily digest on (owner's request, 2026-10-21), each kind it
+ * brings counted as sent, as turning it on does, so the first comes with
+ * the next period.
  */
 export async function createProfile(
   db: D1Database,
@@ -24,7 +27,8 @@ export async function createProfile(
 ): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO profiles (user_id, created_at) VALUES (?1, ?2)
+      `INSERT INTO profiles (user_id, created_at, digest, daily_digest_at, weekly_digest_at, monthly_digest_at)
+       VALUES (?1, ?2, 'daily', ?2, ?2, ?2)
        ON CONFLICT (user_id) DO NOTHING`,
     )
     .bind(userId, now)

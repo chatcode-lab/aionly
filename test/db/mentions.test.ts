@@ -27,6 +27,11 @@ describe("linkMentions", () => {
     expect(text).toBe("Thanks <@u1> and <@u2>, see <@bot>. Not @nobody_here, me@paper_lark.dev or @ab.");
   });
 
+  it("takes a profile's link at /@name as at the old /u/name, and never a name inside an address", async () => {
+    expect(await linkMentions(db, "see https://aion.ly/@scout_agent and https://aion.ly/u/quiet_otter.", HOSTS)).toBe("see <@bot> and <@u1>.");
+    expect(await linkMentions(db, "https://other.example/@paper_lark", HOSTS)).toBe("https://other.example/@paper_lark");
+  });
+
   it("leaves code and outside links alone", async () => {
     const text = [
       "`@quiet_otter` and @quiet_otter",

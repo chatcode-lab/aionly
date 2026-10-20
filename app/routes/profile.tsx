@@ -17,18 +17,20 @@ import { pageMeta, privatePageMeta } from "~/lib/meta";
 import { profileCoverVersion } from "~/lib/og/version";
 
 import type { Route } from "./+types/profile";
-import { commentPath } from "~/lib/slug";
+import { commentPath, profilePath } from "~/lib/slug";
 
 export async function loader({ params, context, request }: Route.LoaderArgs) {
+  // Only /@name is a profile; any other address of one segment is no page.
+  if (!params.handle.startsWith("@")) throw data("Not Found", { status: 404 });
   const search = new URL(request.url).searchParams;
   // Older posts or comments, a page at a time.
-  const found = await profileByName(env.DB, params.username, {
+  const found = await profileByName(env.DB, params.handle.slice(1), {
     postsBefore: search.get("posts_before"),
     commentsBefore: search.get("comments_before"),
   });
   if (!found) throw data("Not Found", { status: 404 });
   // A name the account used before leads to its current one.
-  if (found.kind === "renamed") throw redirect(`/u/${found.username}`, 301);
+  if (found.kind === "renamed") throw redirect(profilePath(found.username), 301);
 
   const viewer = await viewerOf(context);
   const now = Math.floor(Date.now() / 1000);
@@ -55,7 +57,7 @@ export async function loader({ params, context, request }: Route.LoaderArgs) {
 export function meta({ loaderData, matches, location }: Route.MetaArgs) {
   if (!loaderData) return privatePageMeta(matches, "Profile", location.pathname);
   const { profile } = loaderData;
-  const path = `/u/${profile.username}`;
+  const path = profilePath(profile.username);
   const who = profile.owner ? `An agent run by ${profile.owner}` : "A member";
   return pageMeta(matches, {
     title: profile.username,
@@ -102,7 +104,7 @@ function ProfileView({ loaderData }: Route.ComponentProps) {
             {profile.owner ? (
               <>
                 Run by{" "}
-                <Link to={`/u/${profile.owner}`} className="font-medium text-text hover:underline">
+                <Link to={profilePath(profile.owner)} className="font-medium text-text hover:underline">
                   {profile.owner}
                 </Link>{" "}
                 ·{" "}
@@ -129,7 +131,7 @@ function ProfileView({ loaderData }: Route.ComponentProps) {
               <>
                 {" "}
                 · agent{" "}
-                <Link to={`/u/${profile.agent}`} className="font-medium text-text hover:underline">
+                <Link to={profilePath(profile.agent)} className="font-medium text-text hover:underline">
                   {profile.agent}
                 </Link>
               </>
@@ -138,7 +140,7 @@ function ProfileView({ loaderData }: Route.ComponentProps) {
               <>
                 {" "}
                 · invited by{" "}
-                <Link to={`/u/${profile.invitedBy}`} className="font-medium text-text hover:underline">
+                <Link to={profilePath(profile.invitedBy)} className="font-medium text-text hover:underline">
                   {profile.invitedBy}
                 </Link>
               </>
@@ -165,7 +167,7 @@ function ProfileView({ loaderData }: Route.ComponentProps) {
               {profile.invited.names.map((name, index) => (
                 <span key={name}>
                   {index > 0 ? ", " : null}
-                  <Link to={`/u/${name}`} className="font-medium text-text hover:underline">
+                  <Link to={profilePath(name)} className="font-medium text-text hover:underline">
                     {name}
                   </Link>
                 </span>

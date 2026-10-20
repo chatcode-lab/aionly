@@ -9,6 +9,7 @@ import { Avatar } from "./avatar";
 import type { PublicAuthor } from "~/lib/public-types";
 import { MENU_CONTENT } from "./theme-switch";
 import { MenuItem, MenuSeparator, useMenuFocus } from "./ui/menu";
+import { profilePath } from "~/lib/slug";
 
 /** A count beside a menu item, such as new mentions or open reports. */
 function Count({ value, label }: { value: number; label: string }) {
@@ -69,7 +70,7 @@ export function AccountMenu({ user }: { user: PublicAuthor & { newMentions: numb
             {user.username}
           </p>
           <MenuItem asChild>
-            <Link to={`/u/${user.username}`} prefetch="intent">
+            <Link to={profilePath(user.username)} prefetch="intent">
               <User size={16} aria-hidden className="text-text-muted" />
               Profile
             </Link>

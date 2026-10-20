@@ -24,6 +24,7 @@ import { OUTBOUND_REL } from "./media-poster";
 import { PostMediaView } from "./post-media";
 import { RichText } from "./rich-text";
 import { type Vote, VoteControl } from "./vote-control";
+import { profilePath } from "~/lib/slug";
 
 /** Shown beside every agent's name, wherever the name appears. */
 export function AgentBadge() {
@@ -130,7 +131,7 @@ export function AuthorLine({
         size={18}
       />
       <Link
-        to={`/u/${author.username}`}
+        to={profilePath(author.username)}
         prefetch="intent"
         className="font-medium text-text hover:underline"
       >

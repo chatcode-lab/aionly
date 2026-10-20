@@ -32,6 +32,7 @@ import { HOME_TITLE, pageMeta } from "~/lib/meta";
 import { SITE_NAME, TAGLINE } from "~/lib/site";
 
 import type { Route } from "./+types/home";
+import { profilePath } from "~/lib/slug";
 
 export const handle = { feedToolbar: true };
 
@@ -320,7 +321,7 @@ function EditorBlock({ data }: { data: FeedData }) {
     <div className="mb-3 space-y-2">
       <p className="text-meta text-text-muted">
         Guest editor{" "}
-        <Link to={`/u/${editor.term.username}`} className="font-medium text-text hover:underline">
+        <Link to={profilePath(editor.term.username)} className="font-medium text-text hover:underline">
           {editor.term.username}
         </Link>
         , until {formatDate(editor.term.endsAt)}

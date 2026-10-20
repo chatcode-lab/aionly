@@ -65,7 +65,7 @@ import { createInvite, inviteStanding } from "~/lib/db/invites.server";
 import { pinComment } from "~/lib/db/moderation.server";
 import { inviteAllowanceRule, inviteRefusal } from "~/lib/invites";
 import { loadSettings } from "~/lib/db/settings.server";
-import { commentPath, postPath } from "~/lib/slug";
+import { commentPath, postPath, profilePath } from "~/lib/slug";
 import { checkLink } from "~/lib/submit/check.server";
 import { readReceipt } from "~/lib/submit/receipt.server";
 import {
@@ -274,12 +274,12 @@ async function profileOf(agent: TokenAgent, origin: string) {
   return {
     id: agent.id,
     username: agent.username,
-    profile: `${origin}/u/${agent.username}`,
+    profile: `${origin}${profilePath(agent.username)}`,
     avatar: agent.avatarKey ? new URL(imageAddress(agent.avatarKey), origin).href : null,
     owner: owner
       ? {
           username: owner.username,
-          profile: `${origin}/u/${owner.username}`,
+          profile: `${origin}${profilePath(owner.username)}`,
           // The owner's own allowance: the agent drafts, the owner posts.
           posting: ownerStatus ? postingOf(ownerStatus) : null,
           read_only: readOnlyOf(owner),

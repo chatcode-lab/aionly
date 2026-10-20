@@ -19,6 +19,9 @@ test("signed out, the top bar offers Sign in, which opens on New member, then si
   await expect(dialog.getByLabel("Your invitation code")).toBeVisible();
   await expect(dialog).toContainText("Joining takes an invitation.");
   await expect(dialog.getByRole("button", { name: "Continue with Google" })).toHaveCount(0);
+  // For now, the one way in without one: the shared partner link, while it is open (owner's request, 2026-10-21).
+  await expect(dialog.getByRole("status").filter({ hasText: "No invitation yet? For now, anyone can join with" })).toBeVisible();
+  await expect(dialog.getByRole("link", { name: /\/join\/boris$/ })).toHaveAttribute("href", "/join/boris");
 
   await tabs.getByRole("button", { name: "Sign in" }).click();
   await expect(tabs.getByRole("button", { name: "Sign in" })).toHaveAttribute("aria-pressed", "true");
@@ -41,14 +44,14 @@ test.describe("without scripts", () => {
   test.use({ javaScriptEnabled: false });
 
   test("Sign in leads to a sign-in page that still works", async ({ page }) => {
-    await page.goto("/u/quiet_otter_482");
+    await page.goto("/@quiet_otter_482");
     await page.locator("header").getByRole("link", { name: "Sign in" }).click();
-    await expect(page).toHaveURL(/\/signin\?next=%2Fu%2Fquiet_otter_482$/);
+    await expect(page).toHaveURL(/\/signin\?next=%2F%40quiet_otter_482$/);
     await expect(page.getByLabel("Your invitation code")).toBeVisible();
 
     // The tabs are links here, so Sign in opens without scripts.
     await page.getByRole("navigation", { name: "Join or sign in" }).getByRole("link", { name: "Sign in" }).click();
-    await expect(page).toHaveURL(/\/signin\?next=%2Fu%2Fquiet_otter_482&tab=member$/);
+    await expect(page).toHaveURL(/\/signin\?next=%2F%40quiet_otter_482&tab=member$/);
 
     // The form posts and the browser heads for Google.
     const leaving = page.waitForRequest((request) =>
@@ -61,7 +64,7 @@ test.describe("without scripts", () => {
 
 test("Continue with Google leaves for Google with a callback to this site", async ({ page, baseURL }) => {
   const response = await page.request.post("/signin", {
-    form: { next: "/u/quiet_otter_482" },
+    form: { next: "/@quiet_otter_482" },
     headers: { Origin: baseURL! },
     maxRedirects: 0,
   });
@@ -155,7 +158,7 @@ test("a member's text size, chosen in Settings, scales the text on every page fr
   expect(await (await page.request.get("/")).text()).toContain("--text-scale:1.3");
   const sideways = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   // The Fan page's choice of plan with a name, and the agents page's long addresses, too (review F91).
-  for (const path of ["/", `/u/${account.username}`, "/agents", "/fan?name=q9a1", "/settings"]) {
+  for (const path of ["/", `/@${account.username}`, "/agents", "/fan?name=q9a1", "/settings"]) {
     await open(page, path);
     expect(await bodySize()).toBe("19.5px");
     // Spacing and the column stay, so nothing scrolls sideways, even at 320 px.
@@ -216,11 +219,11 @@ test("the welcome step shows the name, and the first change is free", async ({ p
   await expect(page).toHaveURL(/\/fan\?joined=&next=%2Fu%2Fquiet_otter_482$/);
   await expect(page.getByRole("button", { name: `Account: ${fresh}` })).toBeVisible();
   await page.getByRole("link", { name: "Not now, take me to the board" }).click();
-  await expect(page).toHaveURL(/\/u\/quiet_otter_482$/);
+  await expect(page).toHaveURL(/\/@quiet_otter_482$/);
 
   // The old name now leads to the new one.
-  await page.goto(`/u/${account.username}`);
-  await expect(page).toHaveURL(new RegExp(`/u/${fresh}$`));
+  await page.goto(`/@${account.username}`);
+  await expect(page).toHaveURL(new RegExp(`/@${fresh}$`));
 });
 
 test("after the first change, the next waits 30 days", async ({ page, context, account }) => {
@@ -272,7 +275,7 @@ test("the email shows only in the account's own Settings, and the Google name no
   // The test accounts carry these as their Google identity.
   const email = `${account.id}@example.invalid`;
   const name = `Test ${account.id}`;
-  const pages = ["/", "/saved", "/submit", "/welcome", `/u/${account.username}`, "/p/s_post_01"];
+  const pages = ["/", "/saved", "/submit", "/welcome", `/@${account.username}`, "/p/s_post_01"];
 
   await account.signIn(context);
   await open(page, "/settings");
@@ -285,7 +288,7 @@ test("the email shows only in the account's own Settings, and the Google name no
     const body = await (await page.request.get(path)).text();
     for (const secret of [email, name]) expect(body, `${secret} on ${path}`).not.toContain(secret);
   }
-  const anonymous = await request.get(`/u/${account.username}`);
+  const anonymous = await request.get(`/@${account.username}`);
   for (const secret of [email, name]) expect(await anonymous.text()).not.toContain(secret);
 });
 
@@ -340,6 +343,10 @@ test("a sign-in without an invitation says how to join, on New member", async ({
   const tabs = page.getByRole("navigation", { name: "Join or sign in" });
   await expect(tabs.getByRole("link", { name: "New member" })).toHaveAttribute("aria-current", "page");
   await expect(page.getByLabel("Your invitation code")).toBeVisible();
+  // The shared link leads to its own page, which signs anyone up.
+  await page.getByRole("link", { name: /\/join\/boris$/ }).click();
+  await expect(page).toHaveURL(/\/join\/boris$/);
+  await expect(page.getByRole("heading", { name: / invites you to aion\.ly$/ })).toBeVisible();
 });
 
 test("a sign-in refused for another reason returns to Sign in", async ({ page }) => {

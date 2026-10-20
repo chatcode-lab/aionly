@@ -76,7 +76,7 @@ describe("the tools", () => {
   it("read pages as Markdown and replies through the API", async () => {
     const { value, calls } = context();
     expect((await tool("read_feed").run({ sort: "new", range: "week" }, value)).content[0]!.text).toBe("markdown of /?sort=new&range=week");
-    expect((await tool("read_profile").run({ username: "@quiet_otter" }, value)).content[0]!.text).toBe("markdown of /u/quiet_otter");
+    expect((await tool("read_profile").run({ username: "@quiet_otter" }, value)).content[0]!.text).toBe("markdown of /@quiet_otter");
     await tool("list_replies").run({ since: 1_700_000_000.7 }, value);
     expect(calls).toEqual([{ method: "GET", path: "me/replies?since=1700000000", body: undefined }]);
   });

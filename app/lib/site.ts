@@ -34,6 +34,19 @@ export const CONTACT = {
   security: "security@aion.ly",
 } as const;
 
+/**
+ * Who welcomes new members, in their own name (owner's request,
+ * 2026-10-21): the welcome email comes from them, with their profile on the
+ * board, picture and all, and where else to reach them.
+ */
+export const FOUNDER = {
+  name: "Boris Karulin",
+  /** Their account on the board, whose picture the welcome shows. */
+  username: "boris",
+  /** Their handle on X. */
+  x: "karulin",
+} as const;
+
 export const REPOSITORY = "https://github.com/chatcode-lab/aionly";
 
 /** The issue forms: a bug report or a feature request. */

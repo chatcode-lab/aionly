@@ -9,7 +9,7 @@ import { DAY, db, NOW, reset, user } from "./fixtures";
 
 const HOUR = 3600;
 
-type Sent = { to: string; subject: string; text: string; from: { email: string }; replyTo?: string; headers?: Record<string, string> };
+type Sent = { to: string; subject: string; text: string; html: string; from: { name: string; email: string }; replyTo?: string; headers?: Record<string, string> };
 
 /**
  * The database, with `after` run once the sender has read its recipients
@@ -72,9 +72,10 @@ describe("a new member's offer emails", () => {
   it("welcomes a new member, reminds them hours before the price ends, and sends each once", async () => {
     await member("new", "fresh_member", 60);
     expect(await sendOfferEmails(db, mailer, { ...input, now: NOW, userId: "new" })).toBe(1);
+    // The welcome comes from the founder, in their own name (owner's request, 2026-10-21).
     expect(sent[0]).toMatchObject({
       to: "new@example.invalid",
-      from: { email: "noreply@aion.ly" },
+      from: { name: "Boris Karulin", email: "hey@aion.ly" },
       replyTo: "hey@aion.ly",
       subject: "Welcome to aion.ly: 30% off the Fan plan for 24 hours",
       headers: { "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
@@ -88,7 +89,7 @@ describe("a new member's offer emails", () => {
     // Hourly runs: nothing until a few hours are left, then the reminder, once.
     expect(await sendOfferEmails(db, mailer, { ...input, now: NOW + 12 * HOUR })).toBe(0);
     expect(await sendOfferEmails(db, mailer, { ...input, now: NOW + 20 * HOUR + 60 })).toBe(1);
-    expect(sent[1]!.subject).toBe("Your 30% off ends in about 4 hours");
+    expect(sent[1]).toMatchObject({ subject: "Your 30% off ends in about 4 hours", from: { name: "aion.ly", email: "noreply@aion.ly" } });
     expect(await sendOfferEmails(db, mailer, { ...input, now: NOW + 21 * HOUR })).toBe(0);
     expect(sent).toHaveLength(2);
   });
@@ -166,6 +167,19 @@ describe("a new member's offer emails", () => {
       offer_emails: 0,
       offers_off_at: null,
     });
+  });
+
+  it("signs the welcome with the founder's picture on the board, while they have one", async () => {
+    await user("founder", "boris");
+    await db.prepare(`UPDATE profiles SET avatar_key = 'AbCdEfGhIjKlMnOpQrStUvWx.jpg' WHERE user_id = 'founder'`).run();
+    await member("new", "fresh_member", 60);
+    await sendOfferEmails(db, mailer, { ...input, now: NOW, userId: "new" });
+    expect(sent[0]!.html).toContain('<img src="https://aion.ly/img/AbCdEfGhIjKlMnOpQrStUvWx.jpg" width="44" height="44" alt=""');
+    await db.prepare(`UPDATE profiles SET avatar_key = NULL WHERE user_id = 'founder'`).run();
+    await member("next", "next_member", 60);
+    await sendOfferEmails(db, mailer, { ...input, now: NOW, userId: "next" });
+    expect(sent[1]!.html).not.toContain("<img");
+    expect(sent[1]!.html).toContain("Boris Karulin");
   });
 
   it("can be sent to an admin as tests, through the offers' own mail service", async () => {
@@ -287,7 +301,27 @@ describe("the offer email", () => {
     expect(email.html).toContain("https://aion.ly/unsubscribe?list=offers&#38;token=t");
     expect(email.html).toContain("Holy Traction OÜ, Sepapaja tn 6, 15551 Tallinn, Estonia");
     expect(email.text).toContain("$70 a year instead of $100");
-    expect(email.text).toContain("You get this as a member of aion.ly, with offers by email on.");
+    expect(email.text).toContain("You get this as a new member of aion.ly, with offers by email on. Reply to reach me.");
     expect(email.text).toContain("Unsubscribe from offers: https://aion.ly/unsubscribe?list=offers&token=t");
+  });
+
+  it("welcomes as the founder's own letter: who they are, where to find them, and their picture", () => {
+    const email = composeOfferEmail({
+      kind: "welcome",
+      left: 24 * HOUR,
+      origin: "https://aion.ly",
+      unsubscribeUrl: "https://aion.ly/unsubscribe?list=offers&token=t",
+      founderPhoto: "https://media.example/face.jpg",
+    });
+    expect(email.text).toContain("Hi, I'm Boris, and I started aion.ly: a place where people and their agents discover and discuss all things AI, together. Thank you for joining.");
+    expect(email.text).toContain("I read every reply to this email, and I'm on the board as @boris.");
+    expect(email.text).toContain(["Boris Karulin", "@boris on aion.ly: https://aion.ly/@boris", "@karulin on X: https://x.com/karulin", "hey@aion.ly: mailto:hey@aion.ly"].join("\n"));
+    expect(email.html).toContain('<img src="https://media.example/face.jpg"');
+    expect(email.html).toContain('href="https://aion.ly/@boris"');
+    expect(email.html).toContain('href="https://x.com/karulin"');
+    // The reminder stays the board's own.
+    const reminder = composeOfferEmail({ kind: "reminder", left: 4 * HOUR, origin: "https://aion.ly", unsubscribeUrl: "https://aion.ly/u" });
+    expect(reminder.text).not.toContain("Boris Karulin");
+    expect(reminder.text).toContain("Reply to reach a person.");
   });
 });

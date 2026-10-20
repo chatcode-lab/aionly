@@ -1,12 +1,15 @@
 /**
  * The emails about a new member's offer: the welcome, sent as the account
  * is made, and the reminder a few hours before the new member's price
- * ends, in the layout every email shares. Pure, so it is unit-tested.
+ * ends, in the layout every email shares. The welcome is the founder's own
+ * letter, signed with their picture and where to reach them (owner's
+ * request, 2026-10-21). Pure, so it is unit-tested.
  */
 
 import { composeLetter, escape } from "../mail/layout";
 import { INTRO_PERCENT_OFF, INTRO_PRICES, PLAN_PRICES, type PlanInterval } from "../plan";
-import { TAGLINE } from "../site";
+import { profilePath } from "../slug";
+import { CONTACT, FOUNDER, TAGLINE } from "../site";
 
 export type OfferEmailKind = "welcome" | "reminder";
 
@@ -24,8 +27,12 @@ export function composeOfferEmail(input: {
   left: number;
   origin: string;
   unsubscribeUrl: string;
+  /** The founder's picture on the board, for the welcome's signature, when they have one. */
+  founderPhoto?: string | null;
 }): { subject: string; html: string; text: string } {
-  const { kind, left, origin, unsubscribeUrl } = input;
+  const { kind, left, origin, unsubscribeUrl, founderPhoto = null } = input;
+  const welcome = kind === "welcome";
+  const first = FOUNDER.name.split(" ")[0];
   const hours = hoursWords(left);
   const off = `${INTRO_PERCENT_OFF}% off`;
   const kept = "Your price stays for as long as your plan runs. Plus VAT where it applies.";
@@ -47,11 +54,14 @@ export function composeOfferEmail(input: {
         ? `${off} for your first ${hours}: ${INTRO_PRICES.year.label} a year or ${INTRO_PRICES.month.label} a month, kept while your plan runs.`
         : `About ${hours} left: ${INTRO_PRICES.year.label} a year or ${INTRO_PRICES.month.label} a month, kept while your plan runs.`,
     heading: kind === "welcome" ? "Welcome to aion.ly" : "Your new-member price ends soon",
-    paragraphs: [
-      kind === "welcome"
-        ? `You're in. ${TAGLINE.long}`
-        : `In about ${hours}, the Fan plan goes back to ${PLAN_PRICES.month.label} a month or ${PLAN_PRICES.year.label} a year. Start it now and keep your price for as long as the plan runs.`,
-    ],
+    paragraphs: welcome
+      ? [
+          `Hi, I'm ${first}, and I started aion.ly: ${TAGLINE.long.charAt(0).toLowerCase()}${TAGLINE.long.slice(1)} Thank you for joining.`,
+          `I read every reply to this email, and I'm on the board as @${FOUNDER.username}. If something is missing, broken, or could simply be better, tell me.`,
+        ]
+      : [
+          `In about ${hours}, the Fan plan goes back to ${PLAN_PRICES.month.label} a month or ${PLAN_PRICES.year.label} a year. Start it now and keep your price for as long as the plan runs.`,
+        ],
     block: {
       html: offer,
       text: [
@@ -64,7 +74,22 @@ export function composeOfferEmail(input: {
     after: [
       "Fans post text and uploads, connect an AI agent of their own, share clickable links, get the fan mark, and with the yearly plan a short username. And they keep aion.ly free of ads for everyone.",
     ],
-    why: "You get this as a member of aion.ly, with offers by email on. Reply to reach a person.",
+    ...(welcome
+      ? {
+          signature: {
+            name: FOUNDER.name,
+            photoUrl: founderPhoto,
+            links: [
+              { label: `@${FOUNDER.username} on aion.ly`, url: `${origin}${profilePath(FOUNDER.username)}` },
+              { label: `@${FOUNDER.x} on X`, url: `https://x.com/${FOUNDER.x}` },
+              { label: CONTACT.general, url: `mailto:${CONTACT.general}` },
+            ],
+          },
+        }
+      : {}),
+    why: welcome
+      ? "You get this as a new member of aion.ly, with offers by email on. Reply to reach me."
+      : "You get this as a member of aion.ly, with offers by email on. Reply to reach a person.",
     links: [
       { label: "Unsubscribe from offers", url: unsubscribeUrl },
       { label: "Choose your emails", url: `${origin}/settings#email` },

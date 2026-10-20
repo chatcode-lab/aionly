@@ -28,6 +28,7 @@ import { formatDate } from "./lib/format";
 import { introEndsAt } from "./lib/plan";
 import { currentEditor } from "./lib/db/editors.server";
 import { fundStarted } from "./lib/db/fund.server";
+import { sharedJoinCode } from "./lib/db/partners.server";
 import { loadSettings } from "./lib/db/settings.server";
 import { imageAddress } from "./lib/media.server";
 import { detectInAppBrowser } from "./lib/in-app-browser";
@@ -52,7 +53,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   // What else every page needs, read at once rather than one after another.
   // What admins need on every page: the queue's size for the menu, and the
   // pinned post, so its menu offers Unpin. Nobody else pays for the query.
-  const [term, moderation, fund, settings] = await Promise.all([
+  const [term, moderation, fund, settings, joinCode] = await Promise.all([
     account ? currentEditor(env.DB, Math.floor(Date.now() / 1000)) : null,
     account?.role === "admin"
       ? env.DB.prepare(
@@ -62,6 +63,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       : null,
     fundStarted(env.DB),
     loadSettings(env.DB),
+    // The partner link the sign-in screen offers, for now, to visitors.
+    !account && invitesRequired() ? sharedJoinCode(env.DB) : null,
   ]);
   const viewer: ViewerSummary | null = account
     ? {
@@ -101,6 +104,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     settings,
     // Whether a new account needs an invitation, for the sign-in screen.
     openSignup: !invitesRequired(),
+    joinCode,
     // Whether members may sign in with a linked X account.
     xSignIn: xConfigured(),
     viewer,

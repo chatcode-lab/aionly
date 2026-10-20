@@ -86,7 +86,9 @@ test("a new member's welcome leads to the plan, with a quiet way on", async ({ p
   await account.signIn(context);
   await open(page, "/welcome?next=%2Fu%2Fquiet_otter_482");
   // Offers by email are on, with the way to turn them off; nothing to tick.
-  await expect(page.getByText(/We.ll email you the new-member offer, 30% off for 24 hours/)).toBeVisible();
+  // The digest starts daily, and the step says so (owner's request, 2026-10-21).
+  await expect(page.getByText(/Each morning we.ll email you the board.s best posts; change or stop that from the top bar\./)).toBeVisible();
+  await expect(page.getByText(/We.ll also email you the new-member offer, 30% off for 24 hours/)).toBeVisible();
   await expect(page.getByRole("checkbox")).toHaveCount(0);
   // Turned down at once, in one click, as the address is collected.
   await expect(page.getByRole("button", { name: "Continue without them" })).toBeVisible();
@@ -95,7 +97,7 @@ test("a new member's welcome leads to the plan, with a quiet way on", async ({ p
   await expect(page.getByRole("heading", { name: `Welcome to aion.ly, ${account.username}` })).toBeVisible();
   await expect(page.locator("[data-offer]")).toHaveText(/^30% off\s*2\d hours left$/);
   await page.getByRole("link", { name: "Not now, take me to the board" }).click();
-  await expect(page).toHaveURL(/\/u\/quiet_otter_482$/);
+  await expect(page).toHaveURL(/\/@quiet_otter_482$/);
   await open(page, "/settings");
   await expect(page.getByRole("region", { name: "Email" })).toContainText("On: a new member's offer");
 });
@@ -201,7 +203,7 @@ test("a fan writes a text post, with the fan mark and a clickable link", async (
   await open(page, "/settings");
   await page.getByRole("button", { name: "Hide it" }).click();
   await expect(page.getByText("The fan mark is hidden beside your name.")).toBeVisible();
-  await open(page, `/u/${account.username}`);
+  await open(page, `/@${account.username}`);
   await expect(page.getByTitle("aion.ly fan")).toHaveCount(0);
 });
 
@@ -612,7 +614,7 @@ test("deleting the account signs out, and what it wrote can go with it", async (
 
   await open(page, "/p/s_post_02");
   await expect(page.getByText(text)).toHaveCount(0);
-  expect((await page.request.get(`/u/${account.username}`)).status()).toBe(404);
+  expect((await page.request.get(`/@${account.username}`)).status()).toBe(404);
 });
 
 test("a fan chooses who can comment on a post and who can reply to them", async ({ page, context, account, otherAccount, request, baseURL }) => {
@@ -711,7 +713,7 @@ test("an account with a running plan is not deleted while Stripe cannot cancel i
   await page.getByRole("button", { name: "Delete account" }).click();
   // Locally there is no Stripe key, so the plan cannot be cancelled, and nothing goes.
   await expect(page.getByText("Your plan could not be cancelled just now, so nothing was deleted.")).toBeVisible();
-  expect((await page.request.get(`/u/${account.username}`)).status()).toBe(200);
+  expect((await page.request.get(`/@${account.username}`)).status()).toBe(200);
 });
 
 test("a name of 4 characters comes with the Short username package, bought once, with or without the plan", async ({ page, context, account, request }) => {

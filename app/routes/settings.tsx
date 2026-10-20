@@ -66,6 +66,7 @@ import { cn } from "~/lib/cn";
 import { COMMENT_REPLIES, type CommentReplies, parseCommentReplies, parsePostChoice, POST_CHOICES, type PostChoice } from "~/lib/replies";
 
 import type { Route } from "./+types/settings";
+import { profilePath } from "~/lib/slug";
 
 export function meta({ matches, location }: Route.MetaArgs) {
   return privatePageMeta(matches, "Settings", location.pathname);
@@ -292,8 +293,11 @@ async function planAction(viewer: AccountRecord, form: FormData, planIntent: "pl
     const to = form.get("to");
     if (to !== "month" && to !== "year") return { planError: "That was not understood." };
     const later = form.get("at") === "period_end";
+    // The amount the member approved, and when it was worked out.
     const at = Number(form.get("at"));
-    const result = await switchPlan(viewer, to, later ? "period_end" : Number.isInteger(at) && at > 0 ? at : undefined);
+    const cents = Number(form.get("cents"));
+    const approved = Number.isInteger(at) && at > 0 && Number.isInteger(cents) && cents >= 0 ? { at, cents } : undefined;
+    const result = await switchPlan(viewer, to, later ? "period_end" : approved);
     if (result.ok) {
       return {
         planNotice:
@@ -303,6 +307,16 @@ async function planAction(viewer: AccountRecord, form: FormData, planIntent: "pl
       };
     }
     if (result.reason === "stale") return { planError: "That amount was worked out a while ago. Choose Switch to yearly again to see it as of now." };
+    if (result.reason === "changed") {
+      // Shown again, to approve as it is now (review F118).
+      return {
+        planQuote: result.quote,
+        planError: `The amount changed since you saw it: it is ${formatMoney(result.quote.cents)} now. Nothing was charged.`,
+      };
+    }
+    if (result.reason === "pending") {
+      return { planError: "A switch is already waiting for the end of this period. Keep the plan as it is first, then switch now." };
+    }
     if (result.reason === "confirm") {
       return {
         planError: "Your bank asks to confirm this payment, which can't be done here. Nothing was charged, and your plan stays monthly. You can switch when this month ends instead.",
@@ -585,7 +599,7 @@ function AgentSection({
       {entitled ? (
         <>
           <p className="text-body text-text-muted">
-            <Link to={`/u/${agent.username}`} className="font-medium text-text hover:underline">
+            <Link to={profilePath(agent.username)} className="font-medium text-text hover:underline">
               {agent.username}
             </Link>{" "}
             acts for you in the apps you connect.{" "}
@@ -600,7 +614,7 @@ function AgentSection({
         // Paused: connecting more would do nothing, so no setup line.
         <div className="space-y-3">
           <p className="text-body text-text-muted">
-            <Link to={`/u/${agent.username}`} className="font-medium text-text hover:underline">
+            <Link to={profilePath(agent.username)} className="font-medium text-text hover:underline">
               {agent.username}
             </Link>{" "}
             is paused until you are a fan again: the apps and tokens below do nothing until then. What it posted
@@ -825,7 +839,7 @@ function InvitesSection({
             {standing.invited.map((person, index) => (
               <span key={person.id}>
                 {index > 0 ? ", " : null}
-                <Link to={`/u/${person.username}`} className="underline underline-offset-4">
+                <Link to={profilePath(person.username)} className="underline underline-offset-4">
                   {person.username}
                 </Link>
               </span>
@@ -1029,6 +1043,7 @@ function PlanSwitch({ plan, disabled }: { plan: PlanStatus; disabled: boolean })
         <input type="hidden" name="intent" value="plan-switch" />
         <input type="hidden" name="to" value="year" />
         <input type="hidden" name="at" value={quote.at} />
+        <input type="hidden" name="cents" value={quote.cents} />
         <p className="min-w-0 flex-1 basis-60 text-body">
           Switching to yearly now charges {formatMoney(quote.cents)} today{quote.taxed ? ", tax included" : null}: {yearly.label} for a year from
           today, less what&apos;s left of this month.

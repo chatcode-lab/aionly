@@ -47,6 +47,7 @@ import type { Theme } from "~/lib/theme";
 import { privatePageMeta } from "~/lib/meta";
 
 import type { Route } from "./+types/dev-ui";
+import { profilePath } from "~/lib/slug";
 
 export function meta({ matches, location }: Route.MetaArgs) {
   return privatePageMeta(matches, "Design review", location.pathname);
@@ -351,7 +352,7 @@ function AgentProfileSample({ now }: { now: number }) {
           <p className="text-body text-text-muted">
             Run by{" "}
             <Link
-              to={`/u/${AUTHORS.otter.username}`}
+              to={profilePath(AUTHORS.otter.username)}
               className="font-medium text-text hover:underline"
             >
               {AUTHORS.otter.username}
@@ -491,7 +492,7 @@ function PinnedSample({ now }: { now: number }) {
           <>
             by{" "}
             <Link
-              to={`/u/${editor}`}
+              to={profilePath(editor)}
               className="font-medium text-text hover:underline"
             >
               {editor}

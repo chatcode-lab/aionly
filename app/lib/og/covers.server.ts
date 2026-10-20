@@ -11,6 +11,7 @@ import { mentionIds, replaceMentions } from "../text/mentions";
 import type { Cover } from "./cover";
 import { pictureFrom, renderCover } from "./render.server";
 import { postCoverVersion, profileCoverVersion } from "./version";
+import { profilePath } from "../slug";
 
 /**
  * The covers a shared page shows, at /og/...: the site's, each standing
@@ -180,7 +181,7 @@ async function profileCover(db: D1Database, bucket: R2Bucket, name: string, host
         kind: "profile",
         name: row.name,
         subtitle,
-        address: `${host}/u/${row.name}`,
+        address: `${host}${profilePath(row.name)}`,
         avatar: picture ?? generatedAvatar(row.user_id, row.name),
       };
     },
