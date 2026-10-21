@@ -4,6 +4,7 @@
  */
 
 import { composeLetter, escape } from "../mail/layout";
+import { clip } from "../meta";
 
 export type Frequency = "daily" | "weekly" | "monthly";
 
@@ -22,6 +23,9 @@ export const CHOSEN_WITH: Record<Frequency, readonly Frequency[]> = {
 /** Posts in each of a digest's two lists, the most voted and the most discussed. */
 export const LIST_SIZE = 5;
 
+/** The most of a post's description a digest shows, cut at a word. */
+export const EXCERPT_MAX = 200;
+
 export interface DigestPost {
   title: string;
   /** The post's own page on the board, absolute. */
@@ -31,7 +35,15 @@ export interface DigestPost {
   score: number;
   comments: number;
   author: string;
+  /** The description as plain text; the digest cuts it to `EXCERPT_MAX`. */
   excerpt: string;
+}
+
+/** A post's excerpt as a digest shows it, and whether there is more to read. */
+function excerptOf(post: DigestPost): { text: string; more: boolean } {
+  const text = clip(post.excerpt, EXCERPT_MAX);
+  // The feed's own cut ends in an ellipsis too.
+  return { text, more: text !== post.excerpt || text.endsWith("…") };
 }
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
@@ -49,6 +61,13 @@ export function periodName(frequency: Frequency, period?: { to: number }): strin
 }
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
+
+function excerptHtml(post: DigestPost): string {
+  if (!post.excerpt) return "";
+  const { text, more } = excerptOf(post);
+  const link = more ? ` <a href="${escape(post.url)}" style="color:#c2410c;font-weight:600;text-decoration:none;white-space:nowrap">Read more</a>` : "";
+  return `<div style="color:#55524c;font-size:14px;line-height:20px;margin-top:6px">${escape(text)}${link}</div>`;
+}
 
 export function composeDigest(input: {
   frequency: Frequency;
@@ -75,7 +94,7 @@ ${list.posts
     (post, index) => `<div style="padding:14px 0;${index === 0 ? "" : "border-top:1px solid #e7e5e0"}">
 <a href="${escape(post.url)}" style="color:#1f1d1a;font-size:16px;font-weight:600;text-decoration:none">${escape(post.title)}</a>
 <div style="color:#6f6b64;font-size:13px;margin-top:3px">${escape(line(post))}</div>
-${post.excerpt ? `<div style="color:#55524c;font-size:14px;line-height:20px;margin-top:6px">${escape(post.excerpt)}</div>` : ""}
+${excerptHtml(post)}
 </div>`,
   )
   .join("\n")}`,
@@ -84,7 +103,7 @@ ${post.excerpt ? `<div style="color:#55524c;font-size:14px;line-height:20px;marg
   const text = lists.flatMap((list, at) => [
     ...(at > 0 ? [""] : []),
     list.heading.toUpperCase(),
-    ...list.posts.flatMap((post) => ["", post.title, line(post), ...(post.excerpt ? [post.excerpt] : []), post.url]),
+    ...list.posts.flatMap((post) => ["", post.title, line(post), ...(post.excerpt ? [excerptOf(post).text] : []), post.url]),
   ]);
   const posts = [...voted, ...discussed];
   const title = `${period[0]!.toUpperCase()}${period.slice(1)} on aion.ly`;

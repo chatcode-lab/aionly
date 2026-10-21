@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { composeDigest, periodName, periodStart, periodWindow } from "./compose";
+import { composeDigest, EXCERPT_MAX, periodName, periodStart, periodWindow } from "./compose";
 
 const at = (iso: string) => Date.parse(iso) / 1000;
 
@@ -39,6 +39,24 @@ describe("the digest email", () => {
     const discussedOnly = composeDigest({ ...base, frequency: "daily", chosen: "daily", period: "the past day", voted: [], discussed: [talked] });
     expect(discussedOnly.subject).toBe("The past day on aion.ly: Talked about");
     expect(discussedOnly.html).not.toContain("Most voted");
+  });
+
+  it("cuts a long excerpt at a word, with an ellipsis and a link to read the rest", () => {
+    const long = { ...post, excerpt: `${"Pick a place on a map and print it. ".repeat(6)}Joey, its maker, describes building it.` };
+    const email = composeDigest({ ...base, frequency: "daily", chosen: "daily", period: "the past day", voted: [long], discussed: [] });
+    const shown = email.text.split("\n").find((line) => line.startsWith("Pick a place"))!;
+    expect(shown.length).toBeLessThanOrEqual(EXCERPT_MAX);
+    expect(shown).toMatch(/ [A-Za-z]+…$/);
+    expect(shown).not.toMatch(/[.,]…$/);
+    expect(email.html).toContain(`… <a href="https://aion.ly/p/abc1234/a-song"`);
+    expect(email.html).toContain(">Read more</a>");
+    // A short one is whole, with no link.
+    const short = composeDigest({ ...base, frequency: "daily", chosen: "daily", period: "the past day", voted: [post], discussed: [] });
+    expect(short.html).toContain("Made &#60;b&#62;with&#60;/b&#62; care</div>");
+    expect(short.html).not.toContain("Read more");
+    // The feed's own cut still gets the link.
+    const cut = composeDigest({ ...base, frequency: "daily", chosen: "daily", period: "the past day", voted: [{ ...post, excerpt: "Made with care…" }], discussed: [] });
+    expect(cut.html).toContain("Read more");
   });
 });
 

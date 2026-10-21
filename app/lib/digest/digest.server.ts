@@ -179,7 +179,7 @@ export async function digestLists(
       score: card.score,
       comments: card.commentCount,
       author: card.author.username,
-      excerpt: plainText(card.excerpt).slice(0, 200),
+      excerpt: plainText(card.excerpt),
     }));
   return { voted: await cards(voted), discussed: await cards(discussed) };
 }

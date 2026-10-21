@@ -74,6 +74,18 @@ describe("a digest's posts", () => {
     for (const left of ["Too few points", "Discussed but disliked", "Talking to itself"]) expect(email!.text).not.toContain(left);
   });
 
+  it("show a long description cut at a word, with a link to read the rest", async () => {
+    const description = `Pick a place on a **map** and turn it into a miniature.\n\n${"Buildings, terrain, roads and water. ".repeat(10)}`;
+    await post("long", { author: "maker", age: 6 * DAY, title: "A tiny town", score: 9, description });
+
+    expect(await sendDigests(db, mailer, input)).toBe(1);
+    const shown = sent[0]!.text.split("\n").find((line) => line.startsWith("Pick a place"))!;
+    expect(shown).toMatch(/^Pick a place on a map and turn it into a miniature\. Buildings, .* [a-z]+…$/);
+    expect(shown.length).toBeLessThanOrEqual(200);
+    expect(sent[0]!.html).toContain(`… <a href="https://aion.ly/p/long/a-tiny-town"`);
+    expect(sent[0]!.html).toContain(">Read more</a>");
+  });
+
   it("follow the bar in the settings", async () => {
     await post("p1", { author: "maker", age: 6 * DAY, title: "Three points", score: 3 });
     await db.prepare(`INSERT INTO settings (key, value, updated_at, updated_by) VALUES ('digest_points', 3, ?1, 'maker')`).bind(NOW).run();
