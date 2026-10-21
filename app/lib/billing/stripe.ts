@@ -758,10 +758,14 @@ export async function releaseIdleSchedule(client: StripeClient, subscriptionId: 
 
 /**
  * Lets go of a subscription's schedule, keeping its price as it is: no
- * switch. An end the schedule set stays (review F119).
+ * switch. An end or change arranged in Stripe is not let go of, and throws
+ * `ArrangedInStripe`: before its last phase, a schedule's end is not yet
+ * a date on the subscription for `preserve_cancel_date` to keep (review
+ * F120). An end set by the time of release stays (review F119).
  */
 export async function releaseSchedule(client: StripeClient, subscriptionId: string): Promise<StripeSubscription> {
   const subscription = await getSubscription(client, subscriptionId);
+  if (arrangedInStripe(subscription)) throw new ArrangedInStripe(subscriptionId);
   const schedule = subscription.schedule;
   if (!schedule) return subscription;
   const id = typeof schedule === "string" ? schedule : schedule.id;

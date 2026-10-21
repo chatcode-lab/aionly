@@ -3,6 +3,8 @@
  * the layout every email shares. Pure, so it is unit-tested.
  */
 
+import { generatedAvatar } from "../avatar";
+import { founderSignature } from "../mail/founder";
 import { composeLetter, escape } from "../mail/layout";
 import { clip } from "../meta";
 
@@ -35,6 +37,10 @@ export interface DigestPost {
   score: number;
   comments: number;
   author: string;
+  /** The author's account, whose drawn picture's color it picks. */
+  authorId: string;
+  /** The author's picture on the board, absolute; their drawn one without. */
+  authorPhoto: string | null;
   /** The description as plain text; the digest cuts it to `EXCERPT_MAX`. */
   excerpt: string;
 }
@@ -62,6 +68,21 @@ export function periodName(frequency: Frequency, period?: { to: number }): strin
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
 
+/**
+ * The author's picture, small, before their name: their own, or the one
+ * the board draws, their initial on their color. Sized in ems of its own
+ * font size, so it grows with the reader's text size (`atTextSize`).
+ */
+function authorPicture(post: DigestPost): string {
+  const box = "display:inline-block;font-size:10px;width:1.6em;height:1.6em;border-radius:50%;vertical-align:middle;margin-right:3px";
+  if (post.authorPhoto) return `<img src="${escape(post.authorPhoto)}" width="16" height="16" alt="" style="${box};border:0">`;
+  const { color, letter } = generatedAvatar(post.authorId, post.author);
+  return `<span style="${box};background:${color};color:#ffffff;line-height:1.6em;text-align:center;font-weight:600">${escape(letter)}</span>`;
+}
+
+/** Under the digest, the founder asks what readers make of it (owner's request, 2026-10-21). */
+export const FOUNDER_NOTE = "What do you think of this digest? Hit reply and tell me what to add, change, or leave out. I read every reply.";
+
 function excerptHtml(post: DigestPost): string {
   if (!post.excerpt) return "";
   const { text, more } = excerptOf(post);
@@ -79,9 +100,12 @@ export function composeDigest(input: {
   discussed: DigestPost[];
   origin: string;
   unsubscribeUrl: string;
+  /** The founder's picture on the board, for the note under the posts, when they have one. */
+  founderPhoto?: string | null;
 }): { subject: string; html: string; text: string } {
-  const { frequency, chosen, period, voted, discussed, origin, unsubscribeUrl } = input;
-  const line = (post: DigestPost) => `${post.source} · ${plural(post.score, "point")} · ${plural(post.comments, "comment")} · by ${post.author}`;
+  const { frequency, chosen, period, voted, discussed, origin, unsubscribeUrl, founderPhoto = null } = input;
+  const details = (post: DigestPost) => `${post.source} · ${plural(post.score, "point")} · ${plural(post.comments, "comment")}`;
+  const line = (post: DigestPost) => `${details(post)} · by ${post.author}`;
   const lists = [
     { heading: "Most voted", posts: voted },
     { heading: "Most discussed", posts: discussed },
@@ -93,7 +117,7 @@ ${list.posts
   .map(
     (post, index) => `<div style="padding:14px 0;${index === 0 ? "" : "border-top:1px solid #e7e5e0"}">
 <a href="${escape(post.url)}" style="color:#1f1d1a;font-size:16px;font-weight:600;text-decoration:none">${escape(post.title)}</a>
-<div style="color:#6f6b64;font-size:13px;margin-top:3px">${escape(line(post))}</div>
+<div style="color:#6f6b64;font-size:13px;margin-top:3px">${escape(details(post))} · <span style="white-space:nowrap">by ${authorPicture(post)}${escape(post.author)}</span></div>
 ${excerptHtml(post)}
 </div>`,
   )
@@ -118,7 +142,8 @@ ${excerptHtml(post)}
     heading: title,
     block: { html, text },
     button: { label: "Open aion.ly", url: origin },
-    why: `${chosen === frequency ? `You get this because you turned on the ${frequency} digest.` : `It comes with the ${chosen} digest you turned on.`} Reply to reach a person.`,
+    signature: founderSignature(origin, founderPhoto, FOUNDER_NOTE),
+    why: chosen === frequency ? `You get this because you turned on the ${frequency} digest.` : `It comes with the ${chosen} digest you turned on.`,
     links: [
       { label: "Unsubscribe", url: unsubscribeUrl },
       { label: "Choose your emails", url: `${origin}/settings#email` },

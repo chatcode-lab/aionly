@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { composeDigest, EXCERPT_MAX, periodName, periodStart, periodWindow } from "./compose";
+import { generatedAvatar } from "../avatar";
+import { composeDigest, EXCERPT_MAX, FOUNDER_NOTE, periodName, periodStart, periodWindow } from "./compose";
 
 const at = (iso: string) => Date.parse(iso) / 1000;
 
@@ -12,6 +13,8 @@ describe("the digest email", () => {
     score: 12,
     comments: 1,
     author: "quiet_otter",
+    authorId: "u_otter",
+    authorPhoto: null as string | null,
     excerpt: "Made <b>with</b> care",
   };
 
@@ -39,6 +42,35 @@ describe("the digest email", () => {
     const discussedOnly = composeDigest({ ...base, frequency: "daily", chosen: "daily", period: "the past day", voted: [], discussed: [talked] });
     expect(discussedOnly.subject).toBe("The past day on aion.ly: Talked about");
     expect(discussedOnly.html).not.toContain("Most voted");
+  });
+
+  it("shows each author's picture by their name: their own, or their initial on their color", () => {
+    const pictured = { ...post, title: "Pictured", author: "<maker>", authorPhoto: "https://aion.ly/img/a.jpg?x=1&y=2" };
+    const email = composeDigest({ ...base, frequency: "daily", chosen: "daily", period: "the past day", voted: [post, pictured], discussed: [] });
+    expect(email.html).toContain(`by <img src="https://aion.ly/img/a.jpg?x=1&#38;y=2" width="16" height="16" alt=""`);
+    // Kept with the name, on one line.
+    expect(email.html).toContain('· <span style="white-space:nowrap">by <img');
+    expect(email.html).toContain("&#60;maker&#62;</span></div>");
+    const drawn = /by <span style="([^"]*)">Q<\/span>quiet_otter<\/span><\/div>/.exec(email.html);
+    expect(drawn?.[1]).toContain(`background:${generatedAvatar("u_otter", "quiet_otter").color}`);
+    // Sized from its own font size, so it grows with the reader's text.
+    expect(drawn?.[1]).toContain("font-size:10px;width:1.6em;height:1.6em");
+    expect(email.text).toContain("12 points · 1 comment · by quiet_otter\n");
+  });
+
+  it("ends with the founder asking what readers make of it, with their picture and where to reach them", () => {
+    const email = composeDigest({ ...base, frequency: "daily", chosen: "daily", period: "the past day", voted: [post], discussed: [], founderPhoto: "https://aion.ly/img/boris.jpg" });
+    expect(email.html).toContain(`<img src="https://aion.ly/img/boris.jpg" width="44" height="44"`);
+    expect(email.html).toContain(">Boris Karulin</div>");
+    expect(email.html).toContain(`>${FOUNDER_NOTE}</div>`);
+    expect(email.html).toContain(
+      '<a href="https://aion.ly/@boris" style="color:#6f6b64">aion.ly/@boris</a> · <a href="https://x.com/karulin" style="color:#6f6b64">x.com/karulin</a> · <a href="mailto:hey@aion.ly" style="color:#6f6b64">hey@aion.ly</a>',
+    );
+    expect(email.text).toContain(`Boris Karulin\n${FOUNDER_NOTE}\nhttps://aion.ly/@boris · https://x.com/karulin · hey@aion.ly\n`);
+    // Without a picture, the rest stays.
+    const bare = composeDigest({ ...base, frequency: "daily", chosen: "daily", period: "the past day", voted: [post], discussed: [] });
+    expect(bare.html).not.toContain('width="44"');
+    expect(bare.html).toContain(FOUNDER_NOTE);
   });
 
   it("cuts a long excerpt at a word, with an ellipsis and a link to read the rest", () => {

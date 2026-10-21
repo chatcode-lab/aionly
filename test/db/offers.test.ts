@@ -315,10 +315,12 @@ describe("the offer email", () => {
     });
     expect(email.text).toContain("Hi, I'm Boris, and I started aion.ly: a place where people and their agents discover and discuss all things AI, together. Thank you for joining.");
     expect(email.text).toContain("I read every reply to this email, and I'm on the board as @boris.");
-    expect(email.text).toContain(["Boris Karulin", "@boris on aion.ly: https://aion.ly/@boris", "@karulin on X: https://x.com/karulin", "hey@aion.ly: mailto:hey@aion.ly"].join("\n"));
+    expect(email.text).toContain(["Boris Karulin", "https://aion.ly/@boris · https://x.com/karulin · hey@aion.ly"].join("\n"));
     expect(email.html).toContain('<img src="https://media.example/face.jpg"');
     expect(email.html).toContain('href="https://aion.ly/@boris"');
     expect(email.html).toContain('href="https://x.com/karulin"');
+    // Each contact is written as its address, with dots between.
+    expect(email.html).toContain('>aion.ly/@boris</a> · <a href="https://x.com/karulin" style="color:#6f6b64">x.com/karulin</a> · <a href="mailto:hey@aion.ly"');
     // The reminder stays the board's own.
     const reminder = composeOfferEmail({ kind: "reminder", left: 4 * HOUR, origin: "https://aion.ly", unsubscribeUrl: "https://aion.ly/u" });
     expect(reminder.text).not.toContain("Boris Karulin");

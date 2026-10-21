@@ -431,6 +431,11 @@ describe("switching the plan at the period's end", () => {
     const arranged = fakeStripe(subscription(cancelling), subscription(cancelling));
     await expect(schedulePlanSwitch(arranged.client, "sub_1", "price_y")).rejects.toBeInstanceOf(ArrangedInStripe);
     expect(arranged.calls.filter((call) => call.method === "POST")).toEqual([]);
+    // Nor let go of, even before its last phase, with no end date yet to keep (review F120).
+    const later = { ...cancelling, current_phase: { start_date: START, end_date: END }, phases: [phase(START, END, "price_m", "aionly_fan_monthly"), phase(END, END + 365 * 24 * 3600, "price_y", "aionly_fan_yearly")] };
+    const kept = fakeStripe(subscription(later), subscription(later));
+    await expect(releaseSchedule(kept.client, "sub_1")).rejects.toBeInstanceOf(ArrangedInStripe);
+    expect(kept.calls.filter((call) => call.method === "POST")).toEqual([]);
   });
 
   it("lets go of a schedule it made when setting its phases fails, and keeps one there before (review F114)", async () => {

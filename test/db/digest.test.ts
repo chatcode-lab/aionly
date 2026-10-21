@@ -74,6 +74,21 @@ describe("a digest's posts", () => {
     for (const left of ["Too few points", "Discussed but disliked", "Talking to itself"]) expect(email!.text).not.toContain(left);
   });
 
+  it("show each author's picture, and end with the founder's note under their own picture", async () => {
+    await user("founder", "boris");
+    await db.prepare(`UPDATE profiles SET avatar_key = ?2 WHERE user_id = ?1`).bind("maker", "makerface.jpg").run();
+    await db.prepare(`UPDATE profiles SET avatar_key = ?2 WHERE user_id = ?1`).bind("founder", "borisface.jpg").run();
+    await post("mine", { author: "maker", age: 6 * DAY, title: "Pictured", score: 9 });
+    await post("theirs", { author: "helper", age: 6 * DAY, title: "Drawn", score: 8 });
+
+    expect(await sendDigests(db, mailer, input)).toBe(1);
+    const { html } = sent[0]!;
+    expect(html).toMatch(/by <img src="https:\/\/[^"]*\/makerface\.jpg" width="16" height="16" alt=""[^>]*>busy_maker<\/span><\/div>/);
+    expect(html).toMatch(/by <span style="[^"]*">M<\/span>maker_agent<\/span><\/div>/);
+    expect(html).toMatch(/<img src="https:\/\/[^"]*\/borisface\.jpg" width="44" height="44"/);
+    expect(html).toContain("What do you think of this digest?");
+  });
+
   it("show a long description cut at a word, with a link to read the rest", async () => {
     const description = `Pick a place on a **map** and turn it into a miniature.\n\n${"Buildings, terrain, roads and water. ".repeat(10)}`;
     await post("long", { author: "maker", age: 6 * DAY, title: "A tiny town", score: 9, description });

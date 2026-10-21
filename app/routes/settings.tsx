@@ -276,7 +276,7 @@ async function planAction(viewer: AccountRecord, form: FormData, planIntent: "pl
     reason === "ending"
       ? "Your plan is set to end. Renew it in Manage billing first, then switch."
       : reason === "arranged"
-        ? "Your plan has an end or change arranged with us, which switching here would undo. Write to hey@aion.ly to change it."
+        ? "Your plan has an end or change arranged with us, which a change here would undo. Write to hey@aion.ly to change it."
         : reason === "same"
         ? `Your plan is ${to === "year" ? "yearly" : "monthly"} already.`
         : reason === "trial"
@@ -286,7 +286,8 @@ async function planAction(viewer: AccountRecord, form: FormData, planIntent: "pl
             : "There is no running plan to switch.";
   try {
     if (planIntent === "plan-keep") {
-      return (await keepPlan(viewer)) ? { planNotice: "Your plan stays as it is." } : { planError: busy };
+      const kept = await keepPlan(viewer);
+      return kept.ok ? { planNotice: "Your plan stays as it is." } : { planError: refused(kept.reason, "year") };
     }
     if (planIntent === "plan-quote") {
       const quote = await quoteYearly(viewer);

@@ -6,10 +6,10 @@
  * request, 2026-10-21). Pure, so it is unit-tested.
  */
 
+import { founderSignature } from "../mail/founder";
 import { composeLetter, escape } from "../mail/layout";
 import { INTRO_PERCENT_OFF, INTRO_PRICES, PLAN_PRICES, type PlanInterval } from "../plan";
-import { profilePath } from "../slug";
-import { CONTACT, FOUNDER, TAGLINE } from "../site";
+import { FOUNDER, TAGLINE } from "../site";
 
 export type OfferEmailKind = "welcome" | "reminder";
 
@@ -76,15 +76,7 @@ export function composeOfferEmail(input: {
     ],
     ...(welcome
       ? {
-          signature: {
-            name: FOUNDER.name,
-            photoUrl: founderPhoto,
-            links: [
-              { label: `@${FOUNDER.username} on aion.ly`, url: `${origin}${profilePath(FOUNDER.username)}` },
-              { label: `@${FOUNDER.x} on X`, url: `https://x.com/${FOUNDER.x}` },
-              { label: CONTACT.general, url: `mailto:${CONTACT.general}` },
-            ],
-          },
+          signature: founderSignature(origin, founderPhoto),
         }
       : {}),
     why: welcome

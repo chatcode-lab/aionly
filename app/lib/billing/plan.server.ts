@@ -476,16 +476,22 @@ async function switchHeld(viewer: AccountRecord, interval: PlanInterval, approve
   return { ok: true };
 }
 
-/** Keeps a fan's plan as it is, letting go of a switch asked for. False while another change holds the plan. */
-export async function keepPlan(viewer: AccountRecord): Promise<boolean> {
-  const kept = await changingPlan(viewer.id, async () => {
+/** Keeps a fan's plan as it is, letting go of a switch asked for: refused while another change holds the plan, or with an end or change arranged in Stripe. */
+export async function keepPlan(viewer: AccountRecord): Promise<{ ok: true } | { ok: false; reason: "busy" | "arranged" }> {
+  return changingPlan(viewer.id, async () => {
     const subscriptionId = await runningSubscription(env.DB, viewer.id);
-    if (!subscriptionId) return true;
-    const subscription = await releaseSchedule(client(), subscriptionId);
+    if (!subscriptionId) return { ok: true } as const;
+    let subscription: StripeSubscription;
+    try {
+      subscription = await releaseSchedule(client(), subscriptionId);
+    } catch (error) {
+      // An end or change arranged in Stripe stays as it is (review F120).
+      if (error instanceof ArrangedInStripe) return { ok: false, reason: "arranged" } as const;
+      throw error;
+    }
     await applySubscription(env.DB, subscription, { eventAt: await freshEventAt(env.DB, viewer.id, now()), now: now() });
-    return true;
+    return { ok: true } as const;
   });
-  return kept === true;
 }
 
 /**

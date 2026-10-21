@@ -1,11 +1,10 @@
 import { unsubscribeToken } from "../digest/digest.server";
+import { founderPhoto } from "../mail/founder.server";
 import type { Mailer } from "../mail/mailers.server";
 import { forReader } from "../mail/layout";
 import { recipientOf } from "../mail/recipient.server";
 import { SENDERS } from "../mail/senders";
-import { imageAddress } from "../media.server";
 import { INTRO_HOURS, introEndsAt } from "../plan";
-import { FOUNDER } from "../site";
 import { composeOfferEmail, type OfferEmailKind } from "./compose";
 
 /** The reminder goes once this little of a new member's price is left. */
@@ -20,21 +19,6 @@ const BATCH = 100;
 /** Where an offer email's unsubscribe link leads: no sign-in needed. */
 export async function offersUnsubscribeUrl(origin: string, secret: string, userId: string): Promise<string> {
   return `${origin}/unsubscribe?${new URLSearchParams({ list: "offers", token: await unsubscribeToken(secret, userId) })}`;
-}
-
-/**
- * The founder's picture on the board, at an address mail clients can load,
- * for the welcome's signature: null while they have none.
- */
-async function founderPhoto(db: D1Database, origin: string): Promise<string | null> {
-  const row = await db
-    .prepare(
-      `SELECT profile.avatar_key FROM usernames AS name JOIN profiles AS profile ON profile.user_id = name.user_id
-       WHERE name.name = ?1 AND name.is_current = 1 AND profile.deleted_at IS NULL`,
-    )
-    .bind(FOUNDER.username)
-    .first<{ avatar_key: string | null }>();
-  return row?.avatar_key ? new URL(imageAddress(row.avatar_key), origin).href : null;
 }
 
 /** Who an offer email comes from: the welcome, from the founder in their own name. */

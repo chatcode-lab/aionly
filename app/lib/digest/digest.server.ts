@@ -2,6 +2,7 @@ import { participantCondition } from "../db/accounts.server";
 import { postsByIds } from "../db/feed.server";
 import { LIVE } from "../db/rows.server";
 import { settingsInForce } from "../db/settings.server";
+import { founderPhoto } from "../mail/founder.server";
 import type { Mailer } from "../mail/mailers.server";
 import { forReader, type Reader } from "../mail/layout";
 import { readerColumns, readerOf, recipientOf } from "../mail/recipient.server";
@@ -179,6 +180,8 @@ export async function digestLists(
       score: card.score,
       comments: card.commentCount,
       author: card.author.username,
+      authorId: card.author.id,
+      authorPhoto: card.author.photoUrl ? new URL(card.author.photoUrl, input.origin).href : null,
       excerpt: plainText(card.excerpt),
     }));
   return { voted: await cards(voted), discussed: await cards(discussed) };
@@ -207,6 +210,7 @@ export async function sendDigests(
 ): Promise<number> {
   let sent = 0;
   let bar: Bar | null = null;
+  let photo: string | null | undefined;
   for (const frequency of FREQUENCIES) {
     const due = await dueRecipients(db, frequency, input.now);
     if (due.length === 0) continue;
@@ -233,6 +237,7 @@ export async function sendDigests(
     const window = periodWindow(frequency, input.now);
     const lists = await digestLists(db, { ...window, bar, origin: input.origin });
     if (lists.voted.length === 0 && lists.discussed.length === 0) continue;
+    photo ??= await founderPhoto(db, input.origin);
     const failed: string[] = [];
     for (const recipient of recipients) {
       const unsubscribeUrl = `${input.origin}/digest/unsubscribe?token=${encodeURIComponent(await unsubscribeToken(input.secret, recipient.userId))}`;
@@ -244,6 +249,7 @@ export async function sendDigests(
           ...lists,
           origin: input.origin,
           unsubscribeUrl,
+          founderPhoto: photo,
         }),
         recipient,
       );
@@ -307,7 +313,15 @@ export async function sendTestDigest(
   if (lists.voted.length === 0 && lists.discussed.length === 0) return "No posts this month to list.";
   const unsubscribeUrl = `${input.origin}/digest/unsubscribe?token=${encodeURIComponent(await unsubscribeToken(input.secret, input.userId))}`;
   const email = forReader(
-    composeDigest({ frequency, chosen: frequency, period: periodName(frequency), ...lists, origin: input.origin, unsubscribeUrl }),
+    composeDigest({
+      frequency,
+      chosen: frequency,
+      period: periodName(frequency),
+      ...lists,
+      origin: input.origin,
+      unsubscribeUrl,
+      founderPhoto: await founderPhoto(db, input.origin),
+    }),
     account,
   );
   try {

@@ -26,8 +26,8 @@ export interface Letter {
   button?: { label: string; url: string };
   /** After the button, quieter: what to do if it was not expected, and so on. */
   after?: string[];
-  /** Who signs it, with their picture and where to reach them, as a person's letter. */
-  signature?: { name: string; photoUrl?: string | null; links: Array<{ label: string; url: string }> };
+  /** Who signs it, with their picture, a word of theirs, and where to reach them, as a person's letter. */
+  signature?: { name: string; photoUrl?: string | null; note?: string; links: Array<{ label: string; url: string }> };
   /** Why this came, at the foot. */
   why: string;
   /** At the foot after why: unsubscribe, choose your emails. */
@@ -67,7 +67,7 @@ ${paragraphs.map((paragraph) => `<p style="color:#55524c;font-size:15px;line-hei
 ${block ? `<tr><td style="padding:18px 0 0">${block.html}</td></tr>` : ""}
 ${button ? `<tr><td style="padding:18px 0 0"><a href="${escape(button.url)}" style="display:inline-block;background:#c2410c;color:#ffffff;border-radius:8px;padding:11px 18px;font-size:15px;font-weight:600;text-decoration:none">${escape(button.label)}</a></td></tr>` : ""}
 ${after.map((line) => `<tr><td style="padding:12px 0 0;color:#6f6b64;font-size:13px;line-height:19px">${prose(line, "#6f6b64", origin)}</td></tr>`).join("\n")}
-${signature ? signatureHtml(signature) : ""}
+${signature ? signatureHtml(signature, origin) : ""}
 <tr><td style="padding-top:20px"><div style="border-top:1px solid #e7e5e0;padding-top:14px;${MUTED}">
 ${prose(why, "#6f6b64", origin)}${links.length > 0 ? `<br>\n${links.map((link) => `<a href="${escape(link.url)}" style="color:#6f6b64">${escape(link.label)}</a>`).join(" · ")}` : ""}<br>
 ${escape(OPERATOR.name)}, ${escape(OPERATOR.address)}
@@ -81,7 +81,9 @@ ${escape(OPERATOR.name)}, ${escape(OPERATOR.address)}
     ...(block ? [...block.text, ""] : []),
     ...(button ? [`${button.label}: ${button.url}`, ""] : []),
     ...after.flatMap((line) => [line, ""]),
-    ...(signature ? [signature.name, ...signature.links.map((link) => `${link.label}: ${link.url}`), ""] : []),
+    ...(signature
+      ? [signature.name, ...(signature.note ? [signature.note] : []), signature.links.map((link) => link.url.replace(/^mailto:/, "")).join(" · "), ""]
+      : []),
     why,
     ...links.map((link) => `${link.label}: ${link.url}`),
     `${OPERATOR.name}, ${OPERATOR.address}`,
@@ -89,15 +91,17 @@ ${escape(OPERATOR.name)}, ${escape(OPERATOR.address)}
   return { subject, html, text };
 }
 
-/** A signature: the picture, round, beside the name and the ways to reach its writer. */
-function signatureHtml(signature: NonNullable<Letter["signature"]>): string {
+/** A signature: the picture, round, beside the name, a word from its writer, and the ways to reach them. */
+function signatureHtml(signature: NonNullable<Letter["signature"]>, origin: string): string {
+  // Beside a note, the picture stays at the top, by the name.
+  const align = signature.note ? "top" : "middle";
   const photo = signature.photoUrl
-    ? `<td style="padding-right:12px;vertical-align:middle"><img src="${escape(signature.photoUrl)}" width="44" height="44" alt="" style="display:block;width:44px;height:44px;border-radius:22px"></td>`
+    ? `<td style="padding-right:12px;vertical-align:${align}"><img src="${escape(signature.photoUrl)}" width="44" height="44" alt="" style="display:block;width:44px;height:44px;border-radius:22px"></td>`
     : "";
   const links = signature.links.map((link) => `<a href="${escape(link.url)}" style="color:#6f6b64">${escape(link.label)}</a>`).join(" · ");
-  return `<tr><td style="padding:20px 0 0"><table role="presentation" cellpadding="0" cellspacing="0"><tr>${photo}<td style="vertical-align:middle">
+  return `<tr><td style="padding:20px 0 0"><table role="presentation" cellpadding="0" cellspacing="0"><tr>${photo}<td style="vertical-align:${align}">
 <div style="color:#1f1d1a;font-size:15px;line-height:20px;font-weight:600">${escape(signature.name)}</div>
-<div style="color:#6f6b64;font-size:13px;line-height:19px">${links}</div>
+${signature.note ? `<div style="color:#55524c;font-size:14px;line-height:20px;margin-top:2px">${prose(signature.note, "#55524c", origin)}</div>\n` : ""}<div style="color:#6f6b64;font-size:13px;line-height:19px${signature.note ? ";margin-top:4px" : ""}">${links}</div>
 </td></tr></table></td></tr>`;
 }
 
