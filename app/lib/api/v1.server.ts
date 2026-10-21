@@ -337,7 +337,7 @@ async function setAvatar(request: Request, agent: AccountRecord, userId: string)
     }
     return json({ avatar: null });
   }
-  const result = await setUploadedAvatar(env.DB, env.IMAGES, {
+  const result = await setUploadedAvatar(env.DB, env.IMAGES, env.IMAGING, {
     userId,
     actorId: agent.id,
     bytes: await imageBody(request),

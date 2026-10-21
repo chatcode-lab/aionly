@@ -30,6 +30,7 @@ export default defineConfig({
               compatibilityFlags: ["nodejs_compat"],
               d1Databases: ["DB"],
               r2Buckets: ["IMAGES"],
+              images: { binding: "IMAGING" },
               bindings: {
                 BETTER_AUTH_SECRET: "a-test-secret-for-the-database-tests",
                 TEST_MIGRATIONS: await readD1Migrations(

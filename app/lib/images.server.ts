@@ -1,7 +1,6 @@
 import { participantCondition } from "./db/accounts.server";
 import { newId } from "./ids";
 import { fetchPublic, readCapped } from "./links/fetch.server";
-import { stripJpegMetadata } from "./uploads";
 
 /** The largest picture kept as a snapshot. */
 export const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
@@ -10,6 +9,9 @@ export const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 export const PENDING_TTL_SECONDS = 24 * 3600;
 
 type ImageType = "image/jpeg" | "image/png" | "image/webp";
+
+/** A picture's bytes and its real type. */
+type Picture = { bytes: Uint8Array<ArrayBuffer>; type: ImageType };
 
 const EXTENSION: Record<ImageType, string> = {
   "image/jpeg": "jpg",
@@ -168,20 +170,58 @@ export async function sweepPendingImages(
 export type PhotoResult = { ok: true } | { ok: false; reason: "no_photo" | "failed" };
 
 /**
- * Makes `image` an account's avatar, or with null goes back to the letter,
- * and deletes the copy it replaces. Changing it is taking part, so a ban on
- * whoever acts (the account itself, or its agent) refuses it.
+ * The side of a kept avatar, which is square: sharp at three times the
+ * largest one shows on a page (56 px on a profile), yet light in a feed
+ * showing many (owner's request, 2026-10-21).
+ */
+export const AVATAR_SIDE = 320;
+
+/** A picture as `squareAvatar` makes it, the only kind kept as an avatar. */
+export interface SquareAvatar {
+  bytes: Uint8Array<ArrayBuffer>;
+  type: "image/webp";
+  side: number;
+}
+
+const streamOf = (bytes: Uint8Array<ArrayBuffer>) => new Response(bytes).body!;
+
+/**
+ * A picture made an avatar, through Cloudflare's Images binding: cropped
+ * to a square about its center, at most `AVATAR_SIDE` across and never
+ * enlarged, its first frame alone, as WebP, which keeps transparency and
+ * carries no metadata, so nothing says where a photo was taken. Null when
+ * the binding cannot read it.
+ */
+export async function squareAvatar(imaging: ImagesBinding, picture: Picture): Promise<SquareAvatar | null> {
+  try {
+    const info = await imaging.info(streamOf(picture.bytes));
+    if (!("width" in info) || info.width < 1 || info.height < 1) return null;
+    const side = Math.min(AVATAR_SIDE, info.width, info.height);
+    const result = await imaging
+      .input(streamOf(picture.bytes))
+      .transform({ width: side, height: side, fit: "cover" })
+      .output({ format: "image/webp", quality: 85, anim: false });
+    return { bytes: new Uint8Array(await new Response(result.image()).arrayBuffer()), type: "image/webp", side };
+  } catch (error) {
+    console.error("avatar not squared", error);
+    return null;
+  }
+}
+
+/**
+ * Makes `image`, squared, an account's avatar, or with null goes back to
+ * the letter, and deletes the copy it replaces. Changing it is taking
+ * part, so a ban on whoever acts (the account itself, or its agent)
+ * refuses it.
  */
 export async function replaceAvatar(
   db: D1Database,
   bucket: R2Bucket,
-  input: { userId: string; actorId: string; image: { bytes: Uint8Array<ArrayBuffer>; type: ImageType } | null; now: number },
+  input: { userId: string; actorId: string; image: SquareAvatar | null; now: number },
 ): Promise<boolean> {
   let key: string | null = null;
   if (input.image) {
-    const { type } = input.image;
-    // Pictures people upload lose their metadata, where a photo was taken among it.
-    const bytes = type === "image/jpeg" ? stripJpegMetadata(input.image.bytes) : input.image.bytes;
+    const { bytes, type } = input.image;
     key = imageKey(type);
     await bucket.put(key, bytes, storeOptions(type, "avatar"));
     try {
@@ -241,9 +281,10 @@ export async function replaceAvatar(
 export async function setGooglePhoto(
   db: D1Database,
   bucket: R2Bucket,
+  imaging: ImagesBinding,
   input: { userId: string; on: boolean; ownHosts: readonly string[]; now: number },
 ): Promise<PhotoResult> {
-  let image: { bytes: Uint8Array<ArrayBuffer>; type: ImageType } | null = null;
+  let image: SquareAvatar | null = null;
   if (input.on) {
     const user = await db
       .prepare(`SELECT "image" FROM "user" WHERE "id" = ?1`)
@@ -256,7 +297,8 @@ export async function setGooglePhoto(
     } catch {
       return { ok: false, reason: "no_photo" };
     }
-    image = await fetchImage(url, AbortSignal.timeout(5000), input.ownHosts);
+    const fetched = await fetchImage(url, AbortSignal.timeout(5000), input.ownHosts);
+    image = fetched && (await squareAvatar(imaging, fetched));
     if (!image) return { ok: false, reason: "failed" };
   }
   const replaced = await replaceAvatar(db, bucket, { userId: input.userId, actorId: input.userId, image, now: input.now });
@@ -270,6 +312,7 @@ export async function setGooglePhoto(
 export async function setXPhoto(
   db: D1Database,
   bucket: R2Bucket,
+  imaging: ImagesBinding,
   input: { userId: string; ownHosts: readonly string[]; now: number },
 ): Promise<PhotoResult> {
   const row = await db
@@ -283,7 +326,8 @@ export async function setXPhoto(
   } catch {
     return { ok: false, reason: "no_photo" };
   }
-  const image = await fetchImage(url, AbortSignal.timeout(5000), input.ownHosts);
+  const fetched = await fetchImage(url, AbortSignal.timeout(5000), input.ownHosts);
+  const image = fetched && (await squareAvatar(imaging, fetched));
   if (!image) return { ok: false, reason: "failed" };
   const replaced = await replaceAvatar(db, bucket, { userId: input.userId, actorId: input.userId, image, now: input.now });
   return replaced ? { ok: true } : { ok: false, reason: "failed" };
@@ -293,17 +337,67 @@ export type UploadResult = { ok: true } | { ok: false; reason: "too_large" | "no
 
 /**
  * Makes uploaded bytes an account's avatar: JPEG, PNG, or WebP by their
- * first bytes, 2 MB at most. How an agent sets its own picture, or its
- * owner's.
+ * first bytes, 2 MB at most, squared. How an agent sets its own picture,
+ * or its owner's.
  */
 export async function setUploadedAvatar(
   db: D1Database,
   bucket: R2Bucket,
+  imaging: ImagesBinding,
   input: { userId: string; actorId: string; bytes: Uint8Array<ArrayBuffer>; now: number },
 ): Promise<UploadResult> {
   if (input.bytes.byteLength > MAX_IMAGE_BYTES) return { ok: false, reason: "too_large" };
   const type = sniffImage(input.bytes);
-  if (!type) return { ok: false, reason: "not_image" };
-  const replaced = await replaceAvatar(db, bucket, { userId: input.userId, actorId: input.actorId, image: { bytes: input.bytes, type }, now: input.now });
+  const image = type && (await squareAvatar(imaging, { bytes: input.bytes, type }));
+  if (!image) return { ok: false, reason: "not_image" };
+  const replaced = await replaceAvatar(db, bucket, { userId: input.userId, actorId: input.actorId, image, now: input.now });
   return replaced ? { ok: true } : { ok: false, reason: "failed" };
+}
+
+/** Avatars kept before they were squared, squared per run of the hourly job. */
+const SQUARED_PER_RUN = 10;
+
+/**
+ * Squares avatars kept before every avatar was (owner's request,
+ * 2026-10-21): those not WebP, the type `squareAvatar` gives every one
+ * since. Each is swapped for its square only while it is still the
+ * account's avatar, and the old picture goes. One the binding cannot read
+ * stays as it was. Answers how many were squared.
+ */
+export async function squareOldAvatars(db: D1Database, bucket: R2Bucket, imaging: ImagesBinding, now: number): Promise<number> {
+  const { results } = await db
+    .prepare(
+      `SELECT profile.user_id, image.key FROM profiles AS profile
+       JOIN images AS image ON image.key = profile.avatar_key
+       WHERE image.content_type <> 'image/webp'
+       LIMIT ?1`,
+    )
+    .bind(SQUARED_PER_RUN)
+    .all<{ user_id: string; key: string }>();
+  let squared = 0;
+  for (const row of results) {
+    const object = await bucket.get(row.key);
+    if (!object) continue;
+    const bytes = new Uint8Array(await object.arrayBuffer());
+    const type = sniffImage(bytes);
+    const square = type && (await squareAvatar(imaging, { bytes, type }));
+    if (!square) continue;
+    const key = imageKey(square.type);
+    await bucket.put(key, square.bytes, storeOptions(square.type, "avatar"));
+    const [, swapped] = await db.batch([
+      db
+        .prepare(
+          `INSERT INTO images (key, owner_id, kind, state, content_type, bytes, created_at)
+           VALUES (?1, ?2, 'avatar', 'attached', ?3, ?4, ?5)`,
+        )
+        .bind(key, row.user_id, square.type, square.bytes.byteLength, now),
+      db.prepare(`UPDATE profiles SET avatar_key = ?1 WHERE user_id = ?2 AND avatar_key = ?3`).bind(key, row.user_id, row.key),
+    ]);
+    // Changed meanwhile: the new one stands, and this square goes.
+    const gone = swapped!.meta.changes === 0 ? key : row.key;
+    await db.prepare(`DELETE FROM images WHERE key = ?1`).bind(gone).run();
+    await bucket.delete(gone);
+    if (gone === row.key) squared += 1;
+  }
+  return squared;
 }

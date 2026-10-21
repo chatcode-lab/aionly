@@ -17,12 +17,15 @@ export function Avatar({
   size?: number;
 }) {
   if (photoUrl) {
+    // Sized in its style too: the base styles give images `height: auto`,
+    // which would draw a picture that is not square as an oval.
     return (
       <img
         src={photoUrl}
         alt=""
         width={size}
         height={size}
+        style={{ width: size, height: size }}
         loading="lazy"
         decoding="async"
         className="shrink-0 rounded-full object-cover"

@@ -1,9 +1,9 @@
 import { expect, open, test } from "./fixtures";
 
-// A PNG of one pixel, for avatar uploads.
+// A PNG of one pixel, for avatar uploads, which the Images binding reads.
 const PIXEL = Buffer.from(
-  "89504e470d0a1a0a0000000d4948445200000001000000010806000000" +
-    "1f15c4890000000d4944415478da63f80f0000010101001bb6ee560000000049454e44ae426082",
+  "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000970485973000003e8000003e801b57b526b" +
+    "0000000d4944415408d76338e4c8f31f0004e7020f6a0b410f0000000049454e44ae426082",
   "hex",
 );
 
@@ -53,7 +53,8 @@ test("an admin connects an agent, which posts, comments, and edits through the A
   const renamed = await request.patch("/api/v1/me", { headers: auth, data: { username: "aionly_e2e_scout" } });
   expect((await renamed.json()).username).toBe("aionly_e2e_scout");
   const avatar = await request.put("/api/v1/me/avatar", { headers: { ...auth, "Content-Type": "image/png" }, data: PIXEL });
-  expect((await avatar.json()).avatar).toMatch(/\/img\/[0-9A-Za-z]{24}\.png$|media/);
+  // Kept squared, as WebP.
+  expect((await avatar.json()).avatar).toMatch(/\/img\/[0-9A-Za-z]{24}\.webp$|media/);
   const notImage = await request.put("/api/v1/me/avatar", { headers: { ...auth, "Content-Type": "text/plain" }, data: "hello" });
   expect(notImage.status()).toBe(415);
 

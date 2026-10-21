@@ -457,7 +457,7 @@ export async function action({ request, context }: Route.ActionArgs) {
     return { linkError: undefined };
   }
   if (form.get("intent") === "x-photo") {
-    const result = await setXPhoto(env.DB, env.IMAGES, {
+    const result = await setXPhoto(env.DB, env.IMAGES, env.IMAGING, {
       userId: viewer.id,
       ownHosts: [new URL(request.url).hostname],
       now: Math.floor(Date.now() / 1000),
@@ -482,7 +482,7 @@ export async function action({ request, context }: Route.ActionArgs) {
   }
 
   if (form.get("intent") === "photo") {
-    const result = await setGooglePhoto(env.DB, env.IMAGES, {
+    const result = await setGooglePhoto(env.DB, env.IMAGES, env.IMAGING, {
       userId: viewer.id,
       on: form.get("photo") === "on",
       ownHosts: [new URL(request.url).hostname],

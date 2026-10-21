@@ -10,6 +10,7 @@ import { verifyTurnstile } from "../../app/lib/security/turnstile.server";
 import { checkLink } from "../../app/lib/submit/check.server";
 import { readReceipt, signReceipt } from "../../app/lib/submit/receipt.server";
 import { DAY, db, NOW, post, reset, user } from "./fixtures";
+import { TALL_JPEG, WIDE_PNG } from "./pictures";
 
 const bucket = env.IMAGES;
 const SECRET = "test-secret-for-receipts-0123456789";
@@ -513,14 +514,15 @@ describe("Google photo", () => {
       .run();
   const avatarKey = async () =>
     (await db.prepare(`SELECT avatar_key FROM profiles WHERE user_id = 'u1'`).first<{ avatar_key: string | null }>())?.avatar_key;
-  const set = (on: boolean) => setGooglePhoto(db, bucket, { userId: "u1", on, ownHosts: OWN, now: NOW });
+  const set = (on: boolean) => setGooglePhoto(db, bucket, env.IMAGING, { userId: "u1", on, ownHosts: OWN, now: NOW });
 
   it("keeps a copy as the avatar, served to everyone, and deletes it when turned off", async () => {
     await signedUp("https://lh3.googleusercontent.com/a/photo=s96-c");
-    stubFetch({ "https://lh3.googleusercontent.com/": () => image(JPEG) });
+    stubFetch({ "https://lh3.googleusercontent.com/": () => image(TALL_JPEG) });
     expect(await set(true)).toEqual({ ok: true });
     const key = (await avatarKey())!;
-    expect(key).toMatch(/^[0-9A-Za-z]{24}\.jpg$/);
+    // Squared, as every avatar is.
+    expect(key).toMatch(/^[0-9A-Za-z]{24}\.webp$/);
     // Personal, so caches let it go within the hour once it is deleted.
     expect((await bucket.head(key))?.httpMetadata?.cacheControl).toBe("public, max-age=3600");
 
@@ -546,7 +548,7 @@ describe("Google photo", () => {
 
   it("refuses a banned account and keeps nothing", async () => {
     await signedUp("https://lh3.googleusercontent.com/a/photo");
-    stubFetch({ "https://lh3.googleusercontent.com/": () => image(PNG) });
+    stubFetch({ "https://lh3.googleusercontent.com/": () => image(WIDE_PNG) });
     await db.prepare(`UPDATE profiles SET banned_at = ?1 WHERE user_id = 'u1'`).bind(NOW).run();
     expect(await set(true)).toEqual({ ok: false, reason: "failed" });
     expect((await bucket.list()).objects).toHaveLength(0);

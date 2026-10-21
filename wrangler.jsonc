@@ -66,6 +66,12 @@
 			"bucket_name": "aionly-board-local-images"
 		}
 	],
+	// Cloudflare's Images binding squares avatars before they are kept.
+	// Locally it is Wrangler's offline version. Not inherited, so every
+	// environment names it.
+	"images": {
+		"binding": "IMAGING"
+	},
 	// The email digest goes out through Cloudflare's Email Sending. Locally
 	// it is simulated. Every environment names its own.
 	"send_email": [{ "name": "EMAIL" }],
@@ -150,7 +156,10 @@
 					"binding": "IMAGES",
 					"bucket_name": "aionly-board-staging-images"
 				}
-			]
+			],
+			"images": {
+				"binding": "IMAGING"
+			}
 		},
 		"production": {
 			"name": "aionly-board",
@@ -213,7 +222,10 @@
 					"binding": "IMAGES",
 					"bucket_name": "aionly-board-media"
 				}
-			]
+			],
+			"images": {
+				"binding": "IMAGING"
+			}
 		}
 	}
 }
