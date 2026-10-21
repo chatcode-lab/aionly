@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  ArrangedInStripe,
+  arrangedInStripe,
   completedNameCheckouts,
   createCheckout,
   createFreshStartCheckout,
@@ -413,8 +415,22 @@ describe("switching the plan at the period's end", () => {
     expect(asked.calls.some((call) => call.path === "/v1/subscription_schedules")).toBe(false);
     const kept = fakeStripe(subscription(scheduled()), subscription(null));
     const after = await releaseSchedule(kept.client, "sub_1");
-    expect(kept.calls.map((call) => `${call.method} ${call.path}`)).toContain("POST /v1/subscription_schedules/sub_sched_1/release");
+    const release = kept.calls.find((call) => call.path === "/v1/subscription_schedules/sub_sched_1/release");
+    // An end the schedule set stays (review F119).
+    expect(release?.form.get("preserve_cancel_date")).toBe("true");
     expect(scheduledSwitch(after)).toBeNull();
+  });
+
+  it("leaves an end or change arranged in Stripe as it is, and sets no switch over it (review F119)", async () => {
+    // Cancelling after three months, as an operator may arrange.
+    const cancelling = { ...scheduled({}), end_behavior: "cancel", current_phase: { start_date: START, end_date: START + 90 * 24 * 3600 }, phases: [phase(START, START + 90 * 24 * 3600, "price_m", "aionly_fan_monthly")] };
+    expect(arrangedInStripe(subscription(cancelling))).toBe(true);
+    expect(arrangedInStripe({ ...subscription(null), cancel_at: START + 90 * 24 * 3600 })).toBe(true);
+    expect(arrangedInStripe(subscription(scheduled()))).toBe(false);
+    expect(arrangedInStripe(subscription(null))).toBe(false);
+    const arranged = fakeStripe(subscription(cancelling), subscription(cancelling));
+    await expect(schedulePlanSwitch(arranged.client, "sub_1", "price_y")).rejects.toBeInstanceOf(ArrangedInStripe);
+    expect(arranged.calls.filter((call) => call.method === "POST")).toEqual([]);
   });
 
   it("lets go of a schedule it made when setting its phases fails, and keeps one there before (review F114)", async () => {

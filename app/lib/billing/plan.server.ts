@@ -19,6 +19,8 @@ import {
 } from "../db/subscriptions.server";
 import { FRESH_START_PRICE, INTRO_PRICES, introHonoredUntil, NAME_ALLOWANCES, PLAN_PRICES, type PlanInterval } from "../plan";
 import {
+  ArrangedInStripe,
+  arrangedInStripe,
   cancelSubscription,
   checkoutSubscription,
   createCheckout,
@@ -337,7 +339,8 @@ export async function finishFreshStart(viewer: AccountRecord, sessionId: string)
   return settleFreshStart(session, viewer.id);
 }
 
-type SwitchRefusal = { ok: false; reason: "no_plan" | "ending" | "same" | "trial" | "busy" };
+/** `arranged`: an end or change set in Stripe, which the board never makes and a switch would undo (review F119). */
+type SwitchRefusal = { ok: false; reason: "no_plan" | "ending" | "same" | "trial" | "busy" | "arranged" };
 
 export type SwitchOutcome =
   | { ok: true }
@@ -389,6 +392,7 @@ export async function quoteYearly(viewer: AccountRecord): Promise<SwitchQuote> {
   const target = await switchTarget(viewer, "year");
   if (!target.ok) return target;
   const subscription = await getSubscription(client(), target.subscriptionId);
+  if (arrangedInStripe(subscription)) return { ok: false, reason: "arranged" };
   const at = now();
   return { ok: true, ...(await previewSwitchNow(client(), subscription, target.priceId, at)), at };
 }
@@ -435,11 +439,18 @@ async function switchHeld(viewer: AccountRecord, interval: PlanInterval, approve
   let subscription: StripeSubscription;
   if (approved) {
     subscription = await getSubscription(client(), target.subscriptionId);
+    if (arrangedInStripe(subscription)) return { ok: false, reason: "arranged" };
     // A switch the member asked for at the period's end is theirs to undo,
     // not lost to a declined card (review F117). Unread, it counts as one.
     if (scheduledSwitch(subscription) !== null) return { ok: false, reason: "pending" };
-    // One with nothing to come, as one left half made, only holds the portal.
-    if (subscription.schedule) subscription = await releaseSchedule(client(), subscription.id);
+    // One with nothing to come, as one left half made, only holds the
+    // portal. It is let go of only as such, on a fresh read (review F119).
+    const schedule = subscription.schedule;
+    if (schedule && typeof schedule === "object") {
+      const released = scheduleIdle(subscription) ? await releaseIdleSchedule(client(), subscription.id, schedule.id) : null;
+      if (!released) return { ok: false, reason: "pending" };
+      subscription = released;
+    }
     const quote = { ...(await previewSwitchNow(client(), subscription, target.priceId, approved.at)), at: approved.at };
     if (quote.cents !== approved.cents) return { ok: false, reason: "changed", quote };
     try {
@@ -454,7 +465,12 @@ async function switchHeld(viewer: AccountRecord, interval: PlanInterval, approve
       throw error;
     }
   } else {
-    subscription = await schedulePlanSwitch(client(), target.subscriptionId, target.priceId);
+    try {
+      subscription = await schedulePlanSwitch(client(), target.subscriptionId, target.priceId);
+    } catch (error) {
+      if (error instanceof ArrangedInStripe) return { ok: false, reason: "arranged" };
+      throw error;
+    }
   }
   await applySubscription(env.DB, subscription, { eventAt: await freshEventAt(env.DB, viewer.id, now()), now: now() });
   return { ok: true };

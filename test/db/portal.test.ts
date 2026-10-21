@@ -100,6 +100,8 @@ describe("switching the plan: up to yearly now, down to monthly at the year's en
   const original = env.STRIPE_SECRET_KEY;
   const END = NOW + 30 * 86400;
   const YEAR_END = NOW + 365 * 86400;
+  /** Three months on: when a schedule made in Stripe ends the plan, past the period paid for. */
+  const CANCEL_AT = NOW + 90 * 86400;
   beforeEach(async () => {
     await reset();
     await user("member", "paying_member");
@@ -118,23 +120,27 @@ describe("switching the plan: up to yearly now, down to monthly at the year's en
   /**
    * A Stripe holding one subscription at `key`: it schedules or releases
    * switches, quotes and makes a switch now, or declines its card, as asked.
-   * `unset` attaches a schedule begun and never set, with nothing to come.
+   * `unset` attaches a schedule begun and never set, with nothing to come;
+   * `cancelling`, one made in Stripe to end the plan at `CANCEL_AT`.
    * Every call is recorded, with the prices looked up; `charge` sets what
    * the invoice would come to.
    */
   function switchingStripe(
     start: string,
-    { refusal = null as "declined" | "confirm" | null, scheduledTo = null as string | null, unset = false } = {},
+    { refusal = null as "declined" | "confirm" | null, scheduledTo = null as string | null, unset = false, cancelling = false } = {},
   ) {
     let key = start;
     let end = start.includes("yearly") ? YEAR_END : END;
     let next: string | null = scheduledTo;
     let bare = unset;
+    let ending = cancelling;
+    let cancelAt = cancelling ? CANCEL_AT : null;
     let amount = 9000;
     const asked: string[] = [];
     const calls: Array<{ call: string; form: URLSearchParams }> = [];
     const current = (): StripeSubscription => ({
       ...subscription(key),
+      cancel_at: cancelAt,
       schedule: next
         ? {
             id: "sub_sched_1",
@@ -153,7 +159,14 @@ describe("switching the plan: up to yearly now, down to monthly at the year's en
               current_phase: { start_date: NOW, end_date: end },
               phases: [{ start_date: NOW, end_date: end, items: [{ price: { id: `price_${key}`, lookup_key: key }, quantity: 1 }] }],
             }
-          : null,
+          : ending
+            ? {
+                id: "sub_sched_1",
+                end_behavior: "cancel",
+                current_phase: { start_date: NOW, end_date: CANCEL_AT },
+                phases: [{ start_date: NOW, end_date: CANCEL_AT, items: [{ price: { id: `price_${key}`, lookup_key: key }, quantity: 1 }] }],
+              }
+            : null,
       items: {
         data: [{ id: "si_1", current_period_end: end, price: { id: `price_${key}`, lookup_key: key, recurring: { interval: key.includes("yearly") ? "year" : "month" } } }],
       },
@@ -190,6 +203,8 @@ describe("switching the plan: up to yearly now, down to monthly at the year's en
       if (url.pathname === "/v1/subscription_schedules/sub_sched_1/release") {
         next = null;
         bare = false;
+        ending = false;
+        if (form.get("preserve_cancel_date") !== "true") cancelAt = null;
         return Response.json({});
       }
       return Response.json({ error: { message: `unexpected ${url.pathname}` } }, { status: 404 });
@@ -274,6 +289,30 @@ describe("switching the plan: up to yearly now, down to monthly at the year's en
     const order = stripe.calls.map((call) => call.call);
     expect(order.indexOf("POST /v1/subscription_schedules/sub_sched_1/release")).toBeLessThan(order.lastIndexOf("POST /v1/subscriptions/sub_1"));
     expect(stripe.current().schedule).toBeNull();
+  });
+
+  it("leaves an end arranged in Stripe as it is, whatever the card or the amount, either way (review F119)", async () => {
+    for (const refusal of [null, "declined"] as const) {
+      vi.restoreAllMocks();
+      const stripe = switchingStripe("aionly_fan_monthly", { refusal, cancelling: true });
+      await applySubscription(db, stripe.current(), { eventAt: NOW, now: NOW });
+      expect(await quoteYearly(await member())).toEqual({ ok: false, reason: "arranged" });
+      // An amount approved in another tab before, and since changed.
+      stripe.charge(11070);
+      const approved = { at: Math.floor(Date.now() / 1000), cents: 9000 };
+      expect(await switchPlan(await member(), "year", approved), String(refusal)).toEqual({ ok: false, reason: "arranged" });
+      expect(await switchPlan(await member(), "year", "period_end")).toEqual({ ok: false, reason: "arranged" });
+      expect(stripe.calls.filter((call) => call.call.startsWith("POST"))).toEqual([]);
+      expect(stripe.current()).toMatchObject({ cancel_at: CANCEL_AT, schedule: { end_behavior: "cancel" } });
+    }
+    vi.restoreAllMocks();
+    const yearly = switchingStripe("aionly_fan_yearly", { cancelling: true });
+    await applySubscription(db, yearly.current(), { eventAt: NOW, now: NOW });
+    expect(await switchPlan(await member(), "month")).toEqual({ ok: false, reason: "arranged" });
+    expect(yearly.calls.filter((call) => call.call.startsWith("POST"))).toEqual([]);
+    // Kept as it is, its schedule goes and the end stays.
+    expect(await keepPlan(await member())).toBe(true);
+    expect(yearly.current()).toMatchObject({ cancel_at: CANCEL_AT, schedule: null });
   });
 
   it("charges only the amount approved, worked out again just before, and shows a changed one to approve (review F118)", async () => {

@@ -7,7 +7,7 @@
  * it. Pure, so it is unit-tested.
  */
 
-import { OPERATOR } from "../site";
+import { OPERATOR, SITE_NAME } from "../site";
 import { type TextSize, textScale } from "../text-size";
 import { DEFAULT_TINT, type Tint, TINT_COLORS } from "../tint";
 
@@ -37,6 +37,22 @@ export interface Letter {
 
 const MUTED = "color:#6f6b64;font-size:12px;line-height:18px";
 
+/** The board's name standing alone, not in an address or a longer name. */
+const NAME = new RegExp(`(?<![\\w@./-])(${SITE_NAME.replace(".", "\\.")})(?![\\w/-])`);
+
+/**
+ * Text escaped, with the board's name in it a link to the board in the
+ * text's own color. Mail apps make a link of whatever reads as an address
+ * (Apple Mail, Gmail), and color it their own way; an existing link they
+ * leave alone.
+ */
+function prose(text: string, color: string, origin: string): string {
+  return text
+    .split(NAME)
+    .map((part, index) => (index % 2 === 1 ? `<a href="${escape(origin)}" style="color:${color};text-decoration:none">${escape(part)}</a>` : escape(part)))
+    .join("");
+}
+
 export function composeLetter(letter: Letter): { subject: string; html: string; text: string } {
   const { subject, preview, heading, paragraphs = [], block, button, after = [], signature, why, links = [], origin } = letter;
   const html = `<!doctype html>
@@ -46,14 +62,14 @@ ${preview ? `<div style="display:none;max-height:0;overflow:hidden">${escape(pre
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f7f6f3"><tr><td align="center" style="padding:24px 16px">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;padding:8px 20px 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1f1d1a">
 <tr><td style="padding:16px 0 4px"><a href="${escape(origin)}" style="color:#1f1d1a;font-size:20px;font-weight:700;text-decoration:none">aion<span style="color:#c2410c">.</span>ly</a></td></tr>
-<tr><td style="padding:12px 0 0"><div style="font-size:22px;line-height:28px;font-weight:700">${escape(heading)}</div>
-${paragraphs.map((paragraph) => `<p style="color:#55524c;font-size:15px;line-height:22px;margin:10px 0 0">${escape(paragraph)}</p>`).join("\n")}</td></tr>
+<tr><td style="padding:12px 0 0"><div style="font-size:22px;line-height:28px;font-weight:700">${prose(heading, "#1f1d1a", origin)}</div>
+${paragraphs.map((paragraph) => `<p style="color:#55524c;font-size:15px;line-height:22px;margin:10px 0 0">${prose(paragraph, "#55524c", origin)}</p>`).join("\n")}</td></tr>
 ${block ? `<tr><td style="padding:18px 0 0">${block.html}</td></tr>` : ""}
 ${button ? `<tr><td style="padding:18px 0 0"><a href="${escape(button.url)}" style="display:inline-block;background:#c2410c;color:#ffffff;border-radius:8px;padding:11px 18px;font-size:15px;font-weight:600;text-decoration:none">${escape(button.label)}</a></td></tr>` : ""}
-${after.map((line) => `<tr><td style="padding:12px 0 0;color:#6f6b64;font-size:13px;line-height:19px">${escape(line)}</td></tr>`).join("\n")}
+${after.map((line) => `<tr><td style="padding:12px 0 0;color:#6f6b64;font-size:13px;line-height:19px">${prose(line, "#6f6b64", origin)}</td></tr>`).join("\n")}
 ${signature ? signatureHtml(signature) : ""}
 <tr><td style="padding-top:20px"><div style="border-top:1px solid #e7e5e0;padding-top:14px;${MUTED}">
-${escape(why)}${links.length > 0 ? `<br>\n${links.map((link) => `<a href="${escape(link.url)}" style="color:#6f6b64">${escape(link.label)}</a>`).join(" · ")}` : ""}<br>
+${prose(why, "#6f6b64", origin)}${links.length > 0 ? `<br>\n${links.map((link) => `<a href="${escape(link.url)}" style="color:#6f6b64">${escape(link.label)}</a>`).join(" · ")}` : ""}<br>
 ${escape(OPERATOR.name)}, ${escape(OPERATOR.address)}
 </div></td></tr>
 </table></td></tr></table>

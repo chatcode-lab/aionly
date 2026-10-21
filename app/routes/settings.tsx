@@ -272,10 +272,12 @@ async function deleteAccountAction(request: Request, viewer: AccountRecord, form
 async function planAction(viewer: AccountRecord, form: FormData, planIntent: "plan-quote" | "plan-switch" | "plan-keep") {
   if (!billingOpen()) return { planError: "Payments open soon." };
   const busy = "Another change to your plan is being made. Try again in a minute.";
-  const refused = (reason: "no_plan" | "ending" | "same" | "trial" | "busy", to: PlanInterval) =>
+  const refused = (reason: "no_plan" | "ending" | "same" | "trial" | "busy" | "arranged", to: PlanInterval) =>
     reason === "ending"
       ? "Your plan is set to end. Renew it in Manage billing first, then switch."
-      : reason === "same"
+      : reason === "arranged"
+        ? "Your plan has an end or change arranged with us, which switching here would undo. Write to hey@aion.ly to change it."
+        : reason === "same"
         ? `Your plan is ${to === "year" ? "yearly" : "monthly"} already.`
         : reason === "trial"
           ? "Your plan is in a trial. Switching opens once it is paid for."

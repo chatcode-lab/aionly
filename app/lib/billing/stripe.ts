@@ -95,6 +95,8 @@ export interface StripeSubscription {
   customer: string;
   status: string;
   cancel_at_period_end: boolean;
+  /** When it is set to end, by date or by a schedule ending it. */
+  cancel_at?: number | null;
   metadata?: Record<string, string>;
   /** Its schedule, expanded when read through getSubscription; an ID otherwise. */
   schedule?: string | StripeSchedule | null;
@@ -602,14 +604,34 @@ export function scheduleIdle(subscription: StripeSubscription): boolean {
 }
 
 /**
+ * Whether the subscription carries an instruction the board never gives
+ * and must not undo: an end set by date, or a schedule that ends other than
+ * by releasing the plan, as one made in Stripe to cancel it after some
+ * periods (review F119). The board's own schedules release the plan.
+ */
+export function arrangedInStripe(subscription: StripeSubscription): boolean {
+  const schedule = subscription.schedule;
+  return Boolean(subscription.cancel_at) || (typeof schedule === "object" && schedule !== null && schedule.end_behavior !== "release");
+}
+
+/** A plan switch refused because the subscription carries an instruction the board did not give (`arrangedInStripe`). */
+export class ArrangedInStripe extends Error {
+  constructor(subscriptionId: string) {
+    super(`subscription ${subscriptionId} has an end or change arranged in Stripe`);
+  }
+}
+
+/**
  * Switches the plan to `priceId` at the end of the period paid for, through
  * a schedule: this period stays as it is, nothing is charged or credited
  * now, and the new price bills from then on (owner's decision, 2026-10-20:
  * a downgrade waits for the period's end). A switch already asked for is
- * replaced. Answers with the subscription as it is after.
+ * replaced; an end or change arranged in Stripe is not, and throws
+ * `ArrangedInStripe`. Answers with the subscription as it is after.
  */
 export async function schedulePlanSwitch(client: StripeClient, subscriptionId: string, priceId: string): Promise<StripeSubscription> {
   const subscription = await getSubscription(client, subscriptionId);
+  if (arrangedInStripe(subscription)) throw new ArrangedInStripe(subscriptionId);
   const existing = subscription.schedule;
   const created = !(existing && typeof existing === "object");
   let schedule: StripeSchedule;
@@ -734,13 +756,16 @@ export async function releaseIdleSchedule(client: StripeClient, subscriptionId: 
   return getSubscription(client, subscriptionId);
 }
 
-/** Lets go of a subscription's schedule, keeping its price as it is: no switch. */
+/**
+ * Lets go of a subscription's schedule, keeping its price as it is: no
+ * switch. An end the schedule set stays (review F119).
+ */
 export async function releaseSchedule(client: StripeClient, subscriptionId: string): Promise<StripeSubscription> {
   const subscription = await getSubscription(client, subscriptionId);
   const schedule = subscription.schedule;
   if (!schedule) return subscription;
   const id = typeof schedule === "string" ? schedule : schedule.id;
-  await client.request("POST", `/subscription_schedules/${encodeURIComponent(id)}/release`);
+  await client.request("POST", `/subscription_schedules/${encodeURIComponent(id)}/release`, { preserve_cancel_date: true });
   return getSubscription(client, subscriptionId);
 }
 
