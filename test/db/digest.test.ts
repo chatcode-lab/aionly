@@ -89,6 +89,17 @@ describe("a digest's posts", () => {
     expect(html).toContain("What do you think of this digest?");
   });
 
+  it("name each source, a well-known site by its name, as a quiet link to it", async () => {
+    await post("named", { author: "maker", age: 6 * DAY, title: "Named", score: 9, url: "https://blog.anthropic.com/news/proteins" });
+    await post("bare", { author: "maker", age: 6 * DAY, title: "Bare", score: 8, url: "https://www.peec.ai/blog/stats" });
+
+    expect(await sendDigests(db, mailer, input)).toBe(1);
+    const { html, text } = sent[0]!;
+    expect(html).toContain('<a href="https://blog.anthropic.com/news/proteins" style="color:#6f6b64;text-decoration:none">Anthropic</a> · 9 points');
+    expect(html).toContain('<a href="https://www.peec.ai/blog/stats" style="color:#6f6b64;text-decoration:none">peec.ai</a> · 8 points');
+    expect(text).toContain("Anthropic · 9 points · 0 comments · by busy_maker");
+  });
+
   it("show a long description cut at a word, with a link to read the rest", async () => {
     const description = `Pick a place on a **map** and turn it into a miniature.\n\n${"Buildings, terrain, roads and water. ".repeat(10)}`;
     await post("long", { author: "maker", age: 6 * DAY, title: "A tiny town", score: 9, description });

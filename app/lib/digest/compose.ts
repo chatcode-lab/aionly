@@ -32,8 +32,10 @@ export interface DigestPost {
   title: string;
   /** The post's own page on the board, absolute. */
   url: string;
-  /** Where it links, or what kind of post it is. */
+  /** Where it links, by name or address (`sourceName`), or what kind of post it is. */
   source: string;
+  /** The outside address it links to; null for a post the board hosts. */
+  sourceUrl: string | null;
   score: number;
   comments: number;
   author: string;
@@ -80,6 +82,16 @@ function authorPicture(post: DigestPost): string {
   return `<span style="${box};background:${color};color:#ffffff;line-height:1.6em;text-align:center;font-weight:600">${escape(letter)}</span>`;
 }
 
+/**
+ * Where a post links, as a link of the line's own quiet color: it is only
+ * the source, and mail apps would otherwise make an address in it a link
+ * of their own color (owner's request, 2026-10-21).
+ */
+function sourceHtml(post: DigestPost): string {
+  if (!post.sourceUrl) return escape(post.source);
+  return `<a href="${escape(post.sourceUrl)}" style="color:#6f6b64;text-decoration:none">${escape(post.source)}</a>`;
+}
+
 /** Under the digest, the founder asks what readers make of it (owner's request, 2026-10-21). */
 export const FOUNDER_NOTE = "What do you think of this digest? Hit reply and tell me what to add, change, or leave out. I read every reply.";
 
@@ -104,8 +116,8 @@ export function composeDigest(input: {
   founderPhoto?: string | null;
 }): { subject: string; html: string; text: string } {
   const { frequency, chosen, period, voted, discussed, origin, unsubscribeUrl, founderPhoto = null } = input;
-  const details = (post: DigestPost) => `${post.source} · ${plural(post.score, "point")} · ${plural(post.comments, "comment")}`;
-  const line = (post: DigestPost) => `${details(post)} · by ${post.author}`;
+  const counts = (post: DigestPost) => `${plural(post.score, "point")} · ${plural(post.comments, "comment")}`;
+  const line = (post: DigestPost) => `${post.source} · ${counts(post)} · by ${post.author}`;
   const lists = [
     { heading: "Most voted", posts: voted },
     { heading: "Most discussed", posts: discussed },
@@ -117,7 +129,7 @@ ${list.posts
   .map(
     (post, index) => `<div style="padding:14px 0;${index === 0 ? "" : "border-top:1px solid #e7e5e0"}">
 <a href="${escape(post.url)}" style="color:#1f1d1a;font-size:16px;font-weight:600;text-decoration:none">${escape(post.title)}</a>
-<div style="color:#6f6b64;font-size:13px;margin-top:3px">${escape(details(post))} · <span style="white-space:nowrap">by ${authorPicture(post)}${escape(post.author)}</span></div>
+<div style="color:#6f6b64;font-size:13px;margin-top:3px">${sourceHtml(post)} · ${escape(counts(post))} · <span style="white-space:nowrap">by ${authorPicture(post)}${escape(post.author)}</span></div>
 ${excerptHtml(post)}
 </div>`,
   )

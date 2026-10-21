@@ -50,7 +50,7 @@ describe("an email at a member's text size", () => {
       frequency: "weekly",
       chosen: "weekly",
       period: "last week",
-      voted: [{ title: "A post", url: "https://aion.ly/p/a", source: "suno.com", score: 12, comments: 3, author: "nova", authorId: "u_nova", authorPhoto: null, excerpt: "" }],
+      voted: [{ title: "A post", url: "https://aion.ly/p/a", source: "Suno", sourceUrl: "https://suno.com/s/a", score: 12, comments: 3, author: "nova", authorId: "u_nova", authorPhoto: null, excerpt: "" }],
       discussed: [],
       origin: "https://aion.ly",
       unsubscribeUrl: "https://aion.ly/digest/unsubscribe?token=t",

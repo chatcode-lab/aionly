@@ -9,7 +9,8 @@ describe("the digest email", () => {
   const post = {
     title: 'A <song> & "more"',
     url: "https://aion.ly/p/abc1234/a-song",
-    source: "suno.com",
+    source: "Suno",
+    sourceUrl: "https://suno.com/song/abc" as string | null,
     score: 12,
     comments: 1,
     author: "quiet_otter",
@@ -56,6 +57,14 @@ describe("the digest email", () => {
     // Sized from its own font size, so it grows with the reader's text.
     expect(drawn?.[1]).toContain("font-size:10px;width:1.6em;height:1.6em");
     expect(email.text).toContain("12 points · 1 comment · by quiet_otter\n");
+  });
+
+  it("names the source as a link of the line's own color, and a post the board hosts as it is (owner's request, 2026-10-21)", () => {
+    const hosted = { ...post, title: "Hosted", source: "Text post", sourceUrl: null };
+    const email = composeDigest({ ...base, frequency: "daily", chosen: "daily", period: "the past day", voted: [post, hosted], discussed: [] });
+    expect(email.html).toContain('<a href="https://suno.com/song/abc" style="color:#6f6b64;text-decoration:none">Suno</a> · 12 points');
+    expect(email.html).toContain(">Text post · 12 points");
+    expect(email.text).toContain("Suno · 12 points · 1 comment · by quiet_otter");
   });
 
   it("ends with the founder asking what readers make of it, with their picture and where to reach them", () => {

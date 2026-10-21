@@ -7,6 +7,7 @@ import type { Mailer } from "../mail/mailers.server";
 import { forReader, type Reader } from "../mail/layout";
 import { readerColumns, readerOf, recipientOf } from "../mail/recipient.server";
 import { SENDERS } from "../mail/senders";
+import { sourceName } from "../links/source";
 import { plainText } from "../text/markdown";
 import {
   CHOSEN_WITH,
@@ -176,7 +177,8 @@ export async function digestLists(
     (await postsByIds(db, rows.map((row) => row.id))).map((card) => ({
       title: card.title,
       url: `${input.origin}${card.path}`,
-      source: card.host ?? (card.media.kind === "text" ? "Text post" : "Upload"),
+      source: card.host ? sourceName(card.host) : card.media.kind === "text" ? "Text post" : "Upload",
+      sourceUrl: card.host ? card.url : null,
       score: card.score,
       comments: card.commentCount,
       author: card.author.username,
