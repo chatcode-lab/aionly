@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { DraftFields } from "../../app/lib/draft-rules";
 import { accountRecord } from "../../app/lib/db/accounts.server";
@@ -57,6 +57,10 @@ async function token(permission: "read_only" | "comment_only" | "read_write"): P
   if (!issued.ok) throw new Error("no token");
   return issued.id;
 }
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 beforeEach(async () => {
   await reset();
@@ -181,6 +185,49 @@ describe("the run every quarter hour", () => {
     await schedule(id, agentId, SLOT + 2 * SLOT_SECONDS, { tokenId: await token("read_write") });
     expect(await run(SLOT + 2 * SLOT_SECONDS)).toBe(1);
     expect(await postsBy(agentId)).toEqual([ready.title]);
+  });
+
+  describe("a link checked as an edit is saved (review F124)", () => {
+    // A song's short link, which the run follows: to the board itself, which is refused.
+    const short = "https://suno.com/s/ShortSongLink";
+    /** Answers the short link with a redirect to the board, after `meanwhile`, as an edit saved while it is fetched. */
+    const fetching = (meanwhile: () => Promise<unknown>) =>
+      vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+        const url = new URL(input instanceof Request ? input.url : String(input));
+        if (url.href !== short) throw new Error(`unexpected fetch: ${url.href}`);
+        await meanwhile();
+        return new Response(null, { status: 302, headers: { Location: "https://aion.ly/elsewhere" } });
+      });
+    const edit = (id: string, fields: Partial<DraftFields>) => saveDraft(db, { authorId: "owner", id, fields: { ...ready, ...fields }, now: NOW });
+
+    it("publishes the edit, never cancelling it for the link it no longer has", async () => {
+      const id = await draft("owner", { kind: "link", url: short, origin: "found" });
+      await schedule(id, "owner", SLOT);
+      fetching(() => edit(id, { title: "Written up instead" }));
+      expect(await run(SLOT)).toBe(1);
+      expect(await postsBy("owner")).toEqual(["Written up instead"]);
+    });
+
+    it("leaves one still changing due for the next run, which notes the failure of the revision it read", async () => {
+      const id = await draft("owner", { kind: "link", url: short, origin: "found" });
+      await schedule(id, "owner", SLOT);
+      let revision = 1;
+      const spy = fetching(async () => {
+        revision += 1;
+        await edit(id, { kind: "link", url: short, origin: "found", title: `Take ${revision}` });
+      });
+      expect(await run(SLOT)).toBe(0);
+      expect(await draftById(db, id)).toMatchObject({ revision: 3, scheduledAt: SLOT, scheduleFailure: null });
+      // Unchanged, the same refusal holds, and is noted.
+      spy.mockRestore();
+      fetching(async () => undefined);
+      expect(await run(SLOT + SLOT_SECONDS)).toBe(0);
+      expect(await draftById(db, id)).toMatchObject({
+        revision: 3,
+        scheduledAt: null,
+        scheduleFailure: { at: SLOT, reason: "invalid_url", message: "That short link leads somewhere that can't be posted." },
+      });
+    });
   });
 
   it("leaves a paused agent's a draft, saying why", async () => {

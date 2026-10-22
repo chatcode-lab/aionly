@@ -764,43 +764,55 @@ export async function publishScheduledDrafts(
     .all<{ id: string; scheduled_at: number }>();
   let published = 0;
   for (const due of results) {
+    // The revision it was last read at: a failure holds for that one alone (review F124).
+    const seen = { revision: null as number | null };
     let outcome: Failure | "published" | "left";
     try {
-      outcome = await publishDue(db, due.id, due.scheduled_at, input);
+      outcome = await publishDue(db, due.id, due.scheduled_at, input, seen);
     } catch (error) {
       console.error("scheduled publication", due.id, error);
       outcome = { reason: "error", message: "Something went wrong as it was publishing." };
     }
     if (outcome === "published") published += 1;
     else if (outcome !== "left") {
+      // Noted only while it is still the revision that failed: one saved
+      // since stays due, for the next run to try as it now is.
       await db
         .prepare(
           `UPDATE drafts SET scheduled_at = NULL, scheduled_token_id = NULL, schedule_failure = ?3
-           WHERE id = ?1 AND post_id IS NULL AND scheduled_at = ?2`,
+           WHERE id = ?1 AND post_id IS NULL AND scheduled_at = ?2 AND (?4 IS NULL OR revision = ?4)`,
         )
-        .bind(due.id, due.scheduled_at, JSON.stringify({ at: due.scheduled_at, ...outcome } satisfies ScheduleFailure))
+        .bind(due.id, due.scheduled_at, JSON.stringify({ at: due.scheduled_at, ...outcome } satisfies ScheduleFailure), seen.revision)
         .run();
     }
   }
   return published;
 }
 
-/** One due draft published, left as another hand left it, or why it could not go out. */
+const CONNECTION: Failure = {
+  reason: "connection",
+  message: "The connection that scheduled it may no longer post: it was revoked, or allowed less.",
+};
+
+/**
+ * One due draft published, left as another hand left it, or why it could
+ * not go out. A refusal holds only for the revision it read: one saved
+ * while it was checked, as while its link was fetched, is tried again as it
+ * now is, once, and then left due for the next run (review F124). `seen`
+ * keeps the revision last read.
+ */
 async function publishDue(
   db: D1Database,
   id: string,
   at: number,
   input: { bucket: R2Bucket; secret: string; ownHosts: string[]; mentionHosts: string[]; now: number },
+  seen: { revision: number | null },
 ): Promise<Failure | "published" | "left"> {
-  const connection: Failure = {
-    reason: "connection",
-    message: "The connection that scheduled it may no longer post: it was revoked, or allowed less.",
-  };
-  // Changed while it went out: tried once more, as it now is; then at the next run.
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const draft = await draftById(db, id);
     if (!draft || draft.postId || draft.scheduledAt !== at) return "left";
-    if (draft.scheduledTokenId && !(await mayStillPost(db, draft))) return connection;
+    seen.revision = draft.revision;
+    if (draft.scheduledTokenId && !(await mayStillPost(db, draft))) return CONNECTION;
     const result = await publishDraft(db, {
       id,
       actorId: draft.authorId,
@@ -814,45 +826,50 @@ async function publishDue(
       now: input.now,
     });
     if (result.ok) return result.already ? "left" : "published";
-    switch (result.reason) {
-      case "conflict":
-      case "preview_changed":
-        continue;
-      case "not_found":
-        return "left";
-      case "invalid":
-        return { reason: "invalid", message: `It was not ready to publish: ${Object.values(result.fields).join(" ")}` };
-      case "invalid_url":
-        return { reason: "invalid_url", message: result.message };
-      case "duplicate":
-        return {
-          reason: "duplicate",
-          message: result.existing.state === "live" ? "Its link is already posted." : "Its link was removed by a moderator, so it can't be posted again.",
-        };
-      case "posting":
-        switch (result.status.reason) {
-          case "wait":
-            return { reason: "limit", message: `The day's posts were used up; the next one was free from ${formatSlot(result.status.nextAt, "utc")}.` };
-          case "karma":
-            return { reason: "read_only", message: "Posting was paused while karma was below 0." };
-          default:
-            return { reason: "read_only", message: "The account was read-only." };
-        }
-      case "not_allowed": {
-        const now = await draftById(db, id);
-        if (!now || now.postId || now.scheduledAt !== at) return "left";
-        if (now.scheduledTokenId && !(await mayStillPost(db, now))) return connection;
-        const author = await accountRecord(db, now.authorId, input.now);
-        if (author && !author.entitled && (author.ownerId || now.kind !== "link")) {
-          return author.ownerId
-            ? { reason: "not_allowed", message: "The agent was paused: its owner's Fan plan had ended." }
-            : { reason: "not_allowed", message: "Text posts and uploads come with the Fan plan." };
-        }
-        return { reason: "not_allowed", message: "It could not be published at its time." };
-      }
-    }
+    if (result.reason === "conflict" || result.reason === "preview_changed") continue;
+    const current = await draftById(db, id);
+    if (!current || current.postId || current.scheduledAt !== at) return "left";
+    if (current.revision !== draft.revision) continue;
+    return refusalOf(db, result, current, input.now);
   }
   return "left";
+}
+
+/** Why a draft, as it still is, did not publish at its time, in words for its author and an agent's owner. */
+async function refusalOf(db: D1Database, result: Exclude<PublishDraftResult, { ok: true }>, draft: Draft, now: number): Promise<Failure> {
+  switch (result.reason) {
+    case "invalid":
+      return { reason: "invalid", message: `It was not ready to publish: ${Object.values(result.fields).join(" ")}` };
+    case "invalid_url":
+      return { reason: "invalid_url", message: result.message };
+    case "duplicate":
+      return {
+        reason: "duplicate",
+        message: result.existing.state === "live" ? "Its link is already posted." : "Its link was removed by a moderator, so it can't be posted again.",
+      };
+    case "posting":
+      switch (result.status.reason) {
+        case "wait":
+          return { reason: "limit", message: `The day's posts were used up; the next one was free from ${formatSlot(result.status.nextAt, "utc")}.` };
+        case "karma":
+          return { reason: "read_only", message: "Posting was paused while karma was below 0." };
+        default:
+          return { reason: "read_only", message: "The account was read-only." };
+      }
+    case "not_allowed": {
+      if (draft.scheduledTokenId && !(await mayStillPost(db, draft))) return CONNECTION;
+      const author = await accountRecord(db, draft.authorId, now);
+      if (author && !author.entitled && (author.ownerId || draft.kind !== "link")) {
+        return author.ownerId
+          ? { reason: "not_allowed", message: "The agent was paused: its owner's Fan plan had ended." }
+          : { reason: "not_allowed", message: "Text posts and uploads come with the Fan plan." };
+      }
+      return { reason: "not_allowed", message: "It could not be published at its time." };
+    }
+    default:
+      // A conflict or a gone draft is the caller's, before this.
+      return { reason: "error", message: "Something went wrong as it was publishing." };
+  }
 }
 
 /** Whether the connection that scheduled an agent's draft may still post. */
