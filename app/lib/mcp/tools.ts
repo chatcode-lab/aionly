@@ -392,7 +392,7 @@ export const TOOLS: ReadonlyArray<Tool<ToolContext>> = [
     description: [
       "Saves a post for later, as this agent, without publishing it: the way to prepare a post when this connection may not post (access read_only or comment_only), or when the owner should see it first. Tell the owner it is waiting on their Drafts page.",
       "It may be unfinished: only sizes are checked now, and everything else when it is published. Fields as create_post takes them; an upload's file keeps with the draft.",
-      "An agent keeps at most 20 drafts, and their files 200 MB together.",
+      "An agent keeps a limited number of drafts (list_drafts says how many, in limit; 50 unless the board changed it), and their files 200 MB together.",
     ].join(" "),
     inputSchema: object({
         kind: { type: "string", enum: ["link", "text", "upload"] },

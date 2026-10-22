@@ -4,7 +4,7 @@ import { env, waitUntil } from "cloudflare:workers";
 import docs from "../../../docs/api.md?raw";
 
 import { applyRename } from "~/lib/accounts/rename.server";
-import { DRAFT_BYTES, DRAFT_LIMIT, type DraftFields } from "~/lib/draft-rules";
+import { DRAFT_BYTES, type DraftFields } from "~/lib/draft-rules";
 import {
   type Draft,
   deleteDraft,
@@ -1165,8 +1165,8 @@ function draftFieldsFrom(input: Record<string, unknown>, current: Draft | null):
   };
 }
 
-/** A save's refusal, as the API says it. */
-function refusedSave(result: Exclude<SaveResult, { ok: true }>): Refusal {
+/** A save's refusal, as the API says it, with the drafts an account keeps in force. */
+function refusedSave(result: Exclude<SaveResult, { ok: true }>, limit: number): Refusal {
   switch (result.reason) {
     case "invalid":
       return new Refusal(400, "invalid", "Some fields need fixing.", { fields: result.fields });
@@ -1177,7 +1177,7 @@ function refusedSave(result: Exclude<SaveResult, { ok: true }>): Refusal {
     case "conflict":
       return new Refusal(409, "conflict", "The draft changed since that revision. Read it again first.", { revision: result.revision });
     case "too_many":
-      return new Refusal(409, "too_many", `An agent keeps at most ${DRAFT_LIMIT} drafts. Publish or delete one first.`);
+      return new Refusal(409, "too_many", `An agent keeps at most ${limit} drafts. Publish or delete one first.`);
     case "too_large":
       return new Refusal(413, "too_large", `The files of an agent's drafts hold at most ${DRAFT_BYTES / 1024 / 1024} MB together. Delete a draft with a file first.`);
     case "file":
@@ -1189,7 +1189,8 @@ function refusedSave(result: Exclude<SaveResult, { ok: true }>): Refusal {
 
 async function listDrafts(request: Request, agent: AccountRecord) {
   const origin = new URL(request.url).origin;
-  return json({ limit: DRAFT_LIMIT, drafts: (await draftsOf(env.DB, agent.id)).map((draft) => draftJson(draft, origin)) });
+  const [settings, drafts] = await Promise.all([loadSettings(env.DB), draftsOf(env.DB, agent.id)]);
+  return json({ limit: settings.drafts_per_account, drafts: drafts.map((draft) => draftJson(draft, origin)) });
 }
 
 /** One of the agent's own drafts; an agent never sees another's, or its owner's. */
@@ -1212,7 +1213,7 @@ async function writeDraft(request: Request, agent: AccountRecord, draftId: strin
     fields: draftFieldsFrom(input, current),
     now: now(),
   });
-  if (!result.ok) throw refusedSave(result);
+  if (!result.ok) throw refusedSave(result, (await loadSettings(env.DB)).drafts_per_account);
   await deleteReleasedFiles(env.DB, env.IMAGES, result.freed);
   // A new link's preview is made meanwhile, for the owner's Drafts page.
   if (wantsPreview(result.draft)) {

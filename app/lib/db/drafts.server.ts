@@ -1,6 +1,6 @@
 import { type Picture, storedGallery } from "../gallery";
 import { newId, newPostId } from "../ids";
-import { cleanDraft, DRAFT_BYTES, DRAFT_LIMIT, type DraftFields, draftProblems } from "../draft-rules";
+import { cleanDraft, DRAFT_BYTES, DRAFTS_LISTED, type DraftFields, draftProblems } from "../draft-rules";
 import { type PostChoice, parsePostChoice, type PostReplies } from "../replies";
 import type { StoredSnapshot } from "../images.server";
 import { type CheckedLink, checkLink } from "../submit/check.server";
@@ -12,6 +12,7 @@ import { mediaTypeOf } from "../uploads";
 import { accountRecord, participantCondition } from "./accounts.server";
 import { deleteReleasedFiles, releasedKeys, releaseUnusedDraftFiles } from "./draft-files.server";
 import { linkMentions } from "./mentions.server";
+import { settingSql } from "./setting-sql.server";
 import { type Existing, type NewPost, postingStatus, type PostingStatus, publishPost } from "./submit.server";
 
 /**
@@ -167,7 +168,7 @@ export async function draftsOf(db: D1Database, authorId: string): Promise<Draft[
   const { results } = await db
     .prepare(
       `SELECT * FROM drafts WHERE author_id = ?1 AND post_id IS NULL
-       ORDER BY scheduled_at IS NULL, scheduled_at, updated_at DESC, id DESC LIMIT ${DRAFT_LIMIT * 2}`,
+       ORDER BY scheduled_at IS NULL, scheduled_at, updated_at DESC, id DESC LIMIT ${DRAFTS_LISTED}`,
     )
     .bind(authorId)
     .all<DraftRow>();
@@ -329,7 +330,7 @@ export async function saveDraft(
           `INSERT INTO drafts (id, author_id, kind, url, origin, title, description, replies,
              media_key, media_type, media_width, media_height, media_duration, poster_key, created_at, updated_at, pictures)
            SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15, ?16
-           WHERE (SELECT COUNT(*) FROM drafts WHERE author_id = ?2 AND post_id IS NULL) < ${DRAFT_LIMIT}
+           WHERE (SELECT COUNT(*) FROM drafts WHERE author_id = ?2 AND post_id IS NULL) < ${settingSql("drafts_per_account")}
              AND ${fileHolds(9, "media", "media_key")} AND ${fileHolds(14, "post", "poster_key")} AND ${picturesHold}
              AND ${bytesAfterSql(1, 2, 9, 14, 16)} <= ${DRAFT_BYTES} AND ${LIVE_AUTHOR}`,
         )
@@ -363,10 +364,10 @@ export async function saveDraft(
     if (((await sizeAfter())?.bytes ?? 0) > DRAFT_BYTES) return { ok: false, reason: "too_large" };
     if (!current) {
       const count = await db
-        .prepare(`SELECT COUNT(*) AS n FROM drafts WHERE author_id = ?1 AND post_id IS NULL`)
+        .prepare(`SELECT COUNT(*) >= ${settingSql("drafts_per_account")} AS full FROM drafts WHERE author_id = ?1 AND post_id IS NULL`)
         .bind(input.authorId)
-        .first<{ n: number }>();
-      return { ok: false, reason: (count?.n ?? 0) >= DRAFT_LIMIT ? "too_many" : "file" };
+        .first<{ full: number }>();
+      return { ok: false, reason: count?.full ? "too_many" : "file" };
     }
     const now = await draftById(db, id);
     if (!now) return { ok: false, reason: "not_found" };

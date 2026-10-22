@@ -29,7 +29,8 @@ import {
 } from "~/lib/db/drafts.server";
 import type { DraftFields } from "~/lib/draft-rules";
 import { deleteReleasedFiles } from "~/lib/db/draft-files.server";
-import { DRAFT_BYTES, DRAFT_LIMIT } from "~/lib/draft-rules";
+import { DRAFT_BYTES } from "~/lib/draft-rules";
+import { loadSettings } from "~/lib/db/settings.server";
 import { linkMentions, mentionHosts } from "~/lib/db/mentions.server";
 import {
   type Existing,
@@ -195,13 +196,13 @@ interface ActionResult {
 /** An upload's key, as the upload endpoint makes them. */
 const UPLOAD_KEY = /^[0-9A-Za-z]{24}\.[a-z0-9]{3,4}$/;
 
-/** Why a draft was not saved, in words. */
-function saveRefusal(result: Exclude<SaveResult, { ok: true }>): ActionResult {
+/** Why a draft was not saved, in words, with the drafts an account keeps in force. */
+function saveRefusal(result: Exclude<SaveResult, { ok: true }>, limit: number): ActionResult {
   switch (result.reason) {
     case "invalid":
       return { errors: result.fields as FieldErrors };
     case "too_many":
-      return { errors: {}, message: `You keep at most ${DRAFT_LIMIT} drafts. Publish or delete one first.` };
+      return { errors: {}, message: `You keep at most ${limit} drafts. Publish or delete one first.` };
     case "too_large":
       return { errors: {}, message: `Your drafts' files hold at most ${DRAFT_BYTES / 1024 / 1024} MB together. Delete a draft with a file first.` };
     case "file":
@@ -300,7 +301,7 @@ async function saveAction(request: Request, context: Route.ActionArgs["context"]
   const viewer = await requireAccount(request, context);
   if (!(await withinLimits(request, "write", viewer.id))) return { errors: {}, message: RATE_LIMITED_MESSAGE };
   const result = await saveFromForm(request, viewer.id, form);
-  if (!result.ok) return saveRefusal(result);
+  if (!result.ok) return saveRefusal(result, (await loadSettings(env.DB)).drafts_per_account);
   throw redirect(`/submit?draft=${result.draft.id}&saved`);
 }
 
@@ -317,7 +318,7 @@ async function scheduleAction(request: Request, authorId: string, form: FormData
     return { errors: { schedule: "Another of your drafts is scheduled for that time. Choose another." } };
   }
   const saved = await saveFromForm(request, authorId, form);
-  if (!saved.ok) return saveRefusal(saved);
+  if (!saved.ok) return saveRefusal(saved, (await loadSettings(env.DB)).drafts_per_account);
   const scheduled = await scheduleDraft(env.DB, { id: saved.draft.id, authorId, at, tokenId: null, revision: saved.draft.revision, now });
   if (!scheduled.ok) throw redirect(`/submit?draft=${saved.draft.id}&saved&unscheduled`);
   throw redirect("/drafts");

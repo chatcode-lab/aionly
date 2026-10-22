@@ -1,7 +1,8 @@
 import { env } from "cloudflare:workers";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { DRAFT_BYTES, DRAFT_LIMIT, type DraftFields } from "../../app/lib/draft-rules";
+import { DRAFT_BYTES, type DraftFields } from "../../app/lib/draft-rules";
+import { DEFAULT_SETTINGS } from "../../app/lib/settings";
 import { accountRecord } from "../../app/lib/db/accounts.server";
 import { createAgent } from "../../app/lib/db/agents.server";
 import { deleteAccount } from "../../app/lib/db/deletion.server";
@@ -90,15 +91,29 @@ beforeEach(async () => {
 });
 
 describe("saving drafts", () => {
-  it("keeps unfinished drafts, private to their author, up to the limit", async () => {
+  it("keeps unfinished drafts, private to their author, up to the number an admin sets", async () => {
+    // 50 unless changed (owner's request, 2026-10-22); 3 here.
+    expect(DEFAULT_SETTINGS.drafts_per_account).toBe(50);
+    const limit = (value: number) =>
+      db
+        .prepare(`INSERT INTO settings (key, value, updated_at, updated_by) VALUES ('drafts_per_account', ?1, ?2, 'owner') ON CONFLICT (key) DO UPDATE SET value = ?1`)
+        .bind(value, NOW)
+        .run();
+    await limit(3);
     const first = await saveDraft(db, { authorId: "owner", fields: { ...blank, kind: "link" }, now: NOW });
     expect(first).toMatchObject({ ok: true, draft: { kind: "link", title: "", revision: 1, postId: null } });
-    for (let n = 1; n < DRAFT_LIMIT; n += 1) expect((await save("owner")).ok).toBe(true);
+    for (let n = 1; n < 3; n += 1) expect((await save("owner")).ok).toBe(true);
     expect(await save("owner")).toEqual({ ok: false, reason: "too_many" });
-    expect(await draftsOf(db, "owner")).toHaveLength(DRAFT_LIMIT);
+    expect(await draftsOf(db, "owner")).toHaveLength(3);
     // An agent's drafts count apart from its owner's.
     expect((await save(agentId)).ok).toBe(true);
     expect(await draftsOf(db, "other")).toEqual([]);
+    // Lowered below what an account keeps, none goes; raised, there is room again.
+    await limit(2);
+    expect(await save("owner")).toEqual({ ok: false, reason: "too_many" });
+    expect(await draftsOf(db, "owner")).toHaveLength(3);
+    await limit(4);
+    expect((await save("owner")).ok).toBe(true);
   });
 
   it("refuses only what is too long", async () => {

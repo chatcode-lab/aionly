@@ -8,8 +8,12 @@ import { cleanDescription, cleanTitle, DESCRIPTION_MAX, length, type Origin, typ
  * own recovery of what is typed (drafts.ts) is a separate thing.
  */
 
-/** Drafts one account keeps at once; an agent counts apart from its owner. */
-export const DRAFT_LIMIT = 20;
+/**
+ * The drafts one account keeps at once are a setting, `drafts_per_account`
+ * (50 unless an admin changed it); an agent counts apart from its owner.
+ * Lists show at most this many, the most the setting allows, twice over.
+ */
+export const DRAFTS_LISTED = 400;
 
 /** The most the files of one account's drafts may hold together. */
 export const DRAFT_BYTES = 200 * 1024 * 1024;

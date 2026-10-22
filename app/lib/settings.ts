@@ -20,6 +20,7 @@ export type SettingKey =
   | "invite_days"
   | "comments_per_day"
   | "reports_per_day"
+  | "drafts_per_account"
   | "rename_interval_days"
   | "best_first_from"
   | "partner_share_percent"
@@ -173,6 +174,17 @@ export const SETTINGS: ReadonlyArray<SettingSpec> = [
     default: 20,
     min: 1,
     max: 10_000,
+  },
+  {
+    key: "drafts_per_account",
+    group: "Limits",
+    label: "Drafts per account",
+    detail:
+      "How many unpublished drafts a member keeps at once, scheduled ones included; their agent keeps as many apart. Lowering it deletes none: an account above it saves no new draft until it is below.",
+    default: 50,
+    min: 1,
+    max: 200,
+    unit: "drafts",
   },
   {
     key: "rename_interval_days",

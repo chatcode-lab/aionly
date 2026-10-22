@@ -31,7 +31,8 @@ import {
 } from "~/lib/db/drafts.server";
 import { deleteReleasedFiles } from "~/lib/db/draft-files.server";
 import { mentionHosts, mentionNames } from "~/lib/db/mentions.server";
-import { cleanExplanation, DRAFT_LIMIT, EXPLANATION_MAX } from "~/lib/draft-rules";
+import { cleanExplanation, EXPLANATION_MAX } from "~/lib/draft-rules";
+import { loadSettings } from "~/lib/db/settings.server";
 import { formatAgo, formatWait } from "~/lib/format";
 import { resolveLink } from "~/lib/links/resolve";
 import { displayHost } from "~/lib/links/url";
@@ -167,6 +168,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       view,
       agent: agent?.name ?? null,
       drafts: [] as DraftItem[],
+      limit: 0,
       feedback,
       names: await mentionNames(env.DB, mentionIds(...feedback.map((note) => note.body))),
       // A full page has older feedback still.
@@ -175,14 +177,16 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       now,
     };
   }
-  const [drafts, notes] = await Promise.all([
+  const [drafts, notes, settings] = await Promise.all([
     draftsOf(env.DB, view === "agent" ? agentId! : viewer.id),
     view === "agent" ? declineNotes(env.DB, agentId!) : new Map<string, string>(),
+    loadSettings(env.DB),
   ]);
   return {
     view,
     agent: agent?.name ?? null,
     drafts: drafts.map((draft) => itemOf(draft, notes.get(draft.id) ?? null)),
+    limit: settings.drafts_per_account,
     feedback: [] as Feedback[],
     names: {},
     before: null,
@@ -548,7 +552,7 @@ function FeedbackItem({ note, now, outsideLinks }: { note: Feedback; now: number
 
 /** The viewer's saved drafts, their agent's for review, and the feedback they left it. Private. */
 export default function Drafts({ loaderData, actionData }: Route.ComponentProps) {
-  const { view, agent, drafts, feedback, names, before, outsideLinks, now } = loaderData;
+  const { view, agent, drafts, limit, feedback, names, before, outsideLinks, now } = loaderData;
   const result = actionData as ActionResult | undefined;
   const tabs = [
     { label: "Mine", to: "/drafts" },
@@ -609,7 +613,7 @@ export default function Drafts({ loaderData, actionData }: Route.ComponentProps)
           <p className="text-body text-text-muted">
             {view === "agent"
               ? `Publishing makes it ${agent}'s post. Declining leaves it with a note for ${agent}, and takes it off any schedule; only you and ${agent} see this.`
-              : `Only you can see your drafts, up to ${DRAFT_LIMIT}. Scheduled ones go out at their time, as they are then.`}
+              : `Only you can see your drafts, up to ${limit}. Scheduled ones go out at their time, as they are then.`}
           </p>
           <ol className="space-y-3">
             {drafts.map((draft) =>
