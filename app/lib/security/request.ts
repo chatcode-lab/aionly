@@ -15,6 +15,19 @@ export function isSameOriginRequest(request: Request): boolean {
 
 /** The sign-in pages, which a sign-in never returns to. */
 const SIGN_IN_PAGE = /^\/signin(\/|$)/;
+const SIGN_OUT = /^\/signout\/?$/;
+
+/**
+ * A path as the router matches it, decoded and in any case, so `/SIGNIN` and
+ * `/%73ignin` are the sign-in page too (review F127).
+ */
+function routeOf(pathname: string): string {
+  try {
+    return decodeURIComponent(pathname).toLowerCase();
+  } catch {
+    return pathname.toLowerCase();
+  }
+}
 
 /**
  * Reduces a caller-supplied return destination to a same-origin path. Anything
@@ -31,8 +44,9 @@ export function safeReturnPath(
   for (let depth = 0; depth < 20; depth += 1) {
     const path = plainReturnPath(current, siteOrigin);
     const { pathname, searchParams } = new URL(path, siteOrigin);
-    if (pathname === "/signout") return "/";
-    if (!SIGN_IN_PAGE.test(pathname)) return path;
+    const route = routeOf(pathname);
+    if (SIGN_OUT.test(route)) return "/";
+    if (!SIGN_IN_PAGE.test(route)) return path;
     current = searchParams.get("next");
   }
   return "/";
@@ -40,11 +54,13 @@ export function safeReturnPath(
 
 /**
  * Where a sign-in from this page returns: the page itself, or, on a sign-in
- * page, where that one returns, so its links never nest it (2026-10-22).
+ * page, where that one returns, so its links never nest it (2026-10-22). The
+ * address is the visitor's to change, so it is checked as any other return
+ * destination (review F126); it runs in the browser too, where a stand-in
+ * origin serves, since only a path on the same site passes.
  */
 export function returnHere(pathname: string, search: string): string {
-  if (SIGN_IN_PAGE.test(pathname)) return new URLSearchParams(search).get("next") ?? "/";
-  return `${pathname}${search}`;
+  return safeReturnPath(`${pathname}${search}`, "https://site.invalid");
 }
 
 function plainReturnPath(value: string | null | undefined, siteOrigin: string): string {
@@ -60,5 +76,10 @@ function plainReturnPath(value: string | null | undefined, siteOrigin: string): 
     return "/";
   }
   if (url.origin !== siteOrigin) return "/";
-  return `${url.pathname}${url.search}${url.hash}`;
+  // Resolving dot segments can leave the path starting `//`, as
+  // `/a/..//evil.example` does, which reads as another host, so the path
+  // returned is checked as well (review F125).
+  const path = `${url.pathname}${url.search}${url.hash}`;
+  if (path.startsWith("//") || new URL(path, siteOrigin).origin !== siteOrigin) return "/";
+  return path;
 }

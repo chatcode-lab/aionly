@@ -196,6 +196,12 @@ describe("safeReturnPath", () => {
     "/\n/evil.example",
     "https://evil.example/",
     "javascript:alert(1)",
+    // Paths that come to start `//` once their dot segments resolve (review F125).
+    "/a/..//evil.example/landing",
+    "/%2e%2e//evil.example/landing",
+    "/a/%2E%2E//evil.example",
+    "/.//evil.example",
+    "/%2e//evil.example",
   ])("falls back to / for %j", (value) => {
     expect(safeReturnPath(value, SITE)).toBe("/");
   });
@@ -212,15 +218,45 @@ describe("safeReturnPath", () => {
     expect(safeReturnPath(`/signin/email?${new URLSearchParams({ next: "/settings" })}`, SITE)).toBe("/settings");
     expect(safeReturnPath("/signin?tab=member", SITE)).toBe("/");
     expect(safeReturnPath(nest("//evil.example", 3), SITE)).toBe("/");
+    for (const depth of [1, 3, 16]) {
+      expect(safeReturnPath(nest("/a/..//evil.example/landing", depth), SITE)).toBe("/");
+      expect(safeReturnPath(nest("/%2e%2e//evil.example/landing", depth), SITE)).toBe("/");
+    }
     expect(safeReturnPath("/signout", SITE)).toBe("/");
+    expect(safeReturnPath("/SignOut/", SITE)).toBe("/");
     // Only the sign-in pages themselves.
     expect(safeReturnPath("/signing-off", SITE)).toBe("/signing-off");
+  });
+
+  it("knows the sign-in page by any address the router serves it at (review F127)", () => {
+    const nestAt = (page: string, inner: string, times: number) => {
+      let path = inner;
+      for (let n = 0; n < times; n += 1) path = `${page}?${new URLSearchParams({ next: path })}`;
+      return path;
+    };
+    for (const page of ["/SIGNIN", "/%73ignin", "/SignIn/", "/%53IGNIN/email"]) {
+      expect(safeReturnPath(nestAt(page, "/p/abc", 1), SITE)).toBe("/p/abc");
+      expect(safeReturnPath(nestAt(page, "/p/abc", 21), SITE)).toBe("/");
+    }
+    // A malformed escape is no sign-in page, and still a path on this site.
+    expect(safeReturnPath("/%E0%A4%A", SITE)).toBe("/%E0%A4%A");
   });
 
   it("makes a sign-in page's own links return where it does, never nesting it", () => {
     expect(returnHere("/p/abc", "?sort=top")).toBe("/p/abc?sort=top");
     expect(returnHere("/signin", `?${new URLSearchParams({ next: "/p/abc", tab: "member" })}`)).toBe("/p/abc");
+    expect(returnHere("/signin", `?${new URLSearchParams({ next: "/signin?next=%2Fp%2Fabc" })}`)).toBe("/p/abc");
+    expect(returnHere("/SIGNIN", `?${new URLSearchParams({ next: "/p/abc" })}`)).toBe("/p/abc");
     expect(returnHere("/signin", "")).toBe("/");
+  });
+
+  it.each([
+    "https://evil.example/login",
+    "//evil.example/login",
+    "http://[",
+    "/a/..//evil.example/landing",
+  ])("gives a sign-in page's links / for the destination %j it refuses (review F126)", (next) => {
+    expect(returnHere("/signin", `?${new URLSearchParams({ next })}`)).toBe("/");
   });
 });
 

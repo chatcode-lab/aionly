@@ -79,6 +79,27 @@ test("Continue with Google leaves for Google with a callback to this site", asyn
   expect(response.headers()["set-cookie"]).toMatch(/better-auth\.state=/);
 });
 
+test("signed in, the sign-in page sends you on, never to another site, at any address of its own (reviews F125, F127)", async ({ page, context, account }) => {
+  await account.signIn(context);
+  const nest = (at: string, inner: string, times: number) => {
+    let path = inner;
+    for (let n = 0; n < times; n += 1) path = `${at}?${new URLSearchParams({ next: path })}`;
+    return path;
+  };
+  for (const [next, to] of [
+    ["/a/..//evil.example/landing", "/"],
+    ["/%2e%2e//evil.example/landing", "/"],
+    [nest("/signin", "/a/..//evil.example/landing", 3), "/"],
+    [nest("/SIGNIN", "/@quiet_otter_482", 3), "/@quiet_otter_482"],
+    [nest("/SIGNIN", "/@quiet_otter_482", 21), "/"],
+    [nest("/%73ignin", "/@quiet_otter_482", 21), "/"],
+  ]) {
+    const response = await page.request.get(`/signin?${new URLSearchParams({ next })}`, { maxRedirects: 0 });
+    expect(response.status()).toBe(302);
+    expect(response.headers().location).toBe(to);
+  }
+});
+
 test("sign-in from another site is refused", async ({ page }) => {
   const response = await page.request.post("/signin", {
     form: { next: "/" },
@@ -107,6 +128,21 @@ test.describe("inside an app's browser", () => {
     await expect(dialog.getByRole("button", { name: "Copy link" })).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Copy draft" })).toBeVisible();
     await expect(dialog.getByRole("button", { name: "Continue with Google" })).toHaveCount(0);
+  });
+
+  test("on the sign-in page, the dialog's link is where the page returns, never a destination it refuses (review F126)", async ({ page, context, baseURL }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    for (const [next, copied] of [
+      ["https://evil.example/login", "/"],
+      ["//evil.example/login", "/"],
+      ["http://[", "/"],
+      [`/signin?${new URLSearchParams({ next: "/@quiet_otter_482?tab=posts" })}`, "/@quiet_otter_482?tab=posts"],
+    ]) {
+      await open(page, `/signin?${new URLSearchParams({ next })}`);
+      await page.locator("header").getByRole("link", { name: "Sign in" }).click();
+      await page.getByRole("dialog").getByRole("button", { name: "Copy link" }).click();
+      expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(new URL(copied, baseURL).href);
+    }
   });
 });
 
