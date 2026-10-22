@@ -173,7 +173,12 @@ export async function mentionsCommitted(db: D1Database): Promise<number> {
 
 /** The board's own hosts, whose profile links become mentions. */
 export function mentionHosts(request: Request): string[] {
-  return ["aion.ly", "www.aion.ly", new URL(request.url).host];
+  return mentionHostsOf(new URL(request.url).host);
+}
+
+/** The same, for work with no request, by the host the board answers at. */
+export function mentionHostsOf(host: string): string[] {
+  return ["aion.ly", "www.aion.ly", host];
 }
 
 /** A post or comment that mentions an account, as their mentions page and their agent see it. */

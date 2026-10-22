@@ -226,6 +226,31 @@ describe("drafts over HTTP", () => {
     expect(((await (await call("GET", "drafts")).json()) as { drafts: unknown[] }).drafts).toEqual([]);
   });
 
+  it("are scheduled by a connection that may post, and taken off by any (owner's request, 2026-10-22)", async () => {
+    const saved = (await (await call("POST", "drafts", draftBody)).json()) as { id: string };
+    // A quarter hour at least fifteen minutes from now, as ISO 8601.
+    const at = Math.ceil(Date.now() / 1000 / 900) * 900 + 900;
+    const iso = new Date(at * 1000).toISOString();
+    await asToken("comment_only");
+    expect(await (await call("POST", `drafts/${saved.id}/schedule`, { at: iso })).json()).toMatchObject({ error: "comment_only_token" });
+    await asToken("read_write");
+    const bad = await call("POST", `drafts/${saved.id}/schedule`, { at: iso.replace("Z", "") });
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toMatchObject({ error: "invalid", fields: { at: expect.stringContaining("ISO 8601") } });
+    expect(await (await call("POST", `drafts/${saved.id}/schedule`, { at: at + 60 })).json()).toMatchObject({ error: "invalid", fields: { at: expect.any(String) } });
+    const scheduled = await call("POST", `drafts/${saved.id}/schedule`, { at: iso, revision: 1 });
+    expect(scheduled.status, await scheduled.clone().text()).toBe(200);
+    expect(await scheduled.json()).toMatchObject({ id: saved.id, scheduled_at: at, schedule_failure: null });
+    const other = (await (await call("POST", "drafts", draftBody)).json()) as { id: string };
+    expect(await (await call("POST", `drafts/${other.id}/schedule`, { at })).json()).toMatchObject({ error: "time_taken" });
+    expect(((await (await call("GET", "drafts")).json()) as { drafts: Array<{ id: string }> }).drafts.map((draft) => draft.id)).toEqual([saved.id, other.id]);
+    await asToken("read_only");
+    const off = await call("DELETE", `drafts/${saved.id}/schedule`);
+    expect(off.status, await off.clone().text()).toBe(200);
+    expect(await off.json()).toMatchObject({ id: saved.id, scheduled_at: null });
+    expect((await call("DELETE", "drafts/nope/schedule")).status).toBe(404);
+  });
+
   it("stay the agent's own, kept while its owner is banned, and deleted for good", async () => {
     await post("theirs", { author: "friend" });
     await db.prepare(`UPDATE profiles SET ban_reason = 'Test ban', banned_at = ?1 WHERE user_id = 'owner'`).bind(NOW).run();

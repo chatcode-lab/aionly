@@ -7,6 +7,7 @@ import { type CheckedLink, checkLink } from "../submit/check.server";
 import { readReceipt } from "../submit/receipt.server";
 import { cleanDescription, cleanTitle, DESCRIPTION_MAX, descriptionProblem, type Origin, type PostKind, TEXT_BODY_MAX, titleProblem } from "../submit/rules";
 import type { Aspect, Provider } from "../links/types";
+import { formatSlot, scheduleProblem } from "../schedule";
 import { mediaTypeOf } from "../uploads";
 import { accountRecord, participantCondition } from "./accounts.server";
 import { deleteReleasedFiles, releasedKeys, releaseUnusedDraftFiles } from "./draft-files.server";
@@ -49,6 +50,21 @@ export interface Draft {
   postId: string | null;
   /** Its link's preview, made on asking, while the link is the one it was made for. */
   preview: DraftPreview | null;
+  /** When it is to go out on its own; null while it waits for its author. */
+  scheduledAt: number | null;
+  /** The connection an agent scheduled it through; null for a member's own. */
+  scheduledTokenId: string | null;
+  /** Why it did not go out at its time, until it is scheduled again. */
+  scheduleFailure: ScheduleFailure | null;
+}
+
+/** Why a scheduled draft stayed a draft (see publishScheduledDrafts). */
+export interface ScheduleFailure {
+  /** The time it was due. */
+  at: number;
+  reason: "invalid" | "invalid_url" | "duplicate" | "limit" | "read_only" | "connection" | "not_allowed" | "error";
+  /** In words, for its author and an agent's owner alike. */
+  message: string;
 }
 
 /** A link draft's preview, as the Submit check found its link (see saveDraftPreview). */
@@ -88,6 +104,18 @@ interface DraftRow {
   post_id: string | null;
   preview: string | null;
   preview_thumb_key: string | null;
+  scheduled_at: number | null;
+  scheduled_token_id: string | null;
+  schedule_failure: string | null;
+}
+
+function failureOf(value: string | null): ScheduleFailure | null {
+  if (!value) return null;
+  try {
+    return JSON.parse(value) as ScheduleFailure;
+  } catch {
+    return null;
+  }
 }
 
 /** A stored preview, while the draft's link is still the one it was made for. */
@@ -123,6 +151,9 @@ function toDraft(row: DraftRow): Draft {
     declinedAt: row.declined_at,
     postId: row.post_id,
     preview: previewOf(row),
+    scheduledAt: row.scheduled_at,
+    scheduledTokenId: row.scheduled_token_id,
+    scheduleFailure: failureOf(row.schedule_failure),
   };
 }
 
@@ -131,10 +162,13 @@ export async function draftById(db: D1Database, id: string): Promise<Draft | nul
   return row ? toDraft(row) : null;
 }
 
-/** An account's drafts not yet published, the latest change first. */
+/** An account's drafts not yet published: those scheduled, the soonest first, then the latest change first. */
 export async function draftsOf(db: D1Database, authorId: string): Promise<Draft[]> {
   const { results } = await db
-    .prepare(`SELECT * FROM drafts WHERE author_id = ?1 AND post_id IS NULL ORDER BY updated_at DESC, id DESC LIMIT ${DRAFT_LIMIT * 2}`)
+    .prepare(
+      `SELECT * FROM drafts WHERE author_id = ?1 AND post_id IS NULL
+       ORDER BY scheduled_at IS NULL, scheduled_at, updated_at DESC, id DESC LIMIT ${DRAFT_LIMIT * 2}`,
+    )
     .bind(authorId)
     .all<DraftRow>();
   return results.map(toDraft);
@@ -489,6 +523,22 @@ export type PublishDraftResult =
   | { ok: false; reason: "duplicate"; existing: Existing }
   | { ok: false; reason: "posting"; status: Exclude<PostingStatus, { allowed: true }> };
 
+/**
+ * What a draft still lacks to be published, by field: the checks that need
+ * nothing but the draft. Publishing checks the rest, its link among them.
+ */
+export function readyProblems(draft: Draft): Record<string, string> {
+  const problems: Record<string, string> = {};
+  const titleError = titleProblem(cleanTitle(draft.title));
+  const descriptionError = descriptionProblem(cleanDescription(draft.description), draft.kind === "text" ? TEXT_BODY_MAX : DESCRIPTION_MAX);
+  if (titleError) problems.title = titleError;
+  if (descriptionError) problems.description = descriptionError;
+  if (draft.kind === "link" && !draft.url) problems.url = "Add the link first.";
+  if (draft.kind === "upload" && !draft.media) problems.upload = "Add the file first.";
+  if (draft.kind !== "text" && !draft.origin) problems.origin = 'Choose "made" or "found".';
+  return problems;
+}
+
 /** A draft's choice of who may comment, as a post stores it. */
 function repliesOf(choice: PostChoice | null): { replies: PostReplies; closed: boolean } {
   if (choice === "closed") return { replies: "all", closed: true };
@@ -520,6 +570,8 @@ export async function publishDraft(
     /** This site's hosts: links to them cannot be posted, and profile links among them become mentions. */
     ownHosts: string[];
     mentionHosts: string[];
+    /** For the scheduled run: the time it was due, which it must still be due at. */
+    scheduledAt?: number;
     now: number;
   },
 ): Promise<PublishDraftResult> {
@@ -527,6 +579,7 @@ export async function publishDraft(
   if (!found || found.as !== input.as) return { ok: false, reason: "not_found" };
   const { draft } = found;
   if (draft.postId) return { ok: true, postId: draft.postId, title: draft.title, already: true };
+  if (input.scheduledAt !== undefined && draft.scheduledAt !== input.scheduledAt) return { ok: false, reason: "not_allowed" };
   // An owner publishes only the version they reviewed.
   if (found.as === "owner" && input.revision === null) return { ok: false, reason: "conflict", revision: draft.revision };
   if (input.revision !== null && draft.revision !== input.revision) return { ok: false, reason: "conflict", revision: draft.revision };
@@ -535,14 +588,7 @@ export async function publishDraft(
   if (!author || author.deleted) return { ok: false, reason: "not_found" };
   const title = cleanTitle(draft.title);
   const description = cleanDescription(draft.description);
-  const problems: Record<string, string> = {};
-  const titleError = titleProblem(title);
-  const descriptionError = descriptionProblem(description, draft.kind === "text" ? TEXT_BODY_MAX : DESCRIPTION_MAX);
-  if (titleError) problems.title = titleError;
-  if (descriptionError) problems.description = descriptionError;
-  if (draft.kind === "link" && !draft.url) problems.url = "Add the link first.";
-  if (draft.kind === "upload" && !draft.media) problems.upload = "Add the file first.";
-  if (draft.kind !== "text" && !draft.origin) problems.origin = 'Choose "made" or "found".';
+  const problems = readyProblems(draft);
   if (Object.keys(problems).length > 0) return { ok: false, reason: "invalid", fields: problems };
   const origin: Origin = draft.kind === "text" ? "made" : draft.origin!;
 
@@ -554,7 +600,7 @@ export async function publishDraft(
     description: await linkMentions(db, description, input.mentionHosts),
     // Choosing who may comment is the plan's; without it, everyone may.
     ...repliesOf(author.entitled ? draft.replies : null),
-    draft: { id: draft.id, revision: draft.revision },
+    draft: { id: draft.id, revision: draft.revision, ...(input.scheduledAt !== undefined ? { scheduledAt: input.scheduledAt } : {}) },
     now: input.now,
   };
 
@@ -623,6 +669,198 @@ export async function publishDraft(
   if (now?.postId) return { ok: true, postId: now.postId, title: now.title, already: true };
   if (now && now.revision !== draft.revision) return { ok: false, reason: "conflict", revision: now.revision };
   return { ok: false, reason: "not_allowed" };
+}
+
+export type ScheduleResult =
+  | { ok: true; draft: Draft }
+  | { ok: false; reason: "not_found" | "taken" }
+  | { ok: false; reason: "invalid"; fields: Record<string, string> }
+  | { ok: false; reason: "conflict"; revision: number };
+
+/**
+ * Schedules the author's own draft for a time on the quarter hour, or moves
+ * it to another, at the revision they read when they name one. It must be
+ * ready as far as the draft alone tells; the rest is checked when it goes
+ * out, and changes saved meanwhile go out with it. An agent schedules
+ * through a connection that may post, and the draft goes out only while
+ * that one still may. One draft of an account to a time. A failure noted
+ * at its last time goes.
+ */
+export async function scheduleDraft(
+  db: D1Database,
+  input: { id: string; authorId: string; at: number; tokenId: string | null; revision: number | null; now: number },
+): Promise<ScheduleResult> {
+  const timeError = scheduleProblem(input.at, input.now);
+  if (timeError) return { ok: false, reason: "invalid", fields: { at: timeError } };
+  const current = await draftById(db, input.id);
+  if (!current || current.authorId !== input.authorId || current.postId) return { ok: false, reason: "not_found" };
+  if (input.revision !== null && current.revision !== input.revision) return { ok: false, reason: "conflict", revision: current.revision };
+  const problems = readyProblems(current);
+  if (Object.keys(problems).length > 0) return { ok: false, reason: "invalid", fields: problems };
+  const written = await db
+    .prepare(
+      `UPDATE drafts SET scheduled_at = ?3, scheduled_token_id = ?4, schedule_failure = NULL
+       WHERE id = ?1 AND author_id = ?2 AND post_id IS NULL AND (?5 IS NULL OR revision = ?5) AND NOT ${TAKEN} AND ${LIVE_AUTHOR}
+         -- An agent's names the connection it goes out through.
+         AND (?4 IS NOT NULL OR EXISTS (SELECT 1 FROM profiles WHERE user_id = ?2 AND owner_id IS NULL))`,
+    )
+    .bind(input.id, input.authorId, input.at, input.tokenId, input.revision)
+    .run();
+  const now = await draftById(db, input.id);
+  if (!now || now.authorId !== input.authorId || now.postId) return { ok: false, reason: "not_found" };
+  if (written.meta.changes > 0) return { ok: true, draft: now };
+  if (input.revision !== null && now.revision !== input.revision) return { ok: false, reason: "conflict", revision: now.revision };
+  return { ok: false, reason: (await scheduleTaken(db, { ...input, exceptId: input.id })) ? "taken" : "not_found" };
+}
+
+/** Another of the author's (?2) drafts than ?1 is scheduled for the time ?3. */
+const TAKEN = `EXISTS (SELECT 1 FROM drafts AS other
+  WHERE other.author_id = ?2 AND other.scheduled_at = ?3 AND other.post_id IS NULL AND other.id IS NOT ?1)`;
+
+/** Whether another of the author's drafts holds the time: one draft of an account to a time. */
+export async function scheduleTaken(db: D1Database, input: { authorId: string; at: number; exceptId: string | null }): Promise<boolean> {
+  const row = await db.prepare(`SELECT ${TAKEN} AS taken`).bind(input.exceptId, input.authorId, input.at).first<{ taken: number }>();
+  return Boolean(row?.taken);
+}
+
+/** Takes the author's own draft off the schedule, and any failure noted: it stays a draft. */
+export async function unscheduleDraft(db: D1Database, input: { id: string; authorId: string }): Promise<boolean> {
+  const written = await db
+    .prepare(
+      `UPDATE drafts SET scheduled_at = NULL, scheduled_token_id = NULL, schedule_failure = NULL
+       WHERE id = ?1 AND author_id = ?2 AND post_id IS NULL`,
+    )
+    .bind(input.id, input.authorId)
+    .run();
+  return written.meta.changes > 0;
+}
+
+/** Scheduled drafts one run publishes at most; the rest wait for the next. */
+const SCHEDULED_PER_RUN = 25;
+
+type Failure = Omit<ScheduleFailure, "at">;
+
+/**
+ * Publishes the drafts that are due, every quarter hour, as their authors
+ * would: each as it is then, with every check a new post gets, and an
+ * agent's only while the connection that scheduled it may post. One that
+ * cannot go out, its day's posts used up among them, stays a draft, off
+ * the schedule, with the reason kept for its author and an agent's owner.
+ * One changed while it went out is tried again; one moved, taken off the
+ * schedule, or published meanwhile is left as it now is. Answers how many
+ * went out.
+ */
+export async function publishScheduledDrafts(
+  db: D1Database,
+  input: { bucket: R2Bucket; secret: string; ownHosts: string[]; mentionHosts: string[]; now: number },
+): Promise<number> {
+  const { results } = await db
+    .prepare(
+      `SELECT id, scheduled_at FROM drafts WHERE scheduled_at <= ?1 AND post_id IS NULL
+       ORDER BY scheduled_at, id LIMIT ${SCHEDULED_PER_RUN}`,
+    )
+    .bind(input.now)
+    .all<{ id: string; scheduled_at: number }>();
+  let published = 0;
+  for (const due of results) {
+    let outcome: Failure | "published" | "left";
+    try {
+      outcome = await publishDue(db, due.id, due.scheduled_at, input);
+    } catch (error) {
+      console.error("scheduled publication", due.id, error);
+      outcome = { reason: "error", message: "Something went wrong as it was publishing." };
+    }
+    if (outcome === "published") published += 1;
+    else if (outcome !== "left") {
+      await db
+        .prepare(
+          `UPDATE drafts SET scheduled_at = NULL, scheduled_token_id = NULL, schedule_failure = ?3
+           WHERE id = ?1 AND post_id IS NULL AND scheduled_at = ?2`,
+        )
+        .bind(due.id, due.scheduled_at, JSON.stringify({ at: due.scheduled_at, ...outcome } satisfies ScheduleFailure))
+        .run();
+    }
+  }
+  return published;
+}
+
+/** One due draft published, left as another hand left it, or why it could not go out. */
+async function publishDue(
+  db: D1Database,
+  id: string,
+  at: number,
+  input: { bucket: R2Bucket; secret: string; ownHosts: string[]; mentionHosts: string[]; now: number },
+): Promise<Failure | "published" | "left"> {
+  const connection: Failure = {
+    reason: "connection",
+    message: "The connection that scheduled it may no longer post: it was revoked, or allowed less.",
+  };
+  // Changed while it went out: tried once more, as it now is; then at the next run.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const draft = await draftById(db, id);
+    if (!draft || draft.postId || draft.scheduledAt !== at) return "left";
+    if (draft.scheduledTokenId && !(await mayStillPost(db, draft))) return connection;
+    const result = await publishDraft(db, {
+      id,
+      actorId: draft.authorId,
+      as: "author",
+      revision: draft.revision,
+      bucket: input.bucket,
+      secret: input.secret,
+      ownHosts: input.ownHosts,
+      mentionHosts: input.mentionHosts,
+      scheduledAt: at,
+      now: input.now,
+    });
+    if (result.ok) return result.already ? "left" : "published";
+    switch (result.reason) {
+      case "conflict":
+      case "preview_changed":
+        continue;
+      case "not_found":
+        return "left";
+      case "invalid":
+        return { reason: "invalid", message: `It was not ready to publish: ${Object.values(result.fields).join(" ")}` };
+      case "invalid_url":
+        return { reason: "invalid_url", message: result.message };
+      case "duplicate":
+        return {
+          reason: "duplicate",
+          message: result.existing.state === "live" ? "Its link is already posted." : "Its link was removed by a moderator, so it can't be posted again.",
+        };
+      case "posting":
+        switch (result.status.reason) {
+          case "wait":
+            return { reason: "limit", message: `The day's posts were used up; the next one was free from ${formatSlot(result.status.nextAt, "utc")}.` };
+          case "karma":
+            return { reason: "read_only", message: "Posting was paused while karma was below 0." };
+          default:
+            return { reason: "read_only", message: "The account was read-only." };
+        }
+      case "not_allowed": {
+        const now = await draftById(db, id);
+        if (!now || now.postId || now.scheduledAt !== at) return "left";
+        if (now.scheduledTokenId && !(await mayStillPost(db, now))) return connection;
+        const author = await accountRecord(db, now.authorId, input.now);
+        if (author && !author.entitled && (author.ownerId || now.kind !== "link")) {
+          return author.ownerId
+            ? { reason: "not_allowed", message: "The agent was paused: its owner's Fan plan had ended." }
+            : { reason: "not_allowed", message: "Text posts and uploads come with the Fan plan." };
+        }
+        return { reason: "not_allowed", message: "It could not be published at its time." };
+      }
+    }
+  }
+  return "left";
+}
+
+/** Whether the connection that scheduled an agent's draft may still post. */
+async function mayStillPost(db: D1Database, draft: Draft): Promise<boolean> {
+  const row = await db
+    .prepare(`SELECT 1 AS ok FROM agent_tokens WHERE id = ?1 AND agent_id = ?2 AND revoked_at IS NULL AND permission = 'read_write'`)
+    .bind(draft.scheduledTokenId, draft.authorId)
+    .first<{ ok: number }>();
+  return Boolean(row);
 }
 
 /** What an owner did to their agent's work, and why, as the agent and owner read it. */
@@ -733,7 +971,9 @@ export async function declineDraft(
       .bind(feedbackId, input.id, input.ownerId, input.revision, input.explanation, input.now),
     db
       .prepare(
-        `UPDATE drafts SET declined_at = ?2, declined_revision = revision, declined_feedback_id = ?3
+        // Declining a scheduled draft also takes it off the schedule.
+        `UPDATE drafts SET declined_at = ?2, declined_revision = revision, declined_feedback_id = ?3,
+           scheduled_at = NULL, scheduled_token_id = NULL
          WHERE id = ?1 AND EXISTS (SELECT 1 FROM agent_feedback WHERE id = ?3)`,
       )
       .bind(input.id, input.now, feedbackId),

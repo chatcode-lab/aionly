@@ -7,7 +7,8 @@ import { sweepInviteClaims } from "../app/lib/db/invites.server";
 import { sweepPartnerJoins } from "../app/lib/db/partners.server";
 import { sweepDeletedIdentities } from "../app/lib/db/deletion.server";
 import { sweepUnusedDraftFiles } from "../app/lib/db/draft-files.server";
-import { sweepPublishedDrafts } from "../app/lib/db/drafts.server";
+import { publishScheduledDrafts, sweepPublishedDrafts } from "../app/lib/db/drafts.server";
+import { mentionHostsOf } from "../app/lib/db/mentions.server";
 import { sendDigests } from "../app/lib/digest/digest.server";
 import { bulkMailer, transactionalMailer } from "../app/lib/mail/mailers.server";
 import { SENDERS } from "../app/lib/mail/senders";
@@ -23,6 +24,9 @@ import { loadViewer } from "../app/lib/viewer.server";
 import { htmlToMarkdown, mainOf } from "../app/lib/views/html-markdown";
 import { markdownView, wantsMarkdown } from "../app/lib/views/markdown.server";
 import { robotsTxt, sitemapXml } from "../app/lib/views/seo.server";
+
+/** The trigger that publishes scheduled drafts, as wrangler.jsonc names it; the other is hourly. */
+const QUARTER_HOURLY = "*/15 * * * *";
 
 const requestHandler = createRequestHandler(
   () => import("virtual:react-router/server-build"),
@@ -239,13 +243,31 @@ export default {
     return OPEN_PATHS.has(new URL(request.url).pathname) ? withCors(response) : response;
   },
 
+  // Every quarter hour: publishes the drafts scheduled for then, as their
+  // authors would (owner's request, 2026-10-22).
+  //
   // Hourly: removes preview snapshots never published, sign-in states that
   // expired unused, deleted accounts' identities once they may sign up
   // again, OAuth codes and apps no longer needed, drafts published a month
   // ago, and draft files nothing uses, with every file queued for deletion;
   // and sends the digests that are due. A post its author deleted keeps
   // its files until the account goes.
-  async scheduled(_controller, workerEnv, ctx) {
+  async scheduled(controller, workerEnv, ctx) {
+    if (controller.cron === QUARTER_HOURLY) {
+      // The board's own host, for the links and mentions a post checks.
+      const host = workerEnv.SITE_ORIGIN ? new URL(workerEnv.SITE_ORIGIN) : new URL("https://aion.ly");
+      ctx.waitUntil(
+        publishScheduledDrafts(workerEnv.DB, {
+          bucket: workerEnv.IMAGES,
+          secret: workerEnv.BETTER_AUTH_SECRET,
+          ownHosts: [host.hostname],
+          mentionHosts: mentionHostsOf(host.host),
+          // Never before the quarter hour it runs for, whatever the clock says.
+          now: Math.floor(Math.max(Date.now(), controller.scheduledTime) / 1000),
+        }),
+      );
+      return;
+    }
     ctx.waitUntil(
       sweepPendingImages(workerEnv.DB, workerEnv.IMAGES, Math.floor(Date.now() / 1000)),
     );

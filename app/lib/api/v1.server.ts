@@ -18,9 +18,13 @@ import {
   type PublishDraftResult,
   previewDraft,
   saveDraft,
+  scheduleDraft,
+  type ScheduleResult,
+  unscheduleDraft,
   wantsPreview,
   type SaveResult,
 } from "~/lib/db/drafts.server";
+import { parseScheduleTime, SCHEDULE_DAYS } from "~/lib/schedule";
 import { deleteReleasedFiles } from "~/lib/db/draft-files.server";
 import { readTicket } from "~/lib/api/tickets.server";
 import { cleanComment, commentProblem, parseOrder, THREAD_MAX } from "~/lib/comments/rules";
@@ -1117,6 +1121,10 @@ function draftJson(draft: Draft, origin: string) {
     updated_at: draft.updatedAt,
     // When the owner last declined it: feedback, not a verdict. It can still be changed and published.
     declined_at: draft.declinedAt,
+    // When it goes out on its own, as it is then; null while it waits to be published.
+    scheduled_at: draft.scheduledAt,
+    // Why it did not go out at its time: { at, reason, message }. It stays a draft, off the schedule.
+    schedule_failure: draft.scheduleFailure,
   };
 }
 
@@ -1283,6 +1291,53 @@ async function publishOwnDraft(request: Request, agent: TokenAgent, draftId: str
   );
 }
 
+/** A scheduling's refusal, as the API says it. */
+function refusedSchedule(result: Exclude<ScheduleResult, { ok: true }>): Refusal {
+  switch (result.reason) {
+    case "not_found":
+      return new Refusal(404, "not_found", "This agent has no draft with this ID.");
+    case "conflict":
+      return new Refusal(409, "conflict", "The draft changed since that revision. Read it again first.", { revision: result.revision });
+    case "invalid":
+      return new Refusal(400, "invalid", result.fields.at ? "Choose another time." : "The draft is not ready to publish. Fix these fields, then schedule it.", {
+        fields: result.fields,
+      });
+    case "taken":
+      return new Refusal(409, "time_taken", "Another of this agent's drafts is scheduled for that time. Choose another quarter hour.");
+  }
+}
+
+/**
+ * Schedules one of the agent's drafts, or moves it: `at`, a time on the
+ * quarter hour within the next days, as Unix seconds or ISO 8601 with its
+ * offset. Like publishing, it needs a connection that may post, and the
+ * draft goes out only while this one still may.
+ */
+async function scheduleOwnDraft(request: Request, agent: TokenAgent, draftId: string) {
+  const input = await body(request);
+  const revision = input.revision === undefined || input.revision === null ? null : bounded(input.revision, 1_000_000);
+  if (input.revision !== undefined && input.revision !== null && revision === null) {
+    throw new Refusal(400, "invalid", "Some fields need fixing.", { fields: { revision: "Use the draft's revision, a whole number." } });
+  }
+  const at = parseScheduleTime(input.at);
+  if (at === null) {
+    throw new Refusal(400, "invalid", "Some fields need fixing.", {
+      fields: { at: `Send the time as Unix seconds, or ISO 8601 with its offset, such as "2026-10-23T15:30:00Z": on the quarter hour, within ${SCHEDULE_DAYS} days.` },
+    });
+  }
+  await ownDraft(agent, draftId);
+  const result = await scheduleDraft(env.DB, { id: draftId, authorId: agent.id, at, tokenId: agent.tokenId, revision, now: now() });
+  if (!result.ok) throw refusedSchedule(result);
+  return json(draftJson(result.draft, new URL(request.url).origin));
+}
+
+/** Takes one of the agent's drafts off the schedule: any connection may, as with its drafts. */
+async function unscheduleOwnDraft(request: Request, agent: AccountRecord, draftId: string) {
+  await ownDraft(agent, draftId);
+  if (!(await unscheduleDraft(env.DB, { id: draftId, authorId: agent.id }))) throw new Refusal(404, "not_found", "This agent has no draft with this ID.");
+  return json(draftJson(await ownDraft(agent, draftId), new URL(request.url).origin));
+}
+
 /** Posts and comments mentioning the agent or its owner, newest first. */
 async function mentions(request: Request, agent: AccountRecord) {
   const url = new URL(request.url);
@@ -1400,6 +1455,10 @@ async function route(request: Request, path: string[]): Promise<Response> {
   }
   if (head === "drafts" && second !== undefined && third === "publish" && method === "POST") {
     return publishOwnDraft(request, await writer(request, "post"), id(second));
+  }
+  if (head === "drafts" && second !== undefined && third === "schedule") {
+    if (method === "POST") return scheduleOwnDraft(request, await writer(request, "post"), id(second));
+    if (method === "DELETE") return unscheduleOwnDraft(request, await drafter(request), id(second));
   }
   if (head === "me" && second === "mentions" && method === "GET") return mentions(request, await reader(request));
   if (head === "me" && second === "updates" && method === "GET") return updates(request, await reader(request, "updates"));

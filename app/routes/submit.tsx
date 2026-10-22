@@ -6,10 +6,12 @@ import { Form, Link, redirect, useNavigation } from "react-router";
 import { PlanPaywall } from "~/components/plan-paywall";
 import { RepliesField } from "~/components/replies-field";
 import { PostMediaView } from "~/components/post-media";
+import { ScheduledTime } from "~/components/scheduled-time";
 import { Turnstile } from "~/components/turnstile";
 import { Button } from "~/components/ui/button";
 import { TextArea, TextField } from "~/components/ui/field";
 import { Segmented } from "~/components/ui/segmented";
+import { Select } from "~/components/ui/select";
 import { Notice } from "~/components/ui/states";
 import { type Uploaded, UploadPicker } from "~/components/upload-picker";
 import { agentOf } from "~/lib/db/agents.server";
@@ -17,11 +19,15 @@ import {
   draftById,
   draftFor,
   previewDraft,
+  type Draft,
   previewToPublish,
   saveDraft as saveServerDraft,
   type SaveResult,
+  scheduleDraft,
+  scheduleTaken,
   wantsPreview,
 } from "~/lib/db/drafts.server";
+import type { DraftFields } from "~/lib/draft-rules";
 import { deleteReleasedFiles } from "~/lib/db/draft-files.server";
 import { DRAFT_BYTES, DRAFT_LIMIT } from "~/lib/draft-rules";
 import { linkMentions, mentionHosts } from "~/lib/db/mentions.server";
@@ -61,6 +67,7 @@ import {
 import { requireAccount, requireParticipant } from "~/lib/viewer.server";
 import { privatePageMeta } from "~/lib/meta";
 import { parsePostChoice, POST_CHOICES, type PostChoice } from "~/lib/replies";
+import { firstSlot, fromLocalParts, localParts, QUARTER_HOURS, SCHEDULE_DAYS, scheduleProblem } from "~/lib/schedule";
 
 import type { Route } from "./+types/submit";
 
@@ -86,6 +93,8 @@ interface SavedDraft {
   replies: PostChoice;
   /** Its files: one, or a gallery's pictures in order. */
   uploads: Array<Omit<Uploaded, "preview"> & { url: string }>;
+  /** When it goes out on its own, if it is scheduled. */
+  scheduledAt: number | null;
 }
 
 export async function loader({ request, context }: Route.LoaderArgs) {
@@ -133,6 +142,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
                 },
               ]
             : [],
+        scheduledAt: draft.scheduledAt,
       }
     : null;
   // A link draft's stored preview, checked as it was seen, without reading
@@ -155,6 +165,8 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     draftCheck: draft?.url && checked?.ok ? ({ input: draft.url, link: checked.link, receipt: checked.receipt, duplicate: checked.duplicate } satisfies Checked) : null,
     // Just saved, from this form.
     saved: new URL(request.url).searchParams.has("saved"),
+    // Saved to be scheduled, though the time could not be kept.
+    unscheduled: new URL(request.url).searchParams.has("unscheduled"),
     status,
     siteKey: env.TURNSTILE_SITE_KEY,
     now,
@@ -167,7 +179,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   };
 }
 
-type FieldErrors = Partial<Record<"url" | "upload" | "title" | "description" | "origin" | "attest" | "turnstile", string>>;
+type FieldErrors = Partial<Record<"url" | "upload" | "title" | "description" | "origin" | "attest" | "turnstile" | "schedule", string>>;
 
 interface ActionResult {
   errors: FieldErrors;
@@ -229,50 +241,86 @@ function statusMessage(status: PostingStatus, now: number): string | null {
   }
 }
 
+/** What the form holds, as a draft keeps it. */
+function draftFieldsOf(form: FormData): DraftFields {
+  const field = (name: string) => String(form.get(name) ?? "");
+  return {
+    kind: parseKind(field("kind")),
+    url: field("url") || null,
+    origin: parseOrigin(field("origin")),
+    title: field("title"),
+    description: field("description"),
+    replies: parsePostChoice(field("replies")),
+    mediaKey: UPLOAD_KEY.test(field("upload_key")) ? field("upload_key") : null,
+    width: boundedInt(field("width"), 20000),
+    height: boundedInt(field("height"), 20000),
+    duration: boundedInt(field("duration"), 24 * 3600),
+    posterKey: UPLOAD_KEY.test(field("poster_key")) ? field("poster_key") : null,
+    pictures: readGallery(field("pictures")),
+  };
+}
+
 /**
- * Saves what the form holds as a draft, whatever the account's plan or
- * standing: a new one, or the one it was opened from, at the revision it
- * was opened at.
+ * Saves what the form holds as a draft, a new one or the one it was opened
+ * from, at the revision it was opened at; its files' unused ones go, and a
+ * new link's preview is made meanwhile, for the Drafts page to show.
  */
-async function saveAction(request: Request, context: Route.ActionArgs["context"], form: FormData): Promise<ActionResult | Response> {
-  const viewer = await requireAccount(request, context);
-  if (!(await withinLimits(request, "write", viewer.id))) return { errors: {}, message: RATE_LIMITED_MESSAGE };
+async function saveFromForm(request: Request, authorId: string, form: FormData): Promise<SaveResult> {
   const field = (name: string) => String(form.get(name) ?? "");
   const id = ROW_ID.test(field("draft_id")) ? field("draft_id") : undefined;
   const revision = boundedInt(field("draft_revision"), 1_000_000);
   const result = await saveServerDraft(env.DB, {
-    authorId: viewer.id,
+    authorId,
     ...(id ? { id, revision } : {}),
-    fields: {
-      kind: parseKind(field("kind")),
-      url: field("url") || null,
-      origin: parseOrigin(field("origin")),
-      title: field("title"),
-      description: field("description"),
-      replies: parsePostChoice(field("replies")),
-      mediaKey: UPLOAD_KEY.test(field("upload_key")) ? field("upload_key") : null,
-      width: boundedInt(field("width"), 20000),
-      height: boundedInt(field("height"), 20000),
-      duration: boundedInt(field("duration"), 24 * 3600),
-      posterKey: UPLOAD_KEY.test(field("poster_key")) ? field("poster_key") : null,
-      pictures: readGallery(field("pictures")),
-    },
+    fields: draftFieldsOf(form),
     now: Math.floor(Date.now() / 1000),
   });
-  if (!result.ok) return saveRefusal(result);
+  if (!result.ok) return result;
   await deleteReleasedFiles(env.DB, env.IMAGES, result.freed);
-  // A new link's preview is made meanwhile, for the Drafts page to show.
-  if (wantsPreview(result.draft)) {
-    const work = previewDraft(env.DB, {
-      draft: result.draft,
-      bucket: env.IMAGES,
-      ownHosts: [new URL(request.url).hostname],
-      secret: env.BETTER_AUTH_SECRET,
-      now: Math.floor(Date.now() / 1000),
-    });
-    waitUntil(work.catch((error) => console.error("draft preview", error)));
-  }
+  if (wantsPreview(result.draft)) previewSoon(request, result.draft);
+  return result;
+}
+
+function previewSoon(request: Request, draft: Draft): void {
+  const work = previewDraft(env.DB, {
+    draft,
+    bucket: env.IMAGES,
+    ownHosts: [new URL(request.url).hostname],
+    secret: env.BETTER_AUTH_SECRET,
+    now: Math.floor(Date.now() / 1000),
+  });
+  waitUntil(work.catch((error) => console.error("draft preview", error)));
+}
+
+/**
+ * Saves what the form holds as a draft, whatever the account's plan or
+ * standing; a scheduled one stays scheduled, with what was saved.
+ */
+async function saveAction(request: Request, context: Route.ActionArgs["context"], form: FormData): Promise<ActionResult | Response> {
+  const viewer = await requireAccount(request, context);
+  if (!(await withinLimits(request, "write", viewer.id))) return { errors: {}, message: RATE_LIMITED_MESSAGE };
+  const result = await saveFromForm(request, viewer.id, form);
+  if (!result.ok) return saveRefusal(result);
   throw redirect(`/submit?draft=${result.draft.id}&saved`);
+}
+
+/**
+ * Schedules what the form holds, checked as publishing checks it, the
+ * human check included (owner's request, 2026-10-22): saved as a draft and
+ * set to go out at its time, as it is then. The day's allowance is checked
+ * when it goes out. Saved but not scheduled, as when another draft took the
+ * time meanwhile, it opens again as a draft, saying so.
+ */
+async function scheduleAction(request: Request, authorId: string, form: FormData, at: number, now: number): Promise<ActionResult | Response> {
+  const draftId = String(form.get("draft_id") ?? "");
+  if (await scheduleTaken(env.DB, { authorId, at, exceptId: ROW_ID.test(draftId) ? draftId : null })) {
+    return { errors: { schedule: "Another of your drafts is scheduled for that time. Choose another." } };
+  }
+  const saved = await saveFromForm(request, authorId, form);
+  if (!saved.ok) return saveRefusal(saved);
+  const scheduled = await scheduleDraft(env.DB, { id: saved.draft.id, authorId, at, tokenId: null, revision: saved.draft.revision, now });
+  if (!scheduled.ok) throw redirect(`/submit?draft=${saved.draft.id}&saved&unscheduled`);
+  throw redirect("/drafts");
 }
 
 export async function action({ request, context }: Route.ActionArgs): Promise<ActionResult | Response> {
@@ -282,6 +330,9 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
   if (!(await withinLimits(request, "write", viewer.id))) return { errors: {}, message: RATE_LIMITED_MESSAGE };
   const now = Math.floor(Date.now() / 1000);
   const field = (name: string) => String(form.get(name) ?? "");
+  // Publishing later: the time the browser worked out from the viewer's own time zone.
+  const scheduling = form.get("intent") === "schedule";
+  const at = scheduling && /^\d{1,12}$/.test(field("scheduled_at")) ? Number(field("scheduled_at")) : null;
   // Opened from a saved draft: publishing uses it up, at the revision opened.
   const draftId = ROW_ID.test(field("draft_id")) ? field("draft_id") : null;
   const draftRevision = boundedInt(field("draft_revision"), 1_000_000);
@@ -316,6 +367,8 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
   if (descriptionError) errors.description = descriptionError;
   if (!origin) errors.origin = "Say whether you made it or found it.";
   if (field("attest") !== "yes") errors.attest = "Confirm the post fits the board.";
+  const scheduleError = scheduling ? scheduleProblem(at, now) : null;
+  if (scheduleError) errors.schedule = scheduleError;
   if (Object.keys(errors).length > 0 || !origin) return { errors };
 
   const url = new URL(request.url);
@@ -329,6 +382,7 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
   if (!human) {
     return { errors: { turnstile: "The check did not pass. Wait for it to finish, then publish again." } };
   }
+  if (scheduling) return scheduleAction(request, viewer.id, form, at!, now);
 
   const status = await postingStatus(env.DB, viewer, now);
   const blocked = statusMessage(status, now);
@@ -559,6 +613,20 @@ function Composer({ loaderData, actionData }: Pick<Route.ComponentProps, "loader
   const [uploading, setUploading] = useState(false);
   const [touched, setTouched] = useState(false);
   const restored = useRef(false);
+  // Publishing later, at a quarter hour in the viewer's own time zone: the
+  // fields are filled once the page runs, since only the browser knows it.
+  const [later, setLater] = useState(opened?.scheduledAt != null);
+  const [day, setDay] = useState("");
+  const [time, setTime] = useState("");
+  const [days, setDays] = useState({ min: "", max: "" });
+  useEffect(() => {
+    const now = Math.floor(Date.now() / 1000);
+    const parts = localParts(opened?.scheduledAt ?? firstSlot(now));
+    setDay(parts.date);
+    setTime(parts.time);
+    setDays({ min: localParts(now).date, max: localParts(now + SCHEDULE_DAYS * 24 * 3600).date });
+  }, [opened?.scheduledAt]);
+  const scheduledAt = later ? fromLocalParts(day, time) : null;
   // A server answer that the agent box was ticked, before scripts ran.
   const [agentAnswered, setAgentAnswered] = useState(false);
   useEffect(() => setAgentAnswered(Boolean(result?.agentPaywall)), [result]);
@@ -572,6 +640,7 @@ function Composer({ loaderData, actionData }: Pick<Route.ComponentProps, "loader
   const blocked = statusMessage(loaderData.status, loaderData.now);
   const submitting = navigation.state === "submitting" && navigation.formAction?.startsWith("/submit") === true;
   const saving = submitting && navigation.formData?.get("intent") === "save-draft";
+  const scheduling = submitting && navigation.formData?.get("intent") === "schedule";
 
   // Bring back what was typed, and the check that went with it. Just saved,
   // the saved draft is what was typed: the copy in this browser goes.
@@ -602,9 +671,13 @@ function Composer({ loaderData, actionData }: Pick<Route.ComponentProps, "loader
     saveDraft(storage, { url, title, description, origin, kind: source === "link" ? "" : source });
   }, [url, title, description, origin, source, storage]);
 
-  // Leaving for the new post: the draft is done with.
+  // Leaving for the new post, or for Drafts once scheduled: the copy in this browser is done with.
   useEffect(() => {
-    if (navigation.state === "loading" && navigation.formAction?.startsWith("/submit") && navigation.location.pathname.startsWith("/p/")) {
+    if (
+      navigation.state === "loading" &&
+      navigation.formAction?.startsWith("/submit") &&
+      (navigation.location.pathname.startsWith("/p/") || navigation.location.pathname === "/drafts")
+    ) {
       clearDraft(storage);
       sessionStorage.removeItem(CHECK_STORAGE);
     }
@@ -648,6 +721,8 @@ function Composer({ loaderData, actionData }: Pick<Route.ComponentProps, "loader
     source === "link" ? Boolean(current?.receipt) && !duplicate : source === "upload" ? uploaded.length > 0 && !uploading : true;
   const waiting = source === "upload" && uploading;
   const canPublish = ready && !gated && !blocked && token && !submitting;
+  // The day's allowance is checked when a scheduled post goes out, not now.
+  const canSchedule = ready && !gated && token && !submitting && scheduledAt !== null;
 
   return (
     <main className="mx-auto max-w-column space-y-4 px-(--gutter) py-6">
@@ -658,8 +733,14 @@ function Composer({ loaderData, actionData }: Pick<Route.ComponentProps, "loader
         </p>
       </div>
       {opened ? (
-        <Notice>
-          {loaderData.saved ? "Draft saved." : "A saved draft."}{" "}
+        <Notice tone={loaderData.unscheduled ? "danger" : undefined}>
+          {loaderData.unscheduled ? "Saved as a draft, but not scheduled: that time was taken meanwhile. Choose another." : loaderData.saved ? "Draft saved." : "A saved draft."}
+          {opened.scheduledAt !== null ? (
+            <>
+              {" "}
+              Scheduled for <ScheduledTime at={opened.scheduledAt} />; saving keeps it scheduled.
+            </>
+          ) : null}{" "}
           <Link to="/drafts" className="font-medium underline underline-offset-4">
             All drafts
           </Link>
@@ -885,6 +966,54 @@ function Composer({ loaderData, actionData }: Pick<Route.ComponentProps, "loader
             ) : null}
           </div>
 
+          <div className="space-y-2">
+            <label className="flex items-start gap-2.5 text-body">
+              <input
+                type="checkbox"
+                checked={later}
+                onChange={(event) => setLater(event.target.checked)}
+                className="mt-1 size-4 shrink-0 accent-(--accent)"
+              />
+              Publish later
+            </label>
+            {later ? (
+              <div className="space-y-1 pl-6.5">
+                <div className="flex flex-wrap gap-2">
+                  <input
+                    type="date"
+                    aria-label="Date"
+                    value={day}
+                    min={days.min}
+                    max={days.max}
+                    onChange={(event) => setDay(event.target.value)}
+                    className="h-9 rounded-lg border border-border-strong bg-surface px-2 text-body text-text"
+                  />
+                  <Select
+                    aria-label="Time"
+                    value={time}
+                    onChange={(event) => setTime(event.target.value)}
+                    className="h-9 rounded-lg border border-border-strong bg-surface pl-2 text-body text-text"
+                  >
+                    {QUARTER_HOURS.map((slot) => (
+                      <option key={slot} value={slot}>
+                        {slot}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+                <p className="text-meta text-text-muted">
+                  In your time zone, up to {SCHEDULE_DAYS} days ahead. It goes out as it is then, and the day&apos;s posting limit still applies.
+                </p>
+                {result?.errors.schedule ? (
+                  <p role="alert" className="text-meta text-danger">
+                    {result.errors.schedule}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+            <input type="hidden" name="scheduled_at" value={scheduledAt ?? ""} />
+          </div>
+
           <div className="flex flex-wrap items-center justify-end gap-3">
             {source === "link" && !current?.receipt && !duplicate ? (
               <p className="text-meta text-text-muted">Check the link to publish.</p>
@@ -897,9 +1026,15 @@ function Composer({ loaderData, actionData }: Pick<Route.ComponentProps, "loader
             <Button type="submit" name="intent" value="save-draft" formNoValidate disabled={submitting || waiting}>
               {saving ? "Saving…" : "Save draft"}
             </Button>
-            <Button variant="primary" type="submit" name="intent" value="publish" disabled={!canPublish}>
-              {submitting && !saving ? "Publishing…" : "Publish"}
-            </Button>
+            {later ? (
+              <Button variant="primary" type="submit" name="intent" value="schedule" disabled={!canSchedule}>
+                {scheduling ? "Scheduling…" : "Schedule"}
+              </Button>
+            ) : (
+              <Button variant="primary" type="submit" name="intent" value="publish" disabled={!canPublish}>
+                {submitting && !saving ? "Publishing…" : "Publish"}
+              </Button>
+            )}
           </div>
         </div>
       </Form>

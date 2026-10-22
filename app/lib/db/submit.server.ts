@@ -113,9 +113,11 @@ interface PostBase {
   /**
    * The saved draft this publishes, at the revision its publisher saw: its
    * files are used, and it is used up, in the same write, which refuses if
-   * it changed or was published meanwhile.
+   * it changed or was published meanwhile. A scheduled publication names
+   * the time it was due: it goes in only while the draft is still due then,
+   * and an agent's only while the connection that scheduled it may post.
    */
-  draft?: { id: string; revision: number };
+  draft?: { id: string; revision: number; scheduledAt?: number };
   now: number;
 }
 
@@ -200,7 +202,9 @@ export async function publishPost(db: D1Database, post: NewPost): Promise<Publis
   -- the draft, may have replaced it, and the post then waits to be
   -- published again rather than going out without it (review F109).
   AND (?3 <> 'link' OR ?11 = '' OR ${pending(11, "post")} IS NOT NULL)
-  AND (?22 IS NULL OR EXISTS (SELECT 1 FROM drafts WHERE id = ?22 AND author_id = ?2 AND revision = ?23 AND post_id IS NULL))
+  AND (?22 IS NULL OR EXISTS (SELECT 1 FROM drafts WHERE id = ?22 AND author_id = ?2 AND revision = ?23 AND post_id IS NULL
+    AND (?25 IS NULL OR (drafts.scheduled_at = ?25 AND (drafts.scheduled_token_id IS NULL OR EXISTS (
+      SELECT 1 FROM agent_tokens WHERE id = drafts.scheduled_token_id AND agent_id = ?2 AND revoked_at IS NULL AND permission = 'read_write'))))))
   -- Every picture of a gallery is the author's, a picture, and pending or the
   -- draft's, its first the post's file: all of them go in, or none.
   AND (?24 IS NULL OR (json_extract(?24, '$[0].key') = ?15
@@ -250,6 +254,7 @@ export async function publishPost(db: D1Database, post: NewPost): Promise<Publis
           post.draft?.id ?? null,
           post.draft?.revision ?? null,
           gallery,
+          post.draft?.scheduledAt ?? null,
         ),
       db
         .prepare(

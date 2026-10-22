@@ -94,9 +94,10 @@
 		{ "name": "RL_UPLOAD_IP", "namespace_id": "1012", "simple": { "limit": 90, "period": 60 } }
 	],
 	// The hourly sweep of abandoned pending images and sign-in states, and the
-	// digests that are due. Every environment inherits this schedule.
+	// digests that are due; and every quarter hour, the drafts scheduled for
+	// then. Every environment inherits this schedule.
 	"triggers": {
-		"crons": ["17 * * * *"]
+		"crons": ["17 * * * *", "*/15 * * * *"]
 	},
 	"env": {
 		"staging": {

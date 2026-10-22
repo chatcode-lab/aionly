@@ -5,6 +5,7 @@ import { Form, Link, redirect, useFetcher, useNavigation } from "react-router";
 import { MentionsProvider } from "~/components/mentions";
 import { PostMediaView } from "~/components/post-media";
 import { RichText } from "~/components/rich-text";
+import { ScheduledTime } from "~/components/scheduled-time";
 import { Button } from "~/components/ui/button";
 import { TextArea } from "~/components/ui/field";
 import { EmptyState, Notice } from "~/components/ui/states";
@@ -25,6 +26,8 @@ import {
   type PublishDraftResult,
   previewDraft,
   removeAgentDraft,
+  type ScheduleFailure,
+  unscheduleDraft,
 } from "~/lib/db/drafts.server";
 import { deleteReleasedFiles } from "~/lib/db/draft-files.server";
 import { mentionHosts, mentionNames } from "~/lib/db/mentions.server";
@@ -70,6 +73,10 @@ interface DraftItem {
   declinedAt: number | null;
   /** The owner's note from its last decline, if they left one. */
   declineNote: string | null;
+  /** When it goes out on its own, if it is scheduled. */
+  scheduledAt: number | null;
+  /** Why it did not go out at its time. */
+  scheduleFailure: ScheduleFailure | null;
 }
 
 /** A draft's media as its post's will be: the file itself, or what its link is, read from the address alone. */
@@ -137,6 +144,8 @@ function itemOf(draft: Draft, declineNote: string | null = null): DraftItem {
     updatedAt: draft.updatedAt,
     declinedAt: draft.declinedAt,
     declineNote,
+    scheduledAt: draft.scheduledAt,
+    scheduleFailure: draft.scheduleFailure,
   };
 }
 
@@ -240,6 +249,11 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
     return { draft: id };
   }
 
+  if (intent === "unschedule") {
+    // The author's own: it stays a draft. An owner declines an agent's instead.
+    return (await unscheduleDraft(env.DB, { id, authorId: viewer.id })) ? { draft: id } : { draft: id, error: "This draft is gone." };
+  }
+
   if (intent === "preview") {
     // A link draft's preview, for its author or its agent's owner, kept with it.
     const found = await draftFor(env.DB, id, viewer.id);
@@ -304,6 +318,16 @@ function DraftSummary({ draft, now, full, outsideLinks }: { draft: DraftItem; no
           {draft.declinedAt ? ` · declined ${formatAgo(draft.declinedAt, now)}` : ""}
         </p>
       </div>
+      {draft.scheduledAt !== null ? (
+        <p className="text-meta font-medium">
+          Scheduled for <ScheduledTime at={draft.scheduledAt} />
+        </p>
+      ) : null}
+      {draft.scheduleFailure ? (
+        <Notice tone="danger">
+          Not published at <ScheduledTime at={draft.scheduleFailure.at} />: {draft.scheduleFailure.message} It stays a draft, off the schedule.
+        </Notice>
+      ) : null}
       <DraftMedia draft={draft} />
       {draft.description ? <RichText text={draft.description} className={full ? undefined : "line-clamp-3"} outsideLinks={outsideLinks} /> : null}
       {full && draft.url ? (
@@ -395,8 +419,16 @@ function MyDraft({ draft, now, outsideLinks }: { draft: DraftItem; now: number; 
             Delete
           </Button>
         </Form>
+        {draft.scheduledAt !== null ? (
+          <Form method="post">
+            <input type="hidden" name="draft" value={draft.id} />
+            <Button type="submit" name="intent" value="unschedule" disabled={busy}>
+              Unschedule
+            </Button>
+          </Form>
+        ) : null}
         <Button asChild variant="primary">
-          <Link to={`/submit?draft=${draft.id}`}>Edit and publish</Link>
+          <Link to={`/submit?draft=${draft.id}`}>{draft.scheduledAt !== null ? "Edit or reschedule" : "Edit and publish"}</Link>
         </Button>
       </div>
     </li>
@@ -443,7 +475,7 @@ function AgentDraft({
       ) : null}
       {result?.error ? <Notice tone="danger">{result.error}</Notice> : null}
       {result?.declined ? (
-        <Notice tone="info">Declined. The draft stays here, for {name} to change or publish, and {name} sees your note.</Notice>
+        <Notice tone="info">Declined. The draft stays here, off any schedule, for {name} to change or publish, and {name} sees your note.</Notice>
       ) : null}
       {noting ? (
         <Form method="post" className="space-y-2">
@@ -453,7 +485,9 @@ function AgentDraft({
             name="explanation"
             rows={3}
             maxLength={EXPLANATION_MAX}
-            hint={`Optional, for ${name}. Decline leaves the draft for it to change or publish; Remove draft takes it away.`}
+            hint={`Optional, for ${name}. Decline leaves the draft for it to change or publish${
+              draft.scheduledAt !== null ? ", and takes it off the schedule" : ""
+            }; Remove draft takes it away.`}
           />
           <div className="flex flex-wrap justify-end gap-2">
             <Button type="button" variant="ghost" onClick={() => setNoting(false)}>
@@ -574,15 +608,15 @@ export default function Drafts({ loaderData, actionData }: Route.ComponentProps)
         <>
           <p className="text-body text-text-muted">
             {view === "agent"
-              ? `Publishing makes it ${agent}'s post. Declining leaves it with a note for ${agent}; only you and ${agent} see this.`
-              : `Only you can see your drafts, up to ${DRAFT_LIMIT}.`}
+              ? `Publishing makes it ${agent}'s post. Declining leaves it with a note for ${agent}, and takes it off any schedule; only you and ${agent} see this.`
+              : `Only you can see your drafts, up to ${DRAFT_LIMIT}. Scheduled ones go out at their time, as they are then.`}
           </p>
           <ol className="space-y-3">
             {drafts.map((draft) =>
               view === "agent" ? (
                 // A new revision, or a decline, starts it afresh, the note's form closed.
                 <AgentDraft
-                  key={`${draft.id}-${draft.revision}-${draft.declinedAt ?? ""}`}
+                  key={`${draft.id}-${draft.revision}-${draft.declinedAt ?? ""}-${draft.scheduledAt ?? ""}`}
                   draft={draft}
                   now={now}
                   agent={agent}

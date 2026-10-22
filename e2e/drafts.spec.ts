@@ -167,3 +167,58 @@ test("an agent's drafts show as their posts will, and the account menu counts th
   const notes = await (await request.get("/api/v1/me/feedback", { headers: auth })).json();
   expect(notes.feedback[0]).toMatchObject({ action: "removed", explanation: "Not for this board.", title: "A guide worth a look" });
 });
+
+test("a member schedules a post from Submit and takes it off again, and an agent's schedule shows to its owner (owner's request, 2026-10-22)", async ({ page, context, account, request }) => {
+  await setPlan(request, account);
+  await account.signIn(context);
+  await open(page, "/submit");
+  await page.getByRole("button", { name: "Text", exact: true }).click();
+  const title = `Later, from ${account.username}`;
+  await page.getByLabel("Title").fill(title);
+  await page.getByRole("textbox", { name: /^(Text|Description)$/ }).fill("A post that waits for its quarter hour.");
+  await page.getByLabel(/made with AI or about AI/).check();
+  await page.getByLabel("Publish later").check();
+  // The first quarter hour at least fifteen minutes away, in the browser's own time zone.
+  await expect(page.getByLabel("Date")).not.toHaveValue("");
+  await expect(page.getByLabel("Time")).toHaveValue(/^\d{2}:(00|15|30|45)$/);
+  await expect(page.getByRole("button", { name: "Publish", exact: true })).toHaveCount(0);
+  await expect(page.getByText("Turnstile stand-in")).toBeVisible();
+  await page.getByRole("button", { name: "Schedule" }).click();
+  await expect(page).toHaveURL(/\/drafts$/);
+  const item = page.getByRole("listitem").filter({ hasText: title });
+  await expect(item).toContainText(/Scheduled for \w{3} \d{1,2} \w{3}, \d{2}:(00|15|30|45)/);
+  await page.screenshot({ path: test.info().outputPath("scheduled.png"), fullPage: true });
+
+  // Opened again, it says when it goes out, and saving keeps it so.
+  await item.getByRole("link", { name: "Edit or reschedule" }).click();
+  await expect(page.getByText(/Scheduled for .*; saving keeps it scheduled\./)).toBeVisible();
+  await expect(page.getByLabel("Publish later")).toBeChecked();
+  await page.screenshot({ path: test.info().outputPath("reschedule.png"), fullPage: true });
+  await open(page, "/drafts");
+  await item.getByRole("button", { name: "Unschedule" }).click();
+  await expect(item.getByText(/^Scheduled for/)).toHaveCount(0);
+  await expect(item.getByRole("link", { name: "Edit and publish" })).toBeVisible();
+
+  // The agent schedules its own through a connection that may post; its owner sees the time, and declining takes it off.
+  await open(page, "/settings");
+  const section = page.getByRole("region", { name: "Your agent" });
+  await section.getByRole("button", { name: "Connect an agent" }).click();
+  await section.getByRole("button", { name: "New token" }).click();
+  const auth = { Authorization: `Bearer ${(await section.locator("code", { hasText: /^aionly_/ }).textContent())!.trim()}` };
+  const saved = await (await request.post("/api/v1/drafts", { headers: auth, data: { kind: "text", title: "The agent's queued note", description: "Queued for later by the agent." } })).json();
+  const at = new Date((Math.ceil(Date.now() / 1000 / 900) * 900 + 3600) * 1000).toISOString();
+  expect((await (await request.post(`/api/v1/drafts/${saved.id}/schedule`, { headers: auth, data: { at } })).json()).error).toBe("read_only_token");
+  await section.getByRole("combobox", { name: /may do/ }).selectOption("read_write");
+  await expect.poll(async () => (await (await request.get("/api/v1/me", { headers: auth })).json()).access).toBe("read_write");
+  const scheduled = await request.post(`/api/v1/drafts/${saved.id}/schedule`, { headers: auth, data: { at } });
+  expect(scheduled.status(), await scheduled.text()).toBe(200);
+  await open(page, "/drafts?view=agent");
+  const queued = page.getByRole("listitem").filter({ hasText: "The agent's queued note" });
+  await expect(queued).toContainText("Scheduled for");
+  await queued.getByRole("button", { name: "Decline" }).click();
+  await expect(queued.getByText(/and takes it off the schedule/)).toBeVisible();
+  await queued.getByRole("button", { name: "Decline" }).click();
+  await expect(queued.getByText(/^Declined\. /)).toBeVisible();
+  await expect(queued.getByText(/^Scheduled for/)).toHaveCount(0);
+  expect((await (await request.get(`/api/v1/drafts/${saved.id}`, { headers: auth })).json()).scheduled_at).toBeNull();
+});

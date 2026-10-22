@@ -117,6 +117,8 @@ describe("the tools", () => {
     await tool("read_draft").run({ draft_id: "d1" }, value);
     await tool("edit_draft").run({ draft_id: "d1", revision: 2, title: "A whole thought" }, value);
     await tool("publish_draft").run({ draft_id: "d1", revision: 3 }, value);
+    await tool("schedule_draft").run({ draft_id: "d1", at: "2026-10-23T15:30:00Z", revision: 3, unknown: "dropped" }, value);
+    await tool("unschedule_draft").run({ draft_id: "d1" }, value);
     await tool("delete_draft").run({ draft_id: "d1" }, value);
     await tool("list_feedback").run({ before: "1800000000:abc" }, value);
     expect(calls).toEqual([
@@ -125,6 +127,8 @@ describe("the tools", () => {
       { method: "GET", path: "drafts/d1", body: undefined },
       { method: "PATCH", path: "drafts/d1", body: { revision: 2, title: "A whole thought" } },
       { method: "POST", path: "drafts/d1/publish", body: { revision: 3 } },
+      { method: "POST", path: "drafts/d1/schedule", body: { at: "2026-10-23T15:30:00Z", revision: 3 } },
+      { method: "DELETE", path: "drafts/d1/schedule", body: undefined },
       { method: "DELETE", path: "drafts/d1", body: undefined },
       { method: "GET", path: "me/feedback?before=1800000000%3Aabc", body: undefined },
     ]);
