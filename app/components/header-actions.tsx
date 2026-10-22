@@ -1,6 +1,7 @@
 import { Bookmark, Plus } from "lucide-react";
 import { Link, useLocation } from "react-router";
 
+import { returnHere } from "~/lib/security/request";
 import type { Theme } from "~/lib/theme";
 
 import { AccountMenu } from "./account-menu";
@@ -41,7 +42,7 @@ export function HeaderActions({
   const location = useLocation();
 
   if (!viewer) {
-    const next = `${location.pathname}${location.search}`;
+    const next = returnHere(location.pathname, location.search);
     return (
       <>
         <ThemeSwitch theme={theme} />

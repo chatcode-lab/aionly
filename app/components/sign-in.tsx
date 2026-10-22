@@ -13,6 +13,7 @@ import { Form, Link, useLocation, useRouteLoaderData } from "react-router";
 import { copyText } from "~/lib/clipboard";
 import { cn } from "~/lib/cn";
 import { draftsAsText } from "~/lib/drafts";
+import { returnHere } from "~/lib/security/request";
 
 import { Button } from "./ui/button";
 import { DialogContent, DialogRoot } from "./ui/dialog";
@@ -354,7 +355,7 @@ export function SignInProvider({ children }: { children: ReactNode }) {
         {request ? (
           <DialogContent title={request.title ?? "Join or sign in"}>
             <SignInPanel
-              next={`${location.pathname}${location.search}`}
+              next={returnHere(location.pathname, location.search)}
               inAppBrowser={root?.inAppBrowser ?? null}
             />
           </DialogContent>

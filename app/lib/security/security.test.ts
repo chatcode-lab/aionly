@@ -5,7 +5,7 @@ import { type MediaLink, PROVIDERS } from "../links/types";
 import { readBodyCapped } from "./body";
 import { buildSitePolicy, createNonce } from "./csp";
 import { withSecurityHeaders } from "./headers";
-import { isSameOriginRequest, safeReturnPath } from "./request";
+import { isSameOriginRequest, returnHere, safeReturnPath } from "./request";
 
 const SITE = "https://aion.ly";
 
@@ -198,6 +198,29 @@ describe("safeReturnPath", () => {
     "javascript:alert(1)",
   ])("falls back to / for %j", (value) => {
     expect(safeReturnPath(value, SITE)).toBe("/");
+  });
+
+  it("unwraps a sign-in page to where it returns, however deeply nested, and never returns to signing out", () => {
+    const nest = (inner: string, times: number) => {
+      let path = inner;
+      for (let n = 0; n < times; n += 1) path = `/signin?${new URLSearchParams({ next: path })}`;
+      return path;
+    };
+    expect(safeReturnPath(nest("/p/abc?sort=top", 1), SITE)).toBe("/p/abc?sort=top");
+    expect(safeReturnPath(nest("/p/abc", 16), SITE)).toBe("/p/abc");
+    expect(safeReturnPath(nest("/p/abc", 40), SITE)).toBe("/");
+    expect(safeReturnPath(`/signin/email?${new URLSearchParams({ next: "/settings" })}`, SITE)).toBe("/settings");
+    expect(safeReturnPath("/signin?tab=member", SITE)).toBe("/");
+    expect(safeReturnPath(nest("//evil.example", 3), SITE)).toBe("/");
+    expect(safeReturnPath("/signout", SITE)).toBe("/");
+    // Only the sign-in pages themselves.
+    expect(safeReturnPath("/signing-off", SITE)).toBe("/signing-off");
+  });
+
+  it("makes a sign-in page's own links return where it does, never nesting it", () => {
+    expect(returnHere("/p/abc", "?sort=top")).toBe("/p/abc?sort=top");
+    expect(returnHere("/signin", `?${new URLSearchParams({ next: "/p/abc", tab: "member" })}`)).toBe("/p/abc");
+    expect(returnHere("/signin", "")).toBe("/");
   });
 });
 
