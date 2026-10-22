@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { Clock } from "lucide-react";
 import { useState } from "react";
 import { Form, Link, redirect, useFetcher, useNavigation } from "react-router";
 
@@ -310,6 +311,22 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
 
 const KIND: Record<Draft["kind"], string> = { link: "Link", text: "Text", upload: "Upload" };
 
+/**
+ * When a scheduled draft goes out, at the start of its row of buttons, where
+ * it is seen with what can be done about it (owner's request, 2026-10-22).
+ */
+function ScheduledFor({ at }: { at: number | null }) {
+  if (at === null) return null;
+  return (
+    <p className="mr-auto flex items-center gap-1.5 text-body font-medium">
+      <Clock size={16} aria-hidden className="shrink-0 text-text-muted" />
+      <span>
+        Scheduled for <ScheduledTime at={at} />
+      </span>
+    </p>
+  );
+}
+
 function DraftSummary({ draft, now, full, outsideLinks }: { draft: DraftItem; now: number; full: boolean; outsideLinks: boolean }) {
   return (
     <div className="min-w-0 space-y-2">
@@ -322,11 +339,6 @@ function DraftSummary({ draft, now, full, outsideLinks }: { draft: DraftItem; no
           {draft.declinedAt ? ` · declined ${formatAgo(draft.declinedAt, now)}` : ""}
         </p>
       </div>
-      {draft.scheduledAt !== null ? (
-        <p className="text-meta font-medium">
-          Scheduled for <ScheduledTime at={draft.scheduledAt} />
-        </p>
-      ) : null}
       {draft.scheduleFailure ? (
         <Notice tone="danger">
           Not published at <ScheduledTime at={draft.scheduleFailure.at} />: {draft.scheduleFailure.message} It stays a draft, off the schedule.
@@ -416,7 +428,8 @@ function MyDraft({ draft, now, outsideLinks }: { draft: DraftItem; now: number; 
   return (
     <li className="space-y-3 bleed rounded-xl border border-border bg-surface p-3 sm:p-4">
       <DraftSummary draft={draft} now={now} full={false} outsideLinks={outsideLinks} />
-      <div className="flex flex-wrap justify-end gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <ScheduledFor at={draft.scheduledAt} />
         <Form method="post">
           <input type="hidden" name="draft" value={draft.id} />
           <Button type="submit" variant="ghost" name="intent" value="delete" disabled={busy}>
@@ -493,7 +506,8 @@ function AgentDraft({
               draft.scheduledAt !== null ? ", and takes it off the schedule" : ""
             }; Remove draft takes it away.`}
           />
-          <div className="flex flex-wrap justify-end gap-2">
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <ScheduledFor at={draft.scheduledAt} />
             <Button type="button" variant="ghost" onClick={() => setNoting(false)}>
               Cancel
             </Button>
@@ -506,7 +520,8 @@ function AgentDraft({
           </div>
         </Form>
       ) : (
-        <div className="flex flex-wrap justify-end gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <ScheduledFor at={draft.scheduledAt} />
           <Button type="button" variant="ghost" onClick={() => setNoting(true)}>
             Decline
           </Button>
