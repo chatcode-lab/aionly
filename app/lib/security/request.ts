@@ -56,11 +56,17 @@ export function safeReturnPath(
  * Where a sign-in from this page returns: the page itself, or, on a sign-in
  * page, where that one returns, so its links never nest it (2026-10-22). The
  * address is the visitor's to change, so it is checked as any other return
- * destination (review F126); it runs in the browser too, where a stand-in
- * origin serves, since only a path on the same site passes.
+ * destination (review F126), a sign-in page's `next` just as the page checks
+ * it, so the page itself never counts toward the depth (review F128). It runs
+ * in the browser too, where a stand-in origin serves, since only a path on the
+ * same site passes.
  */
 export function returnHere(pathname: string, search: string): string {
-  return safeReturnPath(`${pathname}${search}`, "https://site.invalid");
+  const origin = "https://site.invalid";
+  if (SIGN_IN_PAGE.test(routeOf(pathname))) {
+    return safeReturnPath(new URLSearchParams(search).get("next"), origin);
+  }
+  return safeReturnPath(`${pathname}${search}`, origin);
 }
 
 function plainReturnPath(value: string | null | undefined, siteOrigin: string): string {

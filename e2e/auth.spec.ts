@@ -1,4 +1,12 @@
+import type { Locator } from "@playwright/test";
 import { expect, open, test } from "./fixtures";
+
+/** A path wrapped in this many sign-in pages, each returning to the one inside. */
+function nestSignIn(inner: string, times: number): string {
+  let path = inner;
+  for (let n = 0; n < times; n += 1) path = `/signin?${new URLSearchParams({ next: path })}`;
+  return path;
+}
 
 test("signed out, the top bar offers Sign in, which opens on New member, then signs in with Google", async ({ page }) => {
   await open(page, "/");
@@ -100,6 +108,24 @@ test("signed in, the sign-in page sends you on, never to another site, at any ad
   }
 });
 
+test("on the sign-in page, its forms, the header link, and the dialog's forms return to the same place, as deep as the page goes (review F128)", async ({ page }) => {
+  const profile = "/@quiet_otter_482?tab=posts";
+  for (const [depth, to] of [[18, profile], [19, profile], [20, "/"]] as const) {
+    await open(page, `/signin?${new URLSearchParams({ tab: "member", next: nestSignIn(profile, depth) })}`);
+    const forms = page.getByRole("main").locator('input[name="next"]');
+    await expect(forms).not.toHaveCount(0);
+    for (const input of await forms.all()) await expect(input).toHaveValue(to);
+    const link = page.locator("header").getByRole("link", { name: "Sign in" });
+    await expect(link).toHaveAttribute("href", `/signin?${new URLSearchParams({ next: to })}`);
+    await link.click();
+    const dialog = page.getByRole("dialog");
+    await dialog.getByRole("group", { name: "Join or sign in" }).getByRole("button", { name: "Sign in" }).click();
+    const dialogForms = dialog.locator('input[name="next"]');
+    await expect(dialogForms).not.toHaveCount(0);
+    for (const input of await dialogForms.all()) await expect(input).toHaveValue(to);
+  }
+});
+
 test("sign-in from another site is refused", async ({ page }) => {
   const response = await page.request.post("/signin", {
     form: { next: "/" },
@@ -130,18 +156,29 @@ test.describe("inside an app's browser", () => {
     await expect(dialog.getByRole("button", { name: "Continue with Google" })).toHaveCount(0);
   });
 
-  test("on the sign-in page, the dialog's link is where the page returns, never a destination it refuses (review F126)", async ({ page, context, baseURL }) => {
+  test("on the sign-in page, the header link and the dialog's link are where the page returns, never a destination it refuses (reviews F126, F128)", async ({ page, context, baseURL }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-    for (const [next, copied] of [
+    const profile = "/@quiet_otter_482?tab=posts";
+    for (const [next, to] of [
       ["https://evil.example/login", "/"],
       ["//evil.example/login", "/"],
       ["http://[", "/"],
-      [`/signin?${new URLSearchParams({ next: "/@quiet_otter_482?tab=posts" })}`, "/@quiet_otter_482?tab=posts"],
+      [nestSignIn(profile, 1), profile],
+      [nestSignIn(profile, 18), profile],
+      [nestSignIn(profile, 19), profile],
+      [nestSignIn(profile, 20), "/"],
     ]) {
       await open(page, `/signin?${new URLSearchParams({ next })}`);
-      await page.locator("header").getByRole("link", { name: "Sign in" }).click();
-      await page.getByRole("dialog").getByRole("button", { name: "Copy link" }).click();
-      expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(new URL(copied, baseURL).href);
+      const copied = async (from: Locator) => {
+        await page.evaluate(() => navigator.clipboard.writeText(""));
+        await from.getByRole("button", { name: "Copy link" }).click();
+        return page.evaluate(() => navigator.clipboard.readText());
+      };
+      expect(await copied(page.getByRole("main"))).toBe(new URL(to, baseURL).href);
+      const link = page.locator("header").getByRole("link", { name: "Sign in" });
+      await expect(link).toHaveAttribute("href", `/signin?${new URLSearchParams({ next: to })}`);
+      await link.click();
+      expect(await copied(page.getByRole("dialog"))).toBe(new URL(to, baseURL).href);
     }
   });
 });

@@ -250,6 +250,20 @@ describe("safeReturnPath", () => {
     expect(returnHere("/signin", "")).toBe("/");
   });
 
+  it("takes a sign-in page's links as far down its nesting as the page itself goes (review F128)", () => {
+    const nest = (inner: string, times: number) => {
+      let path = inner;
+      for (let n = 0; n < times; n += 1) path = `/signin?${new URLSearchParams({ next: path })}`;
+      return path;
+    };
+    for (const [depth, expected] of [[18, "/p/abc?sort=top#c-1"], [19, "/p/abc?sort=top#c-1"], [20, "/"]] as const) {
+      const next = nest("/p/abc?sort=top#c-1", depth);
+      expect(safeReturnPath(next, SITE)).toBe(expected);
+      expect(returnHere("/signin", `?${new URLSearchParams({ next })}`)).toBe(expected);
+      expect(returnHere("/SIGNIN", `?${new URLSearchParams({ next })}`)).toBe(expected);
+    }
+  });
+
   it.each([
     "https://evil.example/login",
     "//evil.example/login",
