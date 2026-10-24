@@ -2,6 +2,9 @@ import type { Frame, Locator, Page } from "@playwright/test";
 
 import { expect, test } from "./fixtures";
 
+// The sample feed in Top's order, which these tests' cards are picked from.
+const FEED = "/?sort=top";
+
 // Stand-in players answer the frames, so commands and states can be read.
 test.use({ fakePlayers: true });
 
@@ -80,7 +83,7 @@ async function setAutoplay(page: Page, on: boolean): Promise<void> {
 }
 
 test("plays the focused video muted, and pauses it when focus moves on", async ({ page, problems }) => {
-  await page.goto("/");
+  await page.goto(FEED);
   await focus(page, BUNNY);
   const bunny = await player(page, BUNNY);
   await expect.poll(() => isPlaying(bunny)).toBe(true);
@@ -96,7 +99,7 @@ test("plays the focused video muted, and pauses it when focus moves on", async (
 });
 
 test("a video the provider cannot play here falls back to a preview of the original", async ({ page }) => {
-  await page.goto("/");
+  await page.goto(FEED);
   await focus(page, BUNNY);
   const bunny = await player(page, BUNNY);
   await expect.poll(() => isPlaying(bunny)).toBe(true);
@@ -113,7 +116,7 @@ test("a video the provider cannot play here falls back to a preview of the origi
 });
 
 test("loads frames ahead, at most three, and releases them far away", async ({ page }) => {
-  await page.goto("/");
+  await page.goto(FEED);
   expect(await page.locator("iframe").count()).toBeLessThanOrEqual(3);
 
   // A video whose card is just entering the screen is loaded and ready, but
@@ -135,7 +138,7 @@ test("loads frames ahead, at most three, and releases them far away", async ({ p
 });
 
 test("a released post embed keeps the height it reported", async ({ page }) => {
-  await page.goto("/");
+  await page.goto(FEED);
   await focus(page, X_POST);
   const frame = card(page, X_POST).locator("iframe");
   await expect.poll(() => frame.evaluate((element) => element.clientHeight)).toBe(260);
@@ -150,7 +153,7 @@ test("playback the viewer starts takes over, and stops once scrolled away", asyn
   // Tall enough for two videos to share the screen, with room above the feed
   // to center the first.
   await page.setViewportSize({ width: page.viewportSize()!.width, height: 2400 });
-  await page.goto("/");
+  await page.goto(FEED);
   await page.evaluate(() => (document.body.style.paddingTop = "1600px"));
   await focus(page, BUNNY);
   const bunny = await player(page, BUNNY);
@@ -175,7 +178,7 @@ test("a song loads ahead, and it and a video never play together", async ({ page
   // shows the song and a video beside it, as the viewer starts what they see.
   await page.setViewportSize({ width: 1280, height: 1800 });
   await page.addInitScript(() => window.localStorage.setItem("autoplay", "off"));
-  await page.goto("/");
+  await page.goto(FEED);
   await focus(page, SONG);
 
   // The song's player loaded without a tap, exactly where its poster was.
@@ -207,7 +210,7 @@ test("a song loads ahead, and it and a video never play together", async ({ page
 test("on a touch screen a song waits for a tap, and stops when a video starts or it scrolls away", async ({ page }, testInfo) => {
   test.skip(!testInfo.project.use.hasTouch, "Only touch screens wait for a tap.");
   await page.addInitScript(() => window.localStorage.setItem("autoplay", "off"));
-  await page.goto("/");
+  await page.goto(FEED);
   await focus(page, SONG);
   // A tap inside a frame tells the page nothing here, so the song loads from a tap on its card.
   const poster = card(page, SONG).getByRole("button", { name: "Play song from Suno" });
@@ -246,7 +249,7 @@ test("under data saver a song waits for a tap, at the player's height", async ({
       configurable: true,
     });
   });
-  await page.goto("/");
+  await page.goto(FEED);
   await focus(page, SONG);
   const poster = card(page, SONG).getByRole("button", { name: "Play song from Suno" });
   expect(await poster.evaluate((element) => (element as HTMLElement).offsetHeight)).toBe(176);
@@ -258,7 +261,7 @@ test("under data saver a song waits for a tap, at the player's height", async ({
 });
 
 test("leaves a video the viewer paused alone until focus moves on", async ({ page }) => {
-  await page.goto("/");
+  await page.goto(FEED);
   await focus(page, BUNNY);
   const bunny = await player(page, BUNNY);
   await expect.poll(() => isPlaying(bunny)).toBe(true);
@@ -276,7 +279,7 @@ test("leaves a video the viewer paused alone until focus moves on", async ({ pag
 });
 
 test("pauses when the tab is hidden", async ({ page }) => {
-  await page.goto("/");
+  await page.goto(FEED);
   await focus(page, BUNNY);
   const bunny = await player(page, BUNNY);
   await expect.poll(() => isPlaying(bunny)).toBe(true);
@@ -289,7 +292,7 @@ test("pauses when the tab is hidden", async ({ page }) => {
 });
 
 test("autoplay can be switched off, and stays off", async ({ page }) => {
-  await page.goto("/");
+  await page.goto(FEED);
   await setAutoplay(page, false);
   await page.keyboard.press("Escape");
 
@@ -305,7 +308,7 @@ test("autoplay can be switched off, and stays off", async ({ page }) => {
 
 test("reduced motion keeps autoplay off and says why", async ({ page }) => {
   await page.emulateMedia({ reducedMotion: "reduce" });
-  await page.goto("/");
+  await page.goto(FEED);
   await focus(page, BUNNY);
   const bunny = await player(page, BUNNY);
   await page.waitForTimeout(800);
@@ -318,7 +321,7 @@ test("reduced motion keeps autoplay off and says why", async ({ page }) => {
 });
 
 test("after the viewer unmutes, the next video autoplays with sound", async ({ page }) => {
-  await page.goto("/");
+  await page.goto(FEED);
   await focus(page, BUNNY);
   const bunny = await player(page, BUNNY);
   await expect.poll(() => isPlaying(bunny)).toBe(true);
@@ -335,7 +338,7 @@ test("after the viewer unmutes, the next video autoplays with sound", async ({ p
 });
 
 test("TikTok loads as it takes focus and stops when focus moves on", async ({ page }) => {
-  await page.goto("/");
+  await page.goto(FEED);
   await expect(card(page, TIKTOK).locator("iframe")).toHaveCount(0);
 
   await focus(page, TIKTOK);
@@ -356,7 +359,7 @@ test("under data saver nothing loads until a tap, then one post plays at a time"
       configurable: true,
     });
   });
-  await page.goto("/");
+  await page.goto(FEED);
   await focus(page, BUNNY);
   await page.waitForTimeout(600);
   await expect(page.locator("iframe")).toHaveCount(0);

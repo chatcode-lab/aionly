@@ -15,8 +15,17 @@ export const PAGE_SIZE = 20;
 /** The most post IDs a Top ranking snapshot holds. */
 export const SNAPSHOT_LIMIT = 500;
 
-export function parseSort(value: string | null): Sort {
-  return SORTS.find((sort) => sort === value) ?? "top";
+/**
+ * The sort the bare address opens on until a visitor picks one: New, while
+ * the board has few votes to rank by (owner's request, 2026-10-24).
+ */
+export const DEFAULT_SORT: Sort = "new";
+
+/** The cookie that keeps the sort a visitor last picked, for the bare address. */
+export const SORT_COOKIE = "feed_sort";
+
+export function parseSort(value: string | null | undefined): Sort | null {
+  return SORTS.find((sort) => sort === value) ?? null;
 }
 
 export function parseRange(value: string | null): Range | null {
@@ -24,13 +33,12 @@ export function parseRange(value: string | null): Range | null {
 }
 
 /**
- * The feed's address for a sort and range. Top is the default sort and is
- * left out; a null range means "whatever the board picks on arrival".
+ * The feed's address for a sort and range. The sort is always named, since
+ * the bare address opens on the one the visitor last picked; a null range
+ * means "whatever the board picks on arrival".
  */
 export function feedPath(sort: Sort, range: Range | null): string {
-  const params = new URLSearchParams();
-  if (sort !== "top") params.set("sort", sort);
+  const params = new URLSearchParams({ sort });
   if (range) params.set("range", range);
-  const query = params.toString();
-  return query ? `/?${query}` : "/";
+  return `/?${params}`;
 }

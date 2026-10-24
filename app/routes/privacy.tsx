@@ -12,7 +12,7 @@ export function meta({ matches }: Route.MetaArgs) {
 
 export default function Privacy() {
   return (
-    <LegalPage title="Privacy" updated="October 21, 2026">
+    <LegalPage title="Privacy" updated="October 24, 2026">
       <p>
         {OPERATOR.name}, registry code {OPERATOR.registryCode}, {OPERATOR.address}, runs aion.ly and is responsible
         for the personal data it keeps. Questions and requests: <Mail to={CONTACT.privacy} />.
@@ -133,7 +133,7 @@ export default function Privacy() {
       <p>
         Only what the board needs: a session cookie while you are signed in, a short-lived one during sign-in, one
         that carries an invitation or a partner&apos;s link you opened to your sign-up (a partner&apos;s for up to 30
-        days), and cookies that remember your theme and the pinned posts you collapsed. What you are typing, until you
+        days), and cookies that remember your theme, the feed's sort, and the pinned posts you collapsed. What you are typing, until you
         save it as a draft, and the autoplay setting stay in your browser. There are no analytics or advertising cookies.
       </p>
 

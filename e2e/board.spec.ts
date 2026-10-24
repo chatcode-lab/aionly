@@ -6,32 +6,46 @@ const titles = (page: import("@playwright/test").Page) =>
   page.locator("article h2").allInnerTexts();
 
 test.describe("feed", () => {
-  test("opens on Top for the narrowest range that fills a screen", async ({ page }) => {
+  test("opens on New for the narrowest range that fills a screen", async ({ page }) => {
     await page.goto("/");
     // Twelve sample posts fall inside the week, so the week is the default.
     await expect(page.getByRole("button", { name: "Range: Week" })).toBeVisible();
     await expect(page.locator("article")).toHaveCount(12);
-
-    const shown = await titles(page);
-    expect(shown[0]).toContain("The source for this board");
-    expect(shown[1]).toContain("Big Buck Bunny");
-    expect(shown.at(-1)).toContain("negative score");
+    await expect(page.getByRole("link", { name: "New", exact: true })).toHaveAttribute("aria-current", "page");
+    expect((await titles(page))[0]).toContain("Big Buck Bunny");
   });
 
-  test("sorts by New and picks a range from the one button", async ({ page }) => {
+  test("sorts by Top, picks a range from the one button, and opens on the sort picked last", async ({ page, context }) => {
+    const kept = async () => (await context.cookies()).find((cookie) => cookie.name === "feed_sort")?.value;
     await page.goto("/");
-    await page.getByRole("link", { name: "New", exact: true }).click();
-    await expect(page).toHaveURL(/sort=new/);
-    await expect(page.locator("article h2").first()).toContainText("Big Buck Bunny");
+    await page.getByRole("link", { name: "Top", exact: true }).click();
+    await expect(page).toHaveURL(/\?sort=top$/);
+    await expect(page.locator("article h2").first()).toContainText("The source for this board");
+    const shown = await titles(page);
+    expect(shown[1]).toContain("Big Buck Bunny");
+    expect(shown.at(-1)).toContain("negative score");
 
     await page.getByRole("button", { name: "Range: Week" }).click();
     await page.getByRole("menuitem", { name: "Today" }).click();
-    await expect(page).toHaveURL(/range=day/);
+    await expect(page).toHaveURL(/\?sort=top&range=day$/);
     await expect(page.locator("article")).toHaveCount(5);
+
+    // The bare address, as the logo leads to, keeps the sort this browser picked.
+    await expect.poll(kept).toBe("top");
+    await page.goto("/");
+    await expect(page.getByRole("link", { name: "Top", exact: true })).toHaveAttribute("aria-current", "page");
+    await expect(page.locator("article h2").first()).toContainText("The source for this board");
+
+    await page.getByRole("link", { name: "New", exact: true }).click();
+    await expect(page).toHaveURL(/\?sort=new$/);
+    await expect.poll(kept).toBe("new");
+    await page.goto("/");
+    await expect(page.getByRole("link", { name: "New", exact: true })).toHaveAttribute("aria-current", "page");
+    await expect(page.locator("article h2").first()).toContainText("Big Buck Bunny");
   });
 
   test("loads more without repeating posts, and Back restores them", async ({ page }) => {
-    await page.goto("/?range=all");
+    await page.goto("/?sort=top&range=all");
     await expect(page.locator("article")).toHaveCount(20);
     await expect(page.locator("article h2").first()).toContainText("two months ago");
 
@@ -152,7 +166,7 @@ test.describe("profile", () => {
 });
 
 test("a link post's outside links open in a new tab, in the feed and on its page", async ({ page }) => {
-  for (const path of ["/", "/p/s_post_07/the-source-for-this-board-built-in-chatcode-lab-sessions"]) {
+  for (const path of ["/?sort=top", "/p/s_post_07/the-source-for-this-board-built-in-chatcode-lab-sessions"]) {
     await page.goto(path);
     const card = page.locator("article").first();
     for (const link of [card.getByRole("link", { name: "The source for this board, built in Chatcode Lab sessions" }), card.getByRole("link", { name: /chatcode-lab\/aionly/ })]) {
@@ -164,7 +178,7 @@ test("a link post's outside links open in a new tab, in the feed and on its page
 });
 
 test("a post's link pointed at reads nothing ahead, and its page's data on the click (review F86)", async ({ page }) => {
-  await page.goto("/");
+  await page.goto("/?sort=top");
   const link = page.locator("article").first().locator("a:has(time)");
   const isData = (url: string) => new URL(url).pathname.endsWith(".data");
   const ahead = page.waitForResponse((response) => isData(response.url()));

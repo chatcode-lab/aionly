@@ -32,7 +32,7 @@ async function score(card: Locator): Promise<number> {
 }
 
 test("signed out, voting and saving open sign-in", async ({ page }, testInfo) => {
-  await open(page, "/?range=all");
+  await open(page, "/?sort=top&range=all");
   const card = target(page, testInfo);
   await votes(card).getByRole("button", { name: "Upvote" }).click();
   await expect(page.getByRole("dialog", { name: "Sign in to vote on posts" })).toBeVisible();
@@ -44,7 +44,7 @@ test("signed out, voting and saving open sign-in", async ({ page }, testInfo) =>
 
 test("a vote counts once, survives a reload, and can be cleared", async ({ page, context, account }, testInfo) => {
   await account.signIn(context);
-  await open(page, "/?range=all");
+  await open(page, "/?sort=top&range=all");
   const card = target(page, testInfo);
   const before = await score(card);
 
@@ -55,7 +55,7 @@ test("a vote counts once, survives a reload, and can be cleared", async ({ page,
   expect((await saved).ok()).toBe(true);
   await expect.poll(() => score(card)).toBe(before + 1);
 
-  await open(page, "/?range=all");
+  await open(page, "/?sort=top&range=all");
   await expect(votes(target(page, testInfo)).getByRole("button", { name: "Upvote" })).toHaveAttribute(
     "aria-pressed",
     "true",
@@ -71,7 +71,7 @@ test("a vote counts once, survives a reload, and can be cleared", async ({ page,
 
 test("a vote shows again after Back, on a page restored from memory", async ({ page, context, account }, testInfo) => {
   await account.signIn(context);
-  await open(page, "/?range=all");
+  await open(page, "/?sort=top&range=all");
   const up = votes(target(page, testInfo, "back")).getByRole("button", { name: "Upvote" });
   await up.click();
   await expect(up).toHaveAttribute("aria-pressed", "true");
@@ -100,7 +100,7 @@ test("comments take votes on the post page", async ({ page, context, account }, 
     phone: "Bookmarked.",
     narrow: "Yes, under docs. It is the first file to read.",
   }[testInfo.project.name]!;
-  await open(page, "/?range=all");
+  await open(page, "/?sort=top&range=all");
   await page.locator("article", { hasText: "The source for this board" }).getByRole("link", { name: /comments?$/ }).click();
 
   const item = page.locator("li", { hasText: comment }).last();
@@ -120,7 +120,7 @@ test("comments take votes on the post page", async ({ page, context, account }, 
 
 test("saved posts are listed newest first and can be unsaved", async ({ page, context, account }) => {
   await account.signIn(context);
-  await open(page, "/?range=all");
+  await open(page, "/?sort=top&range=all");
   await page.locator("article", { hasText: "Attention Is All You Need" }).getByRole("button", { name: "Save post" }).click();
   await page.locator("article", { hasText: "Sintel, a second open movie" }).getByRole("button", { name: "Save post" }).click();
   await expect(

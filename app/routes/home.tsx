@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { useEffect, useRef, useState } from "react";
-import { Link, type ShouldRevalidateFunctionArgs } from "react-router";
+import { Link, type ShouldRevalidateFunctionArgs, useLocation } from "react-router";
 
 import { PostMenu } from "~/components/author-menus";
 import { PinnedPost } from "~/components/pinned-post";
@@ -12,6 +12,7 @@ import { editorPick } from "~/lib/db/editors.server";
 import { announcement } from "~/lib/db/pins.server";
 import { viewerMarks } from "~/lib/db/marks.server";
 import {
+  DEFAULT_SORT,
   feedPath,
   PAGE_SIZE,
   parseRange,
@@ -20,6 +21,7 @@ import {
   type Range,
   RANGES,
   SNAPSHOT_LIMIT,
+  SORT_COOKIE,
 } from "~/lib/feed";
 import type { ViewerMarks } from "~/lib/participation";
 import { canVoteOn } from "~/lib/participation";
@@ -50,7 +52,10 @@ export function meta({ matches }: Route.MetaArgs) {
 export async function loader({ request, context }: Route.LoaderArgs) {
   const url = new URL(request.url);
   const now = Math.floor(Date.now() / 1000);
-  const sort = parseSort(url.searchParams.get("sort"));
+  const cookies = request.headers.get("Cookie") ?? "";
+  const cookie = (name: string) => new RegExp(`(?:^|;\\s*)${name}=([^;]+)`).exec(cookies)?.[1];
+  // The sort the address names, or the one this browser last picked.
+  const sort = parseSort(url.searchParams.get("sort")) ?? parseSort(cookie(SORT_COOKIE)) ?? DEFAULT_SORT;
   const picked = parseRange(url.searchParams.get("range"));
   // Read at once, as none waits on another. With no range in the URL, the
   // board picks the narrowest one that can fill a first screen. The
@@ -65,9 +70,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     editorPick(env.DB, now),
   ]);
   const pickedId = editor?.post?.id === pin?.post.id ? null : (editor?.post?.id ?? null);
-  const cookies = request.headers.get("Cookie") ?? "";
-  const collapsedOf = (name: string, id: string | null) =>
-    id !== null && new RegExp(`(?:^|;\\s*)${name}=([^;]+)`).exec(cookies)?.[1] === id;
+  const collapsedOf = (name: string, id: string | null) => id !== null && cookie(name) === id;
   const pinnedId = pin?.post.id ?? null;
   const pinCollapsed = collapsedOf("pin_collapsed", pinnedId);
   const pickCollapsed = collapsedOf("pick_collapsed", pickedId);
@@ -357,11 +360,15 @@ function EditorBlock({ data }: { data: FeedData }) {
 }
 
 export default function Feed({ loaderData }: Route.ComponentProps) {
-  const address = feedPath(
-    loaderData.sort,
-    loaderData.rangePicked ? loaderData.range : null,
-  ).slice(1);
+  // Loaded pages are kept by the address, as the client loader looks them up.
+  const location = useLocation();
+  const address = `${location.pathname}${location.search}`;
   const viewer = useViewer();
+  // A sort the address names is the visitor's pick, kept for the bare address.
+  const named = new URLSearchParams(location.search).has("sort");
+  useEffect(() => {
+    if (named) document.cookie = `${SORT_COOKIE}=${loaderData.sort}; path=/; max-age=31536000; samesite=lax`;
+  }, [named, loaderData.sort]);
 
   return (
     <main className="mx-auto max-w-column px-(--gutter) py-4">
@@ -386,7 +393,7 @@ export default function Feed({ loaderData }: Route.ComponentProps) {
       <FeedList
         key={`${address}:${loaderData.now}`}
         data={loaderData}
-        address={`/${address}`}
+        address={address}
       />
     </main>
   );

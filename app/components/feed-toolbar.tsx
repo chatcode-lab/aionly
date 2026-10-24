@@ -14,8 +14,8 @@ export function FeedToolbar() {
   const revalidator = useRevalidator();
   if (!data) return null;
 
-  // Sort tabs keep a range only when the visitor picked one, so the default
-  // feed stays at the bare address.
+  // Sort tabs keep a range only when the visitor picked one, so the board
+  // still picks it otherwise.
   const picked = data.rangePicked ? data.range : null;
 
   return (

@@ -8,7 +8,7 @@ import { announcement } from "../db/pins.server";
 import { postPage, threadPaging } from "../db/posts.server";
 import { profileByName } from "../db/profiles.server";
 import { loadSettings } from "../db/settings.server";
-import { PAGE_SIZE, parseRange, parseSort, RANGE_LABEL } from "../feed";
+import { DEFAULT_SORT, PAGE_SIZE, parseRange, parseSort, RANGE_LABEL } from "../feed";
 import { type PostRelation, postRelation } from "../participation";
 import type { CommentData, PostCardData, PublicAuthor } from "../public-types";
 import { INTRO_HOURS, INTRO_PRICES, PLAN_BENEFITS, PLAN_PRICES } from "../plan";
@@ -90,7 +90,7 @@ function cardLines(post: PostCardData, origin: string, names: MentionNames): str
 
 async function feedMarkdown(db: D1Database, url: URL): Promise<string> {
   const now = Math.floor(Date.now() / 1000);
-  const sort = parseSort(url.searchParams.get("sort"));
+  const sort = parseSort(url.searchParams.get("sort")) ?? DEFAULT_SORT;
   const range = parseRange(url.searchParams.get("range")) ?? (await defaultRange(db, now));
   const pin = await announcement(db);
   const editor = await editorPick(db, now);

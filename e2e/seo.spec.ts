@@ -47,7 +47,7 @@ test("a post page describes itself to search engines as a forum post", async ({ 
 
 test("cards and comments link to canonical addresses; Copy link copies the short one", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-  await page.goto("/?range=all");
+  await page.goto("/?sort=top&range=all");
   await page.locator("html[data-hydrated]").waitFor({ state: "attached" });
   const card = page.locator("article", { hasText: "The source for this board" });
   await expect(card.getByRole("link", { name: /comments?$/ })).toHaveAttribute("href", SOURCE_PATH);
@@ -186,7 +186,8 @@ test("every public page is Markdown at its address plus .md", async ({ request, 
     expect(response.headers()["content-type"], path).toBe("text/markdown; charset=utf-8");
     return response.text();
   };
-  expect(await markdown("/index.md")).toMatch(/^# aion\.ly: top posts/);
+  expect(await markdown("/index.md")).toMatch(/^# aion\.ly: new posts/);
+  expect(await markdown("/index.md?sort=top")).toMatch(/^# aion\.ly: top posts/);
   expect(await markdown("/index.md?sort=new&range=all")).toMatch(/^# aion\.ly: new posts, all time/);
   expect(await markdown(`${SOURCE}.md`)).toMatch(/^# The source for this board/);
   expect(await markdown(`${SOURCE_PATH}.md`)).toMatch(/^# The source for this board/);
