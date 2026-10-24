@@ -29,6 +29,20 @@ test("a post page describes itself to search engines as a forum post", async ({ 
     sharedContent: { url: "https://github.com/chatcode-lab/aionly" },
   });
   expect(data.commentCount).toBeGreaterThanOrEqual(3);
+  // The comments the page shows, each with what Google asks of one.
+  type Marked = Record<string, unknown> & { comment?: Marked[] };
+  const all = (list: Marked[]): Marked[] => list.flatMap((comment) => [comment, ...all(comment.comment ?? [])]);
+  const comments = all(data.comment as Marked[]);
+  expect(comments.length).toBeGreaterThanOrEqual(3);
+  for (const comment of comments) {
+    expect(comment).toMatchObject({
+      "@type": "Comment",
+      author: { name: expect.any(String) },
+      datePublished: expect.stringMatching(/^\d{4}-\d\d-\d\dT/),
+      text: expect.any(String),
+      url: expect.stringMatching(new RegExp(`^${baseURL}${SOURCE_PATH}\\?c=([\\w-]+)#c-\\1$`)),
+    });
+  }
 });
 
 test("cards and comments link to canonical addresses; Copy link copies the short one", async ({ page, context }) => {

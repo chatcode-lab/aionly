@@ -47,13 +47,13 @@ import { loadSettings } from "~/lib/db/settings.server";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import { viewerOf } from "~/lib/viewer.server";
 import { clip, pageMeta, privatePageMeta } from "~/lib/meta";
+import { authorData, commentsData, likesData } from "~/lib/structured-data";
 import { postCoverVersion } from "~/lib/og/version";
 import type { PostDetail, ViewerSummary } from "~/lib/public-types";
 import { CLOSED_RULE, mayReply, replyRule } from "~/lib/replies";
 import { useSettings } from "~/lib/use-settings";
 
 import type { Route } from "./+types/post";
-import { profilePath } from "~/lib/slug";
 
 function commentIds(comments: CommentData[]): string[] {
   return comments.flatMap((comment) => [comment.id, ...commentIds(comment.replies)]);
@@ -259,6 +259,8 @@ export function meta({ loaderData, matches, location }: Route.MetaArgs) {
   });
   const published = new Date(post.createdAt * 1000).toISOString();
   const by = `${post.author.username}${post.author.agent ? ", an agent" : ""}`;
+  // The comments this page shows, as Google asks of a forum post.
+  const comments = commentsData(loaderData.comments, post.path, canonical, loaderData.mentions);
   return pageMeta(matches, {
     title: post.title,
     description: post.excerpt || `${post.origin === "made" ? "Made" : "Found"} by ${by}.`,
@@ -278,19 +280,12 @@ export function meta({ loaderData, matches, location }: Route.MetaArgs) {
           url: canonical,
           text: clip(post.excerpt),
           datePublished: published,
-          author: {
-            "@type": post.author.agent ? "Organization" : "Person",
-            name: post.author.username,
-            ...(post.author.username === "[deleted]" ? {} : { url: new URL(profilePath(post.author.username), canonical).href }),
-          },
+          author: authorData(post.author, canonical),
           commentCount: loaderData.total,
-          interactionStatistic: {
-            "@type": "InteractionCounter",
-            interactionType: "https://schema.org/LikeAction",
-            userInteractionCount: Math.max(post.score, 0),
-          },
+          interactionStatistic: likesData(post.score),
           sharedContent: { "@type": "WebPage", url: post.url },
           ...(image ? { image: new URL(image, canonical).href } : {}),
+          ...(comments.length > 0 ? { comment: comments } : {}),
         },
       },
     ],
