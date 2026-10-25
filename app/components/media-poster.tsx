@@ -10,13 +10,22 @@ import { type Aspect, PROVIDER_LABEL, type Provider } from "~/lib/links/types";
 /** Outbound links never pass ranking credit and never get a window handle. */
 export const OUTBOUND_REL = "nofollow ugc noopener";
 
-function Thumb({ src }: { src?: string }) {
+/**
+ * How a picture loads. The lead card's, the first a visitor sees, comes
+ * with the page and ahead of anything else on it; any other waits until it
+ * nears the screen, so pictures further down never hold up the first one.
+ */
+function loadingOf(lead: boolean | undefined) {
+  return lead ? { fetchPriority: "high" as const } : { loading: "lazy" as const };
+}
+
+function Thumb({ src, lead }: { src?: string; lead?: boolean }) {
   if (!src) return null;
   return (
     <img
       src={src}
       alt=""
-      loading="lazy"
+      {...loadingOf(lead)}
       decoding="async"
       className="absolute inset-0 size-full object-cover"
     />
@@ -62,6 +71,7 @@ export function MediaPoster({
   thumbUrl,
   duration,
   height,
+  lead,
   onActivate,
 }: {
   provider?: Provider;
@@ -72,6 +82,8 @@ export function MediaPoster({
   duration?: number;
   /** For a post embed or a song player, the height to reserve: the embed's own. */
   height?: number;
+  /** The first card on the screen, whose picture loads first. */
+  lead?: boolean;
   onActivate?: () => void;
 }) {
   const name = provider ? PROVIDER_LABEL[provider] : undefined;
@@ -100,7 +112,7 @@ export function MediaPoster({
           )}
         >
           <Music size={22} aria-hidden />
-          <Thumb src={thumbUrl} />
+          <Thumb src={thumbUrl} lead={lead} />
         </span>
         <span className="min-w-0 flex-1">
           <span className="block text-body font-medium">
@@ -125,7 +137,7 @@ export function MediaPoster({
         style={{ height: height ?? 176 }}
         className="group relative flex w-full items-center justify-center overflow-hidden rounded-xl border border-border bg-surface-2"
       >
-        <Thumb src={thumbUrl} />
+        <Thumb src={thumbUrl} lead={lead} />
         <span className="relative rounded-lg bg-overlay px-3.5 py-2 text-body font-medium text-on-overlay">
           Load post{name ? ` from ${name}` : ""}
         </span>
@@ -141,13 +153,14 @@ export function MediaPoster({
       <button
         type="button"
         onClick={onActivate}
-        aria-label={name ? `Play video from ${name}` : "Play video"}
+        // Named with what it shows, its length too.
+        aria-label={[name ? `Play video from ${name}` : "Play video", length].filter(Boolean).join(", ")}
         className={cn(
           "group relative block overflow-hidden rounded-xl bg-surface-2",
           vertical ? "aspect-[9/16] w-full max-w-80" : "aspect-video w-full",
         )}
       >
-        <Thumb src={thumbUrl} />
+        <Thumb src={thumbUrl} lead={lead} />
         <PlayGlyph />
         {name ? <Badge side="left">{name}</Badge> : null}
         {length ? <Badge side="right">{length}</Badge> : null}
@@ -172,30 +185,45 @@ export function UploadedImage({
   height,
   alt,
   pictures,
+  lead,
 }: {
   src: string;
   width: number;
   height: number;
   alt: string;
   pictures?: PictureView[];
+  /** The first card on the screen, whose picture loads first. */
+  lead?: boolean;
 }) {
   const all = pictures && pictures.length > 1 ? pictures : [{ src, width, height }];
   const [open, setOpen] = useState<number | null>(null);
   return (
     <Dialog.Root open={open !== null} onOpenChange={(next) => setOpen(next ? 0 : null)}>
       {all.length > 1 ? (
-        <GalleryFrame pictures={all} alt={alt} onOpen={setOpen} />
+        <GalleryFrame pictures={all} alt={alt} lead={lead} onOpen={setOpen} />
       ) : (
         <div className="flex justify-center overflow-hidden rounded-xl bg-surface-2">
-          <button type="button" aria-label={`See the picture full size: ${alt}`} className="block cursor-zoom-in" onClick={() => setOpen(0)}>
+          <button
+            type="button"
+            aria-label={`See the picture full size: ${alt}`}
+            className="block cursor-zoom-in"
+            // The picture's shape at its own size at most, never taller than
+            // a picture may stand: its room is kept before it loads, so
+            // nothing below it moves when it does.
+            style={{
+              width: `min(100%, ${width}px, calc(${PICTURE_CAP} * ${width / height}))`,
+              aspectRatio: `${width} / ${height}`,
+            }}
+            onClick={() => setOpen(0)}
+          >
             <img
               src={src}
               width={width}
               height={height}
               alt={alt}
-              loading="lazy"
+              {...loadingOf(lead)}
               decoding="async"
-              className="h-auto max-h-[min(70vh,35rem)] w-auto max-w-full object-contain"
+              className="size-full object-contain"
             />
           </button>
         </div>
@@ -210,7 +238,17 @@ export function UploadedImage({
  * frame of the cover's shape, each fitted inside it, snapping into place as
  * they are swiped, with previous and next where a pointer can hover.
  */
-function GalleryFrame({ pictures, alt, onOpen }: { pictures: PictureView[]; alt: string; onOpen: (index: number) => void }) {
+function GalleryFrame({
+  pictures,
+  alt,
+  lead,
+  onOpen,
+}: {
+  pictures: PictureView[];
+  alt: string;
+  lead?: boolean;
+  onOpen: (index: number) => void;
+}) {
   const strip = useRef<HTMLDivElement>(null);
   const [current, setCurrent] = useState(0);
   // The furthest picture seen: it and the one after it load, the rest wait (review F90).
@@ -253,8 +291,8 @@ function GalleryFrame({ pictures, alt, onOpen }: { pictures: PictureView[]; alt:
                 width={picture.width}
                 height={picture.height}
                 alt={pictureAlt(alt, index, pictures.length)}
-                // The first loads with the page; the next as it comes near.
-                loading={index === 0 ? undefined : "lazy"}
+                // The cover loads as a lone picture would; the next as it comes near.
+                {...(index === 0 ? loadingOf(lead) : { loading: "lazy" as const })}
                 decoding="async"
                 className="size-full object-contain"
               />
@@ -373,12 +411,15 @@ export function PreviewCard({
   host,
   pageTitle,
   thumbUrl,
+  lead,
 }: {
   url: string;
   host: string;
   /** The page's own title from its metadata, when one was found. */
   pageTitle?: string;
   thumbUrl?: string;
+  /** The first card on the screen, whose picture loads first. */
+  lead?: boolean;
 }) {
   return (
     <a
@@ -389,7 +430,7 @@ export function PreviewCard({
     >
       {thumbUrl ? (
         <span className="relative block aspect-[1200/630] w-full">
-          <Thumb src={thumbUrl} />
+          <Thumb src={thumbUrl} lead={lead} />
         </span>
       ) : null}
       <span className="flex items-center gap-3 px-3 py-2.5">

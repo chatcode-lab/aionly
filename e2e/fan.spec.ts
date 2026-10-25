@@ -593,6 +593,67 @@ test("a fan's agent uploads a video through the API and posts it", async ({ page
   await expect(card.getByRole("button", { name: "Play video" }).or(card.locator("video"))).toBeVisible();
 });
 
+test("only the first card's picture loads with the page, and a picture keeps its room before it loads", async ({ page, context, account, request }) => {
+  await setPlan(request, account);
+  await account.signIn(context);
+  // A gallery, posted first so that it is not the newest card.
+  await open(page, "/submit");
+  await page.getByRole("button", { name: "Upload", exact: true }).click();
+  const file = (name: string) => ({ name, mimeType: "image/png", buffer: PIXEL });
+  await page.getByLabel("Upload a file").setInputFiles([file("one.png"), file("two.png")]);
+  await expect(page.getByText("A gallery of 2, the first its cover.")).toBeVisible();
+  await page.getByLabel("I made this").check();
+  const galleryTitle = `A gallery further down, by ${account.username}`;
+  await finishPost(page, galleryTitle, "Two pictures, the first its cover.");
+
+  // Then a picture the agent states the size of: the browser reads a fan's own from the file.
+  await open(page, "/settings");
+  const section = page.getByRole("region", { name: "Your agent" });
+  await section.getByRole("button", { name: "Connect an agent" }).click();
+  await section.getByRole("radio", { name: /Post & comment/ }).check();
+  await section.getByRole("button", { name: "New token" }).click();
+  const auth = { Authorization: `Bearer ${(await section.locator("code", { hasText: /^aionly_/ }).textContent())!.trim()}` };
+  const uploaded = await request.post("/api/v1/uploads", { headers: { ...auth, "Content-Type": "image/png" }, data: PIXEL });
+  expect(uploaded.status(), await uploaded.text()).toBe(201);
+  const key = (await uploaded.json()).upload as string;
+  const created = await request.post("/api/v1/posts", {
+    headers: auth,
+    data: { kind: "upload", upload: key, title: `A wide picture, by ${account.username}`, description: "Laid out at its stated size.", width: 1200, height: 600 },
+  });
+  expect(created.status(), await created.text()).toBe(201);
+  const { id } = await created.json();
+
+  // Every picture past the first card waits until it nears the screen, a gallery's cover too.
+  await open(page, "/?sort=new&range=all");
+  await expect(page.getByRole("group", { name: galleryTitle }).locator("img").first()).toHaveAttribute("loading", "lazy");
+  const pictures = await page.locator("main article").evaluateAll((cards) =>
+    cards.flatMap((card, index) =>
+      Array.from(card.querySelectorAll("img"), (img) => ({ index, loading: img.getAttribute("loading"), priority: img.getAttribute("fetchpriority") })),
+    ),
+  );
+  expect(pictures.filter((picture) => picture.index > 0 && (picture.loading !== "lazy" || picture.priority !== null))).toEqual([]);
+
+  // A post's own page leads with its picture, which has its shape on the page before its file arrives.
+  let release = () => {};
+  const arrived = new Promise<void>((resolve) => (release = resolve));
+  await page.route(new RegExp(`/${key.replace(".", "\\.")}$`), async (route) => {
+    await arrived;
+    await route.fulfill({ contentType: "image/png", body: PIXEL });
+  });
+  await page.goto(`/p/${id}`, { waitUntil: "domcontentloaded" });
+  const card = page.locator("main article").first();
+  const picture = card.locator("img[alt^='A wide picture']");
+  await expect(picture).toHaveAttribute("fetchpriority", "high");
+  await expect(picture).not.toHaveAttribute("loading", /./);
+  const frame = card.getByRole("button", { name: /^See the picture full size/ });
+  const before = (await frame.boundingBox())!;
+  expect(before.width).toBeGreaterThan(200);
+  expect(Math.abs(before.height - before.width / 2)).toBeLessThan(1);
+  release();
+  await expect.poll(() => picture.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
+  expect(await frame.boundingBox()).toEqual(before);
+});
+
 test("deleting the account signs out, and what it wrote can go with it", async ({ page, context, account }) => {
   await account.signIn(context);
   // A comment to delete along with the account.

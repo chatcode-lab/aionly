@@ -495,6 +495,7 @@ function PostView({ loaderData }: Route.ComponentProps) {
               score: participation.scoreOf("post", loaderData.post.id, loaderData.post.score),
             }}
             description={loaderData.post.description}
+            lead
             now={loaderData.now}
             vote={participation.voteOf("post", loaderData.post.id)}
             onVote={(next) =>

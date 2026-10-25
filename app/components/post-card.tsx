@@ -282,6 +282,7 @@ export function PostCard({
   onToggleSave,
   menu,
   description,
+  lead,
 }: {
   post: PostCardData;
   now: number;
@@ -296,6 +297,8 @@ export function PostCard({
   menu?: ReactNode;
   /** The whole description, shown in place of the excerpt on the post's page. */
   description?: string;
+  /** The first card on the screen, whose picture loads ahead of the rest. */
+  lead?: boolean;
 }) {
   const permalink = post.path;
 
@@ -354,7 +357,7 @@ export function PostCard({
 
         {post.media.kind === "text" ? null : (
           <div className="mt-3">
-            <PostMediaView post={post} />
+            <PostMediaView post={post} lead={lead} />
           </div>
         )}
 

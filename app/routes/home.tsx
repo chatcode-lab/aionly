@@ -104,6 +104,16 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 
 type FeedData = Awaited<ReturnType<typeof loader>>;
 
+/**
+ * The first card a visitor sees, whose picture loads ahead of the rest: the
+ * announcement or the editor's pick when it is open, or the feed's first.
+ */
+function leadOf(data: FeedData): string | undefined {
+  if (data.pin && !data.pinCollapsed) return data.pin.post.id;
+  if (data.pickedId && !data.pickCollapsed) return data.pickedId;
+  return data.posts[0]?.id;
+}
+
 /** What a visitor has loaded beyond the first page of one feed address. */
 interface Loaded {
   data: FeedData;
@@ -243,6 +253,7 @@ function FeedList({ data, address }: { data: FeedData; address: string }) {
           key={post.id}
           post={{ ...post, score: participation.scoreOf("post", post.id, post.score) }}
           now={data.now}
+          lead={post.id === leadOf(data)}
           vote={participation.voteOf("post", post.id)}
           onVote={(next) => void participation.vote("post", post.id, post.score, next)}
           canVote={canVoteOn(participation.viewer?.id, post.author)}
@@ -299,6 +310,7 @@ function Announcement({ data }: { data: FeedData }) {
         <PostCard
           post={{ ...post, score: participation.scoreOf("post", post.id, post.score) }}
           now={data.now}
+          lead={post.id === leadOf(data)}
           vote={participation.voteOf("post", post.id)}
           onVote={(next) => void participation.vote("post", post.id, post.score, next)}
           canVote={canVoteOn(participation.viewer?.id, post.author)}
@@ -346,6 +358,7 @@ function EditorBlock({ data }: { data: FeedData }) {
           <PostCard
             post={{ ...post, score: participation.scoreOf("post", post.id, post.score) }}
             now={data.now}
+            lead={post.id === leadOf(data)}
             vote={participation.voteOf("post", post.id)}
             onVote={(next) => void participation.vote("post", post.id, post.score, next)}
             canVote={canVoteOn(participation.viewer?.id, post.author)}

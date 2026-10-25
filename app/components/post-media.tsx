@@ -101,9 +101,11 @@ function Player({
 function ProviderMedia({
   post,
   media,
+  lead,
 }: {
   post: PostCardData;
   media: Extract<PostMedia, { kind: "media" }>;
+  lead?: boolean;
 }) {
   const { key, ref, state } = useMediaSlot(post.id, SLOT_KIND[media.provider]);
   const resolved = useMemo(() => mediaLinkOf(post.url), [post.url]);
@@ -113,7 +115,7 @@ function ProviderMedia({
   if (state.failed) {
     return (
       <div ref={ref} className="space-y-1">
-        <PreviewCard url={post.url} host={post.host ?? ""} thumbUrl={media.thumbUrl} />
+        <PreviewCard url={post.url} host={post.host ?? ""} thumbUrl={media.thumbUrl} lead={lead} />
         <p className="text-meta text-text-muted">It can&apos;t play here.</p>
       </div>
     );
@@ -134,6 +136,7 @@ function ProviderMedia({
           provider={media.provider}
           aspect={media.aspect}
           thumbUrl={media.thumbUrl}
+          lead={lead}
           // A post embed's poster keeps the height the embed last showed at,
           // and a song's the player's fixed height, so loading and releasing
           // the frame does not move the page.
@@ -163,9 +166,11 @@ function ProviderMedia({
 function UploadedMedia({
   post,
   media,
+  lead,
 }: {
   post: PostCardData;
   media: Extract<PostMedia, { kind: "video" | "audio" }>;
+  lead?: boolean;
 }) {
   const video = media.kind === "video";
   const { key, ref, state } = useMediaSlot(post.id, video ? "video" : "song");
@@ -192,6 +197,7 @@ function UploadedMedia({
           aspect={media.aspect}
           thumbUrl={media.thumbUrl}
           duration={media.duration}
+          lead={lead}
           onActivate={() => controller?.tap(key)}
         />
       </div>
@@ -225,14 +231,15 @@ function UploadedMedia({
 
 /**
  * A post's media: a poster that becomes the provider's player, or a preview
- * card that opens the original.
+ * card that opens the original. The lead card's, the first on the screen,
+ * loads its picture ahead of the rest.
  */
-export function PostMediaView({ post }: { post: PostCardData }) {
+export function PostMediaView({ post, lead }: { post: PostCardData; lead?: boolean }) {
   const { media } = post;
 
   switch (media.kind) {
     case "media":
-      return <ProviderMedia post={post} media={media} />;
+      return <ProviderMedia post={post} media={media} lead={lead} />;
     case "page":
       return (
         <PreviewCard
@@ -240,6 +247,7 @@ export function PostMediaView({ post }: { post: PostCardData }) {
           host={post.host ?? ""}
           pageTitle={media.pageTitle}
           thumbUrl={media.thumbUrl}
+          lead={lead}
         />
       );
     case "image":
@@ -250,11 +258,12 @@ export function PostMediaView({ post }: { post: PostCardData }) {
           height={media.height}
           alt={post.title}
           pictures={media.pictures}
+          lead={lead}
         />
       );
     case "video":
     case "audio":
-      return <UploadedMedia post={post} media={media} />;
+      return <UploadedMedia post={post} media={media} lead={lead} />;
     case "text":
       return null;
   }
