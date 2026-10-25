@@ -105,13 +105,18 @@ export async function loader({ request, context }: Route.LoaderArgs) {
 type FeedData = Awaited<ReturnType<typeof loader>>;
 
 /**
- * The first card a visitor sees, whose picture loads ahead of the rest: the
- * announcement or the editor's pick when it is open, or the feed's first.
+ * The card whose picture loads ahead of the rest: the first of the first
+ * two a visitor sees (the announcement or the editor's pick when open, then
+ * the feed) that shows more than text, as a text post leaves the next one's
+ * picture on the first screen.
  */
 function leadOf(data: FeedData): string | undefined {
-  if (data.pin && !data.pinCollapsed) return data.pin.post.id;
-  if (data.pickedId && !data.pickCollapsed) return data.pickedId;
-  return data.posts[0]?.id;
+  const shown = [
+    ...(data.pin && !data.pinCollapsed ? [data.pin.post] : []),
+    ...(data.editor?.post && data.pickedId && !data.pickCollapsed ? [data.editor.post] : []),
+    ...data.posts,
+  ];
+  return shown.slice(0, 2).find((post) => post.media.kind !== "text")?.id;
 }
 
 /** What a visitor has loaded beyond the first page of one feed address. */

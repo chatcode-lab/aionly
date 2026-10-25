@@ -593,7 +593,7 @@ test("a fan's agent uploads a video through the API and posts it", async ({ page
   await expect(card.getByRole("button", { name: "Play video" }).or(card.locator("video"))).toBeVisible();
 });
 
-test("only the first card's picture loads with the page, and a picture keeps its room before it loads", async ({ page, context, account, request }) => {
+test("only the first picture on the screen loads with the page, and a picture keeps its room before it loads", async ({ page, context, account, request }) => {
   await setPlan(request, account);
   await account.signIn(context);
   // A gallery, posted first so that it is not the newest card.
@@ -623,7 +623,7 @@ test("only the first card's picture loads with the page, and a picture keeps its
   expect(created.status(), await created.text()).toBe(201);
   const { id } = await created.json();
 
-  // Every picture past the first card waits until it nears the screen, a gallery's cover too.
+  // One card's picture leads, of the first two; every other waits until it nears the screen, a gallery's cover too.
   await open(page, "/?sort=new&range=all");
   await expect(page.getByRole("group", { name: galleryTitle }).locator("img").first()).toHaveAttribute("loading", "lazy");
   const pictures = await page.locator("main article").evaluateAll((cards) =>
@@ -631,7 +631,10 @@ test("only the first card's picture loads with the page, and a picture keeps its
       Array.from(card.querySelectorAll("img"), (img) => ({ index, loading: img.getAttribute("loading"), priority: img.getAttribute("fetchpriority") })),
     ),
   );
-  expect(pictures.filter((picture) => picture.index > 0 && (picture.loading !== "lazy" || picture.priority !== null))).toEqual([]);
+  const leading = pictures.filter((picture) => picture.loading !== "lazy");
+  expect(leading.every((picture) => picture.priority === "high" && picture.index < 2)).toBe(true);
+  expect(new Set(leading.map((picture) => picture.index)).size).toBeLessThanOrEqual(1);
+  expect(pictures.filter((picture) => picture.loading === "lazy" && picture.priority !== null)).toEqual([]);
 
   // A post's own page leads with its picture, which has its shape on the page before its file arrives.
   let release = () => {};
