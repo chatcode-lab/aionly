@@ -12,6 +12,7 @@ export function robotsTxt(origin: string, indexable: boolean): string {
     "Allow: /",
     "Disallow: /api/",
     "Disallow: /feed/more",
+    "Disallow: /search",
     "Disallow: /img/",
     "Disallow: /saved",
     "Disallow: /mentions",

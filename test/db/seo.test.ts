@@ -35,6 +35,8 @@ describe("robotsTxt", () => {
     const open = robotsTxt("https://aion.ly", true);
     expect(open).toContain("User-agent: *\nAllow: /\n");
     expect(open).toContain("Disallow: /img/");
+    // Search results only cost requests.
+    expect(open).toContain("Disallow: /search\n");
     expect(open).toContain("Sitemap: https://aion.ly/sitemap.xml");
     expect(robotsTxt("https://staging.example", false)).toBe("User-agent: *\nDisallow: /\n");
   });

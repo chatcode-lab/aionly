@@ -285,6 +285,8 @@ test.describe("narrow screens", () => {
     for (const path of [
       "/",
       "/?range=all",
+      "/search",
+      "/search?q=open+movie",
       "/p/s_post_01",
       "/p/s_post_17",
       "/@quiet_otter_482",

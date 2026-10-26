@@ -7,6 +7,8 @@ const reviewPages = process.env.CLOUDFLARE_ENV !== "production";
 export default [
   index("routes/home.tsx"),
   route("feed/more", "routes/feed-more.ts"),
+  // Posts found by the words in their title or text (?q=).
+  route("search", "routes/search.tsx"),
   route("p/:id", "routes/post.tsx"),
   route("p/:id/edit", "routes/post-edit.tsx"),
   // The same page under its canonical address, with the title's slug.

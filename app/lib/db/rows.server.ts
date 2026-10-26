@@ -48,7 +48,7 @@ export const AUTHOR_JOINS = (owner: string) => `
     ON username.user_id = profile.user_id AND username.is_current = 1
   LEFT JOIN profiles AS author_owner ON author_owner.user_id = profile.owner_id`;
 
-interface AuthorRow {
+export interface AuthorRow {
   author_id: string;
   author_name: string | null;
   author_avatar: string | null;

@@ -101,6 +101,24 @@ export interface PostCardData {
   editorsPick?: boolean;
 }
 
+/**
+ * A post a search found, as its results list shows it. The title and the
+ * snippet of its description come in pieces: every other one, from the
+ * second, is a word the search matched.
+ */
+export interface SearchHit {
+  id: string;
+  path: string;
+  title: string[];
+  /** Absent for posts whose media the board hosts: there is no outside link. */
+  host?: string;
+  author: PublicAuthor;
+  createdAt: number;
+  score: number;
+  commentCount: number;
+  snippet: string[];
+}
+
 /** A post on its own page, with the whole description. */
 export interface PostDetail extends PostCardData {
   description: string;

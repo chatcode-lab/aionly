@@ -200,6 +200,8 @@ test("removed and deleted text never reaches a page or its data", async ({ page,
     "/p/s_post_01",
     "/p/s_post_17",
     "/p/s_post_18",
+    "/search?q=never+shown",
+    "/search?q=sample",
     // The authors of the removed and deleted samples.
     "/@velvet_newt_12",
     "/@north_finch_388",

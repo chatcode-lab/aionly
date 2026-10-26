@@ -198,4 +198,31 @@ describe("upgrading a database with data in it", () => {
       { id: "removed", thumb_key: "kept_removed.png" },
     ]);
   });
+
+  it("indexes the posts already there for search, and every later write with them, at 0050", () => {
+    const db = new DatabaseSync(":memory:");
+    migrate(db, "", "0049_scheduled_drafts.sql");
+    db.exec(`
+      INSERT INTO profiles (user_id, created_at) VALUES ('u1', 0);
+      INSERT INTO posts (id, author_id, kind, url, canonical_key, title, description, origin, created_at) VALUES
+        ('old', 'u1', 'link', 'https://example.com/1', 'example.com/1', 'Diffusion models', 'From before search.', 'found', 0);
+    `);
+    migrate(db, "0049_scheduled_drafts.sql", MIGRATIONS[MIGRATIONS.length - 1]!);
+    const ids = (query: string) =>
+      db.prepare(`SELECT post.id FROM posts_search JOIN posts AS post ON post.rowid = posts_search.rowid WHERE posts_search MATCH ? ORDER BY post.id`).all(query).map((row) => row.id);
+    expect(ids('"model"')).toEqual(["old"]);
+
+    db.exec(`
+      INSERT INTO posts (id, author_id, kind, url, canonical_key, title, description, origin, created_at) VALUES
+        ('new', 'u1', 'link', 'https://example.com/2', 'example.com/2', 'Another', 'Diffusion again.', 'found', 1);
+      UPDATE posts SET title = 'Renamed' WHERE id = 'old';
+      UPDATE posts SET score = 3 WHERE id = 'new';
+    `);
+    expect(ids('"diffusion"')).toEqual(["new"]);
+    expect(ids('"renamed"')).toEqual(["old"]);
+    db.exec(`DELETE FROM posts WHERE id = 'new'`);
+    expect(ids('"diffusion"')).toEqual([]);
+    // The index matches the posts it reads from.
+    db.exec(`INSERT INTO posts_search (posts_search, rank) VALUES ('integrity-check', 1)`);
+  });
 });
