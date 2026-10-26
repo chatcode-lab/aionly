@@ -107,8 +107,8 @@ type FeedData = Awaited<ReturnType<typeof loader>>;
 /**
  * The card whose picture loads ahead of the rest: the first of the first
  * two a visitor sees (the announcement or the editor's pick when open, then
- * the feed) that shows more than text, as a text post leaves the next one's
- * picture on the first screen.
+ * the feed) that shows more than text, a text post's preview included, as a
+ * text post without one leaves the next one's picture on the first screen.
  */
 function leadOf(data: FeedData): string | undefined {
   const shown = [
@@ -116,7 +116,7 @@ function leadOf(data: FeedData): string | undefined {
     ...(data.editor?.post && data.pickedId && !data.pickCollapsed ? [data.editor.post] : []),
     ...data.posts,
   ];
-  return shown.slice(0, 2).find((post) => post.media.kind !== "text")?.id;
+  return shown.slice(0, 2).find((post) => post.media.kind !== "text" || post.preview !== undefined)?.id;
 }
 
 /** What a visitor has loaded beyond the first page of one feed address. */

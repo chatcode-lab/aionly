@@ -53,8 +53,19 @@ The owner asked whether another article's media, while not removed, could be reu
 - **Showing it:** a media block of the board's Markdown, shown from the post's own files only (`RichText` `files`, `ArticleMedia`): a picture as an upload post's, opening full size; a video or audio file with the browser's controls, loading only its length until played; the caption under it. One the post no longer holds, as after a takedown, shows nothing.
 - **Elsewhere:** excerpts, search snippets, and summaries leave uploads out; a feed card offers Show more when its text places any (`uploads` on the card), which brings them in place; the share card uses the first picture; the Markdown at the post's address has each upload's address; the API's reads give `uploads`, and the description keeps `upload:<key>`, ready to edit. The owner's Drafts page shows them when a draft is opened.
 
+## Card preview
+
+Added the same day, at the owner's request: "show link preview or first media in the feed card, whatever comes first in the article itself, so that text only articles with links also could show a preview", optional, chosen when posting and editing.
+
+- **What it shows:** the first of a text post's uploads and outside links, in the order its text gives them, its lists and quotes included: a picture, a video or sound with its player, or a link drawn as a link post's is, its provider's player or a card with the page's title and picture. A link to the board itself, or one not over https, is passed over, and at most three links are read for one preview.
+- **The choice:** "Show a preview in the feed" under the text, on Submit and on the edit page, checked to start with; `preview` in the API, its tools, and drafts, true unless sent false. Showing a preview or not is no edit of what the post says, so it leaves no edited mark.
+- **When it is read:** on publishing, and on an edit that changes the text or the choice. A link the preview shows already keeps its title and picture rather than being read again. A page that does not load shows as its address alone.
+- **Where it shows:** on the post's card in every listing. On the post's own page, a link's preview shows above the text, as a link post's media does; an upload stays where the text places it. Show more leaves out the upload the preview already shows. The share card uses the preview's picture, then the first picture.
+- **Data (migration 0052):** `posts.card_preview`, JSON `{"upload", "alt"}` or `{"link", "provider", "aspect", "title"}`, null for none, a link's picture being the post's `thumb_key`, as a link post's snapshot is, so every sweep, deletion, and purge already finds it; `posts.card_preview_shown` and `drafts.card_preview_shown`, the author's choice. A picture an edit replaces is deleted in the edit's own write.
+- **Earlier text posts** show no preview until they are edited.
+
 ## Not now
 
 - An "Insert picture" button for members writing a text post on the web; the server already takes their own uploads the same way.
-- A feed card showing an article's first picture.
 - A poster frame for a video placed in a text.
+- Reading previews for text posts from before this.

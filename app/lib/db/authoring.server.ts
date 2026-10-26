@@ -265,6 +265,8 @@ export interface EditablePost {
   replies: PostReplies;
   /** Its discussion is closed. */
   closed: boolean;
+  /** A text post's card preview, as its author chose it and as it stands, with its picture. */
+  preview: { shown: boolean; json: string | null; thumbKey: string | null };
 }
 
 /** The author's own live post, for its edit page; null for anyone else. */
@@ -275,7 +277,8 @@ export async function editablePost(
 ): Promise<EditablePost | null> {
   const row = await db
     .prepare(
-      `SELECT id, kind, title, origin, description, created_at, reply_policy, comments_closed_at FROM posts
+      `SELECT id, kind, title, origin, description, created_at, reply_policy, comments_closed_at,
+         card_preview_shown, card_preview, thumb_key FROM posts
        WHERE id = ?1 AND author_id = ?2 AND ${LIVE}`,
     )
     .bind(id, authorId)
@@ -288,6 +291,9 @@ export async function editablePost(
       created_at: number;
       reply_policy: Exclude<PostReplies, "all"> | null;
       comments_closed_at: number | null;
+      card_preview_shown: number;
+      card_preview: string | null;
+      thumb_key: string | null;
     }>();
   return row
     ? {
@@ -299,6 +305,11 @@ export async function editablePost(
         createdAt: row.created_at,
         replies: row.reply_policy ?? "all",
         closed: row.comments_closed_at !== null,
+        preview: {
+          shown: row.card_preview_shown === 1,
+          json: row.kind === "text" ? row.card_preview : null,
+          thumbKey: row.kind === "text" ? row.thumb_key : null,
+        },
       }
     : null;
 }
@@ -322,9 +333,21 @@ export type PostEditResult =
  */
 export async function editPost(
   db: D1Database,
-  input: { id: string; authorId: string; title: string; origin: Origin; description: string; now: number },
+  input: {
+    id: string;
+    authorId: string;
+    title: string;
+    origin: Origin;
+    description: string;
+    /**
+     * A text post's card preview, as its text and its author's choice now
+     * give it (see ../submit/text-preview.server.ts); left out, it stays.
+     */
+    preview?: { shown: boolean; json: string | null; thumbKey: string | null };
+    now: number;
+  },
 ): Promise<PostEditResult> {
-  const { id, authorId, title, origin, description, now } = input;
+  const { id, authorId, title, origin, description, preview, now } = input;
   const held = await db
     .prepare(`SELECT kind, inline_media FROM posts WHERE id = ?1 AND author_id = ?2`)
     .bind(id, authorId)
@@ -332,26 +355,64 @@ export async function editPost(
   const placed = await inlineMediaFor(db, { authorId, text: description, kept: inlineKeys(held?.inline_media), article: held?.kind === "text" });
   if (!placed.ok) return { ok: false, reason: "media", problem: placed.problem };
   const inline = placed.json;
+  // A text post's preview changes with it (?9): what it shows (?8), its
+  // author's choice (?10), and a link's picture (?11).
+  const previewing = preview !== undefined && held?.kind === "text";
+  const changed = (post: string) => `(${post}.title <> ?3 OR ${post}.origin <> ?4 OR ${post}.description <> ?5)`;
   // The post as it can change: live, its author's, changed, within the
   // title's hour, and its uploads its author's, sent for it or its own.
   const which = (post: string) => `${post}.id = ?1 AND ${post}.author_id = ?2 AND ${post}.deleted_at IS NULL AND ${post}.removed_batch_id IS NULL
-    AND (${post}.title <> ?3 OR ${post}.origin <> ?4 OR ${post}.description <> ?5)
+    AND (${changed(post)} OR (?9 = 1 AND (${post}.card_preview_shown <> ?10 OR ${post}.card_preview IS NOT ?8 OR ${post}.thumb_key IS NOT ?11)))
     AND ((${post}.title = ?3 AND ${post}.origin = ?4) OR ${post}.created_at > ?6 - ${TITLE_EDIT_SECONDS})
     AND ${participantCondition(2, now)}
     AND ${inlineMediaHolds(7, 2, `SELECT json_extract(held.value, '$.key') FROM json_each(${post}.inline_media) AS held`)}`;
-  // The files it holds that the new text leaves out, read before it changes.
+  // The files it holds that it no longer shows, read before it changes:
+  // uploads the new text leaves out, and a preview's picture it replaces.
   const dropped = `SELECT json_extract(held.value, '$.key') AS key FROM posts AS post, json_each(post.inline_media) AS held
-    WHERE ${which("post")} AND json_extract(held.value, '$.key') NOT IN (SELECT json_extract(value, '$.key') FROM json_each(COALESCE(?7, '[]')))`;
-  const bind = (statement: D1PreparedStatement) => statement.bind(id, authorId, title, origin, description, now, inline);
+    WHERE ${which("post")} AND json_extract(held.value, '$.key') NOT IN (SELECT json_extract(value, '$.key') FROM json_each(COALESCE(?7, '[]')))
+    UNION SELECT post.thumb_key FROM posts AS post
+    WHERE ${which("post")} AND ?9 = 1 AND post.kind = 'text' AND post.thumb_key IS NOT NULL AND post.thumb_key IS NOT ?11`;
+  const bind = (statement: D1PreparedStatement) =>
+    statement.bind(
+      id,
+      authorId,
+      title,
+      origin,
+      description,
+      now,
+      inline,
+      previewing ? preview.json : null,
+      previewing ? 1 : 0,
+      previewing && !preview.shown ? 0 : 1,
+      previewing ? preview.thumbKey : null,
+    );
   const results = await db.batch([
     bind(db.prepare(`INSERT INTO file_deletions (key, queued_at) SELECT key, ?6 FROM (${dropped}) WHERE true ON CONFLICT (key) DO NOTHING`)),
     bind(db.prepare(`DELETE FROM images WHERE key IN (${dropped}) RETURNING key`)),
     bind(
       db.prepare(
-        `UPDATE posts SET title = ?3, origin = ?4, description = ?5, edited_at = ?6, inline_media = ?7
+        `UPDATE posts SET title = ?3, origin = ?4, description = ?5, inline_media = ?7,
+           -- Showing a preview or not is no change to what the post says.
+           edited_at = CASE WHEN ${changed("posts")} THEN ?6 ELSE edited_at END,
+           card_preview = CASE WHEN ?9 = 1 THEN ?8 ELSE card_preview END,
+           card_preview_shown = CASE WHEN ?9 = 1 THEN ?10 ELSE card_preview_shown END,
+           -- A link's picture: the one it has, or the one its check kept pending.
+           thumb_key = CASE WHEN ?9 = 0 THEN thumb_key WHEN ?11 IS NULL THEN NULL WHEN ?11 IS thumb_key THEN thumb_key
+             ELSE (SELECT key FROM images WHERE key = ?11 AND owner_id = ?2 AND kind = 'post' AND state = 'pending') END
          WHERE ${which("posts")}`,
       ),
     ),
+    // A new preview's picture is the post's own.
+    ...(previewing && preview.thumbKey
+      ? [
+          db
+            .prepare(
+              `UPDATE images SET state = 'attached'
+               WHERE key = ?2 AND state = 'pending' AND EXISTS (SELECT 1 FROM posts WHERE id = ?1 AND thumb_key = ?2)`,
+            )
+            .bind(id, preview.thumbKey),
+        ]
+      : []),
     // The uploads it now places are its own.
     ...(inline
       ? [
@@ -371,15 +432,28 @@ export async function editPost(
 
   const row = await db
     .prepare(
-      `SELECT author_id, title, origin, description, created_at,
+      `SELECT author_id, title, origin, description, created_at, card_preview, card_preview_shown, thumb_key,
          deleted_at IS NULL AND removed_batch_id IS NULL AS open
        FROM posts WHERE id = ?1`,
     )
     .bind(id)
-    .first<{ author_id: string; title: string; origin: Origin; description: string; created_at: number; open: number }>();
+    .first<{
+      author_id: string;
+      title: string;
+      origin: Origin;
+      description: string;
+      created_at: number;
+      card_preview: string | null;
+      card_preview_shown: number;
+      thumb_key: string | null;
+      open: number;
+    }>();
   if (!row || row.author_id !== authorId) return { ok: false, reason: "not_found" };
   if (!row.open) return { ok: false, reason: "closed" };
-  if (row.title === title && row.origin === origin && row.description === description) return { ok: true, freed: [] };
+  const samePreview =
+    !previewing ||
+    (row.card_preview === preview.json && row.card_preview_shown === (preview.shown ? 1 : 0) && row.thumb_key === preview.thumbKey);
+  if (row.title === title && row.origin === origin && row.description === description && samePreview) return { ok: true, freed: [] };
   if ((row.title !== title || row.origin !== origin) && row.created_at <= now - TITLE_EDIT_SECONDS) {
     return { ok: false, reason: "window" };
   }

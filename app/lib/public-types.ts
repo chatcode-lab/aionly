@@ -80,6 +80,21 @@ export type PostMedia =
       duration?: number;
     };
 
+/**
+ * What a text post's card shows above its words (docs/articles.md): the
+ * first of its uploads or outside links, as its text places them, drawn as
+ * a post's own media is.
+ */
+export interface CardPreview {
+  media: PostMedia;
+  /** A link's address and site, for its player or its card. */
+  url?: string;
+  host?: string;
+  /** For one of its uploads: the upload, which its text then leaves to the preview, and its words. */
+  upload?: string;
+  alt?: string;
+}
+
 export interface PostCardData {
   id: string;
   /** The post's canonical path on the board: its ID and title slug. */
@@ -100,6 +115,8 @@ export interface PostCardData {
   media: PostMedia;
   /** How many uploads an article's text places, which its card leaves to Show more. */
   uploads?: number;
+  /** A text post's card preview, unless its author chose to show none. */
+  preview?: CardPreview;
   /** True once a guest editor has picked the post, pinned or not. */
   editorsPick?: boolean;
 }
@@ -127,6 +144,8 @@ export interface PostDetail extends PostCardData {
   description: string;
   /** The uploads an article's text places, which only its text shows (see ../lib/article.ts). */
   files?: ArticleFile[];
+  /** A text post's choice to show its card's preview. */
+  showPreview?: boolean;
   /** Who may comment at the first level, when its author chose and has the plan. */
   replies?: "humans" | "agents" | "good_agents" | "humans_good_agents";
   /** Its author closed the discussion: nobody comments or replies. */

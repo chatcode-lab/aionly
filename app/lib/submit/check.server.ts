@@ -186,6 +186,75 @@ export async function checkLink(input: {
   return { ok: true, link: checked, duplicate: null, receipt: await receiptFor(checked, resolved.canonicalKey, input) };
 }
 
+/** A link as a text post's card previews it: its player, or its page's title and picture. */
+export interface LinkPreview {
+  url: string;
+  provider: Provider | null;
+  aspect: Aspect | null;
+  pageTitle: string | null;
+  /** The page's picture, kept as the account's one pending image for the post's write to claim. */
+  thumbKey: string | null;
+}
+
+/**
+ * A link from a text post's text, read as Check link reads one (a short
+ * link followed, the page's own name for itself kept), for its card's
+ * preview. Null when it is not one a post could link to, as one to this
+ * board or not over https; a page that does not load shows without its
+ * title or picture. No repeat check: a text post may link anywhere.
+ */
+export async function linkPreview(input: {
+  raw: string;
+  userId: string;
+  ownHosts: readonly string[];
+  db: D1Database;
+  bucket: R2Bucket;
+  now: number;
+  /** A preview of this same address already shown, kept as it is instead of reading the page again. */
+  keep?: { url: string; preview: LinkPreview };
+}): Promise<LinkPreview | null> {
+  const parsed = parseSubmittedUrl(input.raw, { ownHosts: input.ownHosts });
+  if (!parsed.ok) return null;
+  let url = parsed.url;
+  let link = resolveLink(url);
+  if (link.kind === "short") {
+    try {
+      url = await expandShortLink(url, AbortSignal.timeout(5000), input.ownHosts);
+    } catch {
+      return null;
+    }
+    link = resolveLink(url);
+    if (link.kind === "short") return null;
+  }
+  let address = link.kind === "page" ? cleanPageUrl(url) : mediaUrl(link, url);
+  if (input.keep && input.keep.url === address) return input.keep.preview;
+  const base: LinkPreview = {
+    url: address,
+    provider: link.kind === "media" ? link.provider : null,
+    aspect: link.kind === "media" ? link.aspect : null,
+    pageTitle: null,
+    thumbKey: null,
+  };
+  try {
+    const meta = await linkMeta(link, new URL(address), { signal: AbortSignal.timeout(5000), ownHosts: input.ownHosts });
+    if (link.kind === "page" && meta.canonical && isSamePage(meta.canonical, new URL(address))) address = cleanPageUrl(meta.canonical);
+    if (input.keep && input.keep.url === address) return input.keep.preview;
+    const thumbKey = meta.image
+      ? await snapshotImage(input.db, input.bucket, {
+          url: meta.image,
+          signal: AbortSignal.timeout(5000),
+          ownHosts: input.ownHosts,
+          ownerId: input.userId,
+          now: input.now,
+        })
+      : null;
+    return { ...base, url: address, pageTitle: link.kind === "page" ? (meta.title ?? null) : null, thumbKey };
+  } catch (error) {
+    console.error("text post preview not read", error);
+    return base;
+  }
+}
+
 /** The signed receipt that lets the checked link be published, for a while. */
 function receiptFor(link: CheckedLink, canonicalKey: string, input: { userId: string; secret: string; now: number }): Promise<string> {
   return signReceipt(

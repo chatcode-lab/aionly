@@ -1,4 +1,4 @@
-import { firstPicture, storedInlineMedia } from "../article";
+import { firstPicture, storedInlineMedia, storedPreview } from "../article";
 import { generatedAvatar } from "../avatar";
 import { AUTHOR_COLUMNS, AUTHOR_JOINS, toPublicAuthor } from "../db/rows.server";
 import { mentionNames } from "../db/mentions.server";
@@ -97,12 +97,24 @@ async function versioned(url: URL, found: Found | null, keep: Keep): Promise<Res
   );
 }
 
+/** A text post's picture for its cover: its preview's, a picture or a link's snapshot, or else the first it places. */
+function textPicture(row: { inline_media: string | null; card_preview: string | null; thumb_key: string | null }): string | null {
+  const files = storedInlineMedia(row.inline_media);
+  const preview = storedPreview(row.card_preview);
+  if (preview && "upload" in preview) {
+    const file = files.find((held) => held.key === preview.upload);
+    if (file?.type === "image") return file.key;
+  }
+  if (preview && "link" in preview && row.thumb_key) return row.thumb_key;
+  return firstPicture(files)?.key ?? null;
+}
+
 /** A live post's cover: its title, excerpt, and byline, with its picture beside them. */
 async function postCover(db: D1Database, bucket: R2Bucket, id: string): Promise<Found | null> {
   const row = await db
     .prepare(
       `SELECT post.kind, post.title, post.description, post.origin, post.url, post.thumb_key,
-              post.media_key, post.media_type, post.inline_media, ${AUTHOR_COLUMNS}
+              post.media_key, post.media_type, post.inline_media, post.card_preview, ${AUTHOR_COLUMNS}
        FROM posts AS post
        ${AUTHOR_JOINS("post")}
        WHERE post.id = ?1 AND post.deleted_at IS NULL AND post.removed_batch_id IS NULL`,
@@ -118,16 +130,17 @@ async function postCover(db: D1Database, bucket: R2Bucket, id: string): Promise<
       media_key: string | null;
       media_type: string | null;
       inline_media: string | null;
+      card_preview: string | null;
     }>();
   if (!row) return null;
   const author = toPublicAuthor(row);
-  // An uploaded picture shows itself, and an article its first; anything
-  // else, its snapshot or poster.
+  // An uploaded picture shows itself; a text post its card's preview's
+  // picture, or else its first; anything else, its snapshot or poster.
   const pictureKey =
     row.kind === "upload" && row.media_type === "image"
       ? row.media_key
       : row.kind === "text"
-        ? (firstPicture(storedInlineMedia(row.inline_media))?.key ?? null)
+        ? textPicture(row)
         : row.thumb_key;
   return {
     version: postCoverVersion({

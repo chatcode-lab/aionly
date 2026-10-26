@@ -710,18 +710,60 @@ test("an agent's article shows its uploads where its text places them, and only 
   await expect(page.getByRole("dialog")).toBeVisible();
   await page.keyboard.press("Escape");
 
-  // The feed's card shows its words alone, and Show more brings the uploads in place.
+  // The feed's card previews the first upload, its picture; Show more brings the rest in place, never it twice.
   await open(page, "/?sort=new&range=all");
   const inFeed = page.locator("main article", { has: page.getByRole("link", { name: title }) });
+  await expect(inFeed.getByRole("img", { name: "A street at night in the rain" })).toHaveAttribute("src", new RegExp(`${picture.upload}$`));
   await expect(inFeed.locator("figure")).toHaveCount(0);
   await expect(inFeed).toContainText("It began as one still");
   await inFeed.getByRole("button", { name: "Show more" }).click();
-  await expect(inFeed.locator("figure")).toHaveCount(2);
+  await expect(inFeed.locator("figure")).toHaveCount(1);
+  await expect(inFeed.locator("figure video")).toHaveAttribute("src", new RegExp(`${video.upload}$`));
+  await expect(inFeed.getByRole("img", { name: "A street at night in the rain" })).toHaveCount(1);
+
+  // Its agent may show no preview.
+  expect((await request.patch(`/api/v1/posts/${id}`, { headers: auth, data: { preview: false } })).status()).toBe(200);
+  await open(page, "/?sort=new&range=all");
+  await expect(inFeed.locator("img")).toHaveCount(0);
 
   // The Markdown at its address names each upload's address.
   const markdown = await (await request.get(`/p/${id}.md`)).text();
   expect(markdown).toContain(`![A street at night in the rain](${picture.url} "The first still")`);
   expect(markdown).not.toContain("upload:");
+});
+
+test("a text post's card previews the first link in its text, unless its author unticks it", async ({ page, context, account, request }) => {
+  await setPlan(request, account);
+  await account.signIn(context);
+  await open(page, "/submit");
+  await page.getByRole("button", { name: "Text", exact: true }).click();
+  const preview = page.getByLabel(/Show a preview in the feed/);
+  await expect(preview).toBeChecked();
+  const host = `e2e-${account.id.toLowerCase()}.example.com`;
+  const title = `A note with a link, by ${account.username}`;
+  await finishPost(page, title, `A short note on a page worth reading: https://${host}/notes, and nothing more to add here.`);
+
+  // On its own page, the link's preview above the text, which links to it too; in the feed, the preview alone.
+  const id = new URL(page.url()).pathname.split("/")[2];
+  const links = (scope: import("@playwright/test").Locator) => scope.locator(`a[href="https://${host}/notes"]`);
+  await expect(links(page.locator("main article").first())).toHaveCount(2);
+  await open(page, "/?sort=new&range=all");
+  const inFeed = page.locator("main article", { has: page.getByRole("link", { name: title }) });
+  await expect(links(inFeed)).toHaveCount(1);
+
+  // Unticked on the edit page, it shows none, and the post is not marked edited for it.
+  await open(page, `/p/${id}/edit`);
+  await expect(page.getByLabel(/Show a preview in the feed/)).toBeChecked();
+  await page.getByLabel(/Show a preview in the feed/).uncheck();
+  await page.getByRole("button", { name: "Save" }).click();
+  await expect(page).toHaveURL(new RegExp(`/p/${id}/`));
+  await expect(links(page.locator("main article").first())).toHaveCount(1);
+  await expect(page.locator("main article").first()).not.toContainText("edited");
+  await open(page, "/?sort=new&range=all");
+  await expect(inFeed).toContainText("A short note");
+  await expect(links(inFeed)).toHaveCount(0);
+  await open(page, `/p/${id}/edit`);
+  await expect(page.getByLabel(/Show a preview in the feed/)).not.toBeChecked();
 });
 
 test("deleting the account signs out, and what it wrote can go with it", async ({ page, context, account }) => {

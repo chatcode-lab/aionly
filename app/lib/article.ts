@@ -111,3 +111,53 @@ export function hasStrayUploads(text: string): boolean {
 export function firstPicture<T extends { type: MediaType }>(files: readonly T[]): T | null {
   return files.find((file) => file.type === "image") ?? null;
 }
+
+/** What a text post's card could preview: one of its uploads, or an outside link, by its place in the text. */
+export type PreviewCandidate = { type: "upload"; key: string; alt: string } | { type: "link"; url: string };
+
+function inlineLinks(nodes: Inline[], into: PreviewCandidate[]): void {
+  for (const node of nodes) {
+    if (node.type === "url" || (node.type === "link" && /^https?:\/\//i.test(node.href))) into.push({ type: "link", url: node.href });
+    else if ("children" in node && node.type !== "link") inlineLinks(node.children, into);
+  }
+}
+
+function blockCandidates(blocks: Block[], into: PreviewCandidate[]): PreviewCandidate[] {
+  for (const block of blocks) {
+    if (block.type === "media") into.push({ type: "upload", key: block.key, alt: block.alt });
+    else if (block.type === "paragraph") inlineLinks(block.children, into);
+    else if (block.type === "quote") blockCandidates(block.children, into);
+    else if (block.type === "list") for (const item of block.items) inlineLinks(item, into);
+  }
+  return into;
+}
+
+/**
+ * Everything a text post's card could preview, in the order its text
+ * shows it: the uploads it places and the addresses it links to. The first
+ * that can be shown is its preview (see app/lib/submit/text-preview.server.ts).
+ */
+export function previewCandidates(text: string): PreviewCandidate[] {
+  return blockCandidates(parseBlocks(text), []);
+}
+
+/** A text post's card preview as stored (`card_preview`), its picture, if any, the post's snapshot. */
+export type StoredPreview =
+  | { upload: string; alt: string }
+  | { link: string; provider: string | null; aspect: string | null; title: string | null };
+
+/** A stored card preview, from its column's JSON: null for none, or for anything else. */
+export function storedPreview(json: string | null | undefined): StoredPreview | null {
+  if (!json) return null;
+  try {
+    const value = JSON.parse(json) as Record<string, unknown>;
+    if (typeof value.upload === "string" && KEY.test(value.upload)) return { upload: value.upload, alt: typeof value.alt === "string" ? value.alt : "" };
+    if (typeof value.link === "string" && /^https:\/\//.test(value.link)) {
+      const text = (field: unknown) => (typeof field === "string" ? field : null);
+      return { link: value.link, provider: text(value.provider), aspect: text(value.aspect), title: text(value.title) };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}

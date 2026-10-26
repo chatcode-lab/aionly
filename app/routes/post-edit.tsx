@@ -7,6 +7,7 @@ import { TextArea, TextField } from "~/components/ui/field";
 import { Notice } from "~/components/ui/states";
 import { RepliesField } from "~/components/replies-field";
 import { editablePost, editPost, setCommentsClosed, setPostReplies } from "~/lib/db/authoring.server";
+import { textPreview } from "~/lib/submit/text-preview.server";
 import { deleteReleasedFiles } from "~/lib/db/draft-files.server";
 import { linkMentions, mentionHosts, unlinkMentions } from "~/lib/db/mentions.server";
 import { postPath } from "~/lib/slug";
@@ -77,7 +78,21 @@ export async function action({ params, request, context }: Route.ActionArgs) {
   if (Object.keys(errors).length > 0 || !origin) return { errors };
 
   const stored = await linkMentions(env.DB, description, mentionHosts(request));
-  const result = await editPost(env.DB, { id: post.id, authorId: viewer.id, title, origin, description: stored, now });
+  // A text post's preview follows its text and the box; a link it shows already stays as it was.
+  const preview =
+    post.kind === "text"
+      ? await textPreview({
+          text: stored,
+          shown: form.get("preview_offered") !== "yes" ? post.preview.shown : form.get("preview") === "yes",
+          current: post.preview,
+          userId: viewer.id,
+          ownHosts: [new URL(request.url).hostname],
+          db: env.DB,
+          bucket: env.IMAGES,
+          now,
+        })
+      : undefined;
+  const result = await editPost(env.DB, { id: post.id, authorId: viewer.id, title, origin, description: stored, ...(preview ? { preview } : {}), now });
   // Who may comment, or closing comments, changes at any time with the
   // plan; a closed discussion can always be opened again, plan or not.
   const choice = parsePostChoice(form.get("replies"));
@@ -116,6 +131,7 @@ export default function EditPost({ loaderData, actionData }: Route.ComponentProp
   const [description, setDescription] = useState(post.description);
   const [origin, setOrigin] = useState<Origin>(post.origin);
   const [replies, setReplies] = useState<PostChoice>(post.closed ? "closed" : post.replies);
+  const [showPreview, setShowPreview] = useState(post.preview.shown);
   const errors: FieldErrors = actionData && "errors" in actionData ? actionData.errors : {};
   const message = actionData && "message" in actionData ? actionData.message : undefined;
 
@@ -151,6 +167,25 @@ export default function EditPost({ loaderData, actionData }: Route.ComponentProp
           error={errors.description}
           rows={post.kind === "text" ? 12 : 6}
         />
+        {post.kind === "text" ? (
+          <div>
+            <input type="hidden" name="preview_offered" value="yes" />
+            <label className="flex items-start gap-2.5 text-body">
+              <input
+                type="checkbox"
+                name="preview"
+                value="yes"
+                checked={showPreview}
+                onChange={(event) => setShowPreview(event.target.checked)}
+                className="mt-1 size-4 shrink-0 accent-(--accent)"
+              />
+              <span>
+                Show a preview in the feed
+                <span className="block text-meta text-text-muted">The first link or picture in the text, on the post&apos;s card.</span>
+              </span>
+            </label>
+          </div>
+        ) : null}
         <fieldset disabled={!titleOpen} hidden={post.kind === "text"}>
           <legend className="sr-only">Where it came from</legend>
           <div className="flex flex-wrap gap-x-6">

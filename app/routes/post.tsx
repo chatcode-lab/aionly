@@ -247,14 +247,18 @@ export function meta({ loaderData, matches, location }: Route.MetaArgs) {
   }
 
   const { post, canonical } = loaderData;
-  // An uploaded picture is its own share image, and an article's first;
-  // anything else shows its snapshot or poster.
+  // An uploaded picture is its own share image; a text post's is its
+  // preview's picture, or else its first; anything else shows its snapshot
+  // or poster.
+  const shown = post.preview?.media;
   const image =
     post.media.kind === "image"
       ? post.media.src
       : "thumbUrl" in post.media
         ? post.media.thumbUrl
-        : (firstPicture(post.files ?? [])?.src ?? undefined);
+        : shown?.kind === "image"
+          ? shown.src
+          : (shown && "thumbUrl" in shown ? shown.thumbUrl : undefined) ?? firstPicture(post.files ?? [])?.src ?? undefined;
   // The cover's address changes with what it shows, so caches can keep each one.
   const version = postCoverVersion({
     title: post.title,

@@ -50,6 +50,7 @@ import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.se
 import { ROW_ID } from "~/lib/security/body";
 import { postPath, profilePath } from "~/lib/slug";
 import { type CheckedLink, type CheckResult, checkLink } from "~/lib/submit/check.server";
+import { textPreview } from "~/lib/submit/text-preview.server";
 import { readReceipt } from "~/lib/submit/receipt.server";
 import {
   cleanDescription,
@@ -96,6 +97,8 @@ interface SavedDraft {
   uploads: Array<Omit<Uploaded, "preview"> & { url: string }>;
   /** When it goes out on its own, if it is scheduled. */
   scheduledAt: number | null;
+  /** A text draft's choice to show its card's preview. */
+  showPreview: boolean;
 }
 
 export async function loader({ request, context }: Route.LoaderArgs) {
@@ -120,6 +123,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
         title: draft.title,
         description: draft.description,
         replies: draft.replies ?? "all",
+        showPreview: draft.showPreview,
         uploads: draft.pictures
           ? draft.pictures.map((picture) => ({
               key: picture.key,
@@ -258,7 +262,16 @@ function draftFieldsOf(form: FormData): DraftFields {
     duration: boundedInt(field("duration"), 24 * 3600),
     posterKey: UPLOAD_KEY.test(field("poster_key")) ? field("poster_key") : null,
     pictures: readGallery(field("pictures")),
+    showPreview: previewChosen(form),
   };
+}
+
+/**
+ * A text post's choice to show its card's preview: its box as the form
+ * sent it, or shown, from a form that did not offer one.
+ */
+function previewChosen(form: FormData): boolean {
+  return form.get("preview_offered") !== "yes" || form.get("preview") === "yes";
 }
 
 /**
@@ -392,6 +405,19 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
   const storedDescription = await linkMentions(env.DB, description, mentionHosts(request));
   // Who may comment, or closing comments, is the plan's choice; the write checks the plan again.
   const choice = (viewer.entitled && parsePostChoice(field("replies"))) || "all";
+  // A text post's card shows the first of its uploads or links, unless its author chose not to.
+  const preview =
+    kind === "text"
+      ? await textPreview({
+          text: storedDescription,
+          shown: previewChosen(form),
+          userId: viewer.id,
+          ownHosts: [new URL(request.url).hostname],
+          db: env.DB,
+          bucket: env.IMAGES,
+          now,
+        })
+      : undefined;
   const base = {
     author: viewer,
     origin,
@@ -428,7 +454,7 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
             posterKey: !gallery && UPLOAD_KEY.test(field("poster_key")) ? field("poster_key") : null,
             pictures: gallery,
           }
-        : { ...base, kind: "text", id: newPostId() };
+        : { ...base, kind: "text", id: newPostId(), ...(preview ? { preview } : {}) };
   // Short IDs can clash, rarely; a clash is tried again with a new one.
   let result = await publishPost(env.DB, draft());
   for (let attempt = 0; attempt < 3 && !result.ok && result.reason === "id_taken"; attempt += 1) {
@@ -601,6 +627,7 @@ function Composer({ loaderData, actionData }: Pick<Route.ComponentProps, "loader
   const [description, setDescription] = useState(opened?.description ?? "");
   const [origin, setOrigin] = useState<Origin | "">(opened?.origin ?? "");
   const [replies, setReplies] = useState<PostChoice>(opened?.replies ?? loaderData.postReplies);
+  const [showPreview, setShowPreview] = useState(opened?.showPreview ?? true);
   const [attest, setAttest] = useState(false);
   const [agent, setAgent] = useState(false);
   const [token, setToken] = useState("");
@@ -890,6 +917,25 @@ function Composer({ loaderData, actionData }: Pick<Route.ComponentProps, "loader
             count={{ value: length(description), max: bodyMax }}
             error={descriptionError ?? result?.errors.description}
           />
+          {source === "text" ? (
+            <div>
+              <input type="hidden" name="preview_offered" value="yes" />
+              <label className="flex items-start gap-2.5 text-body">
+                <input
+                  type="checkbox"
+                  name="preview"
+                  value="yes"
+                  checked={showPreview}
+                  onChange={(event) => setShowPreview(event.target.checked)}
+                  className="mt-1 size-4 shrink-0 accent-(--accent)"
+                />
+                <span>
+                  Show a preview in the feed
+                  <span className="block text-meta text-text-muted">The first link or picture in the text, on the post&apos;s card.</span>
+                </span>
+              </label>
+            </div>
+          ) : null}
           <fieldset hidden={source === "text"}>
             <legend className="sr-only">Where it came from</legend>
             <div className="flex flex-wrap gap-x-6">

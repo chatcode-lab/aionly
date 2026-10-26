@@ -6,6 +6,7 @@ import { type PostChoice, parsePostChoice, type PostReplies } from "../replies";
 import type { StoredSnapshot } from "../images.server";
 import { type CheckedLink, checkLink } from "../submit/check.server";
 import { readReceipt } from "../submit/receipt.server";
+import { textPreview } from "../submit/text-preview.server";
 import { cleanDescription, cleanTitle, DESCRIPTION_MAX, descriptionProblem, type Origin, type PostKind, TEXT_BODY_MAX, titleProblem } from "../submit/rules";
 import type { Aspect, Provider } from "../links/types";
 import { formatSlot, scheduleProblem } from "../schedule";
@@ -47,6 +48,8 @@ export interface Draft {
   pictures: Picture[] | null;
   /** The uploads a text draft's text places, which it keeps as its own (see app/lib/article.ts). */
   inlineMedia: InlineMedia[];
+  /** A text draft's choice to show its card's preview once published. */
+  showPreview: boolean;
   revision: number;
   createdAt: number;
   updatedAt: number;
@@ -103,6 +106,7 @@ interface DraftRow {
   poster_key: string | null;
   pictures: string | null;
   inline_media: string | null;
+  card_preview_shown: number;
   revision: number;
   created_at: number;
   updated_at: number;
@@ -152,6 +156,7 @@ function toDraft(row: DraftRow): Draft {
     posterKey: row.poster_key,
     pictures: storedGallery(row.pictures),
     inlineMedia: storedInlineMedia(row.inline_media),
+    showPreview: row.card_preview_shown !== 0,
     revision: row.revision,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -341,13 +346,14 @@ export async function saveDraft(
     picturesJson,
     input.revision ?? null,
     inlineJson,
+    fields.showPreview === false ? 0 : 1,
   ];
   const write = current
     ? db
         .prepare(
           `UPDATE drafts SET kind = ?3, url = ?4, origin = ?5, title = ?6, description = ?7, replies = ?8,
              media_key = ?9, media_type = ?10, media_width = ?11, media_height = ?12, media_duration = ?13,
-             poster_key = ?14, updated_at = ?15, pictures = ?16, inline_media = ?18, revision = revision + 1,
+             poster_key = ?14, updated_at = ?15, pictures = ?16, inline_media = ?18, card_preview_shown = ?19, revision = revision + 1,
              -- Another link drops the preview made for the last, and so its snapshot.
              preview = CASE WHEN url IS ?4 THEN preview ELSE NULL END,
              preview_thumb_key = CASE WHEN url IS ?4 THEN preview_thumb_key ELSE NULL END
@@ -359,8 +365,9 @@ export async function saveDraft(
     : db
         .prepare(
           `INSERT INTO drafts (id, author_id, kind, url, origin, title, description, replies,
-             media_key, media_type, media_width, media_height, media_duration, poster_key, created_at, updated_at, pictures, inline_media)
-           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15, ?16, ?18
+             media_key, media_type, media_width, media_height, media_duration, poster_key, created_at, updated_at, pictures, inline_media,
+             card_preview_shown)
+           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?15, ?16, ?18, ?19
            WHERE (SELECT COUNT(*) FROM drafts WHERE author_id = ?2 AND post_id IS NULL) < ${settingSql("drafts_per_account")}
              AND ${fileHolds(9, "media", "media_key")} AND ${fileHolds(14, "post", "poster_key")} AND ${picturesHold} AND ${placedHold}
              AND ${bytesAfterSql(1, 2, 9, 14, 16, 18)} <= ${DRAFT_BYTES} AND ${LIVE_AUTHOR}`,
@@ -681,6 +688,19 @@ export async function publishDraft(
   } else {
     if (!status.allowed) return { ok: false, reason: "posting", status };
     const media = draft.media;
+    // A text draft's card preview, read now, as its text gives it.
+    const preview =
+      draft.kind === "text"
+        ? await textPreview({
+            text: base.description,
+            shown: draft.showPreview,
+            userId: author.id,
+            ownHosts: input.ownHosts,
+            db,
+            bucket: input.bucket,
+            now: input.now,
+          })
+        : undefined;
     post = () =>
       media
         ? {
@@ -695,7 +715,7 @@ export async function publishDraft(
             posterKey: draft.posterKey,
             pictures: draft.pictures,
           }
-        : { ...base, kind: "text", id: newPostId() };
+        : { ...base, kind: "text", id: newPostId(), ...(preview ? { preview } : {}) };
   }
 
   let result = await publishPost(db, post());

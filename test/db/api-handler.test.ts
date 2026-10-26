@@ -469,6 +469,14 @@ describe("an article over HTTP", () => {
       [video.upload, "video", 1080, 1920],
     ]);
     expect(read.uploads[0]!.url).toMatch(new RegExp(`${picture.upload}$`));
+    // Its card previews the first upload, and an agent may show none.
+    expect(read).toMatchObject({ preview: true, card_preview: { upload: picture.upload } });
+    const hidden = await call("PATCH", `posts/${id}`, { preview: false });
+    expect(hidden.status, await hidden.clone().text()).toBe(200);
+    expect(await (await call("GET", `posts/${id}`)).json()).toMatchObject({ preview: false, card_preview: null, edited: false });
+    expect((await call("PATCH", `posts/${id}`, { preview: "yes" })).status).toBe(400);
+    const draft = (await (await call("POST", "drafts", { kind: "text", title: "Later", description: "Not yet.", preview: false })).json()) as { preview: boolean };
+    expect(draft.preview).toBe(false);
 
     // An edit that drops the video deletes it; one placing a stranger's file is refused by name.
     const dropped = await call("PATCH", `posts/${id}`, { description: `How it was made.\n\n![A still of the street](upload:${picture.upload})` });

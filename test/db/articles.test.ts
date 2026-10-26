@@ -12,6 +12,7 @@ import { purgePostMedia, removePost } from "../../app/lib/db/moderation.server";
 import { postPage } from "../../app/lib/db/posts.server";
 import { publishPost } from "../../app/lib/db/submit.server";
 import type { DraftFields } from "../../app/lib/draft-rules";
+import { textPreview, type TextPreview } from "../../app/lib/submit/text-preview.server";
 import { storeUpload } from "../../app/lib/uploads.server";
 import { DAY, db, NOW, reset, user } from "./fixtures";
 
@@ -210,5 +211,86 @@ describe("an article's uploads in a draft", () => {
     expect(bytes?.bytes).toBeGreaterThan(0);
     expect(await deleteDraft(db, { id: saved.draft.id, authorId: "u1" })).toEqual({ ok: true, freed: [kept] });
     expect(await stateOf(kept)).toBeNull();
+  });
+});
+
+describe("a text post's card preview", () => {
+  const preview = (text: string, current?: { json: string | null; thumbKey: string | null }, shown = true) =>
+    textPreview({ text, shown, current, userId: "u1", ownHosts: ["aion.ly"], db, bucket, now: NOW });
+
+  /** A link's picture, kept as the account's pending snapshot, as a link check keeps one. */
+  async function snapshot(owner = "u1") {
+    const bytes = png(1200, 630);
+    const result = await storeUpload(db, bucket, { ownerId: owner, body: stream(bytes), length: bytes.length, role: "poster", now: NOW });
+    if (!result.ok) throw new Error(result.reason);
+    return result.key;
+  }
+
+  async function textPost(description: string, given: TextPreview, id = "article", owner = "u1") {
+    const author = (await accountRecord(db, owner, NOW))!;
+    return publishPost(db, { kind: "text", id, author, origin: "made", title: "How the rain was made", description, preview: given, now: NOW });
+  }
+
+  it("is the first of its uploads and links, passing over the board's own, or none when its author chose so", async () => {
+    const still = await send("u1");
+    const text = `See https://aion.ly/p/another first.\n\n${place(still, "The still")}\n\nThen https://example.com/page.`;
+    expect(await preview(text)).toEqual({ shown: true, json: JSON.stringify({ upload: still, alt: "The still" }), thumbKey: null });
+    expect(await preview(text, undefined, false)).toEqual({ shown: false, json: null, thumbKey: null });
+    expect(await preview("Only words, and http://example.com/plain.")).toEqual({ shown: true, json: null, thumbKey: null });
+    // A link it shows already keeps its title and picture, read no more.
+    const held = { json: JSON.stringify({ link: "https://example.com/page", provider: null, aspect: null, title: "The page" }), thumbKey: "kept.png" };
+    expect(await preview("Read https://example.com/page now.", held)).toEqual({ shown: true, json: held.json, thumbKey: "kept.png" });
+  });
+
+  it("shows its upload or link on its card, the link's picture its own, and not on its page for an upload", async () => {
+    const still = await send("u1");
+    await textPost(`Words.\n\n${place(still, "The still")}`, await preview(`Words.\n\n${place(still, "The still")}`));
+    const [card] = (await newPage(db, "all", NOW, null)).posts;
+    expect(card?.preview).toEqual({ media: { kind: "image", src: expect.stringContaining(still), width: 1600, height: 900 }, upload: still, alt: "The still" });
+    expect(card?.uploads).toBe(1);
+
+    // Another author's, as one may post once a day.
+    const picture = await snapshot("u2");
+    const link = { shown: true, json: JSON.stringify({ link: "https://example.com/page", provider: null, aspect: null, title: "The page" }), thumbKey: picture };
+    expect(await textPost("Read https://example.com/page now.", link, "linked", "u2")).toMatchObject({ ok: true });
+    expect(await stateOf(picture)).toBe("attached");
+    const page = await postPage(db, "linked");
+    expect(page?.state === "live" ? page.post.preview : null).toEqual({
+      media: { kind: "page", pageTitle: "The page", thumbUrl: expect.stringContaining(picture) },
+      url: "https://example.com/page",
+      host: "example.com",
+    });
+    expect(page?.state === "live" ? page.post.showPreview : null).toBe(true);
+  });
+
+  it("changes with an edit: hidden without an edited mark, and a picture it no longer shows is deleted", async () => {
+    const first = await snapshot();
+    const link = (url: string, thumbKey: string | null) => ({ shown: true, json: JSON.stringify({ link: url, provider: null, aspect: null, title: null }), thumbKey });
+    await textPost("Read https://example.com/one now.", link("https://example.com/one", first));
+    const edit = { id: "article", authorId: "u1", title: "How the rain was made", origin: "made" as const, description: "Read https://example.com/one now.", now: NOW + DAY };
+    const hidden = await editPost(db, { ...edit, preview: { shown: false, json: null, thumbKey: null } });
+    expect(hidden).toEqual({ ok: true, freed: [first] });
+    expect(await stateOf(first)).toBeNull();
+    expect(await db.prepare(`SELECT card_preview, card_preview_shown, thumb_key, edited_at FROM posts WHERE id = 'article'`).first()).toEqual({
+      card_preview: null,
+      card_preview_shown: 0,
+      thumb_key: null,
+      edited_at: null,
+    });
+    // Shown again, with another link's picture.
+    const second = await snapshot();
+    const shown = await editPost(db, { ...edit, description: "Read https://example.com/two now.", preview: link("https://example.com/two", second) });
+    expect(shown).toEqual({ ok: true, freed: [] });
+    expect(await stateOf(second)).toBe("attached");
+    // The same edit again changes nothing.
+    expect(await editPost(db, { ...edit, description: "Read https://example.com/two now.", preview: link("https://example.com/two", second) })).toEqual({
+      ok: true,
+      freed: [],
+    });
+    const third = await snapshot();
+    expect(await editPost(db, { ...edit, description: "Read https://example.com/three now.", preview: link("https://example.com/three", third) })).toEqual({
+      ok: true,
+      freed: [second],
+    });
   });
 });

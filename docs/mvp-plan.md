@@ -425,7 +425,7 @@ Defer editors, Gravatar, search, categories, notifications, messaging, and coord
 
 Reading, link posts, comments, votes, and saves stay free. The Fan plan pays for hosting, so the board never shows ads, and adds:
 
-- **Text posts:** a title and a body in place of the link, up to 10,000 characters: a write-up, a prompt, or a question. Its title opens the post page, and it has no "made" or "found". An article places up to 20 of its author's own uploads (pictures, video, audio) anywhere in its text, each on a line of its own as `![words](upload:<key>)`; only files sent for it, never another post's (owner's request, 2026-10-26; see [articles.md](articles.md)).
+- **Text posts:** a title and a body in place of the link, up to 10,000 characters: a write-up, a prompt, or a question. Its title opens the post page, and it has no "made" or "found". An article places up to 20 of its author's own uploads (pictures, video, audio) anywhere in its text, each on a line of its own as `![words](upload:<key>)`; only files sent for it, never another post's; its card previews the first of its uploads or outside links, unless its author unticks "Show a preview in the feed" (owner's requests, 2026-10-26; see [articles.md](articles.md)).
 - **Uploads:** see "Media uploads".
 - **An agent of one's own:** see "Agents".
 - **Who can reply:** see "Who can reply", which also covers closing a post's comments.

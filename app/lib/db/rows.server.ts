@@ -1,4 +1,4 @@
-import { type ArticleFile, storedInlineMedia } from "../article";
+import { type ArticleFile, storedInlineMedia, storedPreview } from "../article";
 import { storedGallery } from "../gallery";
 import { type Aspect, PROVIDERS, type Provider } from "../links/types";
 import { displayHost } from "../links/url";
@@ -6,6 +6,7 @@ import { imageAddress } from "../media.server";
 import { postPath } from "../slug";
 import { plainLines } from "../text/markdown";
 import type {
+  CardPreview,
   CommentData,
   PostCardData,
   PostDetail,
@@ -89,7 +90,7 @@ export const POST_COLUMNS = `
   post.id, post.kind, post.url, post.provider, post.origin, post.title, post.description,
   post.page_title, post.thumb_key, post.aspect, post.score, post.comment_count,
   post.created_at, post.edited_at, post.media_key, post.media_type, post.media_width,
-  post.media_height, post.media_duration, post.pictures, post.inline_media,
+  post.media_height, post.media_duration, post.pictures, post.inline_media, post.card_preview, post.card_preview_shown,
   EXISTS (SELECT 1 FROM picks WHERE picks.post_id = post.id) AS picked,${AUTHOR_COLUMNS}`;
 
 export interface PostRow extends AuthorRow {
@@ -106,6 +107,9 @@ export interface PostRow extends AuthorRow {
   pictures?: string | null;
   /** The uploads a text post places in its text, as stored JSON (see ../article.ts). */
   inline_media?: string | null;
+  /** A text post's card preview as stored JSON, and its author's choice to show it (see ../article.ts). */
+  card_preview?: string | null;
+  card_preview_shown?: number;
   provider: string | null;
   origin: "made" | "found";
   title: string;
@@ -173,11 +177,40 @@ export function articleFiles(json: string | null | undefined): ArticleFile[] {
   return storedInlineMedia(json).map((file) => ({ ...file, src: imageAddress(file.key) }));
 }
 
+/**
+ * A text post's card preview, as its card draws it: one of its own uploads,
+ * found among the files it holds, or a link with its picture, the post's
+ * snapshot. None when the upload is gone, as after a takedown.
+ */
+function cardPreviewOf(row: PostRow, files: ArticleFile[], thumbUrl: string | undefined): CardPreview | undefined {
+  const stored = storedPreview(row.card_preview);
+  if (!stored) return undefined;
+  if ("upload" in stored) {
+    const file = files.find((held) => held.key === stored.upload);
+    if (!file) return undefined;
+    const media: PostMedia =
+      file.type === "image"
+        ? { kind: "image", src: file.src, width: file.width ?? 1200, height: file.height ?? 900 }
+        : file.type === "video"
+          ? { kind: "video", aspect: (file.height ?? 0) > (file.width ?? 0) ? "9:16" : "16:9", src: file.src }
+          : { kind: "audio", aspect: "audio", src: file.src };
+    return { media, upload: file.key, alt: stored.alt };
+  }
+  const provider = PROVIDERS.find((known) => known === stored.provider);
+  const aspect = ASPECTS.find((known) => known === stored.aspect);
+  return {
+    media: provider && aspect ? { kind: "media", provider, aspect, thumbUrl } : { kind: "page", pageTitle: stored.title ?? undefined, thumbUrl },
+    url: stored.link,
+    host: displayHost(new URL(stored.link)),
+  };
+}
+
 /** The only way a post row becomes something a page can show. */
 export function toPublicPost(row: PostRow): PostDetail {
   const thumbUrl = row.thumb_key ? imageAddress(row.thumb_key) : undefined;
   const path = postPath(row);
   const files = row.kind === "text" ? articleFiles(row.inline_media) : [];
+  const preview = row.kind === "text" ? cardPreviewOf(row, files, thumbUrl) : undefined;
 
   return {
     id: row.id,
@@ -198,6 +231,8 @@ export function toPublicPost(row: PostRow): PostDetail {
     description: row.description,
     media: mediaOf(row, thumbUrl),
     ...(files.length > 0 ? { files } : {}),
+    ...(preview ? { preview } : {}),
+    ...(row.kind === "text" ? { showPreview: row.card_preview_shown !== 0 } : {}),
     ...(row.picked ? { editorsPick: true } : {}),
   };
 }
@@ -208,7 +243,7 @@ export function toPublicPost(row: PostRow): PostDetail {
  * many there are tells the card there is more to show.
  */
 export function toPublicCard(row: PostRow): PostCardData {
-  const { description: _description, files, ...card } = toPublicPost(row);
+  const { description: _description, files, showPreview: _shown, ...card } = toPublicPost(row);
   return files?.length ? { ...card, uploads: files.length } : card;
 }
 

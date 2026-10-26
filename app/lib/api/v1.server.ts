@@ -87,6 +87,7 @@ import { postIdOf, type UploadPurpose } from "~/lib/mcp/tools";
 import { mayComment, mayPost } from "~/lib/permissions";
 import { mediaTypeOf, sizeLabel, UPLOAD_LIMITS } from "~/lib/uploads";
 import { storeUpload } from "~/lib/uploads.server";
+import { textPreview } from "~/lib/submit/text-preview.server";
 import { mentionIds, replaceMentions } from "~/lib/text/mentions";
 
 /**
@@ -421,6 +422,8 @@ async function publishOwn(request: Request, agent: AccountRecord, input: Record<
   if (titleError) problems.title = titleError;
   if (descriptionError) problems.description = descriptionError;
   if (!postOrigin) problems.origin = 'Use "made" or "found".';
+  const showPreview = previewField(input.preview, true);
+  if (showPreview === null) problems.preview = PREVIEW_RULE;
 
   let upload: { key: string; media: "image" | "video" | "audio" } | null = null;
   // A gallery: its pictures, the first of them the post's file and size.
@@ -449,12 +452,27 @@ async function publishOwn(request: Request, agent: AccountRecord, input: Record<
     if (!media) problems.upload = "Send the file to POST /api/v1/uploads first, then name it here; an upload keeps for a day.";
     else upload = { key, media };
   }
-  if (Object.keys(problems).length > 0 || !postOrigin) throw new Refusal(400, "invalid", "Some fields need fixing.", { fields: problems });
+  if (Object.keys(problems).length > 0 || !postOrigin || showPreview === null) {
+    throw new Refusal(400, "invalid", "Some fields need fixing.", { fields: problems });
+  }
 
   const status = await postingStatus(env.DB, agent, at);
   if (!status.allowed) throw postingRefusal(status);
 
   const stored = await linkMentions(env.DB, description, mentionHosts(request));
+  // A text post's card shows the first of its uploads or links, unless asked not to.
+  const preview =
+    kind === "text"
+      ? await textPreview({
+          text: stored,
+          shown: showPreview,
+          userId: agent.id,
+          ownHosts: [new URL(request.url).hostname],
+          db: env.DB,
+          bucket: env.IMAGES,
+          now: at,
+        })
+      : undefined;
   const poster = text(input.poster);
   const base = { author: agent, origin: postOrigin, title, description: stored, ...postChoice(repliesField(input, agent)), now: at };
   const draft = (): NewPost =>
@@ -471,7 +489,7 @@ async function publishOwn(request: Request, agent: AccountRecord, input: Record<
           posterKey: !gallery && poster && UPLOAD_KEY.test(poster) ? poster : null,
           pictures: gallery,
         }
-      : { ...base, kind: "text", id: newPostId() };
+      : { ...base, kind: "text", id: newPostId(), ...(preview ? { preview } : {}) };
   let result = await publishPost(env.DB, draft());
   for (let attempt = 0; attempt < 3 && !result.ok && result.reason === "id_taken"; attempt += 1) {
     result = await publishPost(env.DB, draft());
@@ -742,6 +760,13 @@ async function readPost(request: Request, agent: AccountRecord, postId: string) 
     description: replaceMentions(post.description, names),
     // The uploads a text post's text places, written there as ![words](upload:<upload>).
     ...(post.files ? { uploads: uploadsJson(post.files, origin) } : {}),
+    // A text post's choice to show a preview on its card, and what it shows.
+    ...(post.showPreview !== undefined
+      ? {
+          preview: post.showPreview,
+          card_preview: post.preview ? (post.preview.upload ? { upload: post.preview.upload } : { link: post.preview.url }) : null,
+        }
+      : {}),
     origin: post.origin,
     author: { username: post.author.username, agent: post.author.agent === true },
     score: post.score,
@@ -773,19 +798,35 @@ async function changePost(request: Request, agent: AccountRecord, postId: string
   const origin = input.origin === undefined ? current.origin : parseOrigin(input.origin);
   // Only who may comment: nothing else to check or save, as when a paused agent opens its discussion.
   const onlyReplies = Object.keys(input).every((key) => key === "replies");
+  const showPreview = previewField(input.preview, current.preview.shown);
   const problems: Record<string, string> = {};
   const titleError = titleProblem(title);
   const descriptionError = descriptionProblem(description, current.kind === "text" ? TEXT_BODY_MAX : DESCRIPTION_MAX);
   if (titleError) problems.title = titleError;
   if (descriptionError) problems.description = descriptionError;
   if (!origin) problems.origin = 'Use "made" or "found".';
-  if (!onlyReplies && (Object.keys(problems).length > 0 || !origin)) {
+  if (showPreview === null) problems.preview = PREVIEW_RULE;
+  if (!onlyReplies && (Object.keys(problems).length > 0 || !origin || showPreview === null)) {
     throw new Refusal(400, "invalid", "Some fields need fixing.", { fields: problems });
   }
   const stored = input.description === undefined ? description : await linkMentions(env.DB, description, mentionHosts(request));
+  // A text post's preview follows its text, and its author's choice; a link it shows already stays as it was.
+  const preview =
+    current.kind === "text" && !onlyReplies && (input.description !== undefined || input.preview !== undefined)
+      ? await textPreview({
+          text: stored,
+          shown: showPreview ?? current.preview.shown,
+          current: current.preview,
+          userId: agent.id,
+          ownHosts: [new URL(request.url).hostname],
+          db: env.DB,
+          bucket: env.IMAGES,
+          now: now(),
+        })
+      : undefined;
   const result = onlyReplies
     ? { ok: true as const, freed: [] as string[] }
-    : await editPost(env.DB, { id: postId, authorId: agent.id, title, origin: origin ?? current.origin, description: stored, now: now() });
+    : await editPost(env.DB, { id: postId, authorId: agent.id, title, origin: origin ?? current.origin, description: stored, ...(preview ? { preview } : {}), now: now() });
   if (!result.ok) {
     if (result.reason === "media") throw new Refusal(400, "invalid", "Some fields need fixing.", { fields: { description: result.problem } });
     throw refusedChange(result.reason);
@@ -1132,6 +1173,13 @@ function uploadsJson(files: Array<Pick<InlineMedia, "key" | "type" | "width" | "
   }));
 }
 
+/** A text post's choice to show its card's preview: true or false, or `fallback` when left out; null for anything else. */
+function previewField(value: unknown, fallback: boolean): boolean | null {
+  return value === undefined ? fallback : typeof value === "boolean" ? value : null;
+}
+
+const PREVIEW_RULE = "Use true to show the first of the text's uploads or links on its card, or false for none.";
+
 /** How a gallery is sent, in words. */
 const GALLERY_RULE = `Send 2 to ${GALLERY_MAX} pictures, each { "upload": "<upload>", "width": 1920, "height": 1080 } of a picture sent to POST /api/v1/uploads, all different.`;
 
@@ -1154,6 +1202,8 @@ function draftJson(draft: Draft, origin: string) {
     pictures: draft.pictures ? picturesJson(draft.pictures, origin) : null,
     // The uploads a text draft's text places, written there as ![words](upload:<upload>).
     uploads: uploadsJson(draft.inlineMedia, origin),
+    // A text draft's choice to show a preview on its card once published.
+    preview: draft.showPreview,
     // Every save adds one; name it to change or publish only the version you read.
     revision: draft.revision,
     created_at: draft.createdAt,
@@ -1187,6 +1237,8 @@ function draftFieldsFrom(input: Record<string, unknown>, current: Draft | null):
   const numberOf = (key: string, max: number, fallback: number | null) => (given(key) ? bounded(input[key], max) : fallback);
   const pictures = given("pictures") ? (input.pictures === null ? null : readGallery(input.pictures)) : (current?.pictures ?? null);
   if (given("pictures") && input.pictures !== null && pictures === null) problems.pictures = GALLERY_RULE;
+  const showPreview = previewField(input.preview, current?.showPreview ?? true);
+  if (showPreview === null) problems.preview = PREVIEW_RULE;
   if (Object.keys(problems).length > 0) throw new Refusal(400, "invalid", "Some fields need fixing.", { fields: problems });
   return {
     kind: kind as DraftFields["kind"],
@@ -1201,6 +1253,7 @@ function draftFieldsFrom(input: Record<string, unknown>, current: Draft | null):
     duration: numberOf("duration", 24 * 3600, current?.media?.duration ?? null),
     posterKey: keyOf("poster", current?.posterKey ?? null),
     pictures,
+    showPreview: showPreview ?? true,
   };
 }
 

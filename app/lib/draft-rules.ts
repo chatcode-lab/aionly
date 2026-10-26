@@ -42,6 +42,8 @@ export interface DraftFields {
   posterKey: string | null;
   /** A gallery's pictures in order, the first being `mediaKey`; null for one file. */
   pictures: Picture[] | null;
+  /** A text post's choice to show its card's preview (see ./article.ts); shown unless false. */
+  showPreview?: boolean;
 }
 
 /** The fields as stored: cleaned, with what the kind has no use for left out. */

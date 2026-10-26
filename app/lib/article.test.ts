@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { articleKeys, firstPicture, hasStrayUploads, inlineMediaJson, storedInlineMedia } from "./article";
+import { articleKeys, firstPicture, hasStrayUploads, inlineMediaJson, previewCandidates, storedInlineMedia, storedPreview } from "./article";
 import { parseBlocks, plainLines, plainText } from "./text/markdown";
 import { pictureSize } from "./uploads";
 
@@ -42,6 +42,41 @@ describe("an article's text", () => {
     const text = `Before.\n\n![A street](upload:${key(1)} "Caption")\n\nAfter.`;
     expect(plainLines(text)).toBe("Before.\nAfter.");
     expect(plainText(text)).toBe("Before. After.");
+  });
+});
+
+describe("what a text post's card could preview", () => {
+  it("is its uploads and outside links in the order its text gives them, lists and quotes included", () => {
+    const text = [
+      "Write to [us](mailto:hey@aion.ly), or see `https://example.com/code`.",
+      "",
+      "> A quote linking [the paper](https://arxiv.org/abs/1706.03762).",
+      "",
+      `![The still](upload:${key(1)})`,
+      "",
+      "- A list item with https://example.com/listed and **[bold](https://example.com/bold)**",
+    ].join("\n");
+    expect(previewCandidates(text)).toEqual([
+      { type: "link", url: "https://arxiv.org/abs/1706.03762" },
+      { type: "upload", key: key(1), alt: "The still" },
+      { type: "link", url: "https://example.com/listed" },
+      { type: "link", url: "https://example.com/bold" },
+    ]);
+    expect(previewCandidates("Only words here.")).toEqual([]);
+  });
+
+  it("reads back as stored, and nothing that is not a preview", () => {
+    expect(storedPreview(JSON.stringify({ upload: key(1), alt: "The still" }))).toEqual({ upload: key(1), alt: "The still" });
+    expect(storedPreview(JSON.stringify({ link: "https://youtube.com/watch?v=x", provider: "youtube", aspect: "16:9", title: null }))).toEqual({
+      link: "https://youtube.com/watch?v=x",
+      provider: "youtube",
+      aspect: "16:9",
+      title: null,
+    });
+    expect(storedPreview(JSON.stringify({ link: "javascript:alert(1)" }))).toBeNull();
+    expect(storedPreview(JSON.stringify({ upload: "../x" }))).toBeNull();
+    expect(storedPreview(null)).toBeNull();
+    expect(storedPreview("not json")).toBeNull();
   });
 });
 

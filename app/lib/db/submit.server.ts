@@ -135,6 +135,11 @@ export interface LinkPost extends PostBase {
 /** A fan's post with no link: a title and a body. */
 export interface TextPost extends PostBase {
   kind: "text";
+  /**
+   * Its card's preview, as its author chose it and its text gives it (see
+   * ../submit/text-preview.server.ts); none, and shown, when left out.
+   */
+  preview?: { shown: boolean; json: string | null; thumbKey: string | null };
 }
 
 /** A fan's uploaded picture, video, or audio, with a video's poster frame. */
@@ -197,7 +202,9 @@ export async function publishPost(db: D1Database, post: NewPost): Promise<Publis
   const limit = dailyLimit(post.author);
   const link = post.kind === "link" ? post : null;
   const upload = post.kind === "upload" ? post : null;
-  const thumbKey = link?.thumbKey ?? upload?.posterKey ?? "";
+  const text = post.kind === "text" ? post : null;
+  // A link's snapshot, a video's poster, or a text post's preview's picture.
+  const thumbKey = link?.thumbKey ?? upload?.posterKey ?? text?.preview?.thumbKey ?? "";
   const mediaKey = upload?.mediaKey ?? "";
   // A gallery, as stored: pictures only, the first of them the post's file.
   const gallery =
@@ -248,13 +255,14 @@ export async function publishPost(db: D1Database, post: NewPost): Promise<Publis
         .prepare(
           `INSERT INTO posts (id, author_id, kind, url, canonical_key, provider, origin,
              title, description, page_title, thumb_key, aspect, created_at,
-             media_key, media_type, media_width, media_height, media_duration, reply_policy, comments_closed_at, pictures, inline_media)
+             media_key, media_type, media_width, media_height, media_duration, reply_policy, comments_closed_at, pictures, inline_media,
+             card_preview, card_preview_shown)
            SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ${pending(11, "post")}, ?14, ?12,
              ${pending(15, "media")}, ?16, ?17, ?18, ?19,
              -- Choosing who may comment is the plan's; without it, everyone may.
              CASE WHEN ${entitledCondition(2, post.now)} THEN ?20 ELSE NULL END,
              CASE WHEN ?21 AND ${entitledCondition(2, post.now)} THEN ?12 ELSE NULL END,
-             ?24, ?26
+             ?24, ?26, ?27, ?28
            WHERE ${allowed}`,
         )
         .bind(
@@ -284,6 +292,8 @@ export async function publishPost(db: D1Database, post: NewPost): Promise<Publis
           gallery,
           post.draft?.scheduledAt ?? null,
           inline,
+          text?.preview?.json ?? null,
+          text?.preview?.shown === false ? 0 : 1,
         ),
       db
         .prepare(

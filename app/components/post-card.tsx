@@ -210,7 +210,9 @@ function Excerpt({ post }: { post: PostCardData }) {
   const text = useRef<HTMLParagraphElement>(null);
   // Cut by length on the server, or by the line clamp, measured whenever
   // the excerpt's size changes, as when the window narrows (review F103).
-  const truncated = post.excerpt.endsWith("…") || (post.uploads ?? 0) > 0;
+  // Uploads its card leaves out: all of an article's, but the one its preview shows.
+  const unshown = (post.uploads ?? 0) - (post.preview?.upload ? 1 : 0);
+  const truncated = post.excerpt.endsWith("…") || unshown > 0;
   const [clamped, setClamped] = useState(false);
   const [open, setOpen] = useState(false);
   const [asked, setAsked] = useState(false);
@@ -243,7 +245,13 @@ function Excerpt({ post }: { post: PostCardData }) {
       {showing ? (
         <MentionsProvider names={loaded.names}>
           {/* In the excerpt's muted color, as more of the same text. */}
-          <RichText text={loaded.description} className="text-text-muted" outsideLinks={post.author.outsideLinks} files={loaded.files} />
+          <RichText
+            text={loaded.description}
+            className="text-text-muted"
+            outsideLinks={post.author.outsideLinks}
+            // The upload its preview shows above is not shown twice.
+            files={loaded.files?.filter((file) => file.key !== post.preview?.upload)}
+          />
         </MentionsProvider>
       ) : (
         <p
@@ -251,8 +259,8 @@ function Excerpt({ post }: { post: PostCardData }) {
           className={cn(
             // The excerpt keeps the post's lines.
             "text-body whitespace-pre-line text-text-muted [overflow-wrap:anywhere]",
-            // A text post has nothing else to show, so more of it is.
-            post.media.kind === "text" ? "line-clamp-4" : "line-clamp-2",
+            // A text post with nothing else to show shows more of itself.
+            post.media.kind === "text" && !post.preview ? "line-clamp-4" : "line-clamp-2",
           )}
         >
           {post.excerpt}
@@ -360,11 +368,20 @@ export function PostCard({
           </AuthorLine>
         </div>
 
-        {post.media.kind === "text" ? null : (
+        {post.media.kind !== "text" ? (
           <div className="mt-3">
             <PostMediaView post={post} lead={lead} />
           </div>
-        )}
+        ) : post.preview && !(description !== undefined && post.preview.upload) ? (
+          // A text post's preview, drawn as a post's own media: on its own
+          // page only a link's, as its text shows its uploads in place.
+          <div className="mt-3">
+            <PostMediaView
+              post={{ ...post, media: post.preview.media, url: post.preview.url ?? post.url, host: post.preview.host, title: post.preview.alt || post.title }}
+              lead={lead}
+            />
+          </div>
+        ) : null}
 
         {description === undefined ? (
           <Excerpt post={post} />
