@@ -68,6 +68,11 @@ describe("focusCandidate", () => {
   it("focuses TikTok like any video", () => {
     expect(focusCandidate([box("t", "tiktok", 200)], VH)).toBe("t");
   });
+
+  it("never focuses a player that waits for the viewer, as in an article's text", () => {
+    const boxes = [{ ...box("waits", "video", 250), waits: true }, { ...box("tiktok", "tiktok", 250), waits: true }, box("other", "video", 900)];
+    expect(focusCandidate(boxes, VH)).toBeNull();
+  });
 });
 
 describe("planMounts", () => {
@@ -116,6 +121,13 @@ describe("planMounts", () => {
     expect(
       planMounts(input({ boxes, candidate: "t", autoplay: false })).has("t"),
     ).toBe(false);
+  });
+
+  it("loads a waiting video ahead, held paused, and a waiting TikTok only from a tap", () => {
+    const boxes = [{ ...box("v", "video", 200), waits: true }, { ...box("t", "tiktok", 600), waits: true }];
+    expect(planMounts(input({ boxes })).has("v")).toBe(true);
+    expect(planMounts(input({ boxes, candidate: "t" })).has("t")).toBe(false);
+    expect(planMounts(input({ boxes, held: new Set(["t"]) })).has("t")).toBe(true);
   });
 
   it("releases TikTok half a screen away", () => {

@@ -152,7 +152,7 @@ export function shouldRevalidate({ formAction, defaultShouldRevalidate }: Should
 export async function clientLoader({ request, serverLoader }: Route.ClientLoaderArgs) {
   const url = new URL(request.url);
   // Only a Back or Forward step reuses what was loaded. Any other arrival,
-  // including Refresh, takes a new ranking.
+  // including a reload, takes a new ranking.
   const restoring = Date.now() - lastPopAt < 1000;
   const loaded = restoring ? loadedPages.get(url.pathname + url.search) : undefined;
   return loaded ? loaded.data : await serverLoader();

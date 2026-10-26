@@ -1,10 +1,11 @@
-import { Bookmark, Plus } from "lucide-react";
+import { Bookmark, Newspaper, Plus } from "lucide-react";
 import { Link, useLocation } from "react-router";
 
 import { returnHere } from "~/lib/security/request";
 import type { Theme } from "~/lib/theme";
 
 import { AccountMenu } from "./account-menu";
+import { useDigestInvite } from "./digest-invite";
 import { DigestMenu } from "./digest-menu";
 import { useSignIn } from "./sign-in";
 import { ThemeSwitch } from "./theme-switch";
@@ -26,10 +27,37 @@ function SubmitLink() {
 }
 
 /**
- * The top bar's right side. Signed out: the theme switch, Submit, and Sign
- * in. Signed in: saved posts, the email digest, Submit, and the account
- * menu; the theme and autoplay are in Settings. Never more than four
- * controls, so it fits a 320 px screen.
+ * The email digest for a visitor: the founder's invitation to join for it,
+ * with a dot until they have seen it, to draw the eye (owner's request,
+ * 2026-10-26). The digest's own join page until the page's scripts run.
+ * None while the shared link is closed.
+ */
+function DigestInviteButton() {
+  const invite = useDigestInvite();
+  if (!invite) return null;
+  return (
+    <IconButton asChild aria-label="Email digest" className="relative">
+      <Link
+        to={invite.href}
+        aria-haspopup="dialog"
+        aria-expanded={invite.open}
+        onClick={(event) => {
+          event.preventDefault();
+          invite.toggle();
+        }}
+      >
+        <Newspaper size={18} aria-hidden />
+        {invite.fresh ? <span aria-hidden className="absolute top-1.5 right-1.5 size-2 rounded-full bg-accent-solid ring-2 ring-bg" /> : null}
+      </Link>
+    </IconButton>
+  );
+}
+
+/**
+ * The top bar's right side. Signed out: the theme switch, the email digest,
+ * Submit, and Sign in. Signed in: saved posts, the email digest, Submit,
+ * and the account menu; the theme and autoplay are in Settings. Never more
+ * than four controls, so it fits a 320 px screen.
  */
 export function HeaderActions({
   viewer,
@@ -46,6 +74,7 @@ export function HeaderActions({
     return (
       <>
         <ThemeSwitch theme={theme} />
+        <DigestInviteButton />
         <SubmitLink />
         {/* A plain link to the sign-in page until the page's scripts run,
             then the sign-in dialog. */}

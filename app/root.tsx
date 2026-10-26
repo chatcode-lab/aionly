@@ -14,7 +14,7 @@ import {
 
 import type { Route } from "./+types/root";
 import "./app.css";
-import { DigestInvite } from "./components/digest-invite";
+import { DigestInviteProvider } from "./components/digest-invite";
 import { FeedToolbar } from "./components/feed-toolbar";
 import { HeaderActions } from "./components/header-actions";
 import { NotifyProvider } from "./components/notify";
@@ -186,13 +186,14 @@ export function Layout({ children }: { children: React.ReactNode }) {
         <ToastProvider>
           <NotifyProvider>
             <SignInProvider>
-              <SiteHeader toolbar={feedToolbar ? <FeedToolbar /> : undefined}>
-                <HeaderActions viewer={data?.viewer ?? null} theme={theme} />
-              </SiteHeader>
-              {data?.viewer?.ban ? <BanNotice ban={data.viewer.ban} karma={data.viewer.karma} /> : null}
-              <div className="flex-1">{children}</div>
-              <SiteFooter reviewPages={data?.reviewPages ?? false} fund={data?.fund ?? false} />
-              <DigestInvite />
+              <DigestInviteProvider>
+                <SiteHeader toolbar={feedToolbar ? <FeedToolbar /> : undefined}>
+                  <HeaderActions viewer={data?.viewer ?? null} theme={theme} />
+                </SiteHeader>
+                {data?.viewer?.ban ? <BanNotice ban={data.viewer.ban} karma={data.viewer.karma} /> : null}
+                <div className="flex-1">{children}</div>
+                <SiteFooter reviewPages={data?.reviewPages ?? false} fund={data?.fund ?? false} />
+              </DigestInviteProvider>
             </SignInProvider>
           </NotifyProvider>
         </ToastProvider>

@@ -104,12 +104,14 @@ function ProviderMedia({
   post,
   media,
   lead,
+  waits,
 }: {
   post: PostCardData;
   media: Extract<PostMedia, { kind: "media" }>;
   lead?: boolean;
+  waits?: boolean;
 }) {
-  const { key, ref, state } = useMediaSlot(post.id, SLOT_KIND[media.provider]);
+  const { key, ref, state } = useMediaSlot(post.id, SLOT_KIND[media.provider], waits);
   const resolved = useMemo(() => mediaLinkOf(post.url), [post.url]);
   const link = state.mounted ? resolved : null;
 
@@ -236,12 +238,12 @@ function UploadedMedia({
  * card that opens the original. The lead card's, the first on the screen,
  * loads its picture ahead of the rest.
  */
-export function PostMediaView({ post, lead }: { post: PostCardData; lead?: boolean }) {
+export function PostMediaView({ post, lead, waits }: { post: PostCardData; lead?: boolean; waits?: boolean }) {
   const { media } = post;
 
   switch (media.kind) {
     case "media":
-      return <ProviderMedia post={post} media={media} lead={lead} />;
+      return <ProviderMedia post={post} media={media} lead={lead} waits={waits} />;
     case "page":
       return (
         <PreviewCard
@@ -274,12 +276,15 @@ export function PostMediaView({ post, lead }: { post: PostCardData; lead?: boole
 /**
  * A provider link an article's text shows as its player, where the text
  * places it (owner's request, 2026-10-26): drawn as a link post's media,
- * with a playback slot and a remembered height of its own. `thumbUrl` is
- * the post's snapshot when its preview is this link.
+ * with a playback slot and a remembered height of its own. It plays only
+ * when the viewer starts it, unless it is the card's preview (`preview`),
+ * which plays as a link post's does, with the post's snapshot as its poster.
  */
-export function TextEmbed({ post, block, thumbUrl }: { post: PostCardData; block: EmbedBlock; thumbUrl?: string }) {
+export function TextEmbed({ post, block, preview }: { post: PostCardData; block: EmbedBlock; preview?: { thumbUrl?: string } }) {
+  const thumbUrl = preview?.thumbUrl;
   return (
     <PostMediaView
+      waits={!preview}
       post={{
         ...post,
         id: `${post.id}~${block.index}`,

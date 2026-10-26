@@ -17,10 +17,3 @@ export function frequencyOf(value: unknown): Frequency | null {
  * invitation to the digest, to the account the sign-up makes.
  */
 export const DIGEST_COOKIE = "aionly_digest";
-
-/** When each choice's emails come, as the invitation to the digest puts it. */
-export const CADENCE: Record<Frequency, string> = {
-  daily: "Every morning, plus the week's and month's best.",
-  weekly: "Every Monday, plus the month's best.",
-  monthly: "Early each month.",
-};

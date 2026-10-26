@@ -23,6 +23,12 @@ export type SlotKind =
 export interface SlotBox {
   key: string;
   kind: SlotKind;
+  /**
+   * Plays only when the viewer starts it, as a player in an article's text
+   * does (owner's request, 2026-10-26): it never takes focus, and a TikTok
+   * one, which plays as it loads, loads only from a tap.
+   */
+  waits?: boolean;
   /** Edges relative to the top of the viewport, in CSS pixels. */
   top: number;
   bottom: number;
@@ -81,7 +87,7 @@ export function focusCandidate(
   let best: string | null = null;
   let bestDistance = Infinity;
   for (const box of boxes) {
-    if (box.kind !== "video" && box.kind !== "tiktok") continue;
+    if ((box.kind !== "video" && box.kind !== "tiktok") || box.waits) continue;
     if (onScreen(box, viewportHeight) < RULES.focusVisible) continue;
     const distance = distanceFromCenter(box, viewportHeight);
     if (distance < bestDistance) {
@@ -135,7 +141,7 @@ function wanted(box: SlotBox, input: MountInput): boolean {
       return false;
     case "tiktok":
       // Loaded only as it takes focus, since loading starts it playing.
-      if (!input.autoplay) return false;
+      if (!input.autoplay || box.waits) return false;
       if (loaded) return away <= RULES.releaseTikTokBeyond;
       return box.key === input.candidate;
   }

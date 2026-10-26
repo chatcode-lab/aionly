@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { closedLately, INVITE_AFTER_MS, INVITE_PAUSE_MS, INVITE_QUIET_MS, inviteDue } from "./digest-invite";
-import { CADENCE, frequencyOf } from "./digest/frequency";
+import { frequencyOf } from "./digest/frequency";
 
 describe("the founder's invitation to the digest", () => {
   const interested = { visibleMs: INVITE_AFTER_MS, scrolled: 1, pages: 1, idleMs: INVITE_PAUSE_MS };
@@ -29,10 +29,9 @@ describe("the founder's invitation to the digest", () => {
 });
 
 describe("a digest chosen on the way in", () => {
-  it("is one of the three, as a form or cookie gives it, and says when it comes", () => {
+  it("is one of the three, as a form or cookie gives it", () => {
     expect(frequencyOf("weekly")).toBe("weekly");
     expect(frequencyOf("off")).toBeNull();
     expect(frequencyOf(null)).toBeNull();
-    expect(CADENCE.daily).toMatch(/morning/);
   });
 });

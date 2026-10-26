@@ -63,6 +63,8 @@ interface Slot {
   key: string;
   postId: string;
   kind: SlotKind;
+  /** Plays only when the viewer starts it (`SlotBox.waits`). */
+  waits: boolean;
   element: HTMLElement;
   /** Loaded by a tap, so it stays loaded while it plays. */
   tapped: boolean;
@@ -150,11 +152,13 @@ export class PlaybackController {
     postId: string,
     kind: SlotKind,
     element: HTMLElement,
+    waits = false,
   ): () => void {
     const slot: Slot = {
       key,
       postId,
       kind,
+      waits,
       element,
       tapped: false,
       connection: null,
@@ -517,6 +521,7 @@ export class PlaybackController {
       boxes.push({
         key: slot.key,
         kind: slot.kind,
+        ...(slot.waits ? { waits: true } : {}),
         top: rect.top,
         bottom: rect.bottom,
       });

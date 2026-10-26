@@ -1,6 +1,6 @@
-import { RotateCw, Search, X } from "lucide-react";
+import { Search, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Form, Link, useLocation, useNavigate, useRevalidator, useRouteLoaderData } from "react-router";
+import { Form, Link, useLocation, useNavigate, useRouteLoaderData } from "react-router";
 
 import { feedPath, RANGE_LABEL, RANGES } from "~/lib/feed";
 import { QUERY_MAX } from "~/lib/search";
@@ -62,14 +62,14 @@ function SearchField({ query, onClose }: { query: string; onClose?: () => void }
 }
 
 /**
- * Sort, range, refresh, and search for the feed, shown in the top bar.
- * Search opens its field in place of the rest; on the search page, the
- * field holds what was searched for.
+ * Sort, range, and search for the feed, shown in the top bar. Search opens
+ * its field in place of the rest; on the search page, the field holds what
+ * was searched for. There is no Refresh: loading the page again takes a new
+ * ranking (owner's request, 2026-10-26).
  */
 export function FeedToolbar() {
   const data = useRouteLoaderData<typeof loader>("routes/home");
   const found = useRouteLoaderData<typeof searchLoader>("routes/search");
-  const revalidator = useRevalidator();
   const location = useLocation();
   // Open over the feed until closed, or until the page changes.
   const [openAt, setOpenAt] = useState<string | null>(null);
@@ -117,29 +117,19 @@ export function FeedToolbar() {
           to: feedPath(data.sort, range),
         }))}
       />
-      {/* Side by side, with no gap, so the row fits a 320 px screen with "All time". */}
-      <div className="flex items-center">
-        <IconButton
-          aria-label="Refresh"
-          onClick={() => void revalidator.revalidate()}
-          disabled={revalidator.state === "loading"}
+      {/* The search page until the page's scripts run, then the field in place. */}
+      <IconButton asChild aria-label="Search">
+        <Link
+          ref={searchLink}
+          to="/search"
+          onClick={(event) => {
+            event.preventDefault();
+            setOpenAt(location.key);
+          }}
         >
-          <RotateCw size={16} aria-hidden />
-        </IconButton>
-        {/* The search page until the page's scripts run, then the field in place. */}
-        <IconButton asChild aria-label="Search">
-          <Link
-            ref={searchLink}
-            to="/search"
-            onClick={(event) => {
-              event.preventDefault();
-              setOpenAt(location.key);
-            }}
-          >
-            <Search size={16} aria-hidden />
-          </Link>
-        </IconButton>
-      </div>
+          <Search size={16} aria-hidden />
+        </Link>
+      </IconButton>
     </>
 
   );

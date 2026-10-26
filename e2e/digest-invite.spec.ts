@@ -67,12 +67,12 @@ test("a visitor who reads a while is invited to join for the digest, and once cl
   expect(await invite.evaluate((card) => card.contains(document.activeElement))).toBe(false);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 
-  // Daily first, each saying when it comes.
+  // Daily first; the three alone, with nothing more to read (owner's request, 2026-10-26).
   await expect(invite.getByRole("radio", { name: "Daily" })).toBeChecked();
-  await expect(invite).toContainText("Every morning, plus the week's and month's best.");
+  await expect(invite.getByRole("radio")).toHaveCount(3);
+  await expect(invite).not.toContainText("Every morning");
   await invite.getByText("Weekly", { exact: true }).click();
   await expect(invite.getByRole("radio", { name: "Weekly" })).toBeChecked();
-  await expect(invite).toContainText("Every Monday, plus the month's best.");
 
   // Closed, it stays away, on the next visit too.
   await invite.getByRole("button", { name: "Close" }).click();
@@ -200,4 +200,49 @@ test.describe("inside an app's browser", () => {
     await invite.getByRole("button", { name: "Copy link" }).click();
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(new URL("/join/boris?digest=weekly", baseURL).href);
   });
+});
+
+test("the top bar's digest button, with a dot until it is seen, opens the invitation on any page", async ({ page }) => {
+  await open(page, "/manifesto");
+  const button = page.locator("header").getByRole("link", { name: "Email digest" });
+  const dot = button.locator("span");
+  // Before the page's scripts run, it is the digest's own join page.
+  await expect(button).toHaveAttribute("href", "/join/boris?digest=daily&next=%2Fmanifesto");
+  await expect(dot).toHaveCount(1);
+  await button.click();
+  const invite = page.getByRole("dialog", { name: TITLE });
+  await expect(invite).toBeVisible();
+  await expect(invite).toBeFocused();
+  await expect(button).toHaveAttribute("aria-expanded", "true");
+  await expect(dot).toHaveCount(0);
+  // Again, it closes, and focus goes back to the button.
+  await button.click();
+  await expect(invite).toHaveCount(0);
+  await button.click();
+  await page.keyboard.press("Escape");
+  await expect(invite).toHaveCount(0);
+  await expect(button).toBeFocused();
+
+  // Opened elsewhere, it goes with the visitor to the feed; another page closes it.
+  await button.click();
+  await page.getByRole("link", { name: "aion.ly home" }).click();
+  await expect(page).toHaveURL(/\/$/);
+  await expect(invite).toBeVisible();
+  // Submit, which leads a visitor to sign in.
+  await page.locator("header").getByRole("link", { name: "Submit a post" }).click();
+  await expect(page).toHaveURL(/\/signin\?next=%2Fsubmit$/);
+  await expect(invite).toHaveCount(0);
+
+  // Seen, the dot stays away on the next visit too, while closed lately.
+  await page.evaluate(() => sessionStorage.clear());
+  await open(page, "/");
+  await expect(button).toBeVisible();
+  await expect(dot).toHaveCount(0);
+});
+
+test("members have their own digest menu, not the invitation", async ({ page, context, account }) => {
+  await account.signIn(context);
+  await open(page, "/");
+  await expect(page.locator("header").getByRole("link", { name: "Email digest" })).toHaveCount(0);
+  await expect(page.locator("header").getByRole("button", { name: /^Email digest:/ })).toBeVisible();
 });

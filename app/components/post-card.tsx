@@ -405,7 +405,7 @@ export function PostCard({
             files={files}
             embed={
               article
-                ? (block) => <TextEmbed post={post} block={block} thumbUrl={block.key === previewed ? previewThumb : undefined} />
+                ? (block) => <TextEmbed post={post} block={block} preview={block.key === previewed ? { thumbUrl: previewThumb } : undefined} />
                 : undefined
             }
           />

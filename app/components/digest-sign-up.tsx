@@ -1,7 +1,7 @@
 import { type ReactNode, useState } from "react";
 import { Form } from "react-router";
 
-import { CADENCE, FREQUENCIES, type Frequency } from "~/lib/digest/frequency";
+import { FREQUENCIES, type Frequency } from "~/lib/digest/frequency";
 
 import { CopyButton, GoogleMark } from "./sign-in";
 import { Button } from "./ui/button";
@@ -61,9 +61,6 @@ export function DigestSignUp({
           </label>
         ))}
       </div>
-      <p aria-live="polite" className="mt-1.5 text-meta text-text-muted">
-        {CADENCE[digest]}
-      </p>
     </fieldset>
   );
 

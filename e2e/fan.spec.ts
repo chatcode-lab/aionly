@@ -1133,6 +1133,15 @@ test.describe("with players", () => {
     await expect(players(post).post).toHaveCount(1);
     await expect(post.locator(`a[href="${sentence}"]`)).toBeVisible();
 
+    // Not the card's preview, it waits for the viewer: in the middle of the screen, focus never starts it.
+    const video = post.locator('iframe[src*="youtube-nocookie.com/embed/dQw4w9WgXcQ"]');
+    await expect(video).toHaveCount(1);
+    await video.evaluate((frame) => frame.scrollIntoView({ block: "center" }));
+    // Longer than focus takes to start a player.
+    await page.waitForTimeout(1500);
+    const player = page.frames().find((frame) => frame.url().includes("youtube-nocookie.com/embed/dQw4w9WgXcQ"))!;
+    expect(await player.evaluate(() => (window as unknown as { commands: string[] }).commands)).not.toContain("playVideo");
+
     // In the feed, the excerpt leaves them out, and Show more brings them in.
     await open(page, "/?sort=new&range=all");
     const card = page.locator("main article", { has: page.getByRole("link", { name: title }) });

@@ -10,11 +10,10 @@ test.describe("search", () => {
     await header.getByRole("link", { name: "Search" }).click();
     await expect(field).toBeFocused();
     await expect(header.getByRole("link", { name: "Top", exact: true })).toHaveCount(0);
-    await expect(header.getByRole("button", { name: "Refresh" })).toHaveCount(0);
 
     // Escape puts the controls back, and the focus where it was.
     await field.press("Escape");
-    await expect(header.getByRole("button", { name: "Refresh" })).toBeVisible();
+    await expect(header.getByRole("link", { name: "Top", exact: true })).toBeVisible();
     await expect(header.getByRole("link", { name: "Search" })).toBeFocused();
 
     await header.getByRole("link", { name: "Search" }).click();
@@ -30,7 +29,7 @@ test.describe("search", () => {
     await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", "noindex");
     // Nothing of the feed shows, above the results or in the bar.
     await expect(page.getByText("Load more")).toHaveCount(0);
-    await expect(header.getByRole("button", { name: "Refresh" })).toHaveCount(0);
+    await expect(header.getByRole("link", { name: "Top", exact: true })).toHaveCount(0);
 
     // Only Return searches: there is no button for it, and Close sits inside the field.
     await expect(header.getByRole("button", { name: "Search" })).toHaveCount(0);
@@ -49,14 +48,14 @@ test.describe("search", () => {
     await page.goBack();
     await header.getByRole("link", { name: "Close search" }).click();
     await expect(page).toHaveURL(/\/$/);
-    await expect(header.getByRole("button", { name: "Refresh" })).toBeVisible();
+    await expect(header.getByRole("link", { name: "Top", exact: true })).toBeVisible();
 
     // From results, Escape goes back to the feed too, as Close does (review F131).
     await page.goto("/search?q=bunny");
     await field.focus();
     await field.press("Escape");
     await expect(page).toHaveURL(/\/$/);
-    await expect(header.getByRole("button", { name: "Refresh" })).toBeVisible();
+    await expect(header.getByRole("link", { name: "Top", exact: true })).toBeVisible();
   });
 
   test("says when nothing matches, and finds no removed or deleted post", async ({ page }) => {
