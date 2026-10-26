@@ -9,6 +9,7 @@ import {
   nextCover,
   swiped,
   TOUCH_HIDE_MS,
+  TOUCH_SWIPE,
   UNCOVERED,
 } from "~/lib/logo";
 
@@ -45,6 +46,8 @@ export function SiteLogo() {
     let pointer: Point | null = null;
     let finger: Point | null = null;
     let touchedAt: Point | null = null;
+    // Where the page was scrolled to as the finger touched down; null with none down.
+    let scrolledFrom: number | null = null;
     let frame = 0;
     let idle = 0;
     let sleep = 0;
@@ -113,11 +116,29 @@ export function SiteLogo() {
       schedule();
     };
 
-    // A touch screen: a swipe brings the eyes out from behind the name, and
-    // they stay out while the finger is down, even resting in one place.
+    // A touch screen: every swipe brings the eyes out from behind the name,
+    // and they stay out while the finger is down, even resting in one place.
+    // A swipe shows in the finger's moves, or in the page scrolling under it,
+    // since one started while the page still coasts from the last may send
+    // no moves of its own.
+    const wake = () => {
+      clearTimeout(sleep);
+      flag("awake", true);
+      schedule();
+    };
     const onTouchStart = (event: TouchEvent) => {
       const touch = event.touches[0];
       touchedAt = touch ? { x: touch.clientX, y: touch.clientY } : null;
+      finger = touchedAt ?? finger;
+      scrolledFrom = window.scrollY;
+      // Out still from the last swipe: they stay while this finger is down.
+      clearTimeout(sleep);
+      // A touch ends where it began, and a card swapped out as the page
+      // scrolls, as a player taking a poster's place, takes its end out of
+      // the page with it: hear it there too.
+      const from = event.target instanceof Element ? event.target.closest<HTMLElement>(":not(svg, svg *)") : null;
+      from?.addEventListener("touchend", onTouchEnd, { passive: true, once: true });
+      from?.addEventListener("touchcancel", onTouchEnd, { passive: true, once: true });
     };
     const onTouchMove = (event: TouchEvent) => {
       const touch = event.touches[0];
@@ -125,17 +146,21 @@ export function SiteLogo() {
       const at = { x: touch.clientX, y: touch.clientY };
       if (!logo.hasAttribute("data-awake") && !swiped(touchedAt, at)) return;
       finger = at;
-      clearTimeout(sleep);
-      flag("awake", true);
-      schedule();
+      wake();
     };
-    // The last finger lifted: they hide a moment later.
+    // The last finger lifted: they hide a moment later, however the page coasts on.
     const onTouchEnd = (event: TouchEvent) => {
       if (event.touches.length > 0) return;
       touchedAt = null;
+      scrolledFrom = null;
       if (!logo.hasAttribute("data-awake")) return;
       clearTimeout(sleep);
       sleep = window.setTimeout(() => flag("awake", false), TOUCH_HIDE_MS);
+    };
+    const onScroll = () => {
+      waitIdle();
+      if (!touchy.matches || scrolledFrom === null || logo.hasAttribute("data-awake")) return;
+      if (Math.abs(window.scrollY - scrolledFrom) >= TOUCH_SWIPE) wake();
     };
     const onActive = () => waitIdle();
 
@@ -148,7 +173,7 @@ export function SiteLogo() {
     window.addEventListener("touchmove", onTouchMove, { passive: true });
     window.addEventListener("touchend", onTouchEnd, { passive: true });
     window.addEventListener("touchcancel", onTouchEnd, { passive: true });
-    window.addEventListener("scroll", onActive, { passive: true });
+    window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("keydown", onActive);
     waitIdle();
 
@@ -162,7 +187,7 @@ export function SiteLogo() {
       window.removeEventListener("touchmove", onTouchMove);
       window.removeEventListener("touchend", onTouchEnd);
       window.removeEventListener("touchcancel", onTouchEnd);
-      window.removeEventListener("scroll", onActive);
+      window.removeEventListener("scroll", onScroll);
       window.removeEventListener("keydown", onActive);
       cancelAnimationFrame(frame);
       clearTimeout(idle);
