@@ -5,7 +5,9 @@ import { NEW_ISSUE, REPOSITORY } from "~/lib/site";
 
 /**
  * The slim sticky header. On wide screens the toolbar (sort and range) sits
- * in the same row; on narrow ones it wraps to a second row of its own.
+ * in the same row, taking the room between the wordmark and the actions, so
+ * the search field can fill it; on narrow ones it wraps to a second row of
+ * its own.
  */
 export function SiteHeader({
   toolbar,
@@ -28,7 +30,7 @@ export function SiteHeader({
           aion<span className="text-accent">.</span>ly
         </Link>
         {toolbar ? (
-          <div className="order-last flex w-full items-center gap-2 pb-2 md:order-none md:w-auto md:pb-0">
+          <div className="order-last flex w-full items-center gap-2 pb-2 md:order-none md:w-auto md:min-w-0 md:flex-1 md:pb-0">
             {toolbar}
           </div>
         ) : null}

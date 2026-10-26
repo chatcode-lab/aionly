@@ -12,13 +12,16 @@ import { IconButton } from "./ui/button";
 import { LinkTabs } from "./ui/tabs";
 
 /**
- * The search field, in place of the feed's controls. Return or the button
- * searches; Close goes back to the controls, or from results to the feed.
+ * The search field, in place of the feed's controls, as wide as the bar
+ * allows. Return searches, from a phone's keyboard too; Close, inside the
+ * field, goes back to the controls, or from results to the feed.
  */
 function SearchField({ query, onClose }: { query: string; onClose?: () => void }) {
   const close = <X size={16} aria-hidden />;
+  // Inside the field, at its right end.
+  const closeClass = "absolute inset-y-0 right-0";
   return (
-    <Form method="get" action="/search" role="search" className="flex w-full items-center gap-1 md:w-80">
+    <Form method="get" action="/search" role="search" className="relative flex w-full items-center">
       <input
         // A new search from the results starts from what it searched for.
         key={query}
@@ -39,18 +42,16 @@ function SearchField({ query, onClose }: { query: string; onClose?: () => void }
           }
         }}
         // At least 16 px on touch screens, which stops iOS from zooming the
-        // page on focus; Close stands in for the browser's own clear button.
-        className="h-9 min-w-0 flex-1 rounded-lg border border-border-strong bg-surface px-3 text-body text-text placeholder:text-text-faint pointer-coarse:h-(--touch) pointer-coarse:text-[length:max(1rem,var(--text-body))] [&::-webkit-search-cancel-button]:hidden"
+        // page on focus; Close stands in for the browser's own clear button,
+        // with room kept for it.
+        className="h-9 min-w-0 flex-1 rounded-lg border border-border-strong bg-surface pr-9 pl-3 text-body text-text placeholder:text-text-faint pointer-coarse:h-(--touch) pointer-coarse:pr-(--touch) pointer-coarse:text-[length:max(1rem,var(--text-body))] [&::-webkit-search-cancel-button]:hidden"
       />
-      <IconButton type="submit" aria-label="Search">
-        <Search size={16} aria-hidden />
-      </IconButton>
       {onClose ? (
-        <IconButton aria-label="Close search" onClick={onClose}>
+        <IconButton aria-label="Close search" onClick={onClose} className={closeClass}>
           {close}
         </IconButton>
       ) : (
-        <IconButton asChild aria-label="Close search">
+        <IconButton asChild aria-label="Close search" className={closeClass}>
           <Link to="/">{close}</Link>
         </IconButton>
       )}

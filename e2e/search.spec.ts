@@ -32,9 +32,14 @@ test.describe("search", () => {
     await expect(page.getByText("Load more")).toHaveCount(0);
     await expect(header.getByRole("button", { name: "Refresh" })).toHaveCount(0);
 
-    // The search button searches again from the results.
+    // Only Return searches: there is no button for it, and Close sits inside the field.
+    await expect(header.getByRole("button", { name: "Search" })).toHaveCount(0);
+    const fieldBox = (await field.boundingBox())!;
+    const closeBox = (await header.getByRole("link", { name: "Close search" }).boundingBox())!;
+    expect(closeBox.x + closeBox.width).toBeLessThanOrEqual(fieldBox.x + fieldBox.width + 1);
+    expect(closeBox.x).toBeGreaterThan(fieldBox.x + fieldBox.width / 2);
     await field.fill("Attention transformer");
-    await header.getByRole("button", { name: "Search" }).click();
+    await field.press("Enter");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("1 post matches “Attention transformer”");
     await expect(page.locator("main article")).toContainText("2017 transformer paper");
     await expect(page.locator("main article")).toContainText("arxiv.org");
