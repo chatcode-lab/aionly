@@ -438,8 +438,7 @@
 
 /*
  * A touch screen has no cursor, so the name shows from the first paint,
- * and the eyes come out while a finger swipes (data-awake), quicker, since
- * touches are short.
+ * and the eyes come out while the page scrolls (data-awake), quicker.
  */
 @media (hover: none) {
   .site-logo:not([data-awake]) .logo-name {

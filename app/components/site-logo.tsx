@@ -5,11 +5,11 @@ import {
   LOGO_IDLE_MS,
   LOGO_IDLE_REPEAT_MS,
   type LogoCover,
+  LOOK_RANGE,
   lookToward,
   nextCover,
-  swiped,
   TOUCH_HIDE_MS,
-  TOUCH_SWIPE,
+  TOUCH_SCROLL,
   UNCOVERED,
 } from "~/lib/logo";
 
@@ -26,11 +26,12 @@ type Point = { x: number; y: number };
  * As the cursor nears, the name comes down over them part way; over the logo
  * it covers them, and once the cursor leaves it lifts in one move and the
  * eyes peek out. Keyboard focus shows the name as well. A touch screen has
- * no cursor, so there it is the other way round: the name shows, and a
- * swipe brings the eyes out, following the finger for as long as it is
- * down, and they hide a moment after it lifts. The motion is in app.css;
- * this only sets its state, on the element rather than through React, since
- * it follows every move.
+ * no cursor, so there it is the other way round: the name shows, and the
+ * eyes come out while the page scrolls, looking the way it goes, until a
+ * moment after it stops. Scrolling alone tells, since a swipe that catches
+ * the page still coasting never reaches it as a touch. The motion is in
+ * app.css; this only sets its state, on the element rather than through
+ * React, since it follows every move.
  */
 export function SiteLogo() {
   const logoRef = useRef<HTMLSpanElement>(null);
@@ -44,13 +45,13 @@ export function SiteLogo() {
     const touchy = window.matchMedia("(hover: none)");
     let cover: LogoCover = UNCOVERED;
     let pointer: Point | null = null;
-    let finger: Point | null = null;
-    let touchedAt: Point | null = null;
-    // Where the page was scrolled to as the finger touched down; null with none down.
-    let scrolledFrom: number | null = null;
     let frame = 0;
     let idle = 0;
     let sleep = 0;
+    // Where the page was as this stretch of scrolling began (null while it is
+    // still), and where it was at the last scroll.
+    let scrolledFrom: number | null = null;
+    let lastY = window.scrollY;
     const ends: Record<"play" | "peek", number> = { play: 0, peek: 0 };
 
     const flag = (name: string, on: boolean) => logo.toggleAttribute(`data-${name}`, on);
@@ -64,22 +65,13 @@ export function SiteLogo() {
       ends[name] = window.setTimeout(() => flag(name, false), ms);
     };
 
-    const lookAt = (point: Point | null) => {
-      let look: [number, number] = [0, 0];
-      if (point && !still.matches) {
-        const box = eyes.getBoundingClientRect();
-        look = lookToward(point.x - (box.left + box.width / 2), point.y - (box.top + box.height / 2));
-      }
-      logo.style.setProperty("--look-x", look[0].toFixed(2));
-      logo.style.setProperty("--look-y", look[1].toFixed(2));
+    const look = ([x, y]: [number, number]) => {
+      logo.style.setProperty("--look-x", x.toFixed(2));
+      logo.style.setProperty("--look-y", y.toFixed(2));
     };
 
     const update = () => {
       frame = 0;
-      if (touchy.matches) {
-        lookAt(finger);
-        return;
-      }
       const next = nextCover(pointer ? distanceToBox(pointer.x, pointer.y, logo.getBoundingClientRect()) : null, cover);
       if (cover.cover === 1 && next.cover < 1 && !still.matches) run("peek", PEEK_MS);
       cover = next;
@@ -87,7 +79,12 @@ export function SiteLogo() {
       flag("snap", next.snap);
       flag("shut", next.cover === 1);
       flag("near", !still.matches && next.cover > 0.12 && next.cover < 1);
-      lookAt(pointer);
+      if (pointer && !still.matches) {
+        const box = eyes.getBoundingClientRect();
+        look(lookToward(pointer.x - (box.left + box.width / 2), pointer.y - (box.top + box.height / 2)));
+      } else {
+        look([0, 0]);
+      }
     };
     const schedule = () => {
       if (!frame) frame = requestAnimationFrame(update);
@@ -101,7 +98,8 @@ export function SiteLogo() {
       }, ms);
     };
 
-    // A mouse or pen: the name comes and goes with the cursor.
+    // A mouse or pen: the name comes and goes with the cursor. A touch
+    // screen's touches are left alone; its scrolling shows the eyes instead.
     const onPointer = (event: PointerEvent) => {
       if (touchy.matches) return;
       pointer = { x: event.clientX, y: event.clientY };
@@ -116,65 +114,31 @@ export function SiteLogo() {
       schedule();
     };
 
-    // A touch screen: every swipe brings the eyes out from behind the name,
-    // and they stay out while the finger is down, even resting in one place.
-    // A swipe shows in the finger's moves, or in the page scrolling under it,
-    // since one started while the page still coasts from the last may send
-    // no moves of its own.
-    const wake = () => {
-      clearTimeout(sleep);
-      flag("awake", true);
-      schedule();
-    };
-    const onTouchStart = (event: TouchEvent) => {
-      const touch = event.touches[0];
-      touchedAt = touch ? { x: touch.clientX, y: touch.clientY } : null;
-      finger = touchedAt ?? finger;
-      scrolledFrom = window.scrollY;
-      // Out still from the last swipe: they stay while this finger is down.
-      clearTimeout(sleep);
-      // A touch ends where it began, and a card swapped out as the page
-      // scrolls, as a player taking a poster's place, takes its end out of
-      // the page with it: hear it there too.
-      const from = event.target instanceof Element ? event.target.closest<HTMLElement>(":not(svg, svg *)") : null;
-      from?.addEventListener("touchend", onTouchEnd, { passive: true, once: true });
-      from?.addEventListener("touchcancel", onTouchEnd, { passive: true, once: true });
-    };
-    const onTouchMove = (event: TouchEvent) => {
-      const touch = event.touches[0];
-      if (!touchy.matches || !touch || !touchedAt) return;
-      const at = { x: touch.clientX, y: touch.clientY };
-      if (!logo.hasAttribute("data-awake") && !swiped(touchedAt, at)) return;
-      finger = at;
-      wake();
-    };
-    // The last finger lifted: they hide a moment later, however the page coasts on.
-    const onTouchEnd = (event: TouchEvent) => {
-      if (event.touches.length > 0) return;
-      touchedAt = null;
-      scrolledFrom = null;
-      if (!logo.hasAttribute("data-awake")) return;
-      clearTimeout(sleep);
-      sleep = window.setTimeout(() => flag("awake", false), TOUCH_HIDE_MS);
-    };
     const onScroll = () => {
       waitIdle();
-      if (!touchy.matches || scrolledFrom === null || logo.hasAttribute("data-awake")) return;
-      if (Math.abs(window.scrollY - scrolledFrom) >= TOUCH_SWIPE) wake();
+      const y = window.scrollY;
+      const moved = y - lastY;
+      lastY = y;
+      if (!touchy.matches || still.matches) return;
+      scrolledFrom ??= y - moved;
+      if (!logo.hasAttribute("data-awake") && Math.abs(y - scrolledFrom) < TOUCH_SCROLL) return;
+      flag("awake", true);
+      if (moved !== 0) look([0, Math.sign(moved) * LOOK_RANGE * 0.8]);
+      clearTimeout(sleep);
+      sleep = window.setTimeout(() => {
+        flag("awake", false);
+        scrolledFrom = null;
+      }, TOUCH_HIDE_MS);
     };
-    const onActive = () => waitIdle();
+    const onKey = () => waitIdle();
 
     window.addEventListener("pointermove", onPointer, { passive: true });
     window.addEventListener("pointerdown", onPointer, { passive: true });
     window.addEventListener("pointerup", onPointerGone);
     window.addEventListener("pointercancel", onPointerGone);
     document.addEventListener("pointerout", onPointerGone);
-    window.addEventListener("touchstart", onTouchStart, { passive: true });
-    window.addEventListener("touchmove", onTouchMove, { passive: true });
-    window.addEventListener("touchend", onTouchEnd, { passive: true });
-    window.addEventListener("touchcancel", onTouchEnd, { passive: true });
     window.addEventListener("scroll", onScroll, { passive: true });
-    window.addEventListener("keydown", onActive);
+    window.addEventListener("keydown", onKey);
     waitIdle();
 
     return () => {
@@ -183,12 +147,8 @@ export function SiteLogo() {
       window.removeEventListener("pointerup", onPointerGone);
       window.removeEventListener("pointercancel", onPointerGone);
       document.removeEventListener("pointerout", onPointerGone);
-      window.removeEventListener("touchstart", onTouchStart);
-      window.removeEventListener("touchmove", onTouchMove);
-      window.removeEventListener("touchend", onTouchEnd);
-      window.removeEventListener("touchcancel", onTouchEnd);
       window.removeEventListener("scroll", onScroll);
-      window.removeEventListener("keydown", onActive);
+      window.removeEventListener("keydown", onKey);
       cancelAnimationFrame(frame);
       clearTimeout(idle);
       clearTimeout(sleep);

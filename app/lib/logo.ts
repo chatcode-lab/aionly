@@ -18,14 +18,10 @@ export const LOOK_RANGE = 2.4;
 export const LOGO_IDLE_MS = 6000;
 export const LOGO_IDLE_REPEAT_MS = 15_000;
 
-/** On a touch screen, how far a finger moves before it is a swipe, in CSS pixels. */
-export const TOUCH_SWIPE = 10;
+/** On a touch screen, how far the page scrolls before the eyes come out, in CSS pixels. */
+export const TOUCH_SCROLL = 10;
 
-/**
- * On a touch screen, how long the eyes stay out after the finger lifts: a
- * moment only, since a longer stay, with the page still scrolling on, drew
- * the eye away from it (owner's request, 2026-10-26).
- */
+/** On a touch screen, how long the eyes stay out after the page stops scrolling. */
 export const TOUCH_HIDE_MS = 300;
 
 export interface LogoCover {
@@ -60,11 +56,6 @@ export function nextCover(distance: number | null, last: LogoCover): LogoCover {
   if (distance === null) return { cover: 0, lifted: false, snap: true };
   if (last.cover === 1 || last.lifted) return { cover: 0, lifted: distance < LOGO_REACH, snap: true };
   return { cover: Math.max(0, 1 - distance / LOGO_REACH) * LOGO_CREEP, lifted: false, snap: false };
-}
-
-/** Whether a finger has moved far enough from where it touched down to be a swipe, not a tap. */
-export function swiped(from: { x: number; y: number }, to: { x: number; y: number }): boolean {
-  return Math.hypot(to.x - from.x, to.y - from.y) >= TOUCH_SWIPE;
 }
 
 /**

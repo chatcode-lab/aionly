@@ -7,8 +7,6 @@ import {
   LOOK_RANGE,
   lookToward,
   nextCover,
-  swiped,
-  TOUCH_SWIPE,
   UNCOVERED,
 } from "./logo";
 
@@ -77,14 +75,5 @@ describe("lookToward", () => {
 
   it("looks less at a cursor close by", () => {
     expect(Math.hypot(...lookToward(20, 0))).toBeLessThan(Math.hypot(...lookToward(200, 0)));
-  });
-});
-
-describe("swiped", () => {
-  it("tells a swipe from a tap by how far the finger moved", () => {
-    const from = { x: 100, y: 300 };
-    expect(swiped(from, { x: 103, y: 296 })).toBe(false);
-    expect(swiped(from, { x: 100, y: 300 - TOUCH_SWIPE })).toBe(true);
-    expect(swiped(from, { x: 160, y: 300 })).toBe(true);
   });
 });
