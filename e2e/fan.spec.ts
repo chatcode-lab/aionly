@@ -86,8 +86,9 @@ test("a new member's welcome leads to the plan, with a quiet way on", async ({ p
   await account.signIn(context);
   await open(page, "/welcome?next=%2Fu%2Fquiet_otter_482");
   // Offers by email are on, with the way to turn them off; nothing to tick.
-  // The digest starts daily, and the step says so (owner's request, 2026-10-21).
-  await expect(page.getByText(/Each morning we.ll email you the board.s best posts; change or stop that from the top bar\./)).toBeVisible();
+  // The step names the account's digest: off for these test accounts, while a
+  // new one starts daily or as chosen (digest-invite.spec.ts has those words).
+  await expect(page.getByText(/The email digest of the board.s best posts is off; turn it on from the top bar\./)).toBeVisible();
   await expect(page.getByText(/We.ll also email you the new-member offer, 30% off for 24 hours/)).toBeVisible();
   await expect(page.getByRole("checkbox")).toHaveCount(0);
   // Turned down at once, in one click, as the address is collected.

@@ -8,6 +8,7 @@ import { accountRecord, createProfile, linkedWith } from "./db/accounts.server";
 import { signUpRefusal } from "./db/deletion.server";
 import { attachInvite, claimInvite } from "./db/invites.server";
 import { attachPartner, claimPartnerJoin } from "./db/partners.server";
+import { DIGEST_COOKIE, type Frequency, frequencyOf } from "./digest/frequency";
 import { INVITE_COOKIE, normalizeInviteCode } from "./invites";
 import { normalizePartnerCode, PARTNER_COOKIE } from "./partners";
 import { rememberXAccount, type XProfile } from "./db/x-accounts.server";
@@ -51,6 +52,12 @@ export function partnerFrom(request: Request | undefined): string | null {
   const cookie = request?.headers.get("Cookie") ?? "";
   const code = new RegExp(`(?:^|;\\s*)${PARTNER_COOKIE}=([^;]+)`).exec(cookie)?.[1] ?? null;
   return code ? normalizePartnerCode(code) : null;
+}
+
+/** The digest this browser chose on its way in, from the invitation to the digest. */
+export function digestFrom(request: Request | undefined): Frequency | null {
+  const cookie = request?.headers.get("Cookie") ?? "";
+  return frequencyOf(new RegExp(`(?:^|;\\s*)${DIGEST_COOKIE}=([^;]+)`).exec(cookie)?.[1]);
 }
 
 /** Provider tokens are never kept: the board needs only who signed in. */
@@ -242,10 +249,11 @@ function createAuth(origin: string, request?: Request) {
             return { data: { ...user, id } };
           },
           // Every account gets its public profile and a generated name as
-          // it is created, and who invited it. A failure here is repaired on
-          // the next request, or by the hourly sweep.
+          // it is created, with the digest chosen on the way in, and who
+          // invited it. A failure here is repaired on the next request, or
+          // by the hourly sweep.
           after: async (user) => {
-            await createProfile(env.DB, user.id);
+            await createProfile(env.DB, user.id, Math.floor(Date.now() / 1000), digestFrom(request) ?? undefined);
             await attachInvite(env.DB, { userId: user.id });
             await attachPartner(env.DB, { userId: user.id });
           },
@@ -312,4 +320,39 @@ export type Auth = ReturnType<typeof createAuth>;
  */
 export function authFor(request: Request): Auth {
   return createAuth(new URL(request.url).origin, request);
+}
+
+/**
+ * Starts a sign-in with Google or X: the browser goes on to the provider
+ * with the cookie Better Auth sets to tie the callback to it, and any of
+ * `cookies`. Null when it could not start.
+ */
+export async function startSignIn(
+  request: Request,
+  body: NonNullable<Parameters<Auth["api"]["signInSocial"]>[0]>["body"],
+  cookies: string[] = [],
+): Promise<Response | null> {
+  const response = await authFor(request).api.signInSocial({ body: { ...body, disableRedirect: true }, headers: request.headers, asResponse: true });
+  if (!response.ok) return null;
+  const { url } = (await response.json()) as { url: string };
+  const headers = new Headers({ Location: url });
+  for (const cookie of [...response.headers.getSetCookie(), ...cookies]) headers.append("Set-Cookie", cookie);
+  return new Response(null, { status: 302, headers });
+}
+
+/**
+ * Continue with Google, which makes the account too where it may: a new
+ * one comes back through the welcome step, a member to `next`.
+ */
+export function googleSignIn(request: Request, next: string, cookies: string[] = []): Promise<Response | null> {
+  return startSignIn(
+    request,
+    {
+      provider: "google",
+      callbackURL: next,
+      newUserCallbackURL: `/welcome?${new URLSearchParams({ next })}`,
+      errorCallbackURL: `/signin?${new URLSearchParams({ next })}`,
+    },
+    cookies,
+  );
 }

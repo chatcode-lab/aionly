@@ -14,6 +14,7 @@ import {
 
 import type { Route } from "./+types/root";
 import "./app.css";
+import { DigestInvite } from "./components/digest-invite";
 import { FeedToolbar } from "./components/feed-toolbar";
 import { HeaderActions } from "./components/header-actions";
 import { NotifyProvider } from "./components/notify";
@@ -28,7 +29,7 @@ import { formatDate } from "./lib/format";
 import { introEndsAt } from "./lib/plan";
 import { currentEditor } from "./lib/db/editors.server";
 import { fundStarted } from "./lib/db/fund.server";
-import { sharedJoinCode } from "./lib/db/partners.server";
+import { sharedJoin } from "./lib/db/partners.server";
 import { loadSettings } from "./lib/db/settings.server";
 import { imageAddress } from "./lib/media.server";
 import { detectInAppBrowser } from "./lib/in-app-browser";
@@ -53,7 +54,7 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   // What else every page needs, read at once rather than one after another.
   // What admins need on every page: the queue's size for the menu, and the
   // pinned post, so its menu offers Unpin. Nobody else pays for the query.
-  const [term, moderation, fund, settings, joinCode] = await Promise.all([
+  const [term, moderation, fund, settings, shared] = await Promise.all([
     account ? currentEditor(env.DB, Math.floor(Date.now() / 1000)) : null,
     account?.role === "admin"
       ? env.DB.prepare(
@@ -63,8 +64,9 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       : null,
     fundStarted(env.DB),
     loadSettings(env.DB),
-    // The partner link the sign-in screen offers, for now, to visitors.
-    !account && invitesRequired() ? sharedJoinCode(env.DB) : null,
+    // The partner link offered to visitors for now, by the sign-in screen
+    // and the invitation to the digest.
+    account ? null : sharedJoin(env.DB),
   ]);
   const viewer: ViewerSummary | null = account
     ? {
@@ -104,7 +106,9 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     settings,
     // Whether a new account needs an invitation, for the sign-in screen.
     openSignup: !invitesRequired(),
-    joinCode,
+    joinCode: invitesRequired() ? (shared?.code ?? null) : null,
+    // The founder's invitation to join for the digest, through the shared link while it is open.
+    digestInvite: shared ? { code: shared.code, founderPhoto: shared.founderAvatar ? imageAddress(shared.founderAvatar) : null } : null,
     // Whether members may sign in with a linked X account.
     xSignIn: xConfigured(),
     viewer,
@@ -188,6 +192,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
               {data?.viewer?.ban ? <BanNotice ban={data.viewer.ban} karma={data.viewer.karma} /> : null}
               <div className="flex-1">{children}</div>
               <SiteFooter reviewPages={data?.reviewPages ?? false} fund={data?.fund ?? false} />
+              <DigestInvite />
             </SignInProvider>
           </NotifyProvider>
         </ToastProvider>

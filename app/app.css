@@ -328,6 +328,14 @@
   }
 }
 
+/* The invitation to the digest, rising into place. */
+@keyframes invite-in {
+  from {
+    opacity: 0;
+    transform: translateY(1rem);
+  }
+}
+
 @keyframes skeleton-pulse {
   50% {
     opacity: 0.5;

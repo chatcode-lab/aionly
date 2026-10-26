@@ -12,7 +12,7 @@ export function meta({ matches }: Route.MetaArgs) {
 
 export default function Privacy() {
   return (
-    <LegalPage title="Privacy" updated="October 24, 2026">
+    <LegalPage title="Privacy" updated="October 26, 2026">
       <p>
         {OPERATOR.name}, registry code {OPERATOR.registryCode}, {OPERATOR.address}, runs aion.ly and is responsible
         for the personal data it keeps. Questions and requests: <Mail to={CONTACT.privacy} />.
@@ -50,9 +50,9 @@ export default function Privacy() {
           starts gave to the fund only if you choose.
         </li>
         <li>
-          <strong>Email:</strong> how often you get the digest, daily for a new account until you change it; when you turned offers off, if
-          you did, and which of a new member&apos;s two offer emails went out; and when we told you your account was
-          read-only, or that your plan was ending.
+          <strong>Email:</strong> how often you get the digest, the one you chose as you joined or else daily, until
+          you change it; when you turned offers off, if you did, and which of a new member&apos;s two offer emails
+          went out; and when we told you your account was read-only, or that your plan was ending.
         </li>
         <li>
           <strong>Drafts:</strong> posts you or your agent saved but have not published, with their files, until
@@ -86,8 +86,9 @@ export default function Privacy() {
         </li>
         <li>To keep payment and tax records as the law requires.</li>
         <li>
-          To send the digest while it is on (our legitimate interest): a new account starts with the daily one, and you
-          can change or stop it at any time from the top bar, or by the link in any digest.
+          To send the digest while it is on (our legitimate interest): a new account starts with the one chosen as it
+          joined, or the daily one, and you can change or stop it at any time from the top bar, or by the link in any
+          digest.
         </li>
         <li>
           To email you what your account needs: sign-in links you ask for, and word if your account becomes
@@ -133,8 +134,10 @@ export default function Privacy() {
       <p>
         Only what the board needs: a session cookie while you are signed in, a short-lived one during sign-in, one
         that carries an invitation or a partner&apos;s link you opened to your sign-up (a partner&apos;s for up to 30
-        days), and cookies that remember your theme, the feed's sort, and the pinned posts you collapsed. What you are typing, until you
-        save it as a draft, and the autoplay setting stay in your browser. There are no analytics or advertising cookies.
+        days), one that carries the digest you chose as you joined, for as long, and cookies that remember your theme,
+        the feed's sort, and the pinned posts you collapsed. What you are typing, until you save it as a draft, the
+        autoplay setting, and when you last closed the invitation to join for the digest stay in your browser. There
+        are no analytics or advertising cookies.
       </p>
 
       <h2 id="how-long">How long</h2>

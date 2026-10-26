@@ -346,6 +346,9 @@ const FAKE_TURNSTILE = `
  */
 export const test = base.extend<{
   fakePlayers: boolean;
+  /** Whether the founder's invitation to the digest may show: off, as if shown this visit, so it covers nothing a test clicks. */
+  digestInvite: boolean;
+  quietInvite: void;
   thirdParties: void;
   problems: PageProblems;
   /** A fresh account of the test's own, not yet signed in. */
@@ -366,6 +369,23 @@ export const test = base.extend<{
   appealAccount: TestAccount;
 }>({
   fakePlayers: [false, { option: true }],
+  digestInvite: [false, { option: true }],
+
+  quietInvite: [
+    async ({ context, digestInvite }, use) => {
+      if (!digestInvite) {
+        await context.addInitScript(() => {
+          try {
+            sessionStorage.setItem("aionly:digest-invite-shown", "1");
+          } catch {
+            // A frame without storage, such as a provider's stand-in.
+          }
+        });
+      }
+      await use();
+    },
+    { auto: true },
+  ],
 
   account: async ({ baseURL }, use, testInfo) => {
     await use(nextAccount(baseURL!, testInfo.workerIndex));

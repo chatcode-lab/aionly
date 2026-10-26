@@ -1,6 +1,7 @@
 import { newId } from "../ids";
 import { type PartnerStep, SHARED_JOIN_CODE } from "../partners";
 import type { PublicAuthor } from "../public-types";
+import { FOUNDER } from "../site";
 import { AUTHOR_COLUMNS, AUTHOR_JOINS, toPublicAuthor } from "./rows.server";
 import { settleKarma } from "./votes.server";
 
@@ -30,21 +31,39 @@ const STEPS_SQL = `(SELECT json_group_array(json_object('percent', share_percent
   FROM (SELECT * FROM partner_link_steps WHERE code = link.code ORDER BY from_month))`;
 
 const SHARED_CACHE_MS = 60 * 1000;
-let shared: { code: string | null; at: number } | null = null;
+
+/** The shared link while it is open, with the founder's picture, for the invitation to the digest. */
+export interface SharedJoin {
+  code: string;
+  /** The founder's picture on the board, by its key, or null while they have none. */
+  founderAvatar: string | null;
+}
+
+let shared: { join: SharedJoin | null; at: number } | null = null;
 
 /**
  * The partner link offered to anyone signing up (`SHARED_JOIN_CODE`), while
  * it is open, or null. Kept a minute per instance, since every page a
  * visitor opens asks.
  */
-export async function sharedJoinCode(db: D1Database, now = Date.now()): Promise<string | null> {
-  if (shared && now - shared.at < SHARED_CACHE_MS) return shared.code;
+export async function sharedJoin(db: D1Database, now = Date.now()): Promise<SharedJoin | null> {
+  if (shared && now - shared.at < SHARED_CACHE_MS) return shared.join;
   const row = await db
-    .prepare(`SELECT ${openSql("link", "?2")} AS open FROM partner_links AS link WHERE link.code = ?1`)
-    .bind(SHARED_JOIN_CODE, Math.floor(now / 1000))
-    .first<{ open: number }>();
-  shared = { code: row?.open ? SHARED_JOIN_CODE : null, at: now };
-  return shared.code;
+    .prepare(
+      `SELECT ${openSql("link", "?2")} AS open,
+              (SELECT profile.avatar_key FROM usernames AS name JOIN profiles AS profile ON profile.user_id = name.user_id
+               WHERE name.name = ?3 AND name.is_current = 1 AND profile.deleted_at IS NULL) AS founder_avatar
+       FROM partner_links AS link WHERE link.code = ?1`,
+    )
+    .bind(SHARED_JOIN_CODE, Math.floor(now / 1000), FOUNDER.username)
+    .first<{ open: number; founder_avatar: string | null }>();
+  shared = { join: row?.open ? { code: SHARED_JOIN_CODE, founderAvatar: row.founder_avatar } : null, at: now };
+  return shared.join;
+}
+
+/** The shared link's code while it is open, or null. */
+export async function sharedJoinCode(db: D1Database, now = Date.now()): Promise<string | null> {
+  return (await sharedJoin(db, now))?.code ?? null;
 }
 
 /** Forgets this instance's answer, as tests need. */

@@ -7,10 +7,9 @@ import { generatedAvatar } from "../avatar";
 import { founderSignature } from "../mail/founder";
 import { composeLetter, escape } from "../mail/layout";
 import { clip } from "../meta";
+import { FREQUENCIES, type Frequency } from "./frequency";
 
-export type Frequency = "daily" | "weekly" | "monthly";
-
-export const FREQUENCIES: readonly Frequency[] = ["daily", "weekly", "monthly"];
+export { FREQUENCIES, type Frequency };
 
 /**
  * The choices each digest goes to: a daily digest brings the weekly and

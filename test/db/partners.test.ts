@@ -11,6 +11,7 @@ import {
   partnerStanding,
   recordPayout,
   revokePartnerLink,
+  sharedJoin,
   sharedJoinCode,
   sweepPartnerJoins,
 } from "../../app/lib/db/partners.server";
@@ -205,6 +206,14 @@ describe("the link offered to anyone signing up (owner's request, 2026-10-21)", 
     expect(await sharedJoinCode(db, NOW * 1000 + 30_000)).toBe("boris");
     expect(await sharedJoinCode(db, NOW * 1000 + 61_000)).toBeNull();
   });
+
+  it("comes with the founder's picture, for the invitation to the digest", async () => {
+    expect(await link("boris", { partner: "boris" })).toBeNull();
+    expect(await sharedJoin(db, NOW * 1000)).toEqual({ code: "boris", founderAvatar: null });
+    await db.prepare(`UPDATE profiles SET avatar_key = 'founder.jpg' WHERE user_id = 'founder'`).run();
+    forgetSharedJoin();
+    expect(await sharedJoin(db, NOW * 1000)).toEqual({ code: "boris", founderAvatar: "founder.jpg" });
+  });
 });
 
 describe("sign-up through a partner's link", async () => {
@@ -236,5 +245,15 @@ describe("sign-up through a partner's link", async () => {
     await expect(
       (await adapter("aionly_partner=star")).createUser({ name: "Late", email: "late@signup.invalid", emailVerified: true }, google),
     ).rejects.toMatchObject({ body: { code: "invite_invalid" } });
+  });
+
+  it("starts the account with the digest chosen on the way in, or the daily one", async () => {
+    await createPartnerLink(db, { code: "star", partner: "guest_star", steps: [{ percent: 50, months: 12 }], freeInvites: null, maxUses: null, endsAt: null, note: null, actorId: "boss", now: NOW });
+    const digestOf = async (id: string) => (await db.prepare(`SELECT digest FROM profiles WHERE user_id = ?1`).bind(id).first<{ digest: string | null }>())?.digest;
+    const weekly = await (await adapter("aionly_partner=star; aionly_digest=weekly")).createUser({ name: "Weekly", email: "weekly@signup.invalid", emailVerified: true }, google);
+    expect(await digestOf(weekly.id)).toBe("weekly");
+    // Anything else is not a choice.
+    const odd = await (await adapter("aionly_partner=star; aionly_digest=hourly")).createUser({ name: "Odd", email: "odd@signup.invalid", emailVerified: true }, google);
+    expect(await digestOf(odd.id)).toBe("daily");
   });
 });

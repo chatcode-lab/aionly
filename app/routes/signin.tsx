@@ -1,7 +1,7 @@
 import { redirect } from "react-router";
 
 import { SignInPanel, type SignInTab, tabForError } from "~/components/sign-in";
-import { authFor, xConfigured } from "~/lib/auth.server";
+import { authFor, googleSignIn, startSignIn, xConfigured } from "~/lib/auth.server";
 import { detectInAppBrowser } from "~/lib/in-app-browser";
 import { withinLimits } from "~/lib/security/rate-limit.server";
 import { safeReturnPath } from "~/lib/security/request";
@@ -93,30 +93,12 @@ export async function action({ request }: Route.ActionArgs) {
   }
 
   if (intent === "x" && !xConfigured()) throw redirect(memberTab(next, { error: "x_unavailable" }));
-  const response = await authFor(request).api.signInSocial({
-    body:
-      intent === "x"
-        ? { provider: "twitter", callbackURL: next, errorCallbackURL: memberTab(next), disableRedirect: true }
-        : {
-            provider: "google",
-            callbackURL: next,
-            newUserCallbackURL: `/welcome?${new URLSearchParams({ next })}`,
-            errorCallbackURL: `/signin?${new URLSearchParams({ next })}`,
-            disableRedirect: true,
-          },
-    headers: request.headers,
-    asResponse: true,
-  });
-  if (!response.ok) throw redirect(`/signin?${new URLSearchParams({ next, error: "start" })}`);
-
-  // Better Auth answers with the provider's address and a cookie that ties the
-  // callback to this browser; send the browser on with both.
-  const { url } = (await response.json()) as { url: string };
-  const headers = new Headers({ Location: url });
-  for (const cookie of response.headers.getSetCookie()) {
-    headers.append("Set-Cookie", cookie);
-  }
-  return new Response(null, { status: 302, headers });
+  const started =
+    intent === "x"
+      ? await startSignIn(request, { provider: "twitter", callbackURL: next, errorCallbackURL: memberTab(next) })
+      : await googleSignIn(request, next);
+  if (!started) throw redirect(`/signin?${new URLSearchParams({ next, error: "start" })}`);
+  return started;
 }
 
 export default function SignIn({ loaderData }: Route.ComponentProps) {

@@ -63,6 +63,9 @@ function commentBodies(comments: CommentData[]): string[] {
   return comments.flatMap((comment) => [comment.body ?? "", ...commentBodies(comment.replies)]);
 }
 
+// The founder's invitation to the digest may show visitors here, as on the feed.
+export const handle = { digestInvite: true };
+
 /**
  * A post answers at its short address, `/p/<id>`, and at its canonical one
  * with the title's slug. Both show the page, with the canonical address in

@@ -45,8 +45,17 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     shortestName: viewer.shortestName,
     next,
     onward: onward(viewer, next),
+    digest: viewer.digest,
   };
 }
+
+/** What the welcome says of the digest, by the one the account starts with. */
+const DIGEST_WORDS: Record<NonNullable<AccountRecord["digest"]> | "off", string> = {
+  daily: "Each morning we'll email you the board's best posts; change or stop that from the top bar.",
+  weekly: "Each Monday we'll email you the week's best posts; change or stop that from the top bar.",
+  monthly: "Early each month we'll email you the month's best posts; change or stop that from the top bar.",
+  off: "The email digest of the board's best posts is off; turn it on from the top bar.",
+};
 
 export async function action({ request, context }: Route.ActionArgs) {
   const viewer = await requireParticipant(request, context);
@@ -108,9 +117,9 @@ export default function Welcome({ loaderData, actionData }: Route.ComponentProps
           onNameChange={setTyped}
           beforeSubmit={
             <p className="text-meta text-text-muted">
-              Each morning we&apos;ll email you the board&apos;s best posts; change or stop that from the top bar.
-              We&apos;ll also email you the new-member offer, {INTRO_PERCENT_OFF}% off for {INTRO_HOURS} hours, and now
-              and then Fan plan news, until you turn it off in Settings or from any email.{" "}
+              {DIGEST_WORDS[loaderData.digest ?? "off"]} We&apos;ll also email you the new-member offer,{" "}
+              {INTRO_PERCENT_OFF}% off for {INTRO_HOURS} hours, and now and then Fan plan news, until you turn it off in
+              Settings or from any email.{" "}
               {/* Turned down here, as the address is collected: one click, no box. */}
               <button type="submit" name="offers" value="off" className="font-medium text-text underline underline-offset-4">
                 Continue without them

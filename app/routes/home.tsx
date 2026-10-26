@@ -36,7 +36,8 @@ import { SITE_NAME, TAGLINE } from "~/lib/site";
 import type { Route } from "./+types/home";
 import { profilePath } from "~/lib/slug";
 
-export const handle = { feedToolbar: true };
+// The founder's invitation to the digest may show visitors here, as on posts.
+export const handle = { feedToolbar: true, digestInvite: true };
 
 export function meta({ matches }: Route.MetaArgs) {
   return pageMeta(matches, {
