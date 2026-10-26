@@ -63,6 +63,19 @@ describe("readPageMeta", () => {
     expect(await readPageMeta(bare, new URL("https://example.com/"), OWN)).toEqual({ title: "Just a title", image: undefined });
   });
 
+  it("decodes the named references titles carry, by their case, and leaves unknown ones as written", async () => {
+    const titled = (title: string) => new TextEncoder().encode(`<meta property="og:title" content="${title}">`);
+    const cases: Array<[string, string]> = [
+      ["Shabang &mdash; how little of a song do you need?", "Shabang — how little of a song do you need?"],
+      ["Caf&eacute; &amp; Cr&Egrave;me &ndash; &ldquo;Na&iuml;ve&rdquo; &hellip;", "Café & CrÈme – “Naïve” …"],
+      ["&alpha;-fold &rarr; &beta; &frac12; &euro;5 &trade; &AMP; 3 &lt; 4", "α-fold → β ½ €5 ™ & 3 < 4"],
+      ["&EACUTE; &notanentity; &amp;mdash;", "&EACUTE; &notanentity; &mdash;"],
+    ];
+    for (const [raw, title] of cases) {
+      expect((await readPageMeta(titled(raw), new URL("https://example.com/"), OWN)).title).toBe(title);
+    }
+  });
+
   it("reads the canonical link, or og:url without one", async () => {
     const page = new TextEncoder().encode(`<link rel="Canonical" href="/a/b?id=2"><meta property="og:url" content="https://example.com/other">`);
     expect((await readPageMeta(page, new URL("https://example.com/a/b?id=2&ref=x"), OWN)).canonical).toEqual(

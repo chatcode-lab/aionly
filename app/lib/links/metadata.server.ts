@@ -18,25 +18,52 @@ const PAGE_PREFIX_BYTES = 256 * 1024;
 const OEMBED_BYTES = 64 * 1024;
 const MAX_TITLE = 300;
 
-const ENTITIES: Record<string, string> = {
-  amp: "&",
-  lt: "<",
-  gt: ">",
-  quot: '"',
-  apos: "'",
-  nbsp: " ",
-};
+/** Names that stand for consecutive characters, from the first's code point. */
+function run(first: number, names: string): Array<[string, number]> {
+  return names.split(" ").flatMap((name, index) => (name === "-" ? [] : [[name, first + index] as [string, number]]));
+}
+
+/**
+ * The named character references titles carry in practice, such as
+ * `&mdash;` and `&eacute;`: HTML's Latin-1 set, Greek letters, and the
+ * common punctuation and symbols. Names are case-sensitive, as in HTML.
+ */
+const ENTITIES = new Map<string, number>([
+  ["quot", 34], ["amp", 38], ["apos", 39], ["lt", 60], ["gt", 62],
+  ...run(
+    160,
+    "nbsp iexcl cent pound curren yen brvbar sect uml copy ordf laquo not shy reg macr deg plusmn sup2 sup3 acute " +
+      "micro para middot cedil sup1 ordm raquo frac14 frac12 frac34 iquest Agrave Aacute Acirc Atilde Auml Aring AElig " +
+      "Ccedil Egrave Eacute Ecirc Euml Igrave Iacute Icirc Iuml ETH Ntilde Ograve Oacute Ocirc Otilde Ouml times Oslash " +
+      "Ugrave Uacute Ucirc Uuml Yacute THORN szlig agrave aacute acirc atilde auml aring aelig ccedil egrave eacute ecirc " +
+      "euml igrave iacute icirc iuml eth ntilde ograve oacute ocirc otilde ouml divide oslash ugrave uacute ucirc uuml " +
+      "yacute thorn yuml",
+  ),
+  ["OElig", 338], ["oelig", 339], ["Scaron", 352], ["scaron", 353], ["Yuml", 376], ["fnof", 402], ["circ", 710], ["tilde", 732],
+  ...run(913, "Alpha Beta Gamma Delta Epsilon Zeta Eta Theta Iota Kappa Lambda Mu Nu Xi Omicron Pi Rho - Sigma Tau Upsilon Phi Chi Psi Omega"),
+  ...run(945, "alpha beta gamma delta epsilon zeta eta theta iota kappa lambda mu nu xi omicron pi rho sigmaf sigma tau upsilon phi chi psi omega"),
+  ["ensp", 8194], ["emsp", 8195], ["thinsp", 8201], ["zwnj", 8204], ["zwj", 8205], ["lrm", 8206], ["rlm", 8207],
+  ["hyphen", 8208], ["dash", 8208], ["ndash", 8211], ["mdash", 8212], ["horbar", 8213],
+  ["lsquo", 8216], ["rsquo", 8217], ["sbquo", 8218], ["ldquo", 8220], ["rdquo", 8221], ["bdquo", 8222],
+  ["dagger", 8224], ["Dagger", 8225], ["bull", 8226], ["hellip", 8230], ["permil", 8240], ["prime", 8242], ["Prime", 8243],
+  ["lsaquo", 8249], ["rsaquo", 8250], ["oline", 8254], ["frasl", 8260], ["euro", 8364], ["trade", 8482],
+  ["larr", 8592], ["uarr", 8593], ["rarr", 8594], ["darr", 8595], ["harr", 8596], ["rArr", 8658], ["hArr", 8660],
+  ["minus", 8722], ["radic", 8730], ["infin", 8734], ["asymp", 8776], ["ne", 8800], ["le", 8804], ["ge", 8805],
+  ["starf", 9733], ["star", 9734], ["hearts", 9829], ["check", 10003],
+]);
 
 /** Decodes the HTML character references metadata commonly carries. */
 export function decodeEntities(text: string): string {
-  return text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, name: string) => {
+  return text.replace(/&(#x[0-9a-f]+|#\d+|[a-z][a-z0-9]*);/gi, (match, name: string) => {
     if (name[0] === "#") {
       const code = name[1] === "x" || name[1] === "X"
         ? Number.parseInt(name.slice(2), 16)
         : Number.parseInt(name.slice(1), 10);
       return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : match;
     }
-    return ENTITIES[name.toLowerCase()] ?? match;
+    // HTML also takes the basic ones in capitals, such as `&AMP;`.
+    const code = ENTITIES.get(name) ?? (/^(AMP|LT|GT|QUOT)$/.test(name) ? ENTITIES.get(name.toLowerCase()) : undefined);
+    return code === undefined ? match : String.fromCodePoint(code);
   });
 }
 
