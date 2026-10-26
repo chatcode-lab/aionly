@@ -42,7 +42,7 @@ export const DEFAULT_SETTINGS: PlaybackSettings = {
   blockedBy: null,
 };
 
-const CONTROLLED: ReadonlySet<SlotKind> = new Set(["video", "tiktok"]);
+const CONTROLLED: ReadonlySet<SlotKind> = new Set(["video", "tiktok", "native"]);
 
 /**
  * How long a frame has to say anything, ready or its height, before it
@@ -237,7 +237,8 @@ export class PlaybackController {
       failed: false,
     });
     this.clearDeadline(key);
-    if (slot.kind !== "song") {
+    // A song reports nothing, and an article's file loads nothing until it is played.
+    if (slot.kind !== "song" && slot.kind !== "native") {
       this.deadlines.set(
         key,
         setTimeout(() => {

@@ -1,5 +1,6 @@
 import { type ArticleFile, storedInlineMedia, storedPreview } from "../article";
 import { storedGallery } from "../gallery";
+import { coverPicture } from "../og/cover-picture";
 import { type Aspect, PROVIDERS, type Provider } from "../links/types";
 import { displayHost } from "../links/url";
 import { imageAddress } from "../media.server";
@@ -21,7 +22,14 @@ export const LIVE = "deleted_at IS NULL AND removed_batch_id IS NULL";
 // posting. Quick fixes right after posting stay unmarked.
 const EDIT_GRACE_SECONDS = 5 * 60;
 
-const EXCERPT_LENGTH = 280;
+/**
+ * A card's excerpt runs to the end of the line on which it reaches
+ * EXCERPT_MIN characters, and never past EXCERPT_MAX: about six lines of a
+ * card on a desktop at the normal text size (owner's request, 2026-10-26;
+ * 280 characters before).
+ */
+export const EXCERPT_MIN = 200;
+export const EXCERPT_MAX = 600;
 
 const ASPECTS: readonly Aspect[] = ["16:9", "9:16", "post", "audio"];
 
@@ -125,13 +133,19 @@ export interface PostRow extends AuthorRow {
   picked?: number;
 }
 
-function excerptOf(description: string): string {
+/** A card's excerpt of a description, and whether it stops before the description's end. */
+export function excerptOf(description: string): { excerpt: string; cut: boolean } {
   // Its lines kept, so the feed reads it as it was written.
   const text = plainLines(description);
-  // A cut never splits a mention token, which is written in as a name later.
-  return text.length > EXCERPT_LENGTH
-    ? `${text.slice(0, EXCERPT_LENGTH - 1).replace(/<@[A-Za-z0-9_-]*$/, "").trimEnd()}…`
-    : text;
+  const lineEnd = text.indexOf("\n", EXCERPT_MIN);
+  const end = lineEnd === -1 ? text.length : lineEnd;
+  if (end <= EXCERPT_MAX) return { excerpt: text.slice(0, end), cut: end < text.length };
+  // Past the most, at a word if one ends near enough, with an ellipsis. A
+  // cut never splits a mention token, which is written in as a name later.
+  const head = text.slice(0, EXCERPT_MAX - 1);
+  const space = head.search(/\s\S*$/);
+  const cut = (space > EXCERPT_MAX - 40 ? head.slice(0, space) : head).replace(/<@[A-Za-z0-9_-]*$/, "").trimEnd();
+  return { excerpt: `${cut}…`, cut: true };
 }
 
 /** What a post shows above its description. */
@@ -211,6 +225,8 @@ export function toPublicPost(row: PostRow): PostDetail {
   const path = postPath(row);
   const files = row.kind === "text" ? articleFiles(row.inline_media) : [];
   const preview = row.kind === "text" ? cardPreviewOf(row, files, thumbUrl) : undefined;
+  const excerpt = excerptOf(row.description);
+  const cover = coverPicture(row);
 
   return {
     id: row.id,
@@ -227,12 +243,14 @@ export function toPublicPost(row: PostRow): PostDetail {
       row.edited_at - row.created_at > EDIT_GRACE_SECONDS,
     score: row.score,
     commentCount: row.comment_count,
-    excerpt: excerptOf(row.description),
+    excerpt: excerpt.excerpt,
+    ...(excerpt.cut ? { excerptCut: true } : {}),
     description: row.description,
     media: mediaOf(row, thumbUrl),
     ...(files.length > 0 ? { files } : {}),
     ...(preview ? { preview } : {}),
     ...(row.kind === "text" ? { showPreview: row.card_preview_shown !== 0 } : {}),
+    coverPicture: cover ? { key: cover, src: imageAddress(cover) } : null,
     ...(row.picked ? { editorsPick: true } : {}),
   };
 }
@@ -243,7 +261,7 @@ export function toPublicPost(row: PostRow): PostDetail {
  * many there are tells the card there is more to show.
  */
 export function toPublicCard(row: PostRow): PostCardData {
-  const { description: _description, files, showPreview: _shown, ...card } = toPublicPost(row);
+  const { description: _description, files, showPreview: _shown, coverPicture: _cover, ...card } = toPublicPost(row);
   return files?.length ? { ...card, uploads: files.length } : card;
 }
 

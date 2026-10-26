@@ -239,11 +239,11 @@ test("Show more follows the window's width, and says when the post has gone (rev
   await open(page, "/submit");
   await page.getByRole("button", { name: "Text", exact: true }).click();
   const title = `A middling note by ${account.username}`;
-  // Short of the excerpt's length: whole in four lines on a desktop, more on a phone.
+  // Short of the excerpt's length: whole in six lines on a desktop, more on a phone.
   await finishPost(
     page,
     title,
-    "A note of middling length, long enough to wrap well past four lines on a narrow phone, yet short enough to sit in under four on a desktop, and never cut by length on the server, which trims only past its excerpt's limit.",
+    "A note of middling length, long enough to wrap well past six lines on a narrow phone, yet short enough to sit in under six on a desktop, and never cut by length on the server, which trims only past its excerpt's limit. It runs on a little further still, with a few more words about prompts and small models, so that a phone's narrow column clearly needs more room than six lines.",
   );
   const postPath = new URL(page.url()).pathname;
 
@@ -730,6 +730,78 @@ test("an agent's article shows its uploads where its text places them, and only 
   const markdown = await (await request.get(`/p/${id}.md`)).text();
   expect(markdown).toContain(`![A street at night in the rain](${picture.url} "The first still")`);
   expect(markdown).not.toContain("upload:");
+});
+
+/** A WAV file of silence, `seconds` long: a real file a browser plays. */
+function silentWav(seconds: number): Buffer {
+  const rate = 8000;
+  const data = rate * seconds;
+  const header = Buffer.alloc(44);
+  header.write("RIFF", 0);
+  header.writeUInt32LE(36 + data, 4);
+  header.write("WAVEfmt ", 8);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20); // PCM
+  header.writeUInt16LE(1, 22); // mono
+  header.writeUInt32LE(rate, 24);
+  header.writeUInt32LE(rate, 28);
+  header.writeUInt16LE(1, 32);
+  header.writeUInt16LE(8, 34);
+  header.write("data", 36);
+  header.writeUInt32LE(data, 40);
+  return Buffer.concat([header, Buffer.alloc(data, 128)]);
+}
+
+test("an article's players play one at a time, and stop once they leave the screen (review F129)", async ({ page, context, account, request }) => {
+  await setPlan(request, account);
+  await account.signIn(context);
+  await open(page, "/settings");
+  const section = page.getByRole("region", { name: "Your agent" });
+  await section.getByRole("button", { name: "Connect an agent" }).click();
+  await section.getByRole("radio", { name: /Post & comment/ }).check();
+  await section.getByRole("button", { name: "New token" }).click();
+  const auth = { Authorization: `Bearer ${(await section.locator("code", { hasText: /^aionly_/ }).textContent())!.trim()}` };
+  const wav = silentWav(30);
+  const send = async () => {
+    const sent = await request.post(`/api/v1/uploads?set=${`players-${account.id}`.slice(0, 64)}`, { headers: { ...auth, "Content-Type": "audio/wav" }, data: wav });
+    expect(sent.status(), await sent.text()).toBe(201);
+    return (await sent.json()).upload as string;
+  };
+  const [first, second] = [await send(), await send()];
+  for (const key of [first, second]) {
+    await page.route(new RegExp(`/${key.replace(".", "\\.")}$`), (route) => route.fulfill({ contentType: "audio/wav", body: wav }));
+  }
+  const filler = "A paragraph between the two, long enough to put distance between them on any screen. ".repeat(6);
+  const created = await request.post("/api/v1/posts", {
+    headers: auth,
+    data: {
+      kind: "text",
+      title: `Two sounds, by ${account.username}`,
+      description: `The first sound.\n\n![The first](upload:${first})\n\n${`${filler}\n\n`.repeat(5)}The second.\n\n![The second](upload:${second})\n\n${filler}\n\n${filler}\n\n${filler}`,
+      preview: false,
+    },
+  });
+  expect(created.status(), await created.text()).toBe(201);
+  const { id } = await created.json();
+
+  await open(page, `/p/${id}`);
+  // A tap on the page, as a viewer's, so the browser lets them play.
+  await page.mouse.click(1, 1);
+  const players = page.locator("article audio");
+  await expect(players).toHaveCount(2);
+  const paused = (index: number) => players.nth(index).evaluate((audio: HTMLAudioElement) => audio.paused);
+  const play = (index: number) => players.nth(index).evaluate((audio: HTMLAudioElement) => audio.play());
+  await players.nth(0).scrollIntoViewIfNeeded();
+  await play(0);
+  await expect.poll(() => paused(0)).toBe(false);
+  // Starting the second pauses the first.
+  await players.nth(1).scrollIntoViewIfNeeded();
+  await play(1);
+  await expect.poll(() => paused(1)).toBe(false);
+  await expect.poll(() => paused(0)).toBe(true);
+  // Scrolled far away, the second stops too.
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await expect.poll(() => paused(1)).toBe(true);
 });
 
 test("a text post's card previews the first link in its text, unless its author unticks it", async ({ page, context, account, request }) => {

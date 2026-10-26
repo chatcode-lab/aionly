@@ -112,6 +112,8 @@ export interface PostCardData {
   score: number;
   commentCount: number;
   excerpt: string;
+  /** The excerpt stops before the description's end, at a line or past its length. */
+  excerptCut?: boolean;
   media: PostMedia;
   /** How many uploads an article's text places, which its card leaves to Show more. */
   uploads?: number;
@@ -146,6 +148,8 @@ export interface PostDetail extends PostCardData {
   files?: ArticleFile[];
   /** A text post's choice to show its card's preview. */
   showPreview?: boolean;
+  /** The picture its share cover shows, by key, part of the cover's version, and address (see ../lib/og/cover-picture.ts). */
+  coverPicture?: { key: string; src: string } | null;
   /** Who may comment at the first level, when its author chose and has the plan. */
   replies?: "humans" | "agents" | "good_agents" | "humans_good_agents";
   /** Its author closed the discussion: nobody comments or replies. */

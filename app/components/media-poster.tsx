@@ -1,12 +1,15 @@
 import { ArrowUpRight, ChevronLeft, ChevronRight, Music, Play, X } from "lucide-react";
 import { Dialog } from "radix-ui";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { ArticleFile } from "~/lib/article";
 import { cn } from "~/lib/cn";
 import { formatDuration } from "~/lib/format";
 import { type PictureView, pictureAlt } from "~/lib/gallery";
 import { type Aspect, PROVIDER_LABEL, type Provider } from "~/lib/links/types";
+import { playbackController } from "~/lib/playback/controller";
+import { useMediaSlot } from "~/lib/playback/hooks";
+import { connectNative } from "~/lib/playback/native";
 
 /** Outbound links never pass ranking credit and never get a window handle. */
 export const OUTBOUND_REL = "nofollow ugc noopener";
@@ -234,6 +237,50 @@ export function UploadedImage({
   );
 }
 
+/**
+ * An article's video or audio file in the browser's own player, played only
+ * by the viewer, and one of the page's players all the same (review F129):
+ * starting it pauses whatever else plays, starting something else pauses
+ * it, and it stops once it leaves the screen. Each place a text shows a
+ * file is a slot of its own.
+ */
+function ArticlePlayer({ file, words, size }: { file: ArticleFile; words: string; size: { width: number; height: number } | null }) {
+  const { key, ref } = useMediaSlot(file.key, "native");
+  const element = useRef<HTMLVideoElement & HTMLAudioElement>(null);
+  useEffect(() => {
+    const player = element.current;
+    const controller = playbackController();
+    if (!player || !controller) return;
+    const connection = connectNative(player, (event) => controller.report(key, event));
+    controller.attach(key, connection);
+    return () => {
+      controller.detach(key);
+      connection.disconnect();
+    };
+  }, [key]);
+  if (!size) {
+    return (
+      <div ref={ref}>
+        <audio ref={element} src={file.src} controls preload="none" aria-label={words} className="block w-full" />
+      </div>
+    );
+  }
+  return (
+    <div ref={ref} className="flex justify-center overflow-hidden rounded-xl bg-black">
+      <video
+        ref={element}
+        src={file.src}
+        controls
+        playsInline
+        preload="metadata"
+        aria-label={words}
+        className="block"
+        style={{ width: `min(100%, ${size.width}px, calc(${PICTURE_CAP} * ${size.width / size.height}))`, aspectRatio: `${size.width} / ${size.height}` }}
+      />
+    </div>
+  );
+}
+
 /** The size a file of an article is laid out at when its own is not known. */
 const UNKNOWN_SIZE = { image: { width: 1200, height: 900 }, video: { width: 1600, height: 900 } };
 
@@ -251,23 +298,8 @@ export function ArticleMedia({ file, alt, caption }: { file: ArticleFile; alt: s
   if (file.type === "image") {
     const { width, height } = known ?? UNKNOWN_SIZE.image;
     shown = <UploadedImage src={file.src} width={width} height={height} alt={words} />;
-  } else if (file.type === "video") {
-    const { width, height } = known ?? UNKNOWN_SIZE.video;
-    shown = (
-      <div className="flex justify-center overflow-hidden rounded-xl bg-black">
-        <video
-          src={file.src}
-          controls
-          playsInline
-          preload="metadata"
-          aria-label={words}
-          className="block"
-          style={{ width: `min(100%, ${width}px, calc(${PICTURE_CAP} * ${width / height}))`, aspectRatio: `${width} / ${height}` }}
-        />
-      </div>
-    );
   } else {
-    shown = <audio src={file.src} controls preload="none" aria-label={words} className="block w-full" />;
+    shown = <ArticlePlayer file={file} words={words} size={file.type === "video" ? (known ?? UNKNOWN_SIZE.video) : null} />;
   }
   return (
     <figure className="space-y-1.5">

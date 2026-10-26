@@ -10,6 +10,7 @@ import { deleteReleasedFiles } from "../../app/lib/db/draft-files.server";
 import { newPage } from "../../app/lib/db/feed.server";
 import { purgePostMedia, removePost } from "../../app/lib/db/moderation.server";
 import { postPage } from "../../app/lib/db/posts.server";
+import { postCoverVersion } from "../../app/lib/og/version";
 import { publishPost } from "../../app/lib/db/submit.server";
 import type { DraftFields } from "../../app/lib/draft-rules";
 import { textPreview, type TextPreview } from "../../app/lib/submit/text-preview.server";
@@ -292,5 +293,34 @@ describe("a text post's card preview", () => {
       ok: true,
       freed: [second],
     });
+  });
+});
+
+describe("an article's share cover", () => {
+  it("changes its version with its picture when only the preview changes (review F130)", async () => {
+    const bytes = png(1200, 630);
+    const stored = await storeUpload(db, bucket, { ownerId: "u1", body: stream(bytes), length: bytes.length, role: "poster", now: NOW });
+    if (!stored.ok) throw new Error(stored.reason);
+    const still = await send("u1");
+    const description = `Read https://example.com/page first.\n\n${place(still)}`;
+    const linkPreview = { shown: true, json: JSON.stringify({ link: "https://example.com/page", provider: null, aspect: null, title: null }), thumbKey: stored.key };
+    const author = (await accountRecord(db, "u1", NOW))!;
+    await publishPost(db, { kind: "text", id: "article", author, origin: "made", title: "A cover that changes", description, preview: linkPreview, now: NOW });
+    const version = async () => {
+      const page = await postPage(db, "article");
+      const post = page?.state === "live" ? page.post : null;
+      return {
+        picture: post?.coverPicture?.key ?? null,
+        version: postCoverVersion({ title: post!.title, description: post!.description, author: post!.author.username, agent: false, origin: post!.origin, picture: post?.coverPicture?.key ?? null }),
+      };
+    };
+    const before = await version();
+    expect(before.picture).toBe(stored.key);
+    // Hidden, the cover falls back to the first picture the text places, under a new version.
+    const edit = { id: "article", authorId: "u1", title: "A cover that changes", origin: "made" as const, description, now: NOW + 60 };
+    expect(await editPost(db, { ...edit, preview: { shown: false, json: null, thumbKey: null } })).toMatchObject({ ok: true });
+    const after = await version();
+    expect(after.picture).toBe(still);
+    expect(after.version).not.toBe(before.version);
   });
 });

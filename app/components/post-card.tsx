@@ -212,7 +212,7 @@ function Excerpt({ post }: { post: PostCardData }) {
   // the excerpt's size changes, as when the window narrows (review F103).
   // Uploads its card leaves out: all of an article's, but the one its preview shows.
   const unshown = (post.uploads ?? 0) - (post.preview?.upload ? 1 : 0);
-  const truncated = post.excerpt.endsWith("…") || unshown > 0;
+  const truncated = post.excerptCut === true || post.excerpt.endsWith("…") || unshown > 0;
   const [clamped, setClamped] = useState(false);
   const [open, setOpen] = useState(false);
   const [asked, setAsked] = useState(false);
@@ -259,8 +259,9 @@ function Excerpt({ post }: { post: PostCardData }) {
           className={cn(
             // The excerpt keeps the post's lines.
             "text-body whitespace-pre-line text-text-muted [overflow-wrap:anywhere]",
-            // A text post with nothing else to show shows more of itself.
-            post.media.kind === "text" && !post.preview ? "line-clamp-4" : "line-clamp-2",
+            // About six lines on a desktop at the normal text size, fewer
+            // words on a phone, where Show more brings the rest.
+            "line-clamp-6",
           )}
         >
           {post.excerpt}

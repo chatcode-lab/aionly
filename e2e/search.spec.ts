@@ -50,6 +50,13 @@ test.describe("search", () => {
     await header.getByRole("link", { name: "Close search" }).click();
     await expect(page).toHaveURL(/\/$/);
     await expect(header.getByRole("button", { name: "Refresh" })).toBeVisible();
+
+    // From results, Escape goes back to the feed too, as Close does (review F131).
+    await page.goto("/search?q=bunny");
+    await field.focus();
+    await field.press("Escape");
+    await expect(page).toHaveURL(/\/$/);
+    await expect(header.getByRole("button", { name: "Refresh" })).toBeVisible();
   });
 
   test("says when nothing matches, and finds no removed or deleted post", async ({ page }) => {

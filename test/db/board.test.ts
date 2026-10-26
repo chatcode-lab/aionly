@@ -9,6 +9,7 @@ import {
 import { PAGE_SIZE } from "../../app/lib/feed";
 import { PAGE_COMMENTS_MAX, postPage, ROOTS_PER_PAGE } from "../../app/lib/db/posts.server";
 import { profileByName } from "../../app/lib/db/profiles.server";
+import { EXCERPT_MAX, EXCERPT_MIN, excerptOf } from "../../app/lib/db/rows.server";
 import { comment, DAY, db, NOW, post, reset, user } from "./fixtures";
 
 beforeEach(async () => {
@@ -163,10 +164,28 @@ describe("feed cards", () => {
     await post("long", { description: `${"word ".repeat(200)}SENTINEL_TAIL` });
     const [card] = await postsByIds(db, ["long"]);
 
-    expect(card.excerpt.length).toBeLessThanOrEqual(280);
-    expect(card.excerpt.endsWith("…")).toBe(true);
+    expect(card.excerpt.length).toBeLessThanOrEqual(EXCERPT_MAX);
+    expect(card.excerpt.length).toBeGreaterThan(EXCERPT_MAX - 40);
+    // Cut at a word, with an ellipsis.
+    expect(card.excerpt).toMatch(/ word…$/);
+    expect(card.excerptCut).toBe(true);
     expect(JSON.stringify(card)).not.toContain("SENTINEL_TAIL");
     expect(card).not.toHaveProperty("description");
+  });
+
+  it("end at the line on which they grow long enough, never past their most (owner's request, 2026-10-26)", () => {
+    const long = "A sentence of some length, and then another one. ".repeat(5).trim();
+    // A short first line runs on to the end of the line that reaches the least.
+    expect(excerptOf(`TL;DR: a short line.\n\n${long}\n\nAnd a last paragraph.`)).toEqual({ excerpt: `TL;DR: a short line.\n${long}`, cut: true });
+    // A short text is whole, with nothing cut.
+    expect(excerptOf("Just this.\n\nAnd this.")).toEqual({ excerpt: "Just this.\nAnd this.", cut: false });
+    // One long line is cut at the most.
+    expect(excerptOf("word ".repeat(EXCERPT_MAX)).excerpt.length).toBeLessThanOrEqual(EXCERPT_MAX);
+    // Never inside a mention.
+    const mention = `${"x".repeat(EXCERPT_MAX - 5)} <@u_mentioned_one> after`;
+    expect(excerptOf(mention).excerpt).not.toContain("<@");
+    expect(excerptOf("").excerpt).toBe("");
+    expect(EXCERPT_MIN).toBeLessThan(EXCERPT_MAX);
   });
 
   it("describe media posts and page posts differently", async () => {

@@ -1,6 +1,6 @@
 import { RotateCw, Search, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { Form, Link, useLocation, useRevalidator, useRouteLoaderData } from "react-router";
+import { Form, Link, useLocation, useNavigate, useRevalidator, useRouteLoaderData } from "react-router";
 
 import { feedPath, RANGE_LABEL, RANGES } from "~/lib/feed";
 import { QUERY_MAX } from "~/lib/search";
@@ -14,9 +14,11 @@ import { LinkTabs } from "./ui/tabs";
 /**
  * The search field, in place of the feed's controls, as wide as the bar
  * allows. Return searches, from a phone's keyboard too; Close, inside the
- * field, goes back to the controls, or from results to the feed.
+ * field, or Escape goes back to the controls, or from results to the feed
+ * (review F131).
  */
 function SearchField({ query, onClose }: { query: string; onClose?: () => void }) {
+  const navigate = useNavigate();
   const close = <X size={16} aria-hidden />;
   // Inside the field, at its right end.
   const closeClass = "absolute inset-y-0 right-0";
@@ -36,10 +38,10 @@ function SearchField({ query, onClose }: { query: string; onClose?: () => void }
         // Opened to type in; over results, it waits.
         autoFocus={!query}
         onKeyDown={(event) => {
-          if (event.key === "Escape" && onClose) {
-            event.preventDefault();
-            onClose();
-          }
+          if (event.key !== "Escape") return;
+          event.preventDefault();
+          if (onClose) onClose();
+          else void navigate("/");
         }}
         // At least 16 px on touch screens, which stops iOS from zooming the
         // page on focus; Close stands in for the browser's own clear button,

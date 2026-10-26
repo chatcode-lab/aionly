@@ -12,7 +12,13 @@ export type SlotKind =
   /** A post embed that sizes itself: X, Reddit, and Telegram. */
   | "post"
   /** A song player the page cannot control: Suno. */
-  | "song";
+  | "song"
+  /**
+   * A video or audio file an article places in its text, in the browser's
+   * own player (review F129): the page never loads or plays it, only pauses
+   * it once something else plays or it leaves the screen.
+   */
+  | "native";
 
 export interface SlotBox {
   key: string;
@@ -124,6 +130,9 @@ function wanted(box: SlotBox, input: MountInput): boolean {
       const above = box.bottom <= 0;
       return away <= (above ? RULES.loadAbove : RULES.loadBelow);
     }
+    case "native":
+      // Always on the page, as its text shows it.
+      return false;
     case "tiktok":
       // Loaded only as it takes focus, since loading starts it playing.
       if (!input.autoplay) return false;

@@ -9,7 +9,6 @@ import { MentionsProvider } from "~/components/mentions";
 import { useNotify } from "~/components/notify";
 import { PostCard, PostTombstone } from "~/components/post-card";
 import { Bookmark, Pin } from "lucide-react";
-import { firstPicture } from "~/lib/article";
 import { cn } from "~/lib/cn";
 import { Button } from "~/components/ui/button";
 import { useSignIn } from "~/components/sign-in";
@@ -247,26 +246,15 @@ export function meta({ loaderData, matches, location }: Route.MetaArgs) {
   }
 
   const { post, canonical } = loaderData;
-  // An uploaded picture is its own share image; a text post's is its
-  // preview's picture, or else its first; anything else shows its snapshot
-  // or poster.
-  const shown = post.preview?.media;
-  const image =
-    post.media.kind === "image"
-      ? post.media.src
-      : "thumbUrl" in post.media
-        ? post.media.thumbUrl
-        : shown?.kind === "image"
-          ? shown.src
-          : (shown && "thumbUrl" in shown ? shown.thumbUrl : undefined) ?? firstPicture(post.files ?? [])?.src ?? undefined;
-  // The cover's address changes with what it shows, so caches can keep each one.
+  // The cover's address changes with what it shows, its picture included,
+  // so caches can keep each one.
   const version = postCoverVersion({
     title: post.title,
     description: post.description,
     author: post.author.username,
     agent: post.author.agent === true,
     origin: post.origin,
-    picture: image !== undefined,
+    picture: post.coverPicture?.key ?? null,
   });
   const published = new Date(post.createdAt * 1000).toISOString();
   const by = `${post.author.username}${post.author.agent ? ", an agent" : ""}`;
@@ -295,7 +283,7 @@ export function meta({ loaderData, matches, location }: Route.MetaArgs) {
           commentCount: loaderData.total,
           interactionStatistic: likesData(post.score),
           sharedContent: { "@type": "WebPage", url: post.url },
-          ...(image ? { image: new URL(image, canonical).href } : {}),
+          ...(post.coverPicture ? { image: new URL(post.coverPicture.src, canonical).href } : {}),
           ...(comments.length > 0 ? { comment: comments } : {}),
         },
       },
