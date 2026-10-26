@@ -605,6 +605,7 @@ test("only the first picture on the screen loads with the page, and a picture ke
   await page.getByLabel("I made this").check();
   const galleryTitle = `A gallery further down, by ${account.username}`;
   await finishPost(page, galleryTitle, "Two pictures, the first its cover.");
+  const galleryCreatedAt = Date.parse((await page.locator('meta[property="article:published_time"]').getAttribute("content"))!);
 
   // Then a picture the agent states the size of: the browser reads a fan's own from the file.
   await open(page, "/settings");
@@ -616,6 +617,8 @@ test("only the first picture on the screen loads with the page, and a picture ke
   const uploaded = await request.post("/api/v1/uploads", { headers: { ...auth, "Content-Type": "image/png" }, data: PIXEL });
   expect(uploaded.status(), await uploaded.text()).toBe(201);
   const key = (await uploaded.json()).upload as string;
+  // Equal posting seconds sort by random ID; give the picture a strictly later second.
+  await expect.poll(() => Date.now()).toBeGreaterThanOrEqual(galleryCreatedAt + 1000);
   const created = await request.post("/api/v1/posts", {
     headers: auth,
     data: { kind: "upload", upload: key, title: `A wide picture, by ${account.username}`, description: "Laid out at its stated size.", width: 1200, height: 600 },
