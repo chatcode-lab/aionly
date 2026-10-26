@@ -4,6 +4,7 @@ import { LOW_KARMA } from "../moderation";
 import { isSettingKey, settingSpec } from "../settings";
 import { commentPath, postPath, profilePath } from "../slug";
 import { givenNameStatements, participantCondition, withGivenName } from "./accounts.server";
+import { inlineKeys } from "./article-media.server";
 import { applyFreshStart } from "./fresh-starts.server";
 import { settingSql } from "./setting-sql.server";
 import { recountKarma, scoreSql } from "./votes.server";
@@ -413,7 +414,7 @@ export async function grantFreshStart(
 
 /**
  * Deletes a removed post's files for good: its upload, its poster or
- * snapshot, for a takedown. Removal alone keeps them, so the post can be
+ * snapshot, and the uploads an article places, for a takedown. Removal alone keeps them, so the post can be
  * restored; after this it can be restored without them. Copies already in
  * the media domain's cache last until they expire or are purged there.
  * Returns the deleted keys, or null when the post is not removed.
@@ -424,18 +425,23 @@ export async function purgePostMedia(
   input: { postId: string; actorId: string; now: number },
 ): Promise<string[] | null> {
   const row = await db
-    .prepare(`SELECT thumb_key, media_key, pictures FROM posts WHERE id = ?1 AND removed_batch_id IS NOT NULL`)
+    .prepare(`SELECT thumb_key, media_key, pictures, inline_media FROM posts WHERE id = ?1 AND removed_batch_id IS NOT NULL`)
     .bind(input.postId)
-    .first<{ thumb_key: string | null; media_key: string | null; pictures: string | null }>();
+    .first<{ thumb_key: string | null; media_key: string | null; pictures: string | null; inline_media: string | null }>();
   if (!row) return null;
-  // Every picture of a gallery too, the cover once.
-  const named = [row.thumb_key, row.media_key, ...(storedGallery(row.pictures) ?? []).map((picture) => picture.key)];
+  // Every picture of a gallery too, the cover once, and an article's uploads.
+  const named = [
+    row.thumb_key,
+    row.media_key,
+    ...(storedGallery(row.pictures) ?? []).map((picture) => picture.key),
+    ...inlineKeys(row.inline_media),
+  ];
   const keys = [...new Set(named.filter((key): key is string => key !== null))];
   // The files go first: should that fail, the post still names them, and
   // asking again finishes the job. Only then are they forgotten and logged.
   if (keys.length > 0) await bucket.delete(keys);
   await db.batch([
-    db.prepare(`UPDATE posts SET thumb_key = NULL, media_key = NULL, pictures = NULL WHERE id = ?1`).bind(input.postId),
+    db.prepare(`UPDATE posts SET thumb_key = NULL, media_key = NULL, pictures = NULL, inline_media = NULL WHERE id = ?1`).bind(input.postId),
     db.prepare(`DELETE FROM images WHERE key IN (SELECT value FROM json_each(?1))`).bind(JSON.stringify(keys)),
     logAction(db, { id: newId(), batchId: newId(), actorId: input.actorId, action: "purge_media", targetType: "post", targetId: input.postId, reason: null, now: input.now }),
   ]);

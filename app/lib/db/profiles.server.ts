@@ -8,7 +8,7 @@ import {
   AUTHOR_JOINS,
   POST_COLUMNS,
   type PostRow,
-  toPublicPost,
+  toPublicCard,
 } from "./rows.server";
 
 const LISTING_LIMIT = 20;
@@ -173,10 +173,7 @@ export async function profileByName(
       .bind(owner.user_id),
   ]);
 
-  const cards = (posts.results as PostRow[]).slice(0, LISTING_LIMIT).map((row) => {
-    const { description: _description, ...card } = toPublicPost(row);
-    return card;
-  });
+  const cards = (posts.results as PostRow[]).slice(0, LISTING_LIMIT).map(toPublicCard);
   const listedRows = (
     comments.results as Array<{
       id: string;

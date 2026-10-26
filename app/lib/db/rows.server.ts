@@ -1,3 +1,4 @@
+import { type ArticleFile, storedInlineMedia } from "../article";
 import { storedGallery } from "../gallery";
 import { type Aspect, PROVIDERS, type Provider } from "../links/types";
 import { displayHost } from "../links/url";
@@ -6,6 +7,7 @@ import { postPath } from "../slug";
 import { plainLines } from "../text/markdown";
 import type {
   CommentData,
+  PostCardData,
   PostDetail,
   PostMedia,
   PublicAuthor,
@@ -87,7 +89,7 @@ export const POST_COLUMNS = `
   post.id, post.kind, post.url, post.provider, post.origin, post.title, post.description,
   post.page_title, post.thumb_key, post.aspect, post.score, post.comment_count,
   post.created_at, post.edited_at, post.media_key, post.media_type, post.media_width,
-  post.media_height, post.media_duration, post.pictures,
+  post.media_height, post.media_duration, post.pictures, post.inline_media,
   EXISTS (SELECT 1 FROM picks WHERE picks.post_id = post.id) AS picked,${AUTHOR_COLUMNS}`;
 
 export interface PostRow extends AuthorRow {
@@ -102,6 +104,8 @@ export interface PostRow extends AuthorRow {
   media_duration: number | null;
   /** A gallery's pictures as stored JSON, or null for one file (see ../gallery.ts). */
   pictures?: string | null;
+  /** The uploads a text post places in its text, as stored JSON (see ../article.ts). */
+  inline_media?: string | null;
   provider: string | null;
   origin: "made" | "found";
   title: string;
@@ -164,10 +168,16 @@ function mediaOf(row: PostRow, thumbUrl: string | undefined): PostMedia {
     : { kind: "page", pageTitle: row.page_title ?? undefined, thumbUrl };
 }
 
+/** The uploads an article places, with their addresses, for its text to show. */
+export function articleFiles(json: string | null | undefined): ArticleFile[] {
+  return storedInlineMedia(json).map((file) => ({ ...file, src: imageAddress(file.key) }));
+}
+
 /** The only way a post row becomes something a page can show. */
 export function toPublicPost(row: PostRow): PostDetail {
   const thumbUrl = row.thumb_key ? imageAddress(row.thumb_key) : undefined;
   const path = postPath(row);
+  const files = row.kind === "text" ? articleFiles(row.inline_media) : [];
 
   return {
     id: row.id,
@@ -187,8 +197,19 @@ export function toPublicPost(row: PostRow): PostDetail {
     excerpt: excerptOf(row.description),
     description: row.description,
     media: mediaOf(row, thumbUrl),
+    ...(files.length > 0 ? { files } : {}),
     ...(row.picked ? { editorsPick: true } : {}),
   };
+}
+
+/**
+ * A post as a listing shows it: its excerpt, never the whole description,
+ * nor the uploads an article places in it, which stay on its own page; how
+ * many there are tells the card there is more to show.
+ */
+export function toPublicCard(row: PostRow): PostCardData {
+  const { description: _description, files, ...card } = toPublicPost(row);
+  return files?.length ? { ...card, uploads: files.length } : card;
 }
 
 export const COMMENT_COLUMNS = `

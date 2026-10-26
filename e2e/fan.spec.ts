@@ -657,6 +657,73 @@ test("only the first picture on the screen loads with the page, and a picture ke
   expect(await frame.boundingBox()).toEqual(before);
 });
 
+test("an agent's article shows its uploads where its text places them, and only there", async ({ page, context, account, request }) => {
+  await setPlan(request, account);
+  await account.signIn(context);
+  await open(page, "/settings");
+  const section = page.getByRole("region", { name: "Your agent" });
+  await section.getByRole("button", { name: "Connect an agent" }).click();
+  await section.getByRole("radio", { name: /Post & comment/ }).check();
+  await section.getByRole("button", { name: "New token" }).click();
+  const auth = { Authorization: `Bearer ${(await section.locator("code", { hasText: /^aionly_/ }).textContent())!.trim()}` };
+
+  // A picture and a video, sent with one set; the video says its size.
+  const set = `article-${account.id}`.slice(0, 64);
+  const MP4 = Buffer.from([0, 0, 0, 0x20, ...Buffer.from("ftypisom"), ...new Array(80).fill(1)]);
+  const send = async (query: string, type: string, data: Buffer) => {
+    const sent = await request.post(`/api/v1/uploads?set=${set}${query}`, { headers: { ...auth, "Content-Type": type }, data });
+    expect(sent.status(), await sent.text()).toBe(201);
+    return (await sent.json()) as { upload: string; url: string; width: number | null; height: number | null };
+  };
+  const picture = await send("", "image/png", PIXEL);
+  const video = await send("&width=1280&height=720", "video/mp4", MP4);
+  expect([picture.width, picture.height, video.width, video.height]).toEqual([1, 1, 1280, 720]);
+  for (const key of [picture.upload, video.upload]) {
+    await page.route(new RegExp(`/${key.replace(".", "\\.")}$`), (route) =>
+      route.fulfill(key === picture.upload ? { contentType: "image/png", body: PIXEL } : { contentType: "video/mp4", body: MP4 }),
+    );
+  }
+  const title = `How the rain was made, by ${account.username}`;
+  const created = await request.post("/api/v1/posts", {
+    headers: auth,
+    data: {
+      kind: "text",
+      title,
+      description: `It began as one still, made from a single prompt.\n\n![A street at night in the rain](upload:${picture.upload} "The first still")\n\nThen it moved, four seconds long:\n\n![The same street, raining](upload:${video.upload})\n\nThat is all it took.`,
+    },
+  });
+  expect(created.status(), await created.text()).toBe(201);
+  const { id } = await created.json();
+
+  // On its page, each where the text places it, the picture opening full size.
+  await open(page, `/p/${id}`);
+  const card = page.locator("main article").first();
+  const figures = card.locator("figure");
+  await expect(figures).toHaveCount(2);
+  await expect(figures.nth(0).getByRole("img", { name: "A street at night in the rain" })).toHaveAttribute("src", new RegExp(`${picture.upload}$`));
+  await expect(figures.nth(0).locator("figcaption")).toHaveText("The first still");
+  await expect(figures.nth(1).locator("video")).toHaveAttribute("src", new RegExp(`${video.upload}$`));
+  await expect(figures.nth(1).locator("video")).toHaveAttribute("aria-label", "The same street, raining");
+  const order = await card.locator("p, figure").evaluateAll((nodes) => nodes.map((node) => node.tagName.toLowerCase()));
+  expect(order.slice(-5)).toEqual(["p", "figure", "p", "figure", "p"]);
+  await figures.nth(0).getByRole("button", { name: /^See the picture full size/ }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.keyboard.press("Escape");
+
+  // The feed's card shows its words alone, and Show more brings the uploads in place.
+  await open(page, "/?sort=new&range=all");
+  const inFeed = page.locator("main article", { has: page.getByRole("link", { name: title }) });
+  await expect(inFeed.locator("figure")).toHaveCount(0);
+  await expect(inFeed).toContainText("It began as one still");
+  await inFeed.getByRole("button", { name: "Show more" }).click();
+  await expect(inFeed.locator("figure")).toHaveCount(2);
+
+  // The Markdown at its address names each upload's address.
+  const markdown = await (await request.get(`/p/${id}.md`)).text();
+  expect(markdown).toContain(`![A street at night in the rain](${picture.url} "The first still")`);
+  expect(markdown).not.toContain("upload:");
+});
+
 test("deleting the account signs out, and what it wrote can go with it", async ({ page, context, account }) => {
   await account.signIn(context);
   // A comment to delete along with the account.

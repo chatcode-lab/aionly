@@ -1,8 +1,9 @@
+import { ARTICLE_MEDIA_MAX } from "./article";
 import { entitledCondition, participantCondition } from "./db/accounts.server";
-import { GALLERY_MAX, UPLOAD_SET } from "./gallery";
+import { UPLOAD_SET } from "./gallery";
 import { newId } from "./ids";
 import { MAX_IMAGE_BYTES } from "./images.server";
-import { type MediaType, sniffMedia, stripJpegMetadata, UPLOAD_LIMITS } from "./uploads";
+import { type MediaType, pictureSize, type PictureSize, sniffMedia, stripJpegMetadata, UPLOAD_LIMITS } from "./uploads";
 
 /**
  * Uploads: pictures, video, and audio that fans post, which the board
@@ -14,7 +15,7 @@ import { type MediaType, sniffMedia, stripJpegMetadata, UPLOAD_LIMITS } from "./
 export type UploadRole = "media" | "poster";
 
 export type UploadResult =
-  | { ok: true; key: string; media: MediaType; contentType: string }
+  | { ok: true; key: string; media: MediaType; contentType: string; size: PictureSize | null }
   | { ok: false; reason: "too_large" | "unsupported" | "empty" | "not_allowed" | "too_many" };
 
 const CACHE_CONTROL = "public, max-age=86400";
@@ -76,16 +77,27 @@ async function readAll(stream: ReadableStream<Uint8Array>, length: number): Prom
 /**
  * Keeps an uploaded file as the account's pending upload, or a video's
  * poster frame as its one pending post image, replacing any earlier one. A
- * picture sent with a `set`, one gallery's, joins the pictures pending in
- * that set, up to GALLERY_MAX, and replaces only what is pending outside it.
- * Pictures are read whole and lose their metadata; video and audio stream
- * straight into the bucket. `length` is the request's declared size, which
- * the stream must match exactly.
+ * file sent with a `set`, one post's (a gallery's pictures, or an article's
+ * files), joins the files pending in that set, up to ARTICLE_MEDIA_MAX, and
+ * replaces only what is pending outside it. Pictures are read whole, lose
+ * their metadata, and keep their size, read from their bytes; video and
+ * audio stream straight into the bucket, with the size `size` says, if
+ * any. `length` is the request's declared size, which the stream must
+ * match exactly.
  */
 export async function storeUpload(
   db: D1Database,
   bucket: R2Bucket,
-  input: { ownerId: string; body: ReadableStream<Uint8Array>; length: number; role: UploadRole; set?: string | null; now: number },
+  input: {
+    ownerId: string;
+    body: ReadableStream<Uint8Array>;
+    length: number;
+    role: UploadRole;
+    set?: string | null;
+    /** A video's size as its sender says; a picture's is read from it. */
+    size?: PictureSize | null;
+    now: number;
+  },
 ): Promise<UploadResult> {
   if (input.length <= 0) return { ok: false, reason: "empty" };
   const { head, whole } = await peek(input.body, 16);
@@ -105,10 +117,12 @@ export async function storeUpload(
     httpMetadata: { contentType: sniffed.contentType, cacheControl: CACHE_CONTROL, contentDisposition: "inline" },
   };
   let bytes = input.length;
+  let size = sniffed.media === "video" ? (input.size ?? null) : null;
   if (sniffed.media === "image") {
     let picture = await readAll(whole, input.length);
     if (sniffed.contentType === "image/jpeg") picture = stripJpegMetadata(picture);
     bytes = picture.length;
+    size = pictureSize(picture);
     await bucket.put(key, picture, options);
   } else {
     // The bucket needs to know the length up front; this also refuses a body
@@ -122,8 +136,8 @@ export async function storeUpload(
   }
 
   const kind = poster ? "post" : "media";
-  // Only a picture joins a gallery's set; any other file stands alone.
-  const set = !poster && sniffed.media === "image" && input.set && UPLOAD_SET.test(input.set) ? input.set : null;
+  // A poster frame stands alone; any other file may join a set.
+  const set = !poster && input.set && UPLOAD_SET.test(input.set) ? input.set : null;
   // Uploads are the plan's, for a member who may take part; the write
   // checks both. The rows it displaces come back from the same batch, so
   // their files are deleted even when two uploads overlap.
@@ -140,17 +154,17 @@ export async function storeUpload(
         .bind(input.ownerId, kind, set),
       db
         .prepare(
-          `INSERT INTO images (key, owner_id, kind, state, content_type, bytes, created_at, upload_set)
-           SELECT ?1, ?2, ?3, 'pending', ?4, ?5, ?6, ?7 WHERE ${allowed(2)} AND (?7 IS NULL OR ${gathered} < ${GALLERY_MAX})`,
+          `INSERT INTO images (key, owner_id, kind, state, content_type, bytes, created_at, upload_set, width, height)
+           SELECT ?1, ?2, ?3, 'pending', ?4, ?5, ?6, ?7, ?8, ?9 WHERE ${allowed(2)} AND (?7 IS NULL OR ${gathered} < ${ARTICLE_MEDIA_MAX})`,
         )
-        .bind(key, input.ownerId, kind, sniffed.contentType, bytes, input.now, set),
+        .bind(key, input.ownerId, kind, sniffed.contentType, bytes, input.now, set, size?.width ?? null, size?.height ?? null),
     ]);
     if (inserted!.meta.changes === 0) {
       await bucket.delete(key);
       const full = set
         ? await db.prepare(`SELECT ${gathered} AS n`).bind(null, input.ownerId, null, null, null, null, set).first<{ n: number }>()
         : null;
-      return { ok: false, reason: (full?.n ?? 0) >= GALLERY_MAX ? "too_many" : "not_allowed" };
+      return { ok: false, reason: (full?.n ?? 0) >= ARTICLE_MEDIA_MAX ? "too_many" : "not_allowed" };
     }
     displaced = (deleted!.results as Array<{ key: string }>).map((row) => row.key);
   } catch (error) {
@@ -158,13 +172,13 @@ export async function storeUpload(
     throw error;
   }
   if (displaced.length > 0) await bucket.delete(displaced);
-  return { ok: true, key, media: sniffed.media, contentType: sniffed.contentType };
+  return { ok: true, key, media: sniffed.media, contentType: sniffed.contentType, size };
 }
 
 /**
  * Lets go of one of the account's pending uploads, as when a picture is
  * taken out of a gallery before it is published, so it counts no more
- * toward the gallery's ten. Whether there was one.
+ * toward its set. Whether there was one.
  */
 export async function releaseUpload(db: D1Database, bucket: R2Bucket, input: { ownerId: string; key: string }): Promise<boolean> {
   const released = await db

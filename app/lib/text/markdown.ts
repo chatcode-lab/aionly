@@ -4,7 +4,9 @@
  * data that is rendered as React elements, never as HTML, so markup in the
  * text is only ever text. Links, written `[label](url)` or bare, are kept as
  * links here; the renderer decides which may be followed. Images are links
- * to their address, never shown.
+ * to their address, never shown, except an article's own upload on a line
+ * of its own, `![words](upload:<key>)` or `![words](upload:<key> "caption")`,
+ * which is a block the renderer shows from the post's own files.
  */
 
 export type Inline =
@@ -24,7 +26,9 @@ export type Block =
   | { type: "paragraph"; children: Inline[] }
   | { type: "code"; text: string }
   | { type: "quote"; children: Block[] }
-  | { type: "list"; ordered: boolean; start: number; items: Inline[][] };
+  | { type: "list"; ordered: boolean; start: number; items: Inline[][] }
+  // One of the post's own uploads, on a line of its own (see app/lib/article.ts).
+  | { type: "media"; key: string; alt: string; caption: string | null };
 
 // Quotes inside quotes, and emphasis inside emphasis, stop here.
 const MAX_NESTING = 3;
@@ -34,6 +38,8 @@ const QUOTE = /^ {0,3}> ?(.*)$/;
 const BULLET = /^ {0,3}[-*+][ \t]+(.*)$/;
 const NUMBERED = /^ {0,3}(\d{1,9})[.)][ \t]+(.*)$/;
 const LINK = /^\[([^\]\n]{0,500})\]\(([^()\s]{1,2048})(?:[ \t]+"[^"\n]{0,200}")?\)/;
+/** An upload placed on a line of its own: its words, its key, and an optional caption. */
+const MEDIA_LINE = /^ {0,3}!\[([^\]\n]{0,500})\]\(upload:([0-9A-Za-z]{24}\.[a-z0-9]{3,4})(?:[ \t]+"([^"\n]{0,200})")?\)[ \t]*$/;
 const ESCAPABLE = /[\\`*_[\]()>#+\-.!~<@]/;
 const MENTION_TOKEN = /^<@([A-Za-z0-9_-]{1,32})>/;
 const BARE_URL = /^https?:\/\/[^\s<>"'`]+/;
@@ -104,7 +110,7 @@ function isBlank(line: string): boolean {
 }
 
 function startsBlock(line: string): boolean {
-  return FENCE.test(line) || QUOTE.test(line) || BULLET.test(line) || NUMBERED.test(line);
+  return FENCE.test(line) || QUOTE.test(line) || BULLET.test(line) || NUMBERED.test(line) || MEDIA_LINE.test(line);
 }
 
 /** Lines joined with breaks, each parsed for inline markup. */
@@ -149,6 +155,13 @@ export function parseBlocks(source: string, nesting = 0): Block[] {
         index += 1;
       }
       blocks.push({ type: "quote", children: parseBlocks(body.join("\n"), nesting + 1) });
+      continue;
+    }
+
+    const media = MEDIA_LINE.exec(line);
+    if (media) {
+      blocks.push({ type: "media", key: media[2]!, alt: media[1]!.trim(), caption: media[3]?.trim() || null });
+      index += 1;
       continue;
     }
 
@@ -388,6 +401,9 @@ function blockTexts(blocks: Block[], lineBreak: string): string[] {
         return blockTexts(block.children, lineBreak);
       case "list":
         return block.items.map((item) => inlineText(item, lineBreak));
+      // A picture or player has no words in a summary.
+      case "media":
+        return [];
     }
   });
 }

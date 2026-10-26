@@ -184,7 +184,7 @@ describe("editPost", () => {
   it("changes the title and origin in the first hour, and the description any time", async () => {
     await post("fresh", { author: "u1", age: 30 * 60 });
     const edit = { id: "fresh", authorId: "u1", title: "New title", origin: "made" as const, description: "A new description here.", now: NOW };
-    expect(await editPost(db, edit)).toEqual({ ok: true });
+    expect(await editPost(db, edit)).toEqual({ ok: true, freed: [] });
     expect(await read()).toEqual({ title: "New title", origin: "made", description: "A new description here.", edited_at: NOW });
   });
 
@@ -195,14 +195,14 @@ describe("editPost", () => {
       ok: false,
       reason: "window",
     });
-    expect(await editPost(db, { ...base, title: "Old title", description: "A later description." })).toEqual({ ok: true });
+    expect(await editPost(db, { ...base, title: "Old title", description: "A later description." })).toEqual({ ok: true, freed: [] });
     expect(await read()).toMatchObject({ title: "Old title", description: "A later description." });
   });
 
   it("writes nothing when nothing changed, and refuses others and closed posts", async () => {
     await post("fresh", { author: "u1", title: "Same", description: "Same description here." });
     const same = { id: "fresh", authorId: "u1", title: "Same", origin: "found" as const, description: "Same description here.", now: NOW };
-    expect(await editPost(db, same)).toEqual({ ok: true });
+    expect(await editPost(db, same)).toEqual({ ok: true, freed: [] });
     expect((await read())!.edited_at).toBeNull();
     expect(await editPost(db, { ...same, authorId: "u2", description: "Another one entirely." })).toEqual({ ok: false, reason: "not_found" });
     await db.prepare(`UPDATE posts SET deleted_at = ?1 WHERE id = 'fresh'`).bind(NOW).run();

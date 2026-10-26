@@ -6,7 +6,7 @@ import {
   LIVE,
   POST_COLUMNS,
   type PostRow,
-  toPublicPost,
+  toPublicCard,
 } from "./rows.server";
 
 /** A range needs this many posts to be the default on arrival. */
@@ -23,13 +23,6 @@ const RANGE_SECONDS: Record<Range, number | null> = {
 function since(range: Range, now: number): number {
   const seconds = RANGE_SECONDS[range];
   return seconds === null ? 0 : now - seconds;
-}
-
-function toCard(row: PostRow): PostCardData {
-  // The feed sends the excerpt only; the whole description stays on the
-  // post's own page.
-  const { description: _description, ...card } = toPublicPost(row);
-  return card;
 }
 
 /**
@@ -103,7 +96,7 @@ export async function postsByIds(
   const byId = new Map(results.map((row) => [row.id, row]));
   const cards = wanted.flatMap((id) => {
     const row = byId.get(id);
-    return row ? [toCard(row)] : [];
+    return row ? [toPublicCard(row)] : [];
   });
   return withPlainMentions(db, cards, "excerpt");
 }
@@ -161,7 +154,7 @@ export async function newPage(
   const page = results.slice(0, PAGE_SIZE);
   const last = page[page.length - 1];
   return {
-    posts: await withPlainMentions(db, page.map(toCard), "excerpt"),
+    posts: await withPlainMentions(db, page.map(toPublicCard), "excerpt"),
     nextCursor:
       results.length > PAGE_SIZE && last
         ? encodeCursor({ createdAt: last.created_at, id: last.id })

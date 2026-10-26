@@ -58,7 +58,7 @@ describe("mention rows", () => {
     expect(await editComment(db, { id: "c1", authorId: "u1", body: "Hi <@u3>.", now: NOW + 1 })).toEqual({ ok: true });
     expect((await rows()).map((row) => row.target_id)).toEqual(["u3"]);
 
-    expect(await editPost(db, { id: "p1", authorId: "u1", title: "Title of p1", origin: "found", description: "Now for <@bot>.", now: NOW })).toEqual({ ok: true });
+    expect(await editPost(db, { id: "p1", authorId: "u1", title: "Title of p1", origin: "found", description: "Now for <@bot>.", now: NOW })).toEqual({ ok: true, freed: [] });
     expect((await rows()).filter((row) => row.item_type === "post")).toEqual([
       { target_id: "bot", item_type: "post", item_id: "p1", created_at: NOW },
     ]);

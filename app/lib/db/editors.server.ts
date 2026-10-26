@@ -2,7 +2,7 @@ import { newId } from "../ids";
 import { participantCondition } from "./accounts.server";
 import type { PostCardData } from "../public-types";
 import { withPlainMentions } from "./mentions.server";
-import { AUTHOR_JOINS, POST_COLUMNS, type PostRow, toPublicPost } from "./rows.server";
+import { AUTHOR_JOINS, POST_COLUMNS, type PostRow, toPublicCard } from "./rows.server";
 
 /**
  * Guest editors: a member an admin names to lead the board for a term.
@@ -95,8 +95,7 @@ export async function editorPick(db: D1Database, now: number): Promise<EditorPic
     .bind(term.id)
     .first<PostRow & { pick_note: string | null }>();
   if (!row) return { term, post: null, note: null };
-  const { description: _description, ...card } = toPublicPost(row);
-  const [post] = await withPlainMentions(db, [card], "excerpt");
+  const [post] = await withPlainMentions(db, [toPublicCard(row)], "excerpt");
   return { term, post: post!, note: row.pick_note };
 }
 

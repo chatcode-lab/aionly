@@ -11,6 +11,7 @@ import { Button } from "~/components/ui/button";
 import { TextArea } from "~/components/ui/field";
 import { EmptyState, Notice } from "~/components/ui/states";
 import { LinkTabs } from "~/components/ui/tabs";
+import type { ArticleFile } from "~/lib/article";
 import {
   agentIdOf,
   declineDraft,
@@ -66,6 +67,8 @@ interface DraftItem {
   file: { type: "image" | "video" | "audio"; src: string } | null;
   /** A gallery's pictures, in order, the first being `file`. */
   pictures: string[] | null;
+  /** The uploads a text draft's text places, which its text shows where it places them. */
+  files: ArticleFile[];
   /** What the post will show above its description, as the feed shows it; a link's page preview loads on asking. */
   media: PostMedia;
   /** A link's preview: none yet, made, or made without its page's title or picture; and the post that has its link already, if one does. */
@@ -140,6 +143,7 @@ function itemOf(draft: Draft, declineNote: string | null = null): DraftItem {
     host: preview?.host ?? host,
     file: draft.media ? { type: draft.media.type, src: imageAddress(draft.media.key) } : null,
     pictures: draft.pictures ? draft.pictures.map((picture) => imageAddress(picture.key)) : null,
+    files: draft.kind === "text" ? draft.inlineMedia.map((file) => ({ ...file, src: imageAddress(file.key) })) : [],
     media: mediaOf(draft),
     preview: !preview ? "none" : preview.provider || preview.pageTitle || preview.thumbKey ? "made" : "empty",
     duplicate: preview?.duplicate ? { id: preview.duplicate.id, live: preview.duplicate.state === "live" } : null,
@@ -335,6 +339,7 @@ function DraftSummary({ draft, now, full, outsideLinks }: { draft: DraftItem; no
         <p className="text-meta text-text-muted">
           {KIND[draft.kind]}
           {draft.pictures ? ` · a gallery of ${draft.pictures.length}` : ""}
+          {draft.files.length > 0 ? ` · ${draft.files.length} ${draft.files.length === 1 ? "upload" : "uploads"} in the text` : ""}
           {draft.host ? ` · ${draft.host}` : draft.url ? ` · ${draft.url}` : ""} · saved {formatAgo(draft.updatedAt, now)}
           {draft.declinedAt ? ` · declined ${formatAgo(draft.declinedAt, now)}` : ""}
         </p>
@@ -345,7 +350,10 @@ function DraftSummary({ draft, now, full, outsideLinks }: { draft: DraftItem; no
         </Notice>
       ) : null}
       <DraftMedia draft={draft} />
-      {draft.description ? <RichText text={draft.description} className={full ? undefined : "line-clamp-3"} outsideLinks={outsideLinks} /> : null}
+      {/* Opened, an article shows its uploads where its text places them; shut, its words alone. */}
+      {draft.description ? (
+        <RichText text={draft.description} className={full ? undefined : "line-clamp-3"} outsideLinks={outsideLinks} files={full ? draft.files : undefined} />
+      ) : null}
       {full && draft.url ? (
         <p className="text-meta break-all">
           <a href={draft.url} rel="noopener noreferrer nofollow" target="_blank" className="underline underline-offset-4">

@@ -1,8 +1,9 @@
-import type { Picture } from "../gallery";
+import { type Picture, storedGallery } from "../gallery";
 import type { PostReplies } from "../replies";
 import { nextTier, type Origin, postsPerDayFor, REPOST_SECONDS } from "../submit/rules";
 import type { AccountRecord } from "./accounts.server";
 import { entitledCondition, participantCondition } from "./accounts.server";
+import { inlineKeys, inlineMediaFor, inlineMediaHolds } from "./article-media.server";
 import { releasedKeys, releaseUnusedDraftFiles } from "./draft-files.server";
 import { mentionStatements } from "./mentions.server";
 
@@ -159,17 +160,40 @@ export type PublishResult =
   | { ok: false; reason: "duplicate"; existing: Existing }
   // The link's picture, as checked or previewed, was replaced meanwhile: check, or publish, again.
   | { ok: false; reason: "picture_gone" }
+  // The uploads its text places are not its to place: why, in words for its description.
+  | { ok: false; reason: "media"; problem: string }
   | { ok: false; reason: "not_allowed" };
+
+/** The keys of the files a draft keeps, any of which its text may place. */
+async function draftFileKeys(db: D1Database, draftId: string): Promise<string[]> {
+  const row = await db
+    .prepare(`SELECT media_key, pictures, inline_media FROM drafts WHERE id = ?1`)
+    .bind(draftId)
+    .first<{ media_key: string | null; pictures: string | null; inline_media: string | null }>();
+  if (!row) return [];
+  const gallery = (storedGallery(row.pictures) ?? []).map((picture) => picture.key);
+  return [...(row.media_key ? [row.media_key] : []), ...gallery, ...inlineKeys(row.inline_media)];
+}
 
 /**
  * Publishes a post and attaches its pending images, in one batch: a link's
- * snapshot, or an upload's file and poster, which may also be the files of
- * the draft it publishes. The posting rules are part of the insert, so two
- * quick submissions cannot both pass the allowance; text posts and uploads
- * also need the plan, checked the same way, and so is the rule on posting
- * a link again (holdsLink), and the draft's revision.
+ * snapshot, or an upload's file and poster, or the uploads a text post
+ * places in its text, which may also be the files of the draft it
+ * publishes. The posting rules are part of the insert, so two quick
+ * submissions cannot both pass the allowance; text posts and uploads also
+ * need the plan, checked the same way, and so is the rule on posting a link
+ * again (holdsLink), and the draft's revision.
  */
 export async function publishPost(db: D1Database, post: NewPost): Promise<PublishResult> {
+  // An article's files, from its text: its author's, sent for it or kept by its draft.
+  const placed = await inlineMediaFor(db, {
+    authorId: post.author.id,
+    text: post.description,
+    kept: post.draft ? await draftFileKeys(db, post.draft.id) : [],
+    article: post.kind === "text",
+  });
+  if (!placed.ok) return { ok: false, reason: "media", problem: placed.problem };
+  const inline = placed.json;
   const limit = dailyLimit(post.author);
   const link = post.kind === "link" ? post : null;
   const upload = post.kind === "upload" ? post : null;
@@ -212,7 +236,11 @@ export async function publishPost(db: D1Database, post: NewPost): Promise<Publis
       SELECT 1 FROM images WHERE key = json_extract(picture.value, '$.key') AND owner_id = ?2 AND kind = 'media'
         AND content_type LIKE 'image/%' AND (state = 'pending' OR (state = 'draft' AND key IN (
           SELECT json_extract(kept.value, '$.key') FROM drafts, json_each(drafts.pictures) AS kept WHERE drafts.id = ?22)))))
-      = json_array_length(?24)))`;
+      = json_array_length(?24)))
+  -- An article's files: each the author's, pending or the draft's, all of them or none.
+  AND ${inlineMediaHolds(26, 2, `SELECT media_key FROM drafts WHERE id = ?22
+    UNION ALL SELECT json_extract(kept.value, '$.key') FROM drafts, json_each(drafts.pictures) AS kept WHERE drafts.id = ?22
+    UNION ALL SELECT json_extract(kept.value, '$.key') FROM drafts, json_each(drafts.inline_media) AS kept WHERE drafts.id = ?22`)}`;
 
   try {
     const results = await db.batch([
@@ -220,13 +248,13 @@ export async function publishPost(db: D1Database, post: NewPost): Promise<Publis
         .prepare(
           `INSERT INTO posts (id, author_id, kind, url, canonical_key, provider, origin,
              title, description, page_title, thumb_key, aspect, created_at,
-             media_key, media_type, media_width, media_height, media_duration, reply_policy, comments_closed_at, pictures)
+             media_key, media_type, media_width, media_height, media_duration, reply_policy, comments_closed_at, pictures, inline_media)
            SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ${pending(11, "post")}, ?14, ?12,
              ${pending(15, "media")}, ?16, ?17, ?18, ?19,
              -- Choosing who may comment is the plan's; without it, everyone may.
              CASE WHEN ${entitledCondition(2, post.now)} THEN ?20 ELSE NULL END,
              CASE WHEN ?21 AND ${entitledCondition(2, post.now)} THEN ?12 ELSE NULL END,
-             ?24
+             ?24, ?26
            WHERE ${allowed}`,
         )
         .bind(
@@ -255,6 +283,7 @@ export async function publishPost(db: D1Database, post: NewPost): Promise<Publis
           post.draft?.revision ?? null,
           gallery,
           post.draft?.scheduledAt ?? null,
+          inline,
         ),
       db
         .prepare(
@@ -273,6 +302,18 @@ export async function publishPost(db: D1Database, post: NewPost): Promise<Publis
                    AND EXISTS (SELECT 1 FROM posts WHERE id = ?1 AND pictures = ?2)`,
               )
               .bind(post.id, gallery),
+          ]
+        : []),
+      // An article's files, likewise.
+      ...(inline
+        ? [
+            db
+              .prepare(
+                `UPDATE images SET state = 'attached'
+                 WHERE key IN (SELECT json_extract(value, '$.key') FROM json_each(?2)) AND state IN ('pending', 'draft')
+                   AND EXISTS (SELECT 1 FROM posts WHERE id = ?1 AND inline_media = ?2)`,
+              )
+              .bind(post.id, inline),
           ]
         : []),
       // The draft is used up only if the post went in.

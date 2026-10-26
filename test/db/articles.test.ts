@@ -1,0 +1,214 @@
+import { env } from "cloudflare:workers";
+import { beforeEach, describe, expect, it } from "vitest";
+
+import { ARTICLE_MEDIA_MAX } from "../../app/lib/article";
+import { accountRecord } from "../../app/lib/db/accounts.server";
+import { editPost } from "../../app/lib/db/authoring.server";
+import { deleteAccount } from "../../app/lib/db/deletion.server";
+import { deleteDraft, publishDraft, saveDraft } from "../../app/lib/db/drafts.server";
+import { deleteReleasedFiles } from "../../app/lib/db/draft-files.server";
+import { newPage } from "../../app/lib/db/feed.server";
+import { purgePostMedia, removePost } from "../../app/lib/db/moderation.server";
+import { postPage } from "../../app/lib/db/posts.server";
+import { publishPost } from "../../app/lib/db/submit.server";
+import type { DraftFields } from "../../app/lib/draft-rules";
+import { storeUpload } from "../../app/lib/uploads.server";
+import { DAY, db, NOW, reset, user } from "./fixtures";
+
+const bucket = env.IMAGES;
+
+/** A PNG's signature and header: enough to be read as a picture of its size. */
+const png = (width: number, height: number) => {
+  const u32 = (n: number) => [(n >>> 24) & 255, (n >>> 16) & 255, (n >>> 8) & 255, n & 255];
+  return Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...u32(13), 0x49, 0x48, 0x44, 0x52, ...u32(width), ...u32(height), 8, 6, 0, 0, 0]);
+};
+const MP4 = Uint8Array.from([0, 0, 0, 0x20, ...[..."ftypisom"].map((c) => c.charCodeAt(0)), ...new Array(80).fill(1)]);
+
+const stream = (bytes: Uint8Array) =>
+  new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(bytes);
+      controller.close();
+    },
+  });
+
+/** Sends a file for an article, into its set. */
+async function send(owner: string, bytes: Uint8Array = png(1600, 900), size: { width: number; height: number } | null = null): Promise<string> {
+  const result = await storeUpload(db, bucket, { ownerId: owner, body: stream(bytes), length: bytes.length, role: "media", set: "article-set-1", size, now: NOW });
+  if (!result.ok) throw new Error(result.reason);
+  return result.key;
+}
+
+const place = (key: string, words = "What it shows") => `![${words}](upload:${key})`;
+const stateOf = async (key: string) =>
+  (await db.prepare(`SELECT state FROM images WHERE key = ?1`).bind(key).first<{ state: string }>())?.state ?? null;
+
+async function article(owner: string, description: string, id = "article") {
+  const author = (await accountRecord(db, owner, NOW))!;
+  return publishPost(db, { kind: "text", id, author, origin: "made", title: "How the rain was made", description, now: NOW });
+}
+
+beforeEach(async () => {
+  await reset();
+  const stored = (await bucket.list()).objects.map((object) => object.key);
+  if (stored.length > 0) await bucket.delete(stored);
+  await db.prepare(`DELETE FROM file_deletions`).run();
+  await user("u1", "quiet_otter", { plan: true });
+  await user("u2", "paper_lark", { plan: true });
+});
+
+describe("an article's uploads", () => {
+  it("are claimed with it, in the order its text shows them, with their sizes, and shown on its page alone", async () => {
+    const picture = await send("u1");
+    const video = await send("u1", MP4, { width: 1080, height: 1920 });
+    const text = `It began with a still.\n\n${place(picture)}\n\nThen it moved:\n\n${place(video, "The street, raining")}\n\n${place(picture, "Once more")}`;
+    expect(await article("u1", text)).toEqual({ ok: true, id: "article", freed: [] });
+    expect(await stateOf(picture)).toBe("attached");
+    expect(await stateOf(video)).toBe("attached");
+    const page = await postPage(db, "article");
+    const post = page?.state === "live" ? page.post : null;
+    expect(post?.files).toEqual([
+      { key: picture, type: "image", width: 1600, height: 900, src: expect.stringContaining(picture) },
+      { key: video, type: "video", width: 1080, height: 1920, src: expect.stringContaining(video) },
+    ]);
+    expect(post?.excerpt).toBe("It began with a still.\nThen it moved:");
+    // A listing carries the excerpt alone.
+    const [card] = (await newPage(db, "all", NOW, null)).posts;
+    expect(card).not.toHaveProperty("files");
+    expect(card).not.toHaveProperty("description");
+    // Only how many, so the card offers Show more.
+    expect(card?.uploads).toBe(2);
+  });
+
+  it("go in all together or not at all: another's, another post's, one gone, too many, or one not on its own line refuses it", async () => {
+    const mine = await send("u1");
+    const theirs = await send("u2");
+    const refused = async (text: string) => {
+      const result = await article("u1", `Some words first.\n\n${text}`);
+      expect(result).toMatchObject({ ok: false, reason: "media" });
+      expect(await stateOf(mine)).toBe("pending");
+      return result.ok ? "" : result.reason === "media" ? result.problem : "";
+    };
+    expect(await refused(`${place(mine)}\n\n${place(theirs)}`)).toContain(theirs);
+    expect(await refused(place(`${"z".repeat(24)}.png`))).toContain("not an upload");
+    expect(await refused(`In a sentence ${place(mine)} it shows as words.`)).toContain("line of its own");
+    const many = Array.from({ length: ARTICLE_MEDIA_MAX + 1 }, (_, n) => place(`${String(n).padStart(24, "b")}.png`)).join("\n\n");
+    expect(await refused(many)).toContain(`at most ${ARTICLE_MEDIA_MAX}`);
+    // One already another post's.
+    expect(await article("u1", `First.\n\n${place(mine)}`, "first")).toMatchObject({ ok: true });
+    expect(await article("u1", `Second.\n\n${place(mine)}`, "second")).toMatchObject({ ok: false, reason: "media" });
+    // Only a text post places uploads.
+    const author = (await accountRecord(db, "u1", NOW))!;
+    const other = await send("u1");
+    const link = await publishPost(db, {
+      kind: "link", id: "link", author, origin: "found", title: "A link", description: `About it.\n\n${place(other)}`,
+      url: "https://example.com/a", canonicalKey: "example.com/a", provider: null, aspect: null, pageTitle: null, thumbKey: null, now: NOW,
+    });
+    expect(link).toMatchObject({ ok: false, reason: "media", problem: "Only a text post places uploads in its text." });
+    expect(await db.prepare(`SELECT COUNT(*) AS n FROM posts`).first()).toEqual({ n: 1 });
+  });
+
+  it("change with an edit: one placed anew is claimed, one dropped is deleted at once, and a refused edit changes nothing", async () => {
+    const first = await send("u1");
+    const second = await send("u1");
+    await article("u1", `Before.\n\n${place(first)}\n\n${place(second)}`);
+    const edit = { id: "article", authorId: "u1", title: "How the rain was made", origin: "made" as const, now: NOW + 60 };
+    const third = await send("u1", png(640, 480));
+    const result = await editPost(db, { ...edit, description: `Before.\n\n${place(third)}\n\n${place(first)}` });
+    expect(result).toEqual({ ok: true, freed: [second] });
+    expect(await stateOf(third)).toBe("attached");
+    expect(await stateOf(second)).toBeNull();
+    expect(await db.prepare(`SELECT key FROM file_deletions`).all()).toMatchObject({ results: [{ key: second }] });
+    await deleteReleasedFiles(db, bucket, result.ok ? result.freed : []);
+    expect(await bucket.get(second)).toBeNull();
+    const page = await postPage(db, "article");
+    expect(page?.state === "live" ? page.post.files?.map((file) => [file.key, file.width]) : null).toEqual([
+      [third, 640],
+      [first, 1600],
+    ]);
+    // Another's upload refuses the edit, and nothing it held goes.
+    const theirs = await send("u2");
+    expect(await editPost(db, { ...edit, description: `After.\n\n${place(theirs)}` })).toMatchObject({ ok: false, reason: "media" });
+    expect(await stateOf(first)).toBe("attached");
+    expect(await stateOf(third)).toBe("attached");
+    // Nor does an edit that cannot land, after the title's hour.
+    expect(await editPost(db, { ...edit, title: "Another title", description: "After, with none.", now: NOW + DAY })).toEqual({
+      ok: false,
+      reason: "window",
+    });
+    expect(await stateOf(first)).toBe("attached");
+  });
+
+  it("stay, unshown, when its author deletes it, and go with the account; a takedown purges them", async () => {
+    const kept = await send("u1");
+    await article("u1", `Words.\n\n${place(kept)}`);
+    await db.prepare(`UPDATE posts SET deleted_at = ?1 WHERE id = 'article'`).bind(NOW + DAY).run();
+    expect(await stateOf(kept)).toBe("attached");
+    const files = await deleteAccount(db, { userId: "u1", content: false, banned: false, identities: [], now: NOW + 2 * DAY });
+    expect(files).toContain(kept);
+    expect(await stateOf(kept)).toBeNull();
+    expect(await db.prepare(`SELECT inline_media FROM posts WHERE id = 'article'`).first()).toEqual({ inline_media: null });
+
+    const taken = await send("u2");
+    await article("u2", `Words.\n\n${place(taken)}`, "theirs");
+    await user("mod", "a_moderator", { role: "admin" });
+    await removePost(db, { postId: "theirs", actorId: "mod", reason: "spam", now: NOW });
+    expect(await purgePostMedia(db, bucket, { postId: "theirs", actorId: "mod", now: NOW })).toEqual([taken]);
+    expect(await stateOf(taken)).toBeNull();
+  });
+});
+
+describe("an article's uploads in a draft", () => {
+  const fields = (description: string): DraftFields => ({
+    kind: "text",
+    url: null,
+    origin: "made",
+    title: "How the rain was made",
+    description,
+    replies: null,
+    mediaKey: null,
+    width: null,
+    height: null,
+    duration: null,
+    posterKey: null,
+    pictures: null,
+  });
+
+  it("are kept as its own, let go when its text drops them, and published with it", async () => {
+    const first = await send("u1");
+    const second = await send("u1");
+    const saved = await saveDraft(db, { authorId: "u1", fields: fields(`${place(first)}\n\n${place(second)}`), now: NOW });
+    if (!saved.ok) throw new Error(JSON.stringify(saved));
+    expect(saved.draft.inlineMedia.map((file) => file.key)).toEqual([first, second]);
+    expect(await stateOf(first)).toBe("draft");
+    // Another upload, in another set, leaves them alone.
+    await storeUpload(db, bucket, { ownerId: "u1", body: stream(png(10, 10)), length: png(10, 10).length, role: "media", set: "another-set", now: NOW });
+    expect(await stateOf(second)).toBe("draft");
+    const changed = await saveDraft(db, { authorId: "u1", id: saved.draft.id, revision: 1, fields: fields(`Only one now.\n\n${place(first)}`), now: NOW });
+    expect(changed).toMatchObject({ ok: true, freed: [second] });
+    expect(await stateOf(second)).toBeNull();
+    // A stray placement is refused, and the draft stays as it was.
+    expect(await saveDraft(db, { authorId: "u1", id: saved.draft.id, revision: 2, fields: fields(`See ${place(first)} here.`), now: NOW })).toMatchObject({
+      ok: false,
+      reason: "invalid",
+      fields: { description: expect.stringContaining("line of its own") },
+    });
+    const published = await publishDraft(db, {
+      id: saved.draft.id, actorId: "u1", as: "author", revision: 2, bucket, secret: env.BETTER_AUTH_SECRET, ownHosts: ["aion.ly"], mentionHosts: ["aion.ly"], now: NOW,
+    });
+    if (!published.ok) throw new Error(JSON.stringify(published));
+    expect(await stateOf(first)).toBe("attached");
+    const page = await postPage(db, published.postId);
+    expect(page?.state === "live" ? page.post.files?.map((file) => file.key) : null).toEqual([first]);
+  });
+
+  it("go with the draft when it is deleted, and count toward the drafts' size", async () => {
+    const kept = await send("u1");
+    const saved = await saveDraft(db, { authorId: "u1", fields: fields(place(kept)), now: NOW });
+    if (!saved.ok) throw new Error(JSON.stringify(saved));
+    const bytes = await db.prepare(`SELECT bytes FROM images WHERE key = ?1`).bind(kept).first<{ bytes: number }>();
+    expect(bytes?.bytes).toBeGreaterThan(0);
+    expect(await deleteDraft(db, { id: saved.draft.id, authorId: "u1" })).toEqual({ ok: true, freed: [kept] });
+    expect(await stateOf(kept)).toBeNull();
+  });
+});

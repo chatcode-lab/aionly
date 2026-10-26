@@ -114,3 +114,68 @@ export function stripJpegMetadata(bytes: Uint8Array<ArrayBuffer>): Uint8Array<Ar
   return out;
 }
 
+
+/** A picture's size in pixels, which lays a page out before it loads. */
+export interface PictureSize {
+  width: number;
+  height: number;
+}
+
+const sized = (width: number, height: number): PictureSize | null =>
+  width > 0 && height > 0 && width <= 100000 && height <= 100000 ? { width, height } : null;
+
+/**
+ * A picture's size, read from its own bytes as its header states it: JPEG,
+ * PNG, GIF, WebP, and AVIF. Null when the header cannot be read. A JPEG's
+ * orientation tag is ignored, as the board drops it with the rest of EXIF.
+ */
+export function pictureSize(bytes: Uint8Array): PictureSize | null {
+  const u16be = (at: number) => ((bytes[at] ?? 0) << 8) | (bytes[at + 1] ?? 0);
+  const u16le = (at: number) => (bytes[at] ?? 0) | ((bytes[at + 1] ?? 0) << 8);
+  const u24le = (at: number) => u16le(at) | ((bytes[at + 2] ?? 0) << 16);
+  const u32be = (at: number) => u16be(at) * 0x10000 + u16be(at + 2);
+  const sniffed = sniffMedia(bytes.subarray(0, 16));
+  if (!sniffed || sniffed.media !== "image") return null;
+  switch (sniffed.contentType) {
+    case "image/png":
+      // The header chunk comes first: width and height after its name.
+      return ascii(bytes, 12, 4) === "IHDR" ? sized(u32be(16), u32be(20)) : null;
+    case "image/gif":
+      return sized(u16le(6), u16le(8));
+    case "image/webp": {
+      const chunk = ascii(bytes, 12, 4);
+      if (chunk === "VP8 ") return sized(u16le(26) & 0x3fff, u16le(28) & 0x3fff);
+      if (chunk === "VP8L") {
+        const bits = (bytes[21] ?? 0) | ((bytes[22] ?? 0) << 8) | ((bytes[23] ?? 0) << 16) | ((bytes[24] ?? 0) << 24);
+        return sized((bits & 0x3fff) + 1, ((bits >>> 14) & 0x3fff) + 1);
+      }
+      if (chunk === "VP8X") return sized(u24le(24) + 1, u24le(27) + 1);
+      return null;
+    }
+    case "image/jpeg": {
+      // Segments follow one another to a start-of-frame, which holds the size.
+      let at = 2;
+      while (at + 9 < bytes.length && bytes[at] === 0xff) {
+        const marker = bytes[at + 1]!;
+        if (marker === 0xd8 || (marker >= 0xd0 && marker <= 0xd7) || marker === 0x01 || marker === 0xff) {
+          at += marker === 0xff ? 1 : 2;
+          continue;
+        }
+        const frame = marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc;
+        if (frame) return sized(u16be(at + 7), u16be(at + 5));
+        if (marker === 0xda) return null;
+        at += 2 + u16be(at + 2);
+      }
+      return null;
+    }
+    case "image/avif": {
+      // The first image spatial extent property: version and flags, then width and height.
+      for (let at = 12; at + 16 <= Math.min(bytes.length, 65536); at += 1) {
+        if (bytes[at] === 0x69 && ascii(bytes, at, 4) === "ispe") return sized(u32be(at + 8), u32be(at + 12));
+      }
+      return null;
+    }
+    default:
+      return null;
+  }
+}

@@ -1,7 +1,7 @@
 import { newId } from "../ids";
 import type { PostCardData } from "../public-types";
 import { withPlainMentions } from "./mentions.server";
-import { AUTHOR_JOINS, POST_COLUMNS, type PostRow, toPublicPost } from "./rows.server";
+import { AUTHOR_JOINS, POST_COLUMNS, type PostRow, toPublicCard } from "./rows.server";
 
 /** The announcement pinned above the feed, while its post is live. */
 export interface Pin {
@@ -23,8 +23,7 @@ export async function announcement(db: D1Database): Promise<Pin | null> {
     )
     .first<PostRow & { pin_note: string | null; pinned_at: number }>();
   if (!row) return null;
-  const { description: _description, ...card } = toPublicPost(row);
-  const [post] = await withPlainMentions(db, [card], "excerpt");
+  const [post] = await withPlainMentions(db, [toPublicCard(row)], "excerpt");
   return { post: post!, note: row.pin_note, pinnedAt: row.pinned_at };
 }
 

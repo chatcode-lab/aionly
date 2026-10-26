@@ -7,6 +7,7 @@ import { TextArea, TextField } from "~/components/ui/field";
 import { Notice } from "~/components/ui/states";
 import { RepliesField } from "~/components/replies-field";
 import { editablePost, editPost, setCommentsClosed, setPostReplies } from "~/lib/db/authoring.server";
+import { deleteReleasedFiles } from "~/lib/db/draft-files.server";
 import { linkMentions, mentionHosts, unlinkMentions } from "~/lib/db/mentions.server";
 import { postPath } from "~/lib/slug";
 import { formatWait } from "~/lib/format";
@@ -91,7 +92,12 @@ export async function action({ params, request, context }: Route.ActionArgs) {
   if (result.ok && form.get("reopen") === "yes" && post.closed) {
     await setCommentsClosed(env.DB, { id: post.id, authorId: viewer.id, closed: false, now });
   }
-  if (result.ok) throw redirect(postPath({ id: post.id, title }));
+  if (result.ok) {
+    // The uploads its text no longer places go.
+    await deleteReleasedFiles(env.DB, env.IMAGES, result.freed);
+    throw redirect(postPath({ id: post.id, title }));
+  }
+  if (result.reason === "media") return { errors: { ...errors, description: result.problem } };
   return {
     errors,
     message:

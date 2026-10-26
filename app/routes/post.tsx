@@ -9,6 +9,7 @@ import { MentionsProvider } from "~/components/mentions";
 import { useNotify } from "~/components/notify";
 import { PostCard, PostTombstone } from "~/components/post-card";
 import { Bookmark, Pin } from "lucide-react";
+import { firstPicture } from "~/lib/article";
 import { cn } from "~/lib/cn";
 import { Button } from "~/components/ui/button";
 import { useSignIn } from "~/components/sign-in";
@@ -246,8 +247,14 @@ export function meta({ loaderData, matches, location }: Route.MetaArgs) {
   }
 
   const { post, canonical } = loaderData;
-  // An uploaded picture is its own share image; anything else shows its snapshot or poster.
-  const image = post.media.kind === "image" ? post.media.src : "thumbUrl" in post.media ? post.media.thumbUrl : undefined;
+  // An uploaded picture is its own share image, and an article's first;
+  // anything else shows its snapshot or poster.
+  const image =
+    post.media.kind === "image"
+      ? post.media.src
+      : "thumbUrl" in post.media
+        ? post.media.thumbUrl
+        : (firstPicture(post.files ?? [])?.src ?? undefined);
   // The cover's address changes with what it shows, so caches can keep each one.
   const version = postCoverVersion({
     title: post.title,
@@ -495,6 +502,7 @@ function PostView({ loaderData }: Route.ComponentProps) {
               score: participation.scoreOf("post", loaderData.post.id, loaderData.post.score),
             }}
             description={loaderData.post.description}
+            files={loaderData.post.files}
             lead
             now={loaderData.now}
             vote={participation.voteOf("post", loaderData.post.id)}

@@ -432,3 +432,50 @@ describe("a gallery over HTTP", () => {
     expect((await upload("bad set!")).status).toBe(400);
   });
 });
+
+describe("an article over HTTP", () => {
+  const png = Uint8Array.from(atob("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="), (character) => character.charCodeAt(0));
+  const mp4 = Uint8Array.from([0, 0, 0, 0x20, ...[..."ftypisom"].map((c) => c.charCodeAt(0)), ...new Array(80).fill(1)]);
+  const upload = (query: string, bytes: Uint8Array<ArrayBuffer>, type: string) =>
+    handleApi(
+      new Request(`https://aion.ly/api/v1/uploads?${query}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": type, "Content-Length": String(bytes.byteLength), "CF-Connecting-IP": "203.0.113.9" },
+        body: bytes,
+      }),
+      "uploads",
+    );
+
+  it("places a picture and a video sent with one set, reads back their sizes, and edits its uploads with its text", async () => {
+    const picture = (await (await upload("set=article-one", png, "image/png")).json()) as { upload: string; width: number; height: number };
+    // A picture's size is read from it; a video's, as sent.
+    expect([picture.width, picture.height]).toEqual([1, 1]);
+    const sent = await upload("set=article-one&width=1080&height=1920", mp4, "video/mp4");
+    expect(sent.status, await sent.clone().text()).toBe(201);
+    const video = (await sent.json()) as { upload: string; type: string; width: number; height: number };
+    expect([video.type, video.width, video.height]).toEqual(["video", 1080, 1920]);
+
+    const description = `How it was made.\n\n![A still of the street](upload:${picture.upload})\n\nThen it moved.\n\n![The street, raining](upload:${video.upload} "Four seconds")`;
+    const made = await call("POST", "posts", { kind: "text", title: "How the rain was made", description });
+    expect(made.status, await made.clone().text()).toBe(201);
+    const { id } = (await made.json()) as { id: string };
+    const read = (await (await call("GET", `posts/${id}`)).json()) as {
+      description: string;
+      uploads: Array<{ upload: string; type: string; url: string; width: number | null; height: number | null }>;
+    };
+    expect(read.description).toBe(description);
+    expect(read.uploads.map((file) => [file.upload, file.type, file.width, file.height])).toEqual([
+      [picture.upload, "image", 1, 1],
+      [video.upload, "video", 1080, 1920],
+    ]);
+    expect(read.uploads[0]!.url).toMatch(new RegExp(`${picture.upload}$`));
+
+    // An edit that drops the video deletes it; one placing a stranger's file is refused by name.
+    const dropped = await call("PATCH", `posts/${id}`, { description: `How it was made.\n\n![A still of the street](upload:${picture.upload})` });
+    expect(dropped.status, await dropped.clone().text()).toBe(200);
+    expect(await db.prepare(`SELECT 1 FROM images WHERE key = ?1`).bind(video.upload).first()).toBeNull();
+    const stray = await call("PATCH", `posts/${id}`, { description: `See ![this](upload:${picture.upload}) in a sentence.` });
+    expect(stray.status).toBe(400);
+    expect(((await stray.json()) as { fields: { description: string } }).fields.description).toContain("line of its own");
+  });
+});

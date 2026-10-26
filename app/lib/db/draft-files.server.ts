@@ -12,7 +12,8 @@ const DAY = 24 * 3600;
 const unused = (file: string) =>
   `NOT EXISTS (SELECT 1 FROM drafts WHERE author_id = ${file}.owner_id AND post_id IS NULL
      AND (media_key = ${file}.key OR poster_key = ${file}.key OR preview_thumb_key = ${file}.key
-       OR EXISTS (SELECT 1 FROM json_each(drafts.pictures) AS kept WHERE json_extract(kept.value, '$.key') = ${file}.key)))`;
+       OR EXISTS (SELECT 1 FROM json_each(drafts.pictures) AS kept WHERE json_extract(kept.value, '$.key') = ${file}.key)
+       OR EXISTS (SELECT 1 FROM json_each(drafts.inline_media) AS kept WHERE json_extract(kept.value, '$.key') = ${file}.key)))`;
 
 /**
  * Lets go of an account's draft files no unpublished draft uses any more:
@@ -66,7 +67,8 @@ export async function sweepUnusedDraftFiles(db: D1Database, bucket: R2Bucket, no
   const orphan = `file.state = 'draft' AND file.created_at < ?1 AND ${unused("file")}
     AND NOT EXISTS (SELECT 1 FROM posts WHERE author_id = file.owner_id
       AND (media_key = file.key OR thumb_key = file.key
-        OR EXISTS (SELECT 1 FROM json_each(posts.pictures) AS shown WHERE json_extract(shown.value, '$.key') = file.key)))`;
+        OR EXISTS (SELECT 1 FROM json_each(posts.pictures) AS shown WHERE json_extract(shown.value, '$.key') = file.key)
+        OR EXISTS (SELECT 1 FROM json_each(posts.inline_media) AS shown WHERE json_extract(shown.value, '$.key') = file.key)))`;
   await db.batch([
     db
       .prepare(

@@ -2,12 +2,14 @@ import { Check, Copy } from "lucide-react";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Link, useRouteLoaderData } from "react-router";
 
+import type { ArticleFile } from "~/lib/article";
 import { copyText } from "~/lib/clipboard";
 import { cn } from "~/lib/cn";
 import { labelIsAddress, labelNamesAddress } from "~/lib/links/label";
 import { sitePath } from "~/lib/links/site-path";
 import { type Block, type Inline, mailtoAddress, parseBlocks } from "~/lib/text/markdown";
 
+import { ArticleMedia } from "./media-poster";
 import { Mention } from "./mentions";
 
 /**
@@ -98,6 +100,8 @@ interface RenderOptions {
   outsideLinks: boolean;
   /** Inside a link: its words and formatting only, never a link or button within (review F97). */
   inLink?: boolean;
+  /** An article's own uploads, by key: the only files its text can show. */
+  files: ReadonlyMap<string, ArticleFile>;
 }
 
 /**
@@ -220,6 +224,11 @@ function renderBlocks(blocks: Block[], options: RenderOptions): ReactNode[] {
             {renderBlocks(block.children, options)}
           </blockquote>
         );
+      case "media": {
+        // Only the post's own uploads show; one it no longer holds, as after a takedown, shows nothing.
+        const file = options.files.get(block.key);
+        return file ? <ArticleMedia key={index} file={file} alt={block.alt} caption={block.caption} /> : null;
+      }
       case "list": {
         const items = block.items.map((item, itemIndex) => <li key={itemIndex}>{renderInline(item, options)}</li>);
         return block.ordered ? (
@@ -243,22 +252,26 @@ function renderBlocks(blocks: Block[], options: RenderOptions): ReactNode[] {
  * on a tap, never followed, except
  * that in a fan's text, with `outsideLinks`, a bare address, or a link
  * whose label is its own address, is a real link (owner's decision,
- * 2026-10-20, replacing the address alone on its line).
+ * 2026-10-20, replacing the address alone on its line). An article's text
+ * shows its own uploads where it places them (`files`).
  */
 export function RichText({
   text,
   className,
   outsideLinks = false,
+  files,
 }: {
   text: string;
   className?: string;
   outsideLinks?: boolean;
+  files?: readonly ArticleFile[];
 }) {
   const host = (useRouteLoaderData("root") as { host?: string } | undefined)?.host;
   const blocks = useMemo(() => parseBlocks(text), [text]);
+  const byKey = useMemo(() => new Map((files ?? []).map((file) => [file.key, file])), [files]);
   return (
     <div className={cn("space-y-2 text-body [overflow-wrap:anywhere]", className)}>
-      {renderBlocks(blocks, { host, outsideLinks })}
+      {renderBlocks(blocks, { host, outsideLinks, files: byKey })}
     </div>
   );
 }

@@ -11,6 +11,7 @@ import {
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { Link, useFetcher } from "react-router";
 
+import type { ArticleFile } from "~/lib/article";
 import { copyText } from "~/lib/clipboard";
 import { cn } from "~/lib/cn";
 import { formatAge, formatCount } from "~/lib/format";
@@ -201,18 +202,19 @@ function CopyLinkButton({ path }: { path: string }) {
 
 /**
  * A post's excerpt in the feed, with Show more where it was cut short, by
- * its length or its lines: the whole description then loads, formatted as
- * on the post's page, and Show less goes back (owner's request, 2026-10-20).
+ * its length or its lines, or where an article's text places uploads the
+ * card leaves out: the whole description then loads, formatted as on the
+ * post's page, and Show less goes back (owner's request, 2026-10-20).
  */
 function Excerpt({ post }: { post: PostCardData }) {
   const text = useRef<HTMLParagraphElement>(null);
   // Cut by length on the server, or by the line clamp, measured whenever
   // the excerpt's size changes, as when the window narrows (review F103).
-  const truncated = post.excerpt.endsWith("…");
+  const truncated = post.excerpt.endsWith("…") || (post.uploads ?? 0) > 0;
   const [clamped, setClamped] = useState(false);
   const [open, setOpen] = useState(false);
   const [asked, setAsked] = useState(false);
-  const whole = useFetcher<{ description: string; names: MentionNames }>();
+  const whole = useFetcher<{ description: string; names: MentionNames; files?: ArticleFile[] }>();
   const loaded = whole.data && "description" in whole.data ? whole.data : null;
   const showing = open && loaded !== null;
   useEffect(() => {
@@ -241,7 +243,7 @@ function Excerpt({ post }: { post: PostCardData }) {
       {showing ? (
         <MentionsProvider names={loaded.names}>
           {/* In the excerpt's muted color, as more of the same text. */}
-          <RichText text={loaded.description} className="text-text-muted" outsideLinks={post.author.outsideLinks} />
+          <RichText text={loaded.description} className="text-text-muted" outsideLinks={post.author.outsideLinks} files={loaded.files} />
         </MentionsProvider>
       ) : (
         <p
@@ -282,6 +284,7 @@ export function PostCard({
   onToggleSave,
   menu,
   description,
+  files,
   lead,
 }: {
   post: PostCardData;
@@ -297,6 +300,8 @@ export function PostCard({
   menu?: ReactNode;
   /** The whole description, shown in place of the excerpt on the post's page. */
   description?: string;
+  /** The uploads an article's description places, shown where it places them. */
+  files?: ArticleFile[];
   /** The first card on the screen, whose picture loads ahead of the rest. */
   lead?: boolean;
 }) {
@@ -364,7 +369,7 @@ export function PostCard({
         {description === undefined ? (
           <Excerpt post={post} />
         ) : (
-          <RichText text={description} className="mt-3" outsideLinks={post.author.outsideLinks} />
+          <RichText text={description} className="mt-3" outsideLinks={post.author.outsideLinks} files={files} />
         )}
 
         <div className="mt-2 -mb-1 flex items-center gap-0.5 max-sm:-mx-1.5 sm:-ml-2 sm:gap-1">

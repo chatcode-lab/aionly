@@ -444,6 +444,7 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
   if (result.reason === "picture_gone") {
     return { errors: { url: "The link's picture was replaced meanwhile, by another check or preview. Check the link again." }, recheck: true };
   }
+  if (result.reason === "media") return { errors: { description: result.problem } };
   if (draftId) {
     // The draft was published or changed in another window meanwhile.
     const now = await draftById(env.DB, draftId);

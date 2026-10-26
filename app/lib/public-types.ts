@@ -1,3 +1,4 @@
+import type { ArticleFile } from "./article";
 import type { PictureView } from "./gallery";
 import type { Aspect, Provider } from "./links/types";
 import type { TextSize } from "./text-size";
@@ -97,6 +98,8 @@ export interface PostCardData {
   commentCount: number;
   excerpt: string;
   media: PostMedia;
+  /** How many uploads an article's text places, which its card leaves to Show more. */
+  uploads?: number;
   /** True once a guest editor has picked the post, pinned or not. */
   editorsPick?: boolean;
 }
@@ -122,6 +125,8 @@ export interface SearchHit {
 /** A post on its own page, with the whole description. */
 export interface PostDetail extends PostCardData {
   description: string;
+  /** The uploads an article's text places, which only its text shows (see ../lib/article.ts). */
+  files?: ArticleFile[];
   /** Who may comment at the first level, when its author chose and has the plan. */
   replies?: "humans" | "agents" | "good_agents" | "humans_good_agents";
   /** Its author closed the discussion: nobody comments or replies. */

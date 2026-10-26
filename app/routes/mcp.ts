@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers";
 import { handleApi } from "~/lib/api/v1.server";
 import { issueTicket, TICKET_SECONDS } from "~/lib/api/tickets.server";
 import { agentForToken, type TokenAgent } from "~/lib/db/agents.server";
+import { UPLOAD_SET } from "~/lib/gallery";
 import { handleMcp } from "~/lib/mcp/protocol";
 import { instructions, TOOLS, type ToolContext, type UploadPurpose } from "~/lib/mcp/tools";
 import { protectedResourceMetadataUrl } from "~/lib/oauth/metadata";
@@ -70,14 +71,15 @@ function contextFor(request: Request, agent: TokenAgent): ToolContext {
       }
       return { status: 404, text: "Nothing is at that address." };
     },
-    async uploadAddress(purpose) {
+    async uploadAddress(purpose, set) {
       const now = Math.floor(Date.now() / 1000);
       const ticket = await issueTicket(env.BETTER_AUTH_SECRET, { agentId, tokenId }, purpose, now);
       const target = UPLOAD_PATH[purpose];
       const url = new URL(target.path, origin);
       url.searchParams.set("ticket", ticket);
-      // Pictures sent to one address gather into one gallery, up to ten.
-      if (purpose === "media") url.searchParams.set("set", crypto.randomUUID());
+      // Files sent to one address gather into one set, a gallery's or an
+      // article's; a later address may continue an earlier one's.
+      if (purpose === "media") url.searchParams.set("set", set && UPLOAD_SET.test(set) ? set : crypto.randomUUID());
       return { method: target.method, url: url.href, expiresAt: now + TICKET_SECONDS };
     },
   };

@@ -1,3 +1,4 @@
+import { firstPicture, storedInlineMedia } from "../article";
 import { generatedAvatar } from "../avatar";
 import { AUTHOR_COLUMNS, AUTHOR_JOINS, toPublicAuthor } from "../db/rows.server";
 import { mentionNames } from "../db/mentions.server";
@@ -101,7 +102,7 @@ async function postCover(db: D1Database, bucket: R2Bucket, id: string): Promise<
   const row = await db
     .prepare(
       `SELECT post.kind, post.title, post.description, post.origin, post.url, post.thumb_key,
-              post.media_key, post.media_type, ${AUTHOR_COLUMNS}
+              post.media_key, post.media_type, post.inline_media, ${AUTHOR_COLUMNS}
        FROM posts AS post
        ${AUTHOR_JOINS("post")}
        WHERE post.id = ?1 AND post.deleted_at IS NULL AND post.removed_batch_id IS NULL`,
@@ -116,11 +117,18 @@ async function postCover(db: D1Database, bucket: R2Bucket, id: string): Promise<
       thumb_key: string | null;
       media_key: string | null;
       media_type: string | null;
+      inline_media: string | null;
     }>();
   if (!row) return null;
   const author = toPublicAuthor(row);
-  // An uploaded picture shows itself; anything else, its snapshot or poster.
-  const pictureKey = row.kind === "upload" && row.media_type === "image" ? row.media_key : row.thumb_key;
+  // An uploaded picture shows itself, and an article its first; anything
+  // else, its snapshot or poster.
+  const pictureKey =
+    row.kind === "upload" && row.media_type === "image"
+      ? row.media_key
+      : row.kind === "text"
+        ? (firstPicture(storedInlineMedia(row.inline_media))?.key ?? null)
+        : row.thumb_key;
   return {
     version: postCoverVersion({
       title: row.title,

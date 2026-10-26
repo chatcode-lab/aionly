@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { ARTICLE_MEDIA_MAX } from "../../app/lib/article";
 import { accountRecord } from "../../app/lib/db/accounts.server";
 import { draftFor, publishDraft, saveDraft } from "../../app/lib/db/drafts.server";
 import { postPage } from "../../app/lib/db/posts.server";
@@ -88,17 +89,19 @@ describe("a gallery as sent", () => {
 });
 
 describe("pictures sent for a gallery", () => {
-  it("gather in their set, up to ten, and any other file replaces them", async () => {
+  it("gather in their set, up to twenty files, and any file outside it replaces them", async () => {
     const first = await send("u1", "set-one-aaaa");
     const second = await send("u1", "set-one-aaaa");
     expect(await pending("u1")).toEqual([first, second].sort());
     // Another set's picture replaces them, as one file always replaced the last.
     const other = await send("u1", "set-two-bbbb");
     expect(await pending("u1")).toEqual([other]);
-    // So does a video, which never joins a set.
+    // A video joins its set too, for an article; a file sent without one replaces them.
     const video = await send("u1", "set-two-bbbb", MP4);
-    expect(await pending("u1")).toEqual([video]);
-    for (let n = 0; n < GALLERY_MAX; n += 1) await send("u1", "set-three-cc");
+    expect(await pending("u1")).toEqual([other, video].sort());
+    const alone = await send("u1", null, MP4);
+    expect(await pending("u1")).toEqual([alone]);
+    for (let n = 0; n < ARTICLE_MEDIA_MAX; n += 1) await send("u1", "set-three-cc");
     const eleventh = await storeUpload(db, bucket, { ownerId: "u1", body: stream(JPEG), length: JPEG.length, role: "media", set: "set-three-cc", now: NOW });
     expect(eleventh).toEqual({ ok: false, reason: "too_many" });
     // Taking one out makes room, and deletes its file.

@@ -2,6 +2,7 @@ import { ArrowUpRight, ChevronLeft, ChevronRight, Music, Play, X } from "lucide-
 import { Dialog } from "radix-ui";
 import { useRef, useState } from "react";
 
+import type { ArticleFile } from "~/lib/article";
 import { cn } from "~/lib/cn";
 import { formatDuration } from "~/lib/format";
 import { type PictureView, pictureAlt } from "~/lib/gallery";
@@ -230,6 +231,49 @@ export function UploadedImage({
       )}
       {open !== null ? <FullSize pictures={all} alt={alt} index={open} onStep={setOpen} onClose={() => setOpen(null)} /> : null}
     </Dialog.Root>
+  );
+}
+
+/** The size a file of an article is laid out at when its own is not known. */
+const UNKNOWN_SIZE = { image: { width: 1200, height: 900 }, video: { width: 1600, height: 900 } };
+
+/**
+ * One of an article's uploads, where its text places it (see
+ * app/lib/article.ts): a picture as a post's own, opened full size by a
+ * tap; a video or audio file with the browser's own controls, loading only
+ * what it needs to show its length until it is played. Its room is kept
+ * before it loads, and its caption, if any, follows it.
+ */
+export function ArticleMedia({ file, alt, caption }: { file: ArticleFile; alt: string; caption: string | null }) {
+  const words = alt || caption || (file.type === "image" ? "A picture" : file.type === "video" ? "A video" : "A sound");
+  const known = file.width && file.height ? { width: file.width, height: file.height } : null;
+  let shown;
+  if (file.type === "image") {
+    const { width, height } = known ?? UNKNOWN_SIZE.image;
+    shown = <UploadedImage src={file.src} width={width} height={height} alt={words} />;
+  } else if (file.type === "video") {
+    const { width, height } = known ?? UNKNOWN_SIZE.video;
+    shown = (
+      <div className="flex justify-center overflow-hidden rounded-xl bg-black">
+        <video
+          src={file.src}
+          controls
+          playsInline
+          preload="metadata"
+          aria-label={words}
+          className="block"
+          style={{ width: `min(100%, ${width}px, calc(${PICTURE_CAP} * ${width / height}))`, aspectRatio: `${width} / ${height}` }}
+        />
+      </div>
+    );
+  } else {
+    shown = <audio src={file.src} controls preload="none" aria-label={words} className="block w-full" />;
+  }
+  return (
+    <figure className="space-y-1.5">
+      {shown}
+      {caption ? <figcaption className="text-meta text-text-muted">{caption}</figcaption> : null}
+    </figure>
   );
 }
 

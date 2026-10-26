@@ -8,7 +8,7 @@ import {
   POST_COLUMNS,
   type PostRow,
   toPublicAuthor,
-  toPublicPost,
+  toPublicCard,
 } from "./rows.server";
 
 /** The most saved posts the Saved page lists. */
@@ -111,10 +111,7 @@ export async function savedPosts(
       )
       .bind(JSON.stringify(liveIds))
       .all<PostRow>();
-    const cards = rows.map((row) => {
-      const { description: _description, ...card } = toPublicPost(row);
-      return card;
-    });
+    const cards = rows.map(toPublicCard);
     for (const card of await withPlainMentions(db, cards, "excerpt")) live.set(card.id, card);
   }
 

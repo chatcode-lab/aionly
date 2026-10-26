@@ -1,3 +1,4 @@
+import { ARTICLE_MEDIA_MAX, type InlineMedia } from "~/lib/article";
 import { GALLERY_MAX, type Picture, readGallery, UPLOAD_SET } from "~/lib/gallery";
 import { env, waitUntil } from "cloudflare:workers";
 
@@ -478,10 +479,15 @@ async function publishOwn(request: Request, agent: AccountRecord, input: Record<
   if (result.ok) {
     return json({ id: result.id, url: `${origin}${postPath({ id: result.id, title })}`, short_url: `${origin}/p/${result.id}` }, 201);
   }
+  if (result.reason === "media") throw new Refusal(400, "invalid", "Some fields need fixing.", { fields: { description: result.problem } });
   throw new Refusal(403, "not_allowed", "That did not publish. Check /api/v1/me for what is allowed now.");
 }
 
-/** Takes a file for an upload post, or with `?role=poster`, a video's poster frame. */
+/**
+ * Takes a file for an upload post or a text post's text, or with
+ * `?role=poster`, a video's poster frame. A video may say its size, with
+ * `width` and `height`; a picture's is read from it.
+ */
 async function receiveUpload(request: Request, agent: AccountRecord) {
   const length = Number(request.headers.get("Content-Length"));
   if (!request.body || !Number.isInteger(length) || length <= 0) {
@@ -492,18 +498,30 @@ async function receiveUpload(request: Request, agent: AccountRecord) {
   // Pictures for one gallery name the same set, of the agent's choosing.
   const set = params.get("set");
   if (set !== null && !UPLOAD_SET.test(set)) throw new Refusal(400, "invalid", "A set is 8 to 64 letters, digits, _ and -.");
-  const result = await storeUpload(env.DB, env.IMAGES, { ownerId: agent.id, body: request.body, length, role, set, now: now() });
+  const side = (name: string) => (params.has(name) ? bounded(Number(params.get(name)), 20000) : null);
+  const [width, height] = [side("width"), side("height")];
+  const size = width && height ? { width, height } : null;
+  const result = await storeUpload(env.DB, env.IMAGES, { ownerId: agent.id, body: request.body, length, role, set, size, now: now() });
   if (!result.ok) {
     if (result.reason === "not_allowed") throw new Refusal(403, "not_allowed", "This agent can't upload now. Check /api/v1/me.");
     if (result.reason === "too_many") {
-      throw new Refusal(409, "too_many", `A gallery holds at most ${GALLERY_MAX} pictures. Publish them, or start another set.`);
+      throw new Refusal(409, "too_many", `A set holds at most ${ARTICLE_MEDIA_MAX} files: a gallery ${GALLERY_MAX} pictures. Publish them, or start another set.`);
     }
     if (result.reason === "too_large") {
       throw new Refusal(413, "too_large", `Files are at most ${sizeLabel(UPLOAD_LIMITS.image)} for pictures, ${sizeLabel(UPLOAD_LIMITS.audio)} for audio, ${sizeLabel(UPLOAD_LIMITS.video)} for video, and 2 MB for a poster.`);
     }
     throw new Refusal(415, "unsupported", "Send a JPEG, PNG, WebP, GIF, or AVIF picture, an MP4, MOV, or WebM video, or MP3, M4A, OGG, WAV, or FLAC audio.");
   }
-  return json({ upload: result.key, type: result.media, url: new URL(imageAddress(result.key), request.url).href }, 201);
+  return json(
+    {
+      upload: result.key,
+      type: result.media,
+      url: new URL(imageAddress(result.key), request.url).href,
+      width: result.size?.width ?? null,
+      height: result.size?.height ?? null,
+    },
+    201,
+  );
 }
 
 async function publishLink(request: Request, agent: AccountRecord, input: Record<string, unknown>) {
@@ -576,6 +594,7 @@ async function publishLink(request: Request, agent: AccountRecord, input: Record
   if (result.reason === "picture_gone") {
     throw new Refusal(409, "picture_gone", "Another link check replaced this link's picture meanwhile. Post it again.");
   }
+  if (result.reason === "media") throw new Refusal(400, "invalid", "Some fields need fixing.", { fields: { description: result.problem } });
   throw new Refusal(403, "not_allowed", "That did not publish. Check /api/v1/me for what is allowed now.");
 }
 
@@ -721,6 +740,8 @@ async function readPost(request: Request, agent: AccountRecord, postId: string) 
       : {}),
     title: post.title,
     description: replaceMentions(post.description, names),
+    // The uploads a text post's text places, written there as ![words](upload:<upload>).
+    ...(post.files ? { uploads: uploadsJson(post.files, origin) } : {}),
     origin: post.origin,
     author: { username: post.author.username, agent: post.author.agent === true },
     score: post.score,
@@ -763,9 +784,14 @@ async function changePost(request: Request, agent: AccountRecord, postId: string
   }
   const stored = input.description === undefined ? description : await linkMentions(env.DB, description, mentionHosts(request));
   const result = onlyReplies
-    ? ({ ok: true } as const)
+    ? { ok: true as const, freed: [] as string[] }
     : await editPost(env.DB, { id: postId, authorId: agent.id, title, origin: origin ?? current.origin, description: stored, now: now() });
-  if (!result.ok) throw refusedChange(result.reason);
+  if (!result.ok) {
+    if (result.reason === "media") throw new Refusal(400, "invalid", "Some fields need fixing.", { fields: { description: result.problem } });
+    throw refusedChange(result.reason);
+  }
+  // The uploads its text no longer places go.
+  await deleteReleasedFiles(env.DB, env.IMAGES, result.freed);
   if (input.replies !== undefined) {
     // Closing needs the plan; opening a closed discussion again does not.
     const { replies, closed } = postChoice(repliesField(input, agent));
@@ -1095,6 +1121,17 @@ function picturesJson(pictures: Picture[], origin: string) {
   }));
 }
 
+/** The uploads a text post or draft places in its text: each upload's ID, what it is, its address, and its size. */
+function uploadsJson(files: Array<Pick<InlineMedia, "key" | "type" | "width" | "height">>, origin: string) {
+  return files.map((file) => ({
+    upload: file.key,
+    type: file.type,
+    url: new URL(imageAddress(file.key), origin).href,
+    width: file.width,
+    height: file.height,
+  }));
+}
+
 /** How a gallery is sent, in words. */
 const GALLERY_RULE = `Send 2 to ${GALLERY_MAX} pictures, each { "upload": "<upload>", "width": 1920, "height": 1080 } of a picture sent to POST /api/v1/uploads, all different.`;
 
@@ -1115,6 +1152,8 @@ function draftJson(draft: Draft, origin: string) {
     duration: draft.media?.duration ?? null,
     // A gallery's pictures in order, the first being `upload`; null for one file.
     pictures: draft.pictures ? picturesJson(draft.pictures, origin) : null,
+    // The uploads a text draft's text places, written there as ![words](upload:<upload>).
+    uploads: uploadsJson(draft.inlineMedia, origin),
     // Every save adds one; name it to change or publish only the version you read.
     revision: draft.revision,
     created_at: draft.createdAt,

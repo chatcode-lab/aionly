@@ -73,14 +73,18 @@ export async function deleteAccount(
   const inList = `(SELECT ?1 UNION ALL SELECT user_id FROM profiles WHERE owner_id = ?1)`;
   // Its files: its avatar, its drafts' files, and the files of its posts
   // deleted by their author, before or in this batch (the picture or
-  // upload, a gallery's others, and a snapshot or poster). Read inside the
-  // batch, after its posts are deleted, so a post published meanwhile is
-  // counted too (review F99); a moderator's removal keeps its record.
+  // upload, a gallery's others, an article's uploads, and a snapshot or
+  // poster), in five parts, the most D1 takes in one compound query. Read
+  // inside the batch, after its posts are deleted, so a post published
+  // meanwhile is counted too (review F99); a moderator's removal keeps its
+  // record.
   const files = `SELECT avatar_key AS key FROM profiles WHERE user_id IN ${inList} AND avatar_key IS NOT NULL
     UNION SELECT key FROM images WHERE owner_id IN ${inList} AND (kind = 'avatar' OR state = 'draft')
-    UNION SELECT media_key FROM posts WHERE author_id IN ${inList} AND deleted_at IS NOT NULL AND removed_batch_id IS NULL
-    UNION SELECT thumb_key FROM posts WHERE author_id IN ${inList} AND deleted_at IS NOT NULL AND removed_batch_id IS NULL
+    UNION SELECT own.value FROM posts, json_each(json_array(posts.media_key, posts.thumb_key)) AS own
+      WHERE posts.author_id IN ${inList} AND posts.deleted_at IS NOT NULL AND posts.removed_batch_id IS NULL
     UNION SELECT json_extract(picture.value, '$.key') FROM posts, json_each(posts.pictures) AS picture
+      WHERE posts.author_id IN ${inList} AND posts.deleted_at IS NOT NULL AND posts.removed_batch_id IS NULL
+    UNION SELECT json_extract(placed.value, '$.key') FROM posts, json_each(posts.inline_media) AS placed
       WHERE posts.author_id IN ${inList} AND posts.deleted_at IS NOT NULL AND posts.removed_batch_id IS NULL`;
 
   // Its files, queued for the bucket as their rows go; the keys come back.
@@ -122,7 +126,7 @@ export async function deleteAccount(
     db.prepare(`DELETE FROM images WHERE state = 'draft' AND owner_id IN ${inList}`).bind(userId),
     db
       .prepare(
-        `UPDATE posts SET media_key = NULL, thumb_key = NULL, pictures = NULL
+        `UPDATE posts SET media_key = NULL, thumb_key = NULL, pictures = NULL, inline_media = NULL
          WHERE author_id IN ${inList} AND deleted_at IS NOT NULL AND removed_batch_id IS NULL`,
       )
       .bind(userId),

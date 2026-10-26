@@ -2,6 +2,7 @@ import { MAX_DEPTH, THREAD_MAX } from "../comments/rules";
 import { type CommentReplies, policyAdmitsSql, type PostChoice, type PostReplies } from "../replies";
 import { type Origin, TITLE_EDIT_SECONDS } from "../submit/rules";
 import { entitledCondition, participantCondition } from "./accounts.server";
+import { inlineKeys, inlineMediaFor, inlineMediaHolds } from "./article-media.server";
 import { mentionStatements } from "./mentions.server";
 import { LIVE } from "./rows.server";
 import { settingSql } from "./setting-sql.server";
@@ -303,28 +304,70 @@ export async function editablePost(
 }
 
 /**
+ * What editing a post did: the files its text no longer places, let go in
+ * the same write, come back for the bucket; or why it was refused, the
+ * uploads its text places in words for its description.
+ */
+export type PostEditResult =
+  | { ok: true; freed: string[] }
+  | { ok: false; reason: EditRefusal }
+  | { ok: false; reason: "media"; problem: string };
+
+/**
  * Changes a post's description, and its title and "made" or "found" within
  * an hour of posting. Its link never changes. Nothing changed, nothing is
- * written, so the post is not marked edited.
+ * written, so the post is not marked edited. A text post's uploads change
+ * with its text: those it now places are claimed, all or none, and those it
+ * no longer does are deleted, since an edit keeps no earlier version.
  */
 export async function editPost(
   db: D1Database,
   input: { id: string; authorId: string; title: string; origin: Origin; description: string; now: number },
-): Promise<EditResult> {
+): Promise<PostEditResult> {
   const { id, authorId, title, origin, description, now } = input;
-  const [updated] = await db.batch([
-    db
-      .prepare(
-        `UPDATE posts SET title = ?3, origin = ?4, description = ?5, edited_at = ?6
-         WHERE id = ?1 AND author_id = ?2 AND ${LIVE}
-           AND (title <> ?3 OR origin <> ?4 OR description <> ?5)
-           AND ((title = ?3 AND origin = ?4) OR created_at > ?6 - ${TITLE_EDIT_SECONDS})
-           AND ${participantCondition(2, now)}`,
-      )
-      .bind(id, authorId, title, origin, description, now),
+  const held = await db
+    .prepare(`SELECT kind, inline_media FROM posts WHERE id = ?1 AND author_id = ?2`)
+    .bind(id, authorId)
+    .first<{ kind: string; inline_media: string | null }>();
+  const placed = await inlineMediaFor(db, { authorId, text: description, kept: inlineKeys(held?.inline_media), article: held?.kind === "text" });
+  if (!placed.ok) return { ok: false, reason: "media", problem: placed.problem };
+  const inline = placed.json;
+  // The post as it can change: live, its author's, changed, within the
+  // title's hour, and its uploads its author's, sent for it or its own.
+  const which = (post: string) => `${post}.id = ?1 AND ${post}.author_id = ?2 AND ${post}.deleted_at IS NULL AND ${post}.removed_batch_id IS NULL
+    AND (${post}.title <> ?3 OR ${post}.origin <> ?4 OR ${post}.description <> ?5)
+    AND ((${post}.title = ?3 AND ${post}.origin = ?4) OR ${post}.created_at > ?6 - ${TITLE_EDIT_SECONDS})
+    AND ${participantCondition(2, now)}
+    AND ${inlineMediaHolds(7, 2, `SELECT json_extract(held.value, '$.key') FROM json_each(${post}.inline_media) AS held`)}`;
+  // The files it holds that the new text leaves out, read before it changes.
+  const dropped = `SELECT json_extract(held.value, '$.key') AS key FROM posts AS post, json_each(post.inline_media) AS held
+    WHERE ${which("post")} AND json_extract(held.value, '$.key') NOT IN (SELECT json_extract(value, '$.key') FROM json_each(COALESCE(?7, '[]')))`;
+  const bind = (statement: D1PreparedStatement) => statement.bind(id, authorId, title, origin, description, now, inline);
+  const results = await db.batch([
+    bind(db.prepare(`INSERT INTO file_deletions (key, queued_at) SELECT key, ?6 FROM (${dropped}) WHERE true ON CONFLICT (key) DO NOTHING`)),
+    bind(db.prepare(`DELETE FROM images WHERE key IN (${dropped}) RETURNING key`)),
+    bind(
+      db.prepare(
+        `UPDATE posts SET title = ?3, origin = ?4, description = ?5, edited_at = ?6, inline_media = ?7
+         WHERE ${which("posts")}`,
+      ),
+    ),
+    // The uploads it now places are its own.
+    ...(inline
+      ? [
+          db
+            .prepare(
+              `UPDATE images SET state = 'attached'
+               WHERE key IN (SELECT json_extract(value, '$.key') FROM json_each(?2)) AND state = 'pending'
+                 AND EXISTS (SELECT 1 FROM posts WHERE id = ?1 AND inline_media = ?2)`,
+            )
+            .bind(id, inline),
+        ]
+      : []),
     ...mentionStatements(db, { type: "post", id, text: description, authorId, now }),
   ]);
-  if (updated!.meta.changes > 0) return { ok: true };
+  const freed = ((results[1]!.results ?? []) as Array<{ key: string }>).map((row) => row.key);
+  if (results[2]!.meta.changes > 0) return { ok: true, freed };
 
   const row = await db
     .prepare(
@@ -336,7 +379,7 @@ export async function editPost(
     .first<{ author_id: string; title: string; origin: Origin; description: string; created_at: number; open: number }>();
   if (!row || row.author_id !== authorId) return { ok: false, reason: "not_found" };
   if (!row.open) return { ok: false, reason: "closed" };
-  if (row.title === title && row.origin === origin && row.description === description) return { ok: true };
+  if (row.title === title && row.origin === origin && row.description === description) return { ok: true, freed: [] };
   if ((row.title !== title || row.origin !== origin) && row.created_at <= now - TITLE_EDIT_SECONDS) {
     return { ok: false, reason: "window" };
   }

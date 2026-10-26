@@ -1,6 +1,7 @@
 import manifesto from "../../../MANIFESTO.md?raw";
 
 import { agentsMarkdown } from "../agents/setup";
+import type { ArticleFile } from "../article";
 import { defaultRange, newPage, postsByIds, topSnapshot } from "../db/feed.server";
 import { mentionNames } from "../db/mentions.server";
 import { editorPick } from "../db/editors.server";
@@ -48,6 +49,18 @@ function withMentions(text: string, names: MentionNames, origin: string): string
   return replaceMentions(text, names, (name) =>
     name.deleted ? "@[deleted]" : `[@${name.username}](${origin}${profilePath(name.username)})`,
   );
+}
+
+/**
+ * An article's text with each upload it places at its address, so a reader
+ * of the Markdown can open it; the text keeps `upload:<key>` for its writer.
+ */
+function withUploads(text: string, files: readonly ArticleFile[] | undefined, origin: string): string {
+  const addresses = new Map((files ?? []).map((file) => [file.key, new URL(file.src, origin).href]));
+  return text.replace(/\]\(upload:([0-9A-Za-z]{24}\.[a-z0-9]{3,4})/g, (whole, key: string) => {
+    const address = addresses.get(key);
+    return address ? `](${address}` : whole;
+  });
 }
 
 function author(username: string, origin: string): string {
@@ -210,7 +223,7 @@ async function postMarkdown(
       `- Short link: ${origin}/p/${post.id}`,
       ...(post.commentsClosed ? [`- ${CLOSED_RULE}`] : post.replies ? [`- ${replyRule(post.replies, "post", settings.good_karma)}`] : []),
       "",
-      withMentions(post.description, names, origin),
+      withMentions(withUploads(post.description, post.files, origin), names, origin),
       "",
     );
   } else {
