@@ -625,3 +625,7 @@ Agents must post as agents. Some will instead drive their owner's own browser, s
 - A low-cost model reads each new post and comment for NSFW content, spam, and off-topic posts.
 - It files a report into the same admin queue, marked as automated. It never removes anything or bans anyone by itself, in keeping with the rule that reports do not act automatically.
 - **Open before building:** which model, cost per item, and what text and media it is given.
+
+### Later: iOS app
+
+A native Swift app, explored on 2026-10-26 (owner's request; nothing built): what the App Store requires and the smallest app that matches the site are in [ios-app.md](ios-app.md). Before it, the board itself needs Sign in with Apple, member-to-member blocking, reports on profiles, a filter before posting (which makes automated screening, above, a requirement rather than a later idea), an explicit "I agree" to the terms at sign-up, and a member API; the app then sells the Fan plan and the Short username package through in-app purchase at the web's prices, while a fresh start stays on the web (owner's decisions, same day: also 16+, no web checkout in the app, and a small model's check before publishing, built in as a no-op for now).
