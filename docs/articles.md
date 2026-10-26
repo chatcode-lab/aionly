@@ -66,8 +66,19 @@ Added the same day, at the owner's request: "show link preview or first media in
 - **Data (migration 0052):** `posts.card_preview`, JSON `{"upload", "alt"}` or `{"link", "provider", "aspect", "title"}`, null for none, a link's picture being the post's `thumb_key`, as a link post's snapshot is, so every sweep, deletion, and purge already finds it; `posts.card_preview_shown` and `drafts.card_preview_shown`, the author's choice. A picture an edit replaces is deleted in the edit's own write.
 - **Earlier text posts** show no preview until they are edited.
 
+## Players in the text
+
+Added on 26 October 2026, at the owner's request: "auto-embed media that we already support that is linked inside text posts if a link is raw and placed on a separate line", with a limit per post.
+
+- **What shows:** in a text post, a line holding nothing but a bare `https` address of one piece of media from a supported provider (YouTube and Shorts, TikTok, Suno, SoundCloud, X, Reddit, Telegram) shows as that provider's player, where the text places it, a blank line around it or not, in a quote too. Up to 10 a post (`TEXT_EMBEDS_MAX`); any after stay links.
+- **What stays a link:** an address with words on its line, one in a list item, a link with a label, one with a full stop after it, one over `http`, a short link the board would first have to follow (`vm.tiktok.com`, `redd.it`), and any page that is not one piece of media. Comments and the text of link and upload posts never embed.
+- **Decided when shown:** nothing is stored or read from the provider when the post is written; the page reads the text (`parseArticle`) and draws each as a link post's media (`TextEmbed`, `PostMediaView`), with a playback slot and a remembered height of its own, so the one-player rule, loading near the screen, and "It can't play here" all hold. A poster has no picture of its own, except the one the card preview's link has, its snapshot.
+- **The card:** the excerpt leaves these lines out, as it does uploads, and Show more brings them in (`embeds` on the card). With a card preview, the player the preview shows is left out of Show more; on the post's own page that preview shows where the text places it, not above (`previewPlaced`).
+
 ## Not now
 
 - An "Insert picture" button for members writing a text post on the web; the server already takes their own uploads the same way.
 - A poster frame for a video placed in a text.
 - Reading previews for text posts from before this.
+- Players in a draft as the Drafts page shows it, which still shows their links.
+- A poster picture for each player in the text, which would mean keeping a snapshot for each.

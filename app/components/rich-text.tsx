@@ -7,7 +7,7 @@ import { copyText } from "~/lib/clipboard";
 import { cn } from "~/lib/cn";
 import { labelIsAddress, labelNamesAddress } from "~/lib/links/label";
 import { sitePath } from "~/lib/links/site-path";
-import { type Block, type Inline, mailtoAddress, parseBlocks } from "~/lib/text/markdown";
+import { type Block, type EmbedBlock, type Inline, mailtoAddress, parseArticle, parseBlocks } from "~/lib/text/markdown";
 
 import { ArticleMedia } from "./media-poster";
 import { Mention } from "./mentions";
@@ -102,6 +102,8 @@ interface RenderOptions {
   inLink?: boolean;
   /** An article's own uploads, by key: the only files its text can show. */
   files: ReadonlyMap<string, ArticleFile>;
+  /** Draws a provider link an article shows as its player; null to leave it out. */
+  embed?: (block: EmbedBlock) => ReactNode;
 }
 
 /**
@@ -224,6 +226,11 @@ function renderBlocks(blocks: Block[], options: RenderOptions): ReactNode[] {
             {renderBlocks(block.children, options)}
           </blockquote>
         );
+      case "embed": {
+        // One its card shows already, as its preview, is left out.
+        const shown = options.embed?.(block);
+        return shown ? <div key={index}>{shown}</div> : null;
+      }
       case "media": {
         // Only the post's own uploads show; one it no longer holds, as after a takedown, shows nothing.
         const file = options.files.get(block.key);
@@ -253,25 +260,29 @@ function renderBlocks(blocks: Block[], options: RenderOptions): ReactNode[] {
  * that in a fan's text, with `outsideLinks`, a bare address, or a link
  * whose label is its own address, is a real link (owner's decision,
  * 2026-10-20, replacing the address alone on its line). An article's text
- * shows its own uploads where it places them (`files`).
+ * shows its own uploads where it places them (`files`), and, with `embed`,
+ * a bare link to a provider's media on a line of its own as its player.
  */
 export function RichText({
   text,
   className,
   outsideLinks = false,
   files,
+  embed,
 }: {
   text: string;
   className?: string;
   outsideLinks?: boolean;
   files?: readonly ArticleFile[];
+  embed?: (block: EmbedBlock) => ReactNode;
 }) {
   const host = (useRouteLoaderData("root") as { host?: string } | undefined)?.host;
-  const blocks = useMemo(() => parseBlocks(text), [text]);
+  const article = embed !== undefined;
+  const blocks = useMemo(() => (article ? parseArticle(text) : parseBlocks(text)), [text, article]);
   const byKey = useMemo(() => new Map((files ?? []).map((file) => [file.key, file])), [files]);
   return (
     <div className={cn("space-y-2 text-body [overflow-wrap:anywhere]", className)}>
-      {renderBlocks(blocks, { host, outsideLinks, files: byKey })}
+      {renderBlocks(blocks, { host, outsideLinks, files: byKey, embed })}
     </div>
   );
 }

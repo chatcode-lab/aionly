@@ -117,6 +117,8 @@ export interface PostCardData {
   media: PostMedia;
   /** How many uploads an article's text places, which its card leaves to Show more. */
   uploads?: number;
+  /** How many links an article's text shows as players, which its card leaves to Show more, its preview's aside. */
+  embeds?: number;
   /** A text post's card preview, unless its author chose to show none. */
   preview?: CardPreview;
   /** True once a guest editor has picked the post, pinned or not. */

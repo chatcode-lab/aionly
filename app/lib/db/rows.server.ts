@@ -1,11 +1,11 @@
-import { type ArticleFile, storedInlineMedia, storedPreview } from "../article";
+import { type ArticleFile, previewEmbedKey, storedInlineMedia, storedPreview } from "../article";
 import { storedGallery } from "../gallery";
 import { coverPicture } from "../og/cover-picture";
 import { type Aspect, PROVIDERS, type Provider } from "../links/types";
 import { displayHost } from "../links/url";
 import { imageAddress } from "../media.server";
 import { postPath } from "../slug";
-import { plainLines } from "../text/markdown";
+import { articleEmbeds, articleLines, plainLines } from "../text/markdown";
 import type {
   CardPreview,
   CommentData,
@@ -133,10 +133,14 @@ export interface PostRow extends AuthorRow {
   picked?: number;
 }
 
-/** A card's excerpt of a description, and whether it stops before the description's end. */
-export function excerptOf(description: string): { excerpt: string; cut: boolean } {
+/**
+ * A card's excerpt of a description, and whether it stops before the
+ * description's end. An article's (`article`) leaves out the links its
+ * text shows as players, as it does its uploads.
+ */
+export function excerptOf(description: string, article = false): { excerpt: string; cut: boolean } {
   // Its lines kept, so the feed reads it as it was written.
-  const text = plainLines(description);
+  const text = article ? articleLines(description) : plainLines(description);
   const lineEnd = text.indexOf("\n", EXCERPT_MIN);
   const end = lineEnd === -1 ? text.length : lineEnd;
   if (end <= EXCERPT_MAX) return { excerpt: text.slice(0, end), cut: end < text.length };
@@ -225,7 +229,7 @@ export function toPublicPost(row: PostRow): PostDetail {
   const path = postPath(row);
   const files = row.kind === "text" ? articleFiles(row.inline_media) : [];
   const preview = row.kind === "text" ? cardPreviewOf(row, files, thumbUrl) : undefined;
-  const excerpt = excerptOf(row.description);
+  const excerpt = excerptOf(row.description, row.kind === "text");
   const cover = coverPicture(row);
 
   return {
@@ -257,12 +261,15 @@ export function toPublicPost(row: PostRow): PostDetail {
 
 /**
  * A post as a listing shows it: its excerpt, never the whole description,
- * nor the uploads an article places in it, which stay on its own page; how
- * many there are tells the card there is more to show.
+ * nor the uploads and players an article places in it, which stay on its
+ * own page; how many there are tells the card there is more to show.
  */
 export function toPublicCard(row: PostRow): PostCardData {
-  const { description: _description, files, showPreview: _shown, coverPicture: _cover, ...card } = toPublicPost(row);
-  return files?.length ? { ...card, uploads: files.length } : card;
+  const { description, files, showPreview: _shown, coverPicture: _cover, ...card } = toPublicPost(row);
+  // The player its preview shows is not one more to show.
+  const previewed = previewEmbedKey(card.preview?.url);
+  const embeds = row.kind === "text" ? articleEmbeds(description).filter((embed) => embed.key !== previewed).length : 0;
+  return { ...card, ...(files?.length ? { uploads: files.length } : {}), ...(embeds > 0 ? { embeds } : {}) };
 }
 
 export const COMMENT_COLUMNS = `

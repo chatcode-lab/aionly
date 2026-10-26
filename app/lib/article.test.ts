@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { articleKeys, firstPicture, hasStrayUploads, inlineMediaJson, previewCandidates, storedInlineMedia, storedPreview } from "./article";
-import { parseBlocks, plainLines, plainText } from "./text/markdown";
+import { articleKeys, firstPicture, hasStrayUploads, inlineMediaJson, previewCandidates, previewEmbedKey, previewPlaced, storedInlineMedia, storedPreview } from "./article";
+import { articleEmbeds, articleLines, parseArticle, parseBlocks, plainLines, plainText, TEXT_EMBEDS_MAX } from "./text/markdown";
 import { pictureSize } from "./uploads";
 
 const key = (n: number, extension = "png") => `${String(n).padStart(24, "a")}.${extension}`;
@@ -42,6 +42,68 @@ describe("an article's text", () => {
     const text = `Before.\n\n![A street](upload:${key(1)} "Caption")\n\nAfter.`;
     expect(plainLines(text)).toBe("Before.\nAfter.");
     expect(plainText(text)).toBe("Before. After.");
+  });
+});
+
+describe("a provider link on a line of its own in an article (owner's request, 2026-10-26)", () => {
+  const watch = "https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=10s";
+  const video = { type: "embed", url: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", key: "youtube:dQw4w9WgXcQ", provider: "youtube", aspect: "16:9" };
+
+  it("shows as its player, at its plain address, between the lines around it, in a quote too", () => {
+    expect(parseArticle(`Watch this:\n${watch}\nThen this.\n\n> https://www.tiktok.com/@scout/video/7301234567890123456`)).toEqual([
+      { type: "paragraph", children: [{ type: "text", text: "Watch this:" }] },
+      { ...video, index: 0 },
+      { type: "paragraph", children: [{ type: "text", text: "Then this." }] },
+      {
+        type: "quote",
+        children: [{ type: "embed", url: "https://www.tiktok.com/@scout/video/7301234567890123456", key: "tiktok:7301234567890123456", provider: "tiktok", aspect: "9:16", index: 1 }],
+      },
+    ]);
+    expect(articleEmbeds("https://youtu.be/dQw4w9WgXcQ\nhttps://www.youtube.com/shorts/dQw4w9WgXcQ").map((embed) => [embed.key, embed.aspect])).toEqual([
+      ["youtube:dQw4w9WgXcQ", "16:9"],
+      ["youtube:dQw4w9WgXcQ", "9:16"],
+    ]);
+  });
+
+  it("stays a link with words around it, in a list, as a short link or a page, without https, or with a full stop after it", () => {
+    for (const text of [
+      `See ${watch} here.`,
+      `- ${watch}`,
+      "https://vm.tiktok.com/ZMabc123/",
+      "https://redd.it/1abcde",
+      "https://example.com/page",
+      "http://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      `${watch}.`,
+      `[the video](${watch})`,
+    ]) {
+      expect(articleEmbeds(text), text).toEqual([]);
+    }
+  });
+
+  it("shows at most so many, the rest staying links, and only in an article", () => {
+    const many = Array.from({ length: TEXT_EMBEDS_MAX + 2 }, (_, n) => `https://x.com/someone/status/18500000000000000${String(n).padStart(2, "0")}`).join("\n");
+    expect(articleEmbeds(many).map((embed) => embed.index)).toEqual(Array.from({ length: TEXT_EMBEDS_MAX }, (_, n) => n));
+    expect(new Set(articleEmbeds(many).map((embed) => embed.key)).size).toBe(TEXT_EMBEDS_MAX);
+    const last = parseArticle(many).at(-1)!;
+    expect(last.type).toBe("paragraph");
+    // A comment or a link post's text keeps it a link.
+    expect(parseBlocks(watch)).toEqual([{ type: "paragraph", children: [{ type: "url", href: watch }] }]);
+  });
+
+  it("leaves the excerpt, and names the media its card preview plays", () => {
+    expect(articleLines(`Before.\n${watch}\nAfter, at ${watch}`)).toBe(`Before.\nAfter, at ${watch}`);
+    expect(plainLines(`Before.\n${watch}`)).toBe(`Before.\n${watch}`);
+    expect(previewEmbedKey("https://www.youtube.com/watch?v=dQw4w9WgXcQ")).toBe("youtube:dQw4w9WgXcQ");
+    expect(previewEmbedKey("https://example.com/page")).toBeNull();
+    expect(previewEmbedKey(undefined)).toBeNull();
+  });
+
+  it("takes its card preview's place on the post's page when the text shows the same media, in any spelling", () => {
+    const preview = "https://www.youtube.com/watch?v=dQw4w9WgXcQ";
+    expect(previewPlaced("Intro.\nhttps://youtu.be/dQw4w9WgXcQ", preview)).toBe(true);
+    expect(previewPlaced(`Watch ${preview} now.`, preview)).toBe(false);
+    expect(previewPlaced("https://www.youtube.com/watch?v=aaaaaaaaaaa", preview)).toBe(false);
+    expect(previewPlaced("https://example.com/page", "https://example.com/page")).toBe(false);
   });
 });
 

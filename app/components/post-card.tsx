@@ -8,10 +8,10 @@ import {
   Link2,
   MessageSquare,
 } from "lucide-react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useFetcher } from "react-router";
 
-import type { ArticleFile } from "~/lib/article";
+import { type ArticleFile, previewEmbedKey, previewPlaced } from "~/lib/article";
 import { copyText } from "~/lib/clipboard";
 import { cn } from "~/lib/cn";
 import { formatAge, formatCount } from "~/lib/format";
@@ -22,7 +22,7 @@ import type { MentionNames } from "~/lib/text/mentions";
 import { Avatar } from "./avatar";
 import { MentionsProvider } from "./mentions";
 import { OUTBOUND_REL } from "./media-poster";
-import { PostMediaView } from "./post-media";
+import { PostMediaView, TextEmbed } from "./post-media";
 import { RichText } from "./rich-text";
 import { type Vote, VoteControl } from "./vote-control";
 import { profilePath } from "~/lib/slug";
@@ -202,16 +202,18 @@ function CopyLinkButton({ path }: { path: string }) {
 
 /**
  * A post's excerpt in the feed, with Show more where it was cut short, by
- * its length or its lines, or where an article's text places uploads the
- * card leaves out: the whole description then loads, formatted as on the
- * post's page, and Show less goes back (owner's request, 2026-10-20).
+ * its length or its lines, or where an article's text places uploads or
+ * players the card leaves out: the whole description then loads, formatted
+ * as on the post's page, and Show less goes back (owner's request,
+ * 2026-10-20).
  */
 function Excerpt({ post }: { post: PostCardData }) {
   const text = useRef<HTMLParagraphElement>(null);
   // Cut by length on the server, or by the line clamp, measured whenever
   // the excerpt's size changes, as when the window narrows (review F103).
-  // Uploads its card leaves out: all of an article's, but the one its preview shows.
-  const unshown = (post.uploads ?? 0) - (post.preview?.upload ? 1 : 0);
+  // Uploads and players its card leaves out: all of an article's, but the one its preview shows.
+  const unshown = (post.uploads ?? 0) - (post.preview?.upload ? 1 : 0) + (post.embeds ?? 0);
+  const previewed = previewEmbedKey(post.preview?.url);
   const truncated = post.excerptCut === true || post.excerpt.endsWith("…") || unshown > 0;
   const [clamped, setClamped] = useState(false);
   const [open, setOpen] = useState(false);
@@ -249,8 +251,9 @@ function Excerpt({ post }: { post: PostCardData }) {
             text={loaded.description}
             className="text-text-muted"
             outsideLinks={post.author.outsideLinks}
-            // The upload its preview shows above is not shown twice.
+            // The upload or player its preview shows above is not shown twice.
             files={loaded.files?.filter((file) => file.key !== post.preview?.upload)}
+            embed={post.media.kind === "text" ? (block) => (block.key === previewed ? null : <TextEmbed post={post} block={block} />) : undefined}
           />
         </MentionsProvider>
       ) : (
@@ -315,6 +318,14 @@ export function PostCard({
   lead?: boolean;
 }) {
   const permalink = post.path;
+  const article = post.media.kind === "text";
+  const previewed = previewEmbedKey(post.preview?.url);
+  // On its own page, a preview its text shows as a player is shown there, where the text places it.
+  const placed = useMemo(
+    () => description !== undefined && article && previewPlaced(description, post.preview?.url),
+    [description, article, post.preview?.url],
+  );
+  const previewThumb = post.preview?.media.kind === "media" ? post.preview.media.thumbUrl : undefined;
 
   return (
     <article className="bleed rounded-xl border border-border bg-surface p-3 sm:flex sm:gap-3 sm:p-4">
@@ -373,9 +384,9 @@ export function PostCard({
           <div className="mt-3">
             <PostMediaView post={post} lead={lead} />
           </div>
-        ) : post.preview && !(description !== undefined && post.preview.upload) ? (
+        ) : post.preview && !(description !== undefined && (post.preview.upload || placed)) ? (
           // A text post's preview, drawn as a post's own media: on its own
-          // page only a link's, as its text shows its uploads in place.
+          // page only a link's, as its text shows its uploads and players in place.
           <div className="mt-3">
             <PostMediaView
               post={{ ...post, media: post.preview.media, url: post.preview.url ?? post.url, host: post.preview.host, title: post.preview.alt || post.title }}
@@ -387,7 +398,17 @@ export function PostCard({
         {description === undefined ? (
           <Excerpt post={post} />
         ) : (
-          <RichText text={description} className="mt-3" outsideLinks={post.author.outsideLinks} files={files} />
+          <RichText
+            text={description}
+            className="mt-3"
+            outsideLinks={post.author.outsideLinks}
+            files={files}
+            embed={
+              article
+                ? (block) => <TextEmbed post={post} block={block} thumbUrl={block.key === previewed ? previewThumb : undefined} />
+                : undefined
+            }
+          />
         )}
 
         <div className="mt-2 -mb-1 flex items-center gap-0.5 max-sm:-mx-1.5 sm:-ml-2 sm:gap-1">

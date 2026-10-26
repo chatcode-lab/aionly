@@ -264,6 +264,27 @@ describe("a text post's card preview", () => {
     expect(page?.state === "live" ? page.post.showPreview : null).toBe(true);
   });
 
+  it("leaves the links its text shows as players to Show more, all but the one it previews, and out of its excerpt", async () => {
+    const text = [
+      "Three to watch.",
+      "https://youtu.be/dQw4w9WgXcQ",
+      "Then a post:",
+      "https://x.com/someone/status/1850000000000000001",
+      "",
+      "> https://t.me/durov/123",
+      "",
+      "And https://www.youtube.com/watch?v=aaaaaaaaaaa in a sentence.",
+    ].join("\n");
+    const video = { shown: true, json: JSON.stringify({ link: "https://www.youtube.com/watch?v=dQw4w9WgXcQ", provider: "youtube", aspect: "16:9", title: null }), thumbKey: null };
+    await textPost(text, video);
+    const [card] = (await newPage(db, "all", NOW, null)).posts;
+    expect(card?.embeds).toBe(2);
+    expect(card?.excerpt).toBe("Three to watch.\nThen a post:\nAnd https://www.youtube.com/watch?v=aaaaaaaaaaa in a sentence.");
+    // Without a preview, every one of them is left to Show more.
+    await textPost(text, { shown: false, json: null, thumbKey: null }, "unpreviewed", "u2");
+    expect((await newPage(db, "all", NOW, null)).posts.find((post) => post.id === "unpreviewed")?.embeds).toBe(3);
+  });
+
   it("changes with an edit: hidden without an edited mark, and a picture it no longer shows is deleted", async () => {
     const first = await snapshot();
     const link = (url: string, thumbKey: string | null) => ({ shown: true, json: JSON.stringify({ link: url, provider: null, aspect: null, title: null }), thumbKey });

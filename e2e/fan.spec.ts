@@ -1098,3 +1098,49 @@ test("a name of 5 characters comes with the yearly plan", async ({ page, context
   // Brand names stay reserved, plan or not.
   await expect(page.getByLabel("Username")).toHaveValue(short);
 });
+
+test.describe("with players", () => {
+  test.use({ fakePlayers: true });
+
+  test("an article shows a provider's link on a line of its own as its player, which its card leaves to Show more", async ({ page, context, account, request }) => {
+    await setPlan(request, account);
+    await account.signIn(context);
+    await open(page, "/submit");
+    await page.getByRole("button", { name: "Text", exact: true }).click();
+    // No preview, so nothing is read from the providers.
+    await page.getByLabel(/Show a preview in the feed/).uncheck();
+    const title = `Two to watch, by ${account.username}`;
+    const sentence = "https://www.youtube.com/watch?v=aaaaaaaaaaa";
+    await finishPost(
+      page,
+      title,
+      [
+        "Two to watch, and one to read.",
+        "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+        "Between them, a line.",
+        "https://x.com/someone/status/1850000000000000001",
+        "",
+        `And ${sentence} in a sentence stays a link.`,
+      ].join("\n"),
+    );
+    // Each where the text places it: a poster until its frame loads, as it nears the screen.
+    const players = (scope: import("@playwright/test").Locator) => ({
+      video: scope.locator('iframe[src*="youtube-nocookie.com/embed/dQw4w9WgXcQ"]').or(scope.getByRole("button", { name: /^Play video/ })),
+      post: scope.locator('iframe[src*="platform.twitter.com/embed/Tweet.html"]').or(scope.getByRole("button", { name: /^Load post/ })),
+    });
+    const post = page.locator("main article").first();
+    await expect(players(post).video).toHaveCount(1);
+    await expect(players(post).post).toHaveCount(1);
+    await expect(post.locator(`a[href="${sentence}"]`)).toBeVisible();
+
+    // In the feed, the excerpt leaves them out, and Show more brings them in.
+    await open(page, "/?sort=new&range=all");
+    const card = page.locator("main article", { has: page.getByRole("link", { name: title }) });
+    await expect(card).toContainText("Between them, a line.");
+    await expect(card).not.toContainText("dQw4w9WgXcQ");
+    await expect(players(card).video).toHaveCount(0);
+    await card.getByRole("button", { name: "Show more" }).click();
+    await expect(players(card).video).toHaveCount(1);
+    await expect(players(card).post).toHaveCount(1);
+  });
+});

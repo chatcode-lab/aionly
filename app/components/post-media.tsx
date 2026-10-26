@@ -5,11 +5,13 @@ import { connectEmbed } from "~/lib/embeds/connect";
 import { FRAME_LAYOUT, frameHeight, frameUrl } from "~/lib/embeds/frames";
 import { resolveLink } from "~/lib/links/resolve";
 import type { MediaLink, Provider } from "~/lib/links/types";
+import { displayHost } from "~/lib/links/url";
 import { playbackController } from "~/lib/playback/controller";
 import { useMediaSlot } from "~/lib/playback/hooks";
 import { connectNative } from "~/lib/playback/native";
 import type { SlotKind } from "~/lib/playback/plan";
 import type { PostCardData, PostMedia } from "~/lib/public-types";
+import type { EmbedBlock } from "~/lib/text/markdown";
 import { useResolvedTheme } from "~/lib/use-resolved-theme";
 
 import { EmbedFrame } from "./embed-frame";
@@ -267,4 +269,24 @@ export function PostMediaView({ post, lead }: { post: PostCardData; lead?: boole
     case "text":
       return null;
   }
+}
+
+/**
+ * A provider link an article's text shows as its player, where the text
+ * places it (owner's request, 2026-10-26): drawn as a link post's media,
+ * with a playback slot and a remembered height of its own. `thumbUrl` is
+ * the post's snapshot when its preview is this link.
+ */
+export function TextEmbed({ post, block, thumbUrl }: { post: PostCardData; block: EmbedBlock; thumbUrl?: string }) {
+  return (
+    <PostMediaView
+      post={{
+        ...post,
+        id: `${post.id}~${block.index}`,
+        media: { kind: "media", provider: block.provider, aspect: block.aspect, ...(thumbUrl ? { thumbUrl } : {}) },
+        url: block.url,
+        host: displayHost(new URL(block.url)),
+      }}
+    />
+  );
 }

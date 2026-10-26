@@ -6,8 +6,13 @@
  * links here; the renderer decides which may be followed. Images are links
  * to their address, never shown, except an article's own upload on a line
  * of its own, `![words](upload:<key>)` or `![words](upload:<key> "caption")`,
- * which is a block the renderer shows from the post's own files.
+ * which is a block the renderer shows from the post's own files. Parsed as
+ * an article's (`parseArticle`), a bare link to a provider's media on a
+ * line of its own is a block too, which shows as its player.
  */
+
+import { mediaUrl, resolveLink } from "../links/resolve";
+import type { Aspect, Provider } from "../links/types";
 
 export type Inline =
   | { type: "text"; text: string }
@@ -28,7 +33,20 @@ export type Block =
   | { type: "quote"; children: Block[] }
   | { type: "list"; ordered: boolean; start: number; items: Inline[][] }
   // One of the post's own uploads, on a line of its own (see app/lib/article.ts).
-  | { type: "media"; key: string; alt: string; caption: string | null };
+  | { type: "media"; key: string; alt: string; caption: string | null }
+  // In an article, a bare link to a provider's media on a line of its own: its
+  // plain address, its `provider:id` key, and its place among the text's embeds.
+  | { type: "embed"; url: string; key: string; provider: Provider; aspect: Aspect; index: number };
+
+export type EmbedBlock = Extract<Block, { type: "embed" }>;
+
+/** The most links an article's text shows as players; any after stay links (owner's request, 2026-10-26). */
+export const TEXT_EMBEDS_MAX = 10;
+
+/** How many links the text being parsed shows as players so far. */
+interface EmbedBudget {
+  used: number;
+}
 
 // Quotes inside quotes, and emphasis inside emphasis, stop here.
 const MAX_NESTING = 3;
@@ -109,8 +127,35 @@ function isBlank(line: string): boolean {
   return line.trim() === "";
 }
 
-function startsBlock(line: string): boolean {
-  return FENCE.test(line) || QUOTE.test(line) || BULLET.test(line) || NUMBERED.test(line) || MEDIA_LINE.test(line);
+function startsBlock(line: string, embeds?: EmbedBudget): boolean {
+  return (
+    FENCE.test(line) ||
+    QUOTE.test(line) ||
+    BULLET.test(line) ||
+    NUMBERED.test(line) ||
+    MEDIA_LINE.test(line) ||
+    (embeds !== undefined && embeds.used < TEXT_EMBEDS_MAX && embedOf(line) !== null)
+  );
+}
+
+/**
+ * A provider's media that a line holding nothing but its bare https address
+ * links to, as an article shows it, or null: an address with words around
+ * it, a short link the board would have to follow first, or a page that is
+ * not one piece of media stays a link.
+ */
+export function embedOf(line: string): Omit<EmbedBlock, "index"> | null {
+  const text = line.trim();
+  if (!text.startsWith("https://") || bareUrl(text) !== text) return null;
+  let url: URL;
+  try {
+    url = new URL(text);
+  } catch {
+    return null;
+  }
+  const link = resolveLink(url);
+  if (link.kind !== "media") return null;
+  return { type: "embed", url: mediaUrl(link, url), key: link.canonicalKey, provider: link.provider, aspect: link.aspect };
 }
 
 /** Lines joined with breaks, each parsed for inline markup. */
@@ -121,7 +166,28 @@ function lines(texts: string[]): Inline[] {
   ]);
 }
 
-export function parseBlocks(source: string, nesting = 0): Block[] {
+/**
+ * An article's text: as `parseBlocks`, but a bare link to a provider's media
+ * on a line of its own, up to `TEXT_EMBEDS_MAX` of them, is an embed block.
+ */
+export function parseArticle(source: string): Block[] {
+  return parseBlocks(source, 0, { used: 0 });
+}
+
+/** The links an article's text shows as players, in its order, quotes included. */
+export function articleEmbeds(source: string): EmbedBlock[] {
+  const found: EmbedBlock[] = [];
+  const walk = (blocks: Block[]) => {
+    for (const block of blocks) {
+      if (block.type === "embed") found.push(block);
+      else if (block.type === "quote") walk(block.children);
+    }
+  };
+  walk(parseArticle(source));
+  return found;
+}
+
+export function parseBlocks(source: string, nesting = 0, embeds?: EmbedBudget): Block[] {
   const input = source.replace(/\r\n?/g, "\n").split("\n");
   const blocks: Block[] = [];
   let index = 0;
@@ -154,7 +220,15 @@ export function parseBlocks(source: string, nesting = 0): Block[] {
         body.push(match[1]!);
         index += 1;
       }
-      blocks.push({ type: "quote", children: parseBlocks(body.join("\n"), nesting + 1) });
+      blocks.push({ type: "quote", children: parseBlocks(body.join("\n"), nesting + 1, embeds) });
+      continue;
+    }
+
+    const embed = embeds && embeds.used < TEXT_EMBEDS_MAX ? embedOf(line) : null;
+    if (embed && embeds) {
+      blocks.push({ ...embed, index: embeds.used });
+      embeds.used += 1;
+      index += 1;
       continue;
     }
 
@@ -175,7 +249,7 @@ export function parseBlocks(source: string, nesting = 0): Block[] {
         const item = pattern.exec(current);
         if (item) {
           items.push([item[bullet ? 1 : 2]!]);
-        } else if (!isBlank(current) && /^[ \t]/.test(current) && !startsBlock(current)) {
+        } else if (!isBlank(current) && /^[ \t]/.test(current) && !startsBlock(current, embeds)) {
           // An indented line continues the item above it.
           items[items.length - 1]!.push(current);
         } else {
@@ -193,7 +267,7 @@ export function parseBlocks(source: string, nesting = 0): Block[] {
     }
 
     const paragraph: string[] = [];
-    while (index < input.length && !isBlank(input[index]!) && (paragraph.length === 0 || !startsBlock(input[index]!))) {
+    while (index < input.length && !isBlank(input[index]!) && (paragraph.length === 0 || !startsBlock(input[index]!, embeds))) {
       paragraph.push(input[index]!);
       index += 1;
     }
@@ -403,6 +477,7 @@ function blockTexts(blocks: Block[], lineBreak: string): string[] {
         return block.items.map((item) => inlineText(item, lineBreak));
       // A picture or player has no words in a summary.
       case "media":
+      case "embed":
         return [];
     }
   });
@@ -413,13 +488,22 @@ export function plainText(source: string): string {
   return blockTexts(parseBlocks(source), " ").join(" ").replace(/\s+/g, " ").trim();
 }
 
+/** An article's text, its players left out, as `plainLines`. */
+export function articleLines(source: string): string {
+  return linesOf(parseArticle(source));
+}
+
 /**
  * The text without its markup, keeping its lines: each paragraph, list
  * item, and line break starts a new line, and blank lines go. For the
  * feed's excerpts, which read as the post was written.
  */
 export function plainLines(source: string): string {
-  return blockTexts(parseBlocks(source), "\n")
+  return linesOf(parseBlocks(source));
+}
+
+function linesOf(blocks: Block[]): string {
+  return blockTexts(blocks, "\n")
     .join("\n")
     .split("\n")
     .map((line) => line.replace(/\s+/g, " ").trim())

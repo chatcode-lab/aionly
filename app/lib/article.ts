@@ -1,4 +1,5 @@
-import { type Block, type Inline, parseBlocks } from "./text/markdown";
+import { resolveLink } from "./links/resolve";
+import { articleEmbeds, type Block, type Inline, parseBlocks } from "./text/markdown";
 import type { MediaType } from "./uploads";
 
 /**
@@ -139,6 +140,30 @@ function blockCandidates(blocks: Block[], into: PreviewCandidate[]): PreviewCand
  */
 export function previewCandidates(text: string): PreviewCandidate[] {
   return blockCandidates(parseBlocks(text), []);
+}
+
+/**
+ * The `provider:id` key of the media a card preview's link plays, or null
+ * for a preview of anything else: the text that shows the same link as its
+ * player leaves it to the preview where the card shows both.
+ */
+export function previewEmbedKey(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    const link = resolveLink(new URL(url));
+    return link.kind === "media" ? link.canonicalKey : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Whether an article's text shows its card preview's link as a player: its
+ * own page then shows it there, where the text places it, not above.
+ */
+export function previewPlaced(text: string, previewUrl: string | undefined): boolean {
+  const key = previewEmbedKey(previewUrl);
+  return key !== null && articleEmbeds(text).some((embed) => embed.key === key);
 }
 
 /** A text post's card preview as stored (`card_preview`), its picture, if any, the post's snapshot. */
