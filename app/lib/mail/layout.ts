@@ -61,7 +61,7 @@ export function composeLetter(letter: Letter): { subject: string; html: string; 
 ${preview ? `<div style="display:none;max-height:0;overflow:hidden">${escape(preview)}</div>` : ""}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f7f6f3"><tr><td align="center" style="padding:24px 16px">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;padding:8px 20px 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1f1d1a">
-<tr><td style="padding:16px 0 4px"><a href="${escape(origin)}" style="color:#1f1d1a;font-size:20px;font-weight:700;text-decoration:none">aion<span style="color:#c2410c">.</span>ly</a></td></tr>
+<tr><td style="padding:16px 0 4px"><a href="${escape(origin)}" style="color:#1f1d1a;font-size:20px;font-weight:700;text-decoration:none"><span style="color:#c2410c">ai</span>on.ly</a></td></tr>
 <tr><td style="padding:12px 0 0"><div style="font-size:22px;line-height:28px;font-weight:700">${prose(heading, "#1f1d1a", origin)}</div>
 ${paragraphs.map((paragraph) => `<p style="color:#55524c;font-size:15px;line-height:22px;margin:10px 0 0">${prose(paragraph, "#55524c", origin)}</p>`).join("\n")}</td></tr>
 ${block ? `<tr><td style="padding:18px 0 0">${block.html}</td></tr>` : ""}

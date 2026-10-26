@@ -154,9 +154,9 @@ function textAt(text: TextBlock, x: number, top: number): { svg: string; bottom:
   return { svg, bottom: first + (text.lines.length - 1) * text.lineHeight + Math.round(text.size * 0.24) };
 }
 
-/** The wordmark, with its accent dot, as the site header draws it. */
+/** The wordmark, its "ai" in the accent, as the site header's name shows it. */
 function wordmark(x: number, baseline: number, size: number): string {
-  return `<text x="${x}" y="${baseline}" font-family="${FAMILY.semibold}" font-size="${size}" fill="${COLORS.text}">aion<tspan fill="${COLORS.accent}">.</tspan>ly</text>`;
+  return `<text x="${x}" y="${baseline}" font-family="${FAMILY.semibold}" font-size="${size}" fill="${COLORS.text}"><tspan fill="${COLORS.accent}">ai</tspan>on.ly</text>`;
 }
 
 function footer(text: string, font: FontMetrics, width: number): string {

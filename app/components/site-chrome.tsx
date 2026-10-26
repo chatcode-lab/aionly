@@ -3,6 +3,8 @@ import { Link } from "react-router";
 
 import { NEW_ISSUE, REPOSITORY } from "~/lib/site";
 
+import { SiteLogo } from "./site-logo";
+
 /**
  * The slim sticky header. On wide screens the toolbar (sort and range) sits
  * in the same row, taking the room between the wordmark and the actions, so
@@ -23,11 +25,11 @@ export function SiteHeader({
         <Link
           to="/"
           prefetch="intent"
-          // The wordmark is split for its colored dot, so name it in one piece.
+          // The logo shows its eyes, the name only as the cursor comes, so name it here.
           aria-label="aion.ly home"
           className="flex h-13 items-center rounded-md text-title font-bold tracking-tight"
         >
-          aion<span className="text-accent">.</span>ly
+          <SiteLogo />
         </Link>
         {toolbar ? (
           <div className="order-last flex w-full items-center gap-2 pb-2 md:order-none md:w-auto md:min-w-0 md:flex-1 md:pb-0">

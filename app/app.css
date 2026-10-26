@@ -363,3 +363,134 @@
     border-radius: 0;
   }
 }
+
+/*
+ * The header logo (app/components/site-logo.tsx): two eyes, and the name
+ * that comes down over them. The component sets --cover (how far the name
+ * covers them, 0 to 1), --look-x and --look-y (where the pupils look), and
+ * the data- states below. Reduced motion stills it all (above).
+ */
+.logo-eye {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.logo-pupil {
+  transform: translate(calc(var(--look-x, 0) * 1px), calc(var(--look-y, 0) * 1px));
+  transition: transform 0.18s ease-out;
+}
+
+/* As the name comes down, the eyes duck and squash under it. */
+.logo-duck {
+  transform-origin: 50% 100%;
+  transform: translateY(calc(var(--cover, 0) * 0.5em)) scaleY(calc(1 - var(--cover, 0) * 0.35));
+  transition: transform 0.2s ease-out;
+}
+
+.logo-name {
+  transform: translateY(calc((var(--cover, 0) - 1) * 100%));
+  transition: transform 0.2s ease-out;
+}
+
+.logo-wobble {
+  transform-origin: 50% 100%;
+}
+
+/* Covering and lifting are single moves, with a little bounce. */
+.site-logo[data-snap] .logo-duck {
+  transition: transform 0.28s cubic-bezier(0.3, 1.5, 0.5, 1);
+}
+
+.site-logo[data-snap] .logo-name {
+  transition: transform 0.28s cubic-bezier(0.3, 1.25, 0.5, 1);
+}
+
+/* Covered, the eyes close behind the name; keyboard focus shows it too. */
+.site-logo[data-shut] .logo-duck,
+:focus-visible > .site-logo .logo-duck {
+  transform: translateY(0.45em) scaleY(0.15);
+}
+
+:focus-visible > .site-logo .logo-name {
+  transform: none;
+}
+
+.site-logo[data-near] .logo-wobble {
+  animation: logo-wobble 0.45s ease-in-out infinite;
+}
+
+.site-logo[data-play] .logo-eye {
+  animation: logo-blink 2.6s ease-in-out both;
+}
+
+.site-logo[data-play] .logo-look {
+  animation: logo-look 2.6s cubic-bezier(0.5, 0, 0.2, 1) both;
+}
+
+/* Out again, they blink and check around. */
+.site-logo[data-peek] .logo-eye {
+  animation: logo-peek 1.2s ease-out both;
+}
+
+.site-logo[data-peek] .logo-look {
+  animation: logo-peek-look 1.2s ease-in-out both;
+}
+
+/*
+ * A touch screen has no cursor, so the name shows from the first paint,
+ * and the eyes come out while a finger swipes (data-awake), quicker, since
+ * touches are short.
+ */
+@media (hover: none) {
+  .site-logo:not([data-awake]) .logo-name {
+    transform: none;
+  }
+
+  .site-logo:not([data-awake]) .logo-duck {
+    transform: translateY(0.45em) scaleY(0.15);
+  }
+
+  .site-logo .logo-name {
+    transition: transform 0.16s cubic-bezier(0.3, 1.2, 0.5, 1);
+  }
+
+  .site-logo .logo-duck {
+    transition: transform 0.16s cubic-bezier(0.3, 1.5, 0.5, 1);
+  }
+
+  .site-logo .logo-pupil {
+    transition-duration: 0.06s;
+  }
+}
+
+@keyframes logo-blink {
+  0%, 8%, 20%, 88%, 100% { transform: scaleY(1); }
+  14%, 94% { transform: scaleY(0.08); }
+}
+
+@keyframes logo-look {
+  0%, 34% { transform: translate(0, 0); }
+  42%, 56% { transform: translate(-2.4px, 0); }
+  64%, 78% { transform: translate(2.4px, -0.8px); }
+  88%, 100% { transform: translate(0, 0); }
+}
+
+@keyframes logo-wobble {
+  0%, 100% { transform: rotate(0deg); }
+  25% { transform: rotate(-4deg); }
+  75% { transform: rotate(4deg); }
+}
+
+@keyframes logo-peek {
+  0% { transform: scaleY(0.15); }
+  18%, 40% { transform: scaleY(1); }
+  47% { transform: scaleY(0.1); }
+  54%, 100% { transform: scaleY(1); }
+}
+
+@keyframes logo-peek-look {
+  0%, 30% { transform: translate(0, 0); }
+  42% { transform: translate(-2.4px, 0); }
+  62% { transform: translate(2.4px, 0); }
+  80%, 100% { transform: translate(0, 0); }
+}
