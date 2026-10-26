@@ -21,8 +21,12 @@ export const LOGO_IDLE_REPEAT_MS = 15_000;
 /** On a touch screen, how far a finger moves before it is a swipe, in CSS pixels. */
 export const TOUCH_SWIPE = 10;
 
-/** On a touch screen, how long the eyes stay out after the last swipe or scroll. */
-export const TOUCH_AWAKE_MS = 1200;
+/**
+ * On a touch screen, how long the eyes stay out after the finger lifts: a
+ * moment only, since a longer stay, with the page still scrolling on, drew
+ * the eye away from it (owner's request, 2026-10-26).
+ */
+export const TOUCH_HIDE_MS = 300;
 
 export interface LogoCover {
   /** How far the name covers the eyes: 0 lifted, 1 covering them. */
