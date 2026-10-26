@@ -2,7 +2,7 @@ import { X } from "lucide-react";
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useLocation, useMatches, useRouteLoaderData } from "react-router";
 
-import { closedLately, INVITE_CLOSED_KEY, INVITE_SHOWN_KEY, inviteDue } from "~/lib/digest-invite";
+import { closedLately, INVITE_CLOSED_KEY, INVITE_OPENED_KEY, INVITE_SHOWN_KEY, inviteDue } from "~/lib/digest-invite";
 import { returnHere } from "~/lib/security/request";
 import { FOUNDER, SITE_NAME } from "~/lib/site";
 
@@ -47,7 +47,7 @@ interface InviteControls {
   open: boolean;
   /** Opens it where the visitor is, or closes it when open. */
   toggle: () => void;
-  /** Until the visitor has seen it: the button's dot. */
+  /** Until the visitor opens it from the button this visit, and not while it is open: the button's dot. */
   fresh: boolean;
   /** The shared link's page for the digest, which the button leads to before the page's scripts run. */
   href: string;
@@ -91,11 +91,13 @@ export function DigestInviteProvider({ children }: { children: ReactNode }) {
   const titleId = useId();
   const textId = useId();
 
-  // Shown once a visit, and kept away a while once closed; until then, the button has its dot.
+  // Shown by itself once a visit, and kept away a while once closed. The
+  // button's dot stays each visit until the visitor opens it from there.
   useEffect(() => {
-    const seen = stored(() => sessionStorage, INVITE_SHOWN_KEY) !== null || closedLately(stored(() => localStorage, INVITE_CLOSED_KEY), Date.now());
-    if (seen) setState("done");
-    setFresh(!seen);
+    if (stored(() => sessionStorage, INVITE_SHOWN_KEY) !== null || closedLately(stored(() => localStorage, INVITE_CLOSED_KEY), Date.now())) {
+      setState("done");
+    }
+    setFresh(stored(() => sessionStorage, INVITE_OPENED_KEY) === null);
   }, []);
 
   useEffect(() => {
@@ -104,8 +106,11 @@ export function DigestInviteProvider({ children }: { children: ReactNode }) {
 
   const show = useCallback((at: string | null) => {
     store(() => sessionStorage, INVITE_SHOWN_KEY, "1");
+    if (at !== null) {
+      store(() => sessionStorage, INVITE_OPENED_KEY, "1");
+      setFresh(false);
+    }
     setOpenedAt(at);
-    setFresh(false);
     setState("open");
   }, []);
 
@@ -186,7 +191,7 @@ export function DigestInviteProvider({ children }: { children: ReactNode }) {
       invite
         ? {
             open: shown,
-            fresh,
+            fresh: fresh && !shown,
             href: digestJoinPath(invite.code, "daily", returnHere(location.pathname, location.search)),
             toggle: () => {
               if (shown) return close();

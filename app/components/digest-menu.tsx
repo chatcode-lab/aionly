@@ -10,12 +10,13 @@ export const DIGESTS = ["off", "daily", "weekly", "monthly"] as const;
 
 export type Digest = (typeof DIGESTS)[number];
 
-// A daily digest brings the weekly and monthly ones, and a weekly one the
-// monthly, so each choice names what it brings.
+// Each choice by its own word alone (owner's request, 2026-10-26): a daily
+// digest still brings the weekly and monthly ones, and a weekly one the
+// monthly, as each such digest says at its foot.
 export const DIGEST_LABELS: Record<Digest, string> = {
   off: "Off",
-  daily: "Daily, weekly, and monthly",
-  weekly: "Weekly and monthly",
+  daily: "Daily",
+  weekly: "Weekly",
   monthly: "Monthly",
 };
 

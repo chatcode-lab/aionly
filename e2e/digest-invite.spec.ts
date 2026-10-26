@@ -74,9 +74,10 @@ test("a visitor who reads a while is invited to join for the digest, and once cl
   await invite.getByText("Weekly", { exact: true }).click();
   await expect(invite.getByRole("radio", { name: "Weekly" })).toBeChecked();
 
-  // Closed, it stays away, on the next visit too.
+  // Closed, it stays away, on the next visit too; the top bar's button keeps its dot.
   await invite.getByRole("button", { name: "Close" }).click();
   await expect(invite).toHaveCount(0);
+  await expect(page.locator("header").getByRole("link", { name: "Email digest" }).locator("span")).toHaveCount(1);
   await page.evaluate(() => sessionStorage.clear());
   await open(page, "/");
   await readAWhile(page);
@@ -152,8 +153,8 @@ test("Continue with Google keeps the shared link and the digest chosen for the s
 test("the welcome step names the digest the account starts with", async ({ page, context, account }) => {
   await account.signIn(context);
   for (const [choice, words] of [
-    ["Daily, weekly, and monthly", "Each morning we'll email you the board's best posts"],
-    ["Weekly and monthly", "Each Monday we'll email you the week's best posts"],
+    ["Daily", "Each morning we'll email you the board's best posts"],
+    ["Weekly", "Each Monday we'll email you the week's best posts"],
     ["Monthly", "Early each month we'll email you the month's best posts"],
   ]) {
     await open(page, "/");
@@ -202,7 +203,7 @@ test.describe("inside an app's browser", () => {
   });
 });
 
-test("the top bar's digest button, with a dot until it is seen, opens the invitation on any page", async ({ page }) => {
+test("the top bar's digest button, with a dot each visit until it is used, opens the invitation on any page", async ({ page }) => {
   await open(page, "/manifesto");
   const button = page.locator("header").getByRole("link", { name: "Email digest" });
   const dot = button.locator("span");
@@ -233,11 +234,14 @@ test("the top bar's digest button, with a dot until it is seen, opens the invita
   await expect(page).toHaveURL(/\/signin\?next=%2Fsubmit$/);
   await expect(invite).toHaveCount(0);
 
-  // Seen, the dot stays away on the next visit too, while closed lately.
-  await page.evaluate(() => sessionStorage.clear());
+  // Used, the dot stays away for the rest of the visit, and is back on the next,
+  // though the invitation stays away by itself after it was closed.
   await open(page, "/");
   await expect(button).toBeVisible();
   await expect(dot).toHaveCount(0);
+  await page.evaluate(() => sessionStorage.clear());
+  await open(page, "/");
+  await expect(dot).toHaveCount(1);
 });
 
 test("members have their own digest menu, not the invitation", async ({ page, context, account }) => {

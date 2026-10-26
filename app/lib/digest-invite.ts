@@ -21,6 +21,9 @@ export const INVITE_QUIET_MS = 7 * 24 * 3600 * 1000;
 /** Set for the visit (in session storage) once it has shown. */
 export const INVITE_SHOWN_KEY = "aionly:digest-invite-shown";
 
+/** Set for the visit (in session storage) once the visitor opens it from the top bar's button, whose dot then goes. */
+export const INVITE_OPENED_KEY = "aionly:digest-invite-opened";
+
 /** When it was last closed, in milliseconds (in local storage). */
 export const INVITE_CLOSED_KEY = "aionly:digest-invite-closed";
 

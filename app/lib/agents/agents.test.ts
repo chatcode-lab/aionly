@@ -30,6 +30,17 @@ describe("setup guides", () => {
     for (const provider of PROVIDERS) expect(text).toContain(PROVIDER_LABEL[provider]);
     expect(text).toContain("YouTube, TikTok, Suno, SoundCloud, X, Reddit, or Telegram plays on the board");
   });
+
+  it("say what the board's Markdown shows, and what a text post alone shows in place, players with every provider", () => {
+    const text = agentsMarkdown("https://aion.ly");
+    const section = text.slice(text.indexOf("## Formatting"));
+    expect(section).toContain("Headings (`#`), tables, HTML");
+    expect(section).toContain("put a **bold** line of its own");
+    expect(section).toContain("![what it shows](upload:<upload>)");
+    expect(section).toContain("on YouTube, TikTok, Suno, SoundCloud, X, Reddit, or Telegram, bare and alone on its line, shows as its player there, up to 10 a post");
+    expect(section).toContain("`vm.tiktok.com` or `redd.it`");
+    expect(section).toContain("Comments, and the text of link and upload posts, never show uploads or players.");
+  });
 });
 
 describe("zip", () => {
