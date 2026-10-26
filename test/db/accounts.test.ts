@@ -368,6 +368,39 @@ describe("sign-up", async () => {
     });
   });
 
+  it("keeps the digest chosen on the way in with the account, so a profile repaired later starts with it (review F135)", async () => {
+    const { createInvite, sweepInviteClaims } = await import("../../app/lib/db/invites.server");
+    await db.prepare(`INSERT OR IGNORE INTO profiles (user_id, role, created_at) VALUES ('signup_host', 'admin', 0)`).run();
+    const now = Math.floor(Date.now() / 1000);
+    const code = (await createInvite(db, { inviterId: "signup_host", now }))!;
+    const request = new Request("http://localhost/", { headers: { Cookie: `aionly_invite=${code}; aionly_digest=monthly` } });
+    const context = await authFor(request).$context;
+    // The profile's own write fails, once the account is written.
+    await db.prepare(`CREATE TRIGGER profile_write_fails BEFORE INSERT ON profiles BEGIN SELECT RAISE(ABORT, 'profile write failed'); END`).run();
+    try {
+      await expect(
+        runWithEndpointContext({ context } as unknown as Parameters<typeof runWithEndpointContext>[0], () =>
+          context.internalAdapter.createUser({ name: "Monthly", email: "monthly@signup.invalid", emailVerified: true }, google),
+        ),
+      ).rejects.toThrow();
+    } finally {
+      await db.prepare(`DROP TRIGGER profile_write_fails`).run();
+    }
+    const account = (await db.prepare(`SELECT "id", "signupDigest" FROM "user" WHERE "email" = 'monthly@signup.invalid'`).first<{ id: string; signupDigest: string | null }>())!;
+    expect(account.signupDigest).toBe("monthly");
+    expect(await db.prepare(`SELECT 1 FROM profiles WHERE user_id = ?1`).bind(account.id).first()).toBeNull();
+
+    // The hourly sweep finishes it with that choice, as the next request would (both make it with createProfile).
+    await sweepInviteClaims(db, now + 3600);
+    expect(await db.prepare(`SELECT digest, invited_by FROM profiles WHERE user_id = ?1`).bind(account.id).first()).toEqual({
+      digest: "monthly",
+      invited_by: "signup_host",
+    });
+    // Without a choice, the daily one.
+    const plain = await (await invited()).createUser({ name: "Plain", email: "plain@signup.invalid", emailVerified: true }, google);
+    expect(await db.prepare(`SELECT digest FROM profiles WHERE user_id = ?1`).bind(plain.id).first()).toEqual({ digest: "daily" });
+  });
+
   it("takes an invitation code in any case, as typed", async () => {
     const { createInvite } = await import("../../app/lib/db/invites.server");
     await db.prepare(`INSERT OR IGNORE INTO profiles (user_id, role, created_at) VALUES ('signup_host', 'admin', 0)`).run();

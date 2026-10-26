@@ -1,5 +1,4 @@
 import { AGENT_ALLOWANCE_USERNAME_MIN, generateUsername, SHORT_USERNAME_MIN, USERNAME_MIN, YEARLY_USERNAME_MIN } from "../accounts/usernames";
-import type { Frequency } from "../digest/frequency";
 import type { Restriction } from "../public-types";
 import { type CommentReplies, parsePostChoice, type PostChoice } from "../replies";
 import { NEW_MENTIONS_MAX } from "../text/mentions";
@@ -17,23 +16,24 @@ function nowSeconds(): number {
 /**
  * Gives an account its public profile and a generated name. Safe to call
  * again: an existing profile or current name is kept. A new member starts
- * with the digest they chose on the way in, or else the daily one (owner's
- * requests, 2026-10-21 and 2026-10-26), each kind it brings counted as
- * sent, as turning it on does, so the first comes with the next period.
+ * with the digest they chose on the way in, kept with the account
+ * (`"user"."signupDigest"`), or else the daily one (owner's requests,
+ * 2026-10-21 and 2026-10-26), whether at sign-up or in a later repair
+ * (review F135); each kind it brings is counted as sent, as turning it on
+ * does, so the first comes with the next period.
  */
 export async function createProfile(
   db: D1Database,
   userId: string,
   now = nowSeconds(),
-  digest: Frequency = "daily",
 ): Promise<void> {
   await db
     .prepare(
       `INSERT INTO profiles (user_id, created_at, digest, daily_digest_at, weekly_digest_at, monthly_digest_at)
-       VALUES (?1, ?2, ?3, ?2, ?2, ?2)
+       VALUES (?1, ?2, COALESCE((SELECT "signupDigest" FROM "user" WHERE "id" = ?1), 'daily'), ?2, ?2, ?2)
        ON CONFLICT (user_id) DO NOTHING`,
     )
-    .bind(userId, now, digest)
+    .bind(userId, now)
     .run();
 
   // A generated name can collide with a taken one; another draw almost

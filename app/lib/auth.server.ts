@@ -170,6 +170,13 @@ function createAuth(origin: string, request?: Request) {
     database: env.DB,
     telemetry: { enabled: false },
     user: {
+      // The digest chosen on the way in, written with the account, so a
+      // profile made later, by a repair, starts with it too (review F135).
+      // Set by the sign-up hook alone, never taken from a request's body or
+      // given back in one.
+      additionalFields: {
+        signupDigest: { type: "string", required: false, input: false, returned: false },
+      },
       // A Google account whose board account was deleted lately, or deleted
       // while banned, cannot make a new one, nor can such an X account be
       // linked to another; see the plan's "Account deletion". This runs
@@ -246,14 +253,16 @@ function createAuth(origin: string, request?: Request) {
                 message: "A new account needs an invitation from a member.",
               });
             }
-            return { data: { ...user, id } };
+            // The digest chosen on the way in goes with the account itself.
+            const digest = digestFrom(request);
+            return { data: { ...user, id, ...(digest ? { signupDigest: digest } : {}) } };
           },
           // Every account gets its public profile and a generated name as
           // it is created, with the digest chosen on the way in, and who
           // invited it. A failure here is repaired on the next request, or
-          // by the hourly sweep.
+          // by the hourly sweep, with that same digest.
           after: async (user) => {
-            await createProfile(env.DB, user.id, Math.floor(Date.now() / 1000), digestFrom(request) ?? undefined);
+            await createProfile(env.DB, user.id);
             await attachInvite(env.DB, { userId: user.id });
             await attachPartner(env.DB, { userId: user.id });
           },
