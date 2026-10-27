@@ -54,6 +54,24 @@ async function cached(
 }
 
 /**
+ * A page's scripts load after what draws it. React Router preloads every
+ * module the page runs, and React lifts those preloads into the head, where
+ * at their usual high priority they compete with the stylesheet and the
+ * first picture, and Lighthouse counts each as holding up the first paint
+ * (PageSpeed check, 2026-10-27). The server already drew the page; its
+ * scripts only bring it to life.
+ */
+function scriptsAfterPaint(page: Response): Response {
+  return new HTMLRewriter()
+    .on('link[rel="modulepreload"]', {
+      element(link) {
+        link.setAttribute("fetchpriority", "low");
+      },
+    })
+    .transform(page);
+}
+
+/**
  * Where apps connect agents from anywhere, browser-based ones included: the
  * MCP server, the OAuth endpoints apps call, and their discovery documents.
  * None reads a cookie, so any origin may call them.
@@ -244,6 +262,7 @@ async function serve(request: Request, ctx: ExecutionContext): Promise<Response>
   // Pages answer in Markdown too, to requests that ask for it.
   if (secured.headers.get("Content-Type")?.startsWith("text/html")) {
     secured.headers.append("Vary", "Accept");
+    return scriptsAfterPaint(secured);
   }
   return secured;
 }

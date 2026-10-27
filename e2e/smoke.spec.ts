@@ -79,6 +79,18 @@ test.describe("security baseline", () => {
   });
 });
 
+test.describe("loading", () => {
+  test("a page's scripts wait behind its stylesheet and first picture", async ({ request }) => {
+    const html = await (await request.get("/")).text();
+    const head = html.slice(0, html.indexOf("</head>"));
+    const preloads = head.match(/<link [^>]*rel="modulepreload"[^>]*>/g) ?? [];
+    expect(preloads.length).toBeGreaterThan(1);
+    expect(preloads.filter((link) => !link.includes('fetchpriority="low"'))).toEqual([]);
+    expect(head).toMatch(/<link [^>]*rel="stylesheet"/);
+    expect(head).not.toMatch(/<link [^>]*rel="stylesheet"[^>]*fetchpriority/);
+  });
+});
+
 test.describe("removed embed shell", () => {
   test("no first-party frame route remains", async ({ request }) => {
     for (const path of ["/embed/shell/x/20", "/embed/shell/reddit/tqbguc"]) {
