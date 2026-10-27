@@ -8,7 +8,9 @@ import { forReader, type Reader } from "../mail/layout";
 import { readerColumns, readerOf, recipientOf } from "../mail/recipient.server";
 import { SENDERS } from "../mail/senders";
 import { sourceName } from "../links/source";
-import { plainText } from "../text/markdown";
+import { displayHost } from "../links/url";
+import type { PostCardData } from "../public-types";
+import { linkAddresses, plainText } from "../text/markdown";
 import {
   CHOSEN_WITH,
   composeDigest,
@@ -128,6 +130,53 @@ interface Bar {
   comments: number;
 }
 
+/** What a post the board hosts is, and holds, for naming it: its kind, and its text. */
+interface Hosted {
+  kind: string;
+  description: string;
+}
+
+/** The first address a text links to off the board, as a URL, if any. */
+function outsideLink(text: string, origin: string): URL | null {
+  const board = new URL(origin).hostname;
+  for (const address of linkAddresses(text)) {
+    if (!URL.canParse(address)) continue;
+    const url = new URL(address);
+    if (!["http:", "https:"].includes(url.protocol)) continue;
+    if (url.hostname === board || url.hostname.endsWith(`.${board}`)) continue;
+    return url;
+  }
+  return null;
+}
+
+/**
+ * What the digest names before a post's points (owner's request,
+ * 2026-10-27). A link post, its source. A post the board hosts never by
+ * the board's own words for it, text post and upload, but by where it
+ * leads: a text post's card's link, or an upload's first link off the
+ * board, mostly the project it shows; or else by what it is: "Article", or
+ * the upload's "Video", "Audio", "Picture", or "Gallery". Nothing for an
+ * upload whose file is gone.
+ */
+function sourceOf(card: PostCardData, hosted: Hosted | undefined, origin: string): Pick<DigestPost, "source" | "sourceUrl"> {
+  if (card.host) return { source: sourceName(card.host), sourceUrl: card.url };
+  const article = hosted?.kind === "text";
+  const link = article ? (card.preview?.url ? new URL(card.preview.url) : null) : outsideLink(hosted?.description ?? "", origin);
+  if (link) return { source: sourceName(displayHost(link)), sourceUrl: link.href };
+  const named = (source: string | null) => ({ source, sourceUrl: null });
+  if (article) return named("Article");
+  switch (card.media.kind) {
+    case "video":
+      return named("Video");
+    case "audio":
+      return named("Audio");
+    case "image":
+      return named((card.media.pictures?.length ?? 0) > 1 ? "Gallery" : "Picture");
+    default:
+      return named(null);
+  }
+}
+
 export interface DigestLists {
   voted: DigestPost[];
   discussed: DigestPost[];
@@ -173,12 +222,17 @@ export async function digestLists(
     )
     .bind(from, to, bar.least, bar.comments, JSON.stringify(voted.map((row) => row.id)), LIST_SIZE)
     .all<{ id: string }>();
+  // What the posts the board hosts hold, which their cards leave out.
+  const { results: hosted } = await db
+    .prepare(`SELECT id, kind, description FROM posts WHERE id IN (SELECT value FROM json_each(?1)) AND kind <> 'link'`)
+    .bind(JSON.stringify([...voted, ...discussed].map((row) => row.id)))
+    .all<Hosted & { id: string }>();
+  const held = new Map(hosted.map((row) => [row.id, row]));
   const cards = async (rows: Array<{ id: string }>) =>
     (await postsByIds(db, rows.map((row) => row.id))).map((card) => ({
       title: card.title,
       url: `${input.origin}${card.path}`,
-      source: card.host ? sourceName(card.host) : card.media.kind === "text" ? "Text post" : "Upload",
-      sourceUrl: card.host ? card.url : null,
+      ...sourceOf(card, held.get(card.id), input.origin),
       score: card.score,
       comments: card.commentCount,
       author: card.author.username,

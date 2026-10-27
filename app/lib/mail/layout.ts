@@ -37,6 +37,61 @@ export interface Letter {
 
 const MUTED = "color:#6f6b64;font-size:12px;line-height:18px";
 
+/**
+ * Each light color the emails are drawn in, and the color it takes on a
+ * dark screen, from the board's own dark theme (owner's request,
+ * 2026-10-27). White is the card, and the text on the accent, which on dark
+ * is the card's color too. A tint's own dark accent replaces orange's (`atTint`).
+ */
+const DARK: Record<string, string> = {
+  "#f7f6f3": "#121110", // the page
+  "#ffffff": TINT_COLORS[DEFAULT_TINT].dark["on-accent"], // the card, and text on the accent
+  "#1f1d1a": "#f2f0ec", // headings, titles, and prices
+  "#55524c": "#aba69e", // the text
+  "#6f6b64": "#948f87", // quieter lines
+  "#8a857c": "#948f87", // a price struck out
+  "#e7e5e0": "#2c2a27", // rules
+  [TINT_COLORS[DEFAULT_TINT].light.accent]: TINT_COLORS[DEFAULT_TINT].dark.accent,
+  [TINT_COLORS[DEFAULT_TINT].light["accent-soft"]]: TINT_COLORS[DEFAULT_TINT].dark["accent-soft"],
+};
+
+/** The properties whose colors turn, each by a class of its own letter. */
+const TURNS: Record<string, { letter: string; property: string }> = {
+  color: { letter: "c", property: "color" },
+  background: { letter: "b", property: "background-color" },
+  "border-top": { letter: "l", property: "border-top-color" },
+};
+
+/**
+ * An email that follows the reader's color scheme, as the board does, in
+ * mail apps that let it (Apple Mail among them; Gmail darkens emails its own
+ * way). Inline styles stay light; each element drawn in the light colors
+ * gets classes, and a dark scheme's rules recolor them. An element on a
+ * color of its own, as a drawn picture's initial on its color, keeps both.
+ */
+function darkReady(html: string): string {
+  const rules = new Map<string, string>();
+  const marked = html.replace(/ style="([^"]*)"/g, (attribute, style: string) => {
+    const declarations = style.split(";").map((declaration) => {
+      const at = declaration.indexOf(":");
+      return { name: declaration.slice(0, at).trim(), value: declaration.slice(at + 1).trim().toLowerCase() };
+    });
+    const ground = declarations.find((declaration) => declaration.name === "background");
+    if (ground && !(ground.value in DARK)) return attribute;
+    const classes = declarations.flatMap(({ name, value }) => {
+      const turn = TURNS[name];
+      const light = value.match(/#[0-9a-f]{6}/)?.[0];
+      if (!turn || !light || !(light in DARK)) return [];
+      const className = `d${turn.letter}-${light.slice(1)}`;
+      rules.set(className, `.${className}{${turn.property}:${DARK[light]}!important}`);
+      return [className];
+    });
+    return classes.length > 0 ? `${attribute} class="${classes.join(" ")}"` : attribute;
+  });
+  const style = `<style>:root{color-scheme:light dark;supported-color-schemes:light dark}@media (prefers-color-scheme:dark){${[...rules.values()].join("")}}</style>`;
+  return marked.replace("</head>", `${style}</head>`);
+}
+
 /** The board's name standing alone, not in an address or a longer name. */
 const NAME = new RegExp(`(?<![\\w@./-])(${SITE_NAME.replace(".", "\\.")})(?![\\w/-])`);
 
@@ -56,7 +111,7 @@ function prose(text: string, color: string, origin: string): string {
 export function composeLetter(letter: Letter): { subject: string; html: string; text: string } {
   const { subject, preview, heading, paragraphs = [], block, button, after = [], signature, why, links = [], origin } = letter;
   const html = `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(subject)}</title></head>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="supported-color-schemes" content="light dark"><title>${escape(subject)}</title></head>
 <body style="margin:0;background:#f7f6f3">
 ${preview ? `<div style="display:none;max-height:0;overflow:hidden">${escape(preview)}</div>` : ""}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f7f6f3"><tr><td align="center" style="padding:24px 16px">
@@ -88,7 +143,7 @@ ${escape(OPERATOR.name)}, ${escape(OPERATOR.address)}
     ...links.map((link) => `${link.label}: ${link.url}`),
     `${OPERATOR.name}, ${OPERATOR.address}`,
   ].join("\n");
-  return { subject, html, text };
+  return { subject, html: darkReady(html), text };
 }
 
 /** A signature: the picture, round, beside the name, a word from its writer, and the ways to reach them. */
@@ -123,15 +178,19 @@ export function atTextSize<T extends { html: string }>(email: T, size: TextSize)
 
 /**
  * An email in its recipient's tint (Settings, Display): the board's orange,
- * and its pale ground, in their styles, swapped for the tint's light colors.
+ * and its pale ground, swapped for the tint's: its light colors in the
+ * styles, and its dark ones in the dark scheme's rules.
  */
 export function atTint<T extends { html: string }>(email: T, tint: Tint): T {
   if (tint === DEFAULT_TINT) return email;
-  const from = TINT_COLORS[DEFAULT_TINT].light;
-  const to = TINT_COLORS[tint].light;
-  const html = email.html.replace(/style="([^"]*)"/g, (_, style: string) =>
-    `style="${style.replaceAll(from.accent, to.accent).replaceAll(from["accent-soft"], to["accent-soft"])}"`,
-  );
+  const swap = (text: string, scheme: "light" | "dark") => {
+    const from = TINT_COLORS[DEFAULT_TINT][scheme];
+    const to = TINT_COLORS[tint][scheme];
+    return text.replaceAll(from.accent, to.accent).replaceAll(from["accent-soft"], to["accent-soft"]);
+  };
+  const html = email.html
+    .replace(/style="([^"]*)"/g, (_, style: string) => `style="${swap(style, "light")}"`)
+    .replace(/<style>[^<]*<\/style>/, (rules) => swap(rules, "dark"));
   return { ...email, html };
 }
 

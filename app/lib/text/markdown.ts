@@ -483,6 +483,25 @@ function blockTexts(blocks: Block[], lineBreak: string): string[] {
   });
 }
 
+/** The addresses a text links to, written as links or bare, in the order they come. */
+export function linkAddresses(source: string): string[] {
+  const inlines = (nodes: Inline[]): string[] =>
+    nodes.flatMap((node) =>
+      node.type === "link" || node.type === "url" ? [node.href] : "children" in node ? inlines(node.children) : [],
+    );
+  const blocks = (list: Block[]): string[] =>
+    list.flatMap((block) =>
+      block.type === "paragraph"
+        ? inlines(block.children)
+        : block.type === "quote"
+          ? blocks(block.children)
+          : block.type === "list"
+            ? block.items.flatMap(inlines)
+            : [],
+    );
+  return blocks(parseBlocks(source));
+}
+
 /** The text without its markup, on one line, for summaries and previews. */
 export function plainText(source: string): string {
   return blockTexts(parseBlocks(source), " ").join(" ").replace(/\s+/g, " ").trim();

@@ -24,16 +24,19 @@ export const CHOSEN_WITH: Record<Frequency, readonly Frequency[]> = {
 /** Posts in each of a digest's two lists, the most voted and the most discussed. */
 export const LIST_SIZE = 5;
 
-/** The most of a post's description a digest shows, cut at a word. */
-export const EXCERPT_MAX = 200;
+/** The most of a post's description a digest shows, cut at a word (owner's request, 2026-10-27; 200 before). */
+export const EXCERPT_MAX = 350;
 
 export interface DigestPost {
   title: string;
   /** The post's own page on the board, absolute. */
   url: string;
-  /** Where it links, by name or address (`sourceName`), or what kind of post it is. */
-  source: string;
-  /** The outside address it links to; null for a post the board hosts. */
+  /**
+   * Where it links, by name or address (`sourceName`), or what a post the
+   * board hosts holds; null when there is nothing to say.
+   */
+  source: string | null;
+  /** The outside address `source` names; null for what the post holds. */
   sourceUrl: string | null;
   score: number;
   comments: number;
@@ -84,11 +87,13 @@ function authorPicture(post: DigestPost): string {
 /**
  * Where a post links, as a link of the line's own quiet color: it is only
  * the source, and mail apps would otherwise make an address in it a link
- * of their own color (owner's request, 2026-10-21).
+ * of their own color (owner's request, 2026-10-21). With its separator
+ * after it, or nothing when there is no source to name.
  */
 function sourceHtml(post: DigestPost): string {
-  if (!post.sourceUrl) return escape(post.source);
-  return `<a href="${escape(post.sourceUrl)}" style="color:#6f6b64;text-decoration:none">${escape(post.source)}</a>`;
+  if (!post.source) return "";
+  if (!post.sourceUrl) return `${escape(post.source)} · `;
+  return `<a href="${escape(post.sourceUrl)}" style="color:#6f6b64;text-decoration:none">${escape(post.source)}</a> · `;
 }
 
 /** Under the digest, the founder asks what readers make of it (owner's request, 2026-10-21). */
@@ -116,7 +121,7 @@ export function composeDigest(input: {
 }): { subject: string; html: string; text: string } {
   const { frequency, chosen, period, voted, discussed, origin, unsubscribeUrl, founderPhoto = null } = input;
   const counts = (post: DigestPost) => `${plural(post.score, "point")} · ${plural(post.comments, "comment")}`;
-  const line = (post: DigestPost) => `${post.source} · ${counts(post)} · by ${post.author}`;
+  const line = (post: DigestPost) => `${post.source ? `${post.source} · ` : ""}${counts(post)} · by ${post.author}`;
   const lists = [
     { heading: "Most voted", posts: voted },
     { heading: "Most discussed", posts: discussed },
@@ -128,7 +133,7 @@ ${list.posts
   .map(
     (post, index) => `<div style="padding:14px 0;${index === 0 ? "" : "border-top:1px solid #e7e5e0"}">
 <a href="${escape(post.url)}" style="color:#1f1d1a;font-size:16px;font-weight:600;text-decoration:none">${escape(post.title)}</a>
-<div style="color:#6f6b64;font-size:13px;margin-top:3px">${sourceHtml(post)} · ${escape(counts(post))} · <span style="white-space:nowrap">by ${authorPicture(post)}${escape(post.author)}</span></div>
+<div style="color:#6f6b64;font-size:13px;margin-top:3px">${sourceHtml(post)}${escape(counts(post))} · <span style="white-space:nowrap">by ${authorPicture(post)}${escape(post.author)}</span></div>
 ${excerptHtml(post)}
 </div>`,
   )

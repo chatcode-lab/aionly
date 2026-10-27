@@ -52,6 +52,7 @@ describe("the digest email", () => {
     // Kept with the name, on one line.
     expect(email.html).toContain('· <span style="white-space:nowrap">by <img');
     expect(email.html).toContain("&#60;maker&#62;</span></div>");
+    // Its initial on its color, kept as it is on a dark screen.
     const drawn = /by <span style="([^"]*)">Q<\/span>quiet_otter<\/span><\/div>/.exec(email.html);
     expect(drawn?.[1]).toContain(`background:${generatedAvatar("u_otter", "quiet_otter").color}`);
     // Sized from its own font size, so it grows with the reader's text.
@@ -59,12 +60,15 @@ describe("the digest email", () => {
     expect(email.text).toContain("12 points · 1 comment · by quiet_otter\n");
   });
 
-  it("names the source as a link of the line's own color, and a post the board hosts as it is (owner's request, 2026-10-21)", () => {
-    const hosted = { ...post, title: "Hosted", source: "Text post", sourceUrl: null };
-    const email = composeDigest({ ...base, frequency: "daily", chosen: "daily", period: "the past day", voted: [post, hosted], discussed: [] });
-    expect(email.html).toContain('<a href="https://suno.com/song/abc" style="color:#6f6b64;text-decoration:none">Suno</a> · 12 points');
-    expect(email.html).toContain(">Text post · 12 points");
+  it("names the source as a link of the line's own color, what a hosted post is as it is, and nothing without either", () => {
+    const hosted = { ...post, title: "Hosted", source: "Article", sourceUrl: null };
+    const bare = { ...post, title: "Bare", source: null, sourceUrl: null };
+    const email = composeDigest({ ...base, frequency: "daily", chosen: "daily", period: "the past day", voted: [post, hosted, bare], discussed: [] });
+    expect(email.html).toContain('<a href="https://suno.com/song/abc" style="color:#6f6b64;text-decoration:none" class="dc-6f6b64">Suno</a> · 12 points');
+    expect(email.html).toContain('class="dc-6f6b64">Article · 12 points');
+    expect(email.html).toContain('class="dc-6f6b64">12 points · 1 comment · <span');
     expect(email.text).toContain("Suno · 12 points · 1 comment · by quiet_otter");
+    expect(email.text).toContain("Bare\n12 points · 1 comment · by quiet_otter");
   });
 
   it("ends with the founder asking what readers make of it, with their picture and where to reach them", () => {
@@ -73,7 +77,7 @@ describe("the digest email", () => {
     expect(email.html).toContain(">Boris Karulin</div>");
     expect(email.html).toContain(`>${FOUNDER_NOTE}</div>`);
     expect(email.html).toContain(
-      '<a href="https://aion.ly/@boris" style="color:#6f6b64">aion.ly/@boris</a> · <a href="https://x.com/karulin" style="color:#6f6b64">x.com/karulin</a> · <a href="mailto:hey@aion.ly" style="color:#6f6b64">hey@aion.ly</a>',
+      '<a href="https://aion.ly/@boris" style="color:#6f6b64" class="dc-6f6b64">aion.ly/@boris</a> · <a href="https://x.com/karulin" style="color:#6f6b64" class="dc-6f6b64">x.com/karulin</a> · <a href="mailto:hey@aion.ly" style="color:#6f6b64" class="dc-6f6b64">hey@aion.ly</a>',
     );
     expect(email.text).toContain(`Boris Karulin\n${FOUNDER_NOTE}\nhttps://aion.ly/@boris · https://x.com/karulin · hey@aion.ly\n`);
     // Without a picture, the rest stays.
@@ -83,10 +87,11 @@ describe("the digest email", () => {
   });
 
   it("cuts a long excerpt at a word, with an ellipsis and a link to read the rest", () => {
-    const long = { ...post, excerpt: `${"Pick a place on a map and print it. ".repeat(6)}Joey, its maker, describes building it.` };
+    const long = { ...post, excerpt: `${"Pick a place on a map and print it. ".repeat(10)}Joey, its maker, describes building it.` };
     const email = composeDigest({ ...base, frequency: "daily", chosen: "daily", period: "the past day", voted: [long], discussed: [] });
     const shown = email.text.split("\n").find((line) => line.startsWith("Pick a place"))!;
     expect(shown.length).toBeLessThanOrEqual(EXCERPT_MAX);
+    expect(shown.length).toBeGreaterThan(EXCERPT_MAX - 40);
     expect(shown).toMatch(/ [A-Za-z]+…$/);
     expect(shown).not.toMatch(/[.,]…$/);
     expect(email.html).toContain(`… <a href="https://aion.ly/p/abc1234/a-song"`);

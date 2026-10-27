@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { EXCERPT_MAX } from "../../app/lib/digest/compose";
 import { dueRecipients, sendDigests, sendTestDigest, setDigest } from "../../app/lib/digest/digest.server";
 import type { Mailer } from "../../app/lib/mail/mailers.server";
 import { comment, DAY, db, NOW, post, reset, user } from "./fixtures";
@@ -95,9 +96,39 @@ describe("a digest's posts", () => {
 
     expect(await sendDigests(db, mailer, input)).toBe(1);
     const { html, text } = sent[0]!;
-    expect(html).toContain('<a href="https://blog.anthropic.com/news/proteins" style="color:#6f6b64;text-decoration:none">Anthropic</a> · 9 points');
-    expect(html).toContain('<a href="https://www.peec.ai/blog/stats" style="color:#6f6b64;text-decoration:none">peec.ai</a> · 8 points');
+    expect(html).toContain('<a href="https://blog.anthropic.com/news/proteins" style="color:#6f6b64;text-decoration:none" class="dc-6f6b64">Anthropic</a> · 9 points');
+    expect(html).toContain('<a href="https://www.peec.ai/blog/stats" style="color:#6f6b64;text-decoration:none" class="dc-6f6b64">peec.ai</a> · 8 points');
     expect(text).toContain("Anthropic · 9 points · 0 comments · by busy_maker");
+  });
+
+  it("name a post the board hosts by where it leads, or else by what it is, never as a text post or an upload (owner's request, 2026-10-27)", async () => {
+    const week = { author: "maker", age: 6 * DAY };
+    const hosted = async (id: string, score: number, fields: Record<string, string | null>) => {
+      await post(id, { ...week, title: id, score, ...(fields.description ? { description: fields.description } : {}) });
+      await db
+        .prepare(
+          `UPDATE posts SET kind = ?2, url = NULL, canonical_key = NULL, media_key = ?3, media_type = ?4, pictures = ?5, card_preview = ?6 WHERE id = ?1`,
+        )
+        .bind(id, fields.kind, fields.media_type ? "A0qaaxh7fPyMWEyHRJ3kLnqy.jpg" : null, fields.media_type ?? null, fields.pictures ?? null, fields.card_preview ?? null)
+        .run();
+    };
+    const pictures = JSON.stringify([{ key: "A0qaaxh7fPyMWEyHRJ3kLnqy.jpg" }, { key: "dvoCUsCDAjaZlcb97lrtSdMp.png" }]);
+    await hosted("Repo", 9, { kind: "text", card_preview: JSON.stringify({ link: "https://github.com/maker/tool" }) });
+    await hosted("Essay", 8, { kind: "text", description: "See [the demo](https://youtube.com/watch?v=x) first." });
+    await hosted("Demo", 7, { kind: "upload", media_type: "video", description: "More on [our site](https://aion.ly/p/x), and the code at https://github.com/maker/demo." });
+    await hosted("Clip", 6, { kind: "upload", media_type: "video" });
+    await hosted("Shots", 5, { kind: "upload", media_type: "image", pictures });
+
+    expect(await sendDigests(db, mailer, input)).toBe(1);
+    const { html, text } = sent[0]!;
+    expect(html).toContain('<a href="https://github.com/maker/tool" style="color:#6f6b64;text-decoration:none" class="dc-6f6b64">GitHub</a> · 9 points');
+    // An article's own links are its text's, not its source.
+    expect(text).toContain("Essay\nArticle · 8 points");
+    // The board's own address is not where an upload leads.
+    expect(html).toContain('<a href="https://github.com/maker/demo" style="color:#6f6b64;text-decoration:none" class="dc-6f6b64">GitHub</a> · 7 points');
+    expect(text).toContain("Clip\nVideo · 6 points");
+    expect(text).toContain("Shots\nGallery · 5 points");
+    expect(text).not.toMatch(/Text post|Upload/);
   });
 
   it("show a long description cut at a word, with a link to read the rest", async () => {
@@ -107,7 +138,7 @@ describe("a digest's posts", () => {
     expect(await sendDigests(db, mailer, input)).toBe(1);
     const shown = sent[0]!.text.split("\n").find((line) => line.startsWith("Pick a place"))!;
     expect(shown).toMatch(/^Pick a place on a map and turn it into a miniature\. Buildings, .* [a-z]+…$/);
-    expect(shown.length).toBeLessThanOrEqual(200);
+    expect(shown.length).toBeLessThanOrEqual(EXCERPT_MAX);
     expect(sent[0]!.html).toContain(`… <a href="https://aion.ly/p/long/a-tiny-town"`);
     expect(sent[0]!.html).toContain(">Read more</a>");
   });

@@ -295,8 +295,8 @@ describe("the offer email", () => {
   it("shows the discount, both prices struck through, the way to the plan, and the way out", () => {
     const email = composeOfferEmail({ kind: "welcome", left: 24 * HOUR, origin: "https://aion.ly", unsubscribeUrl: "https://aion.ly/unsubscribe?list=offers&token=t" });
     expect(email.html).toContain("30% off");
-    expect(email.html).toContain(`<s style="color:#8a857c">$100</s> <strong style="color:#1f1d1a">$70</strong> a year`);
-    expect(email.html).toContain(`<s style="color:#8a857c">$10</s> <strong style="color:#1f1d1a">$7</strong> a month`);
+    expect(email.html).toContain(`<s style="color:#8a857c" class="dc-8a857c">$100</s> <strong style="color:#1f1d1a" class="dc-1f1d1a">$70</strong> a year`);
+    expect(email.html).toContain(`<s style="color:#8a857c" class="dc-8a857c">$10</s> <strong style="color:#1f1d1a" class="dc-1f1d1a">$7</strong> a month`);
     expect(email.html).toContain(`href="https://aion.ly/fan"`);
     expect(email.html).toContain("https://aion.ly/unsubscribe?list=offers&#38;token=t");
     expect(email.html).toContain("Holy Traction OÜ, Sepapaja tn 6, 15551 Tallinn, Estonia");
@@ -320,7 +320,7 @@ describe("the offer email", () => {
     expect(email.html).toContain('href="https://aion.ly/@boris"');
     expect(email.html).toContain('href="https://x.com/karulin"');
     // Each contact is written as its address, with dots between.
-    expect(email.html).toContain('>aion.ly/@boris</a> · <a href="https://x.com/karulin" style="color:#6f6b64">x.com/karulin</a> · <a href="mailto:hey@aion.ly"');
+    expect(email.html).toContain('>aion.ly/@boris</a> · <a href="https://x.com/karulin" style="color:#6f6b64" class="dc-6f6b64">x.com/karulin</a> · <a href="mailto:hey@aion.ly"');
     // The reminder stays the board's own.
     const reminder = composeOfferEmail({ kind: "reminder", left: 4 * HOUR, origin: "https://aion.ly", unsubscribeUrl: "https://aion.ly/u" });
     expect(reminder.text).not.toContain("Boris Karulin");
