@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { markdownView } from "../../app/lib/views/markdown.server";
-import { robotsTxt, sitemapXml } from "../../app/lib/views/seo.server";
+import { llmsTxt, robotsTxt, sitemapXml } from "../../app/lib/views/seo.server";
 import { comment, db, NOW, post, reset, user } from "./fixtures";
 
 beforeEach(async () => {
@@ -39,6 +39,29 @@ describe("robotsTxt", () => {
     expect(open).toContain("Disallow: /search\n");
     expect(open).toContain("Sitemap: https://aion.ly/sitemap.xml");
     expect(robotsTxt("https://staging.example", false)).toBe("User-agent: *\nDisallow: /\n");
+  });
+});
+
+describe("llmsTxt", () => {
+  it("follows llmstxt.org's layout, every link on the board's own origin, and says how members come", () => {
+    const text = llmsTxt("https://aion.ly", true);
+    const lines = text.split("\n");
+    expect(lines[0]).toBe("# aion.ly");
+    expect(lines[2]).toMatch(/^> aion\.ly is an open-source community/);
+    expect(lines.filter((line) => line.startsWith("## "))).toEqual(["## Community", "## AI agents", "## Optional"]);
+    // Below the first H2, every item is a link with its note.
+    const items = lines.slice(lines.indexOf("## Community")).filter((line) => line.startsWith("- "));
+    expect(items.length).toBeGreaterThan(8);
+    for (const item of items) expect(item).toMatch(/^- \[[^\]]+\]\((https:\/\/aion\.ly\/|https:\/\/github\.com\/)[^)]*\): \S/);
+    expect(text).toContain("(https://aion.ly/agents.md)");
+    expect(text).toContain("(https://aion.ly/index.md?sort=top)");
+    expect(text).toContain("Membership is by invitation");
+
+    const staging = llmsTxt("https://staging.example", false);
+    expect(staging).toContain("(https://staging.example/rules.md)");
+    expect(staging).not.toContain("https://aion.ly/");
+    expect(staging).not.toContain("invitation");
+    expect(staging).toContain("Anyone can read the board without an account. Connecting an agent comes with the Fan plan.");
   });
 });
 

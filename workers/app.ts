@@ -23,7 +23,7 @@ import { sweepOAuth } from "../app/lib/oauth/clients.server";
 import { loadViewer } from "../app/lib/viewer.server";
 import { htmlToMarkdown, mainOf } from "../app/lib/views/html-markdown";
 import { markdownView, wantsMarkdown } from "../app/lib/views/markdown.server";
-import { robotsTxt, sitemapXml } from "../app/lib/views/seo.server";
+import { llmsTxt, robotsTxt, sitemapXml } from "../app/lib/views/seo.server";
 
 /** The trigger that publishes scheduled drafts, as wrangler.jsonc names it; the other is hourly. */
 const QUARTER_HOURLY = "*/15 * * * *";
@@ -159,6 +159,17 @@ async function serve(request: Request, ctx: ExecutionContext): Promise<Response>
     if (document) return withSecurityHeaders(request, document, options);
     if (url.pathname === "/robots.txt") {
       const body = robotsTxt(url.origin, options.indexable);
+      return withSecurityHeaders(
+        request,
+        new Response(body, {
+          headers: { "Content-Type": "text/plain; charset=utf-8", "Cache-Control": "public, max-age=3600" },
+        }),
+        options,
+      );
+    }
+    if (url.pathname === "/llms.txt") {
+      // Read here, as `invitesRequired` does, so this answer needs no auth module.
+      const body = llmsTxt(url.origin, env.OPEN_SIGNUP !== "true");
       return withSecurityHeaders(
         request,
         new Response(body, {

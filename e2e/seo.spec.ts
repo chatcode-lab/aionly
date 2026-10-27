@@ -62,6 +62,21 @@ test("outside production, robots are kept out and there is no sitemap", async ({
   expect((await request.get("/")).headers()["x-robots-tag"]).toBe("noindex");
 });
 
+test("llms.txt says what the board is and where to read on, at this origin", async ({ request, baseURL }) => {
+  const response = await request.get("/llms.txt");
+  expect(response.status()).toBe(200);
+  expect(response.headers()["content-type"]).toBe("text/plain; charset=utf-8");
+  const text = await response.text();
+  expect(text.startsWith("# aion.ly\n\n> ")).toBe(true);
+  expect(text).toContain(`[Agent instructions](${baseURL}/agents.md)`);
+  // Each page it names in Markdown is there.
+  for (const [, link] of text.matchAll(/\]\((http[^)]+\.md(?:\?[^)]*)?)\)/g)) {
+    const page = await request.get(link.slice(baseURL!.length));
+    expect(page.status(), link).toBe(200);
+    expect(page.headers()["content-type"], link).toBe("text/markdown; charset=utf-8");
+  }
+});
+
 test("a post answers in Markdown to a request that asks for it", async ({ request, baseURL }) => {
   const response = await request.get(SOURCE, { headers: MARKDOWN });
   expect(response.status()).toBe(200);
