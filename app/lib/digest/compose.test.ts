@@ -100,9 +100,13 @@ describe("the digest email", () => {
     const short = composeDigest({ ...base, frequency: "daily", chosen: "daily", period: "the past day", voted: [post], discussed: [] });
     expect(short.html).toContain("Made &#60;b&#62;with&#60;/b&#62; care</div>");
     expect(short.html).not.toContain("Read more");
-    // The feed's own cut still gets the link.
-    const cut = composeDigest({ ...base, frequency: "daily", chosen: "daily", period: "the past day", voted: [{ ...post, excerpt: "Made with care…" }], discussed: [] });
+    // The card's own cut still gets the link, at a line as past its length;
+    // an ellipsis the author wrote does not.
+    const cut = composeDigest({ ...base, frequency: "daily", chosen: "daily", period: "the past day", voted: [{ ...post, excerpt: "Made with care.", excerptCut: true }], discussed: [] });
+    expect(cut.html).toContain("Made with care. <a");
     expect(cut.html).toContain("Read more");
+    const trailing = composeDigest({ ...base, frequency: "daily", chosen: "daily", period: "the past day", voted: [{ ...post, excerpt: "Made with care…" }], discussed: [] });
+    expect(trailing.html).not.toContain("Read more");
   });
 });
 

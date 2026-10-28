@@ -239,6 +239,7 @@ export async function digestLists(
       authorId: card.author.id,
       authorPhoto: card.author.photoUrl ? new URL(card.author.photoUrl, input.origin).href : null,
       excerpt: plainText(card.excerpt),
+      ...(card.excerptCut ? { excerptCut: true } : {}),
     }));
   return { voted: await cards(voted), discussed: await cards(discussed) };
 }

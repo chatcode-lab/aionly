@@ -143,6 +143,17 @@ describe("a digest's posts", () => {
     expect(sent[0]!.html).toContain(">Read more</a>");
   });
 
+  it("link to read the rest when the card's excerpt stops at a line, shown whole", async () => {
+    const first = `Pick a place on a map and turn it into a miniature. ${"Buildings, terrain, roads and water. ".repeat(5)}`.trim();
+    await post("lines", { author: "maker", age: 6 * DAY, title: "A tiny town", score: 9, description: `${first}\n\nHow it was made, step by step.` });
+
+    expect(await sendDigests(db, mailer, input)).toBe(1);
+    expect(sent[0]!.text).toContain(`\n${first}\n`);
+    expect(sent[0]!.text).not.toContain("step by step");
+    expect(sent[0]!.html).toContain(`water. <a href="https://aion.ly/p/lines/a-tiny-town"`);
+    expect(sent[0]!.html).toContain(">Read more</a>");
+  });
+
   it("follow the bar in the settings", async () => {
     await post("p1", { author: "maker", age: 6 * DAY, title: "Three points", score: 3 });
     await db.prepare(`INSERT INTO settings (key, value, updated_at, updated_by) VALUES ('digest_points', 3, ?1, 'maker')`).bind(NOW).run();

@@ -45,15 +45,17 @@ export interface DigestPost {
   authorId: string;
   /** The author's picture on the board, absolute; their drawn one without. */
   authorPhoto: string | null;
-  /** The description as plain text; the digest cuts it to `EXCERPT_MAX`. */
+  /** The card's excerpt of the description as plain text; the digest cuts it to `EXCERPT_MAX`. */
   excerpt: string;
+  /** The card's excerpt stops before the description's end, at a line or past its length. */
+  excerptCut?: boolean;
 }
 
 /** A post's excerpt as a digest shows it, and whether there is more to read. */
 function excerptOf(post: DigestPost): { text: string; more: boolean } {
   const text = clip(post.excerpt, EXCERPT_MAX);
-  // The feed's own cut ends in an ellipsis too.
-  return { text, more: text !== post.excerpt || text.endsWith("…") };
+  // The card's own cut often ends at a line, with no ellipsis to show it.
+  return { text, more: text !== post.excerpt || post.excerptCut === true };
 }
 
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
