@@ -2,7 +2,7 @@ import type { FontMetrics } from "./metrics";
 
 /**
  * The covers shown when a page of the board is shared: 1200 by 630, the
- * board's own colors, the logo, a large title, a short description, and
+ * board's own colors on a soft ground, the logo, a large title, a short description, and
  * a line saying whose it is. Drawn as SVG here and rendered to PNG by
  * resvg (see render.server.ts). Plain text and flat color only, so a cover
  * renders in a few milliseconds and reads at thumbnail size.
@@ -12,7 +12,8 @@ export const WIDTH = 1200;
 export const HEIGHT = 630;
 
 const COLORS = {
-  bg: "#f6f5f3",
+  ground: "#f7f6f3",
+  groundDeep: "#ebe7e1",
   text: "#1b1a18",
   muted: "#55524c",
   faint: "#6f6b64",
@@ -50,6 +51,17 @@ const PICTURE_X = 744;
 const FOOTER_BASELINE = HEIGHT - 64;
 /** Text stops this far above the footer. */
 const BODY_BOTTOM = FOOTER_BASELINE - 72;
+
+/**
+ * The ground: warm off-white, a little deeper toward the bottom right, where
+ * a faint glow of the accent rises, so a cover sits softly in light and dark
+ * feeds alike (owner's choice, 2026-10-28).
+ */
+const GROUND = [
+  `<defs><linearGradient id="ground" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${COLORS.ground}"/><stop offset="1" stop-color="${COLORS.groundDeep}"/></linearGradient>`,
+  `<radialGradient id="ember" cx="1" cy="1" r="0.8"><stop offset="0" stop-color="${COLORS.accent}" stop-opacity="0.16"/><stop offset="1" stop-color="${COLORS.accent}" stop-opacity="0"/></radialGradient></defs>`,
+  `<rect width="${WIDTH}" height="${HEIGHT}" fill="url(#ground)"/><rect width="${WIDTH}" height="${HEIGHT}" fill="url(#ember)"/>`,
+].join("");
 
 const escape = (text: string) =>
   text.replace(/[<>&'"]/g, (char) => `&${{ "<": "lt", ">": "gt", "&": "amp", "'": "apos", '"': "quot" }[char]};`);
@@ -161,13 +173,13 @@ function wordmark(x: number, baseline: number, size: number): string {
 
 /**
  * The header's eyes (see ~/components/site-logo), `width` across and half
- * as tall, looking ahead, from x, y at their top left.
+ * as tall, looking down at the name, from x, y at their top left.
  */
 function eyes(x: number, y: number, width: number): string {
   return [
     `<g transform="translate(${x} ${y}) scale(${width / 48})" fill="none" stroke-width="4">`,
-    `<circle cx="12" cy="12" r="8.5" stroke="${COLORS.text}"/><circle cx="12" cy="12" r="3.6" fill="${COLORS.text}"/>`,
-    `<rect x="27" y="3.5" width="17" height="17" rx="3.5" stroke="${COLORS.accent}"/><rect x="32" y="8.5" width="7" height="7" rx="1" fill="${COLORS.accent}"/>`,
+    `<circle cx="12" cy="12" r="8.5" stroke="${COLORS.text}"/><rect x="27" y="3.5" width="17" height="17" rx="3.5" stroke="${COLORS.accent}"/>`,
+    `<g transform="translate(0 2.4)"><circle cx="12" cy="12" r="3.6" fill="${COLORS.text}"/><rect x="32" y="8.5" width="7" height="7" rx="1" fill="${COLORS.accent}"/></g>`,
     "</g>",
   ].join("");
 }
@@ -201,14 +213,14 @@ function description(text: string, fonts: Fonts, width: number, top: number, siz
 }
 
 export function coverSvg(cover: Cover, fonts: Fonts): string {
-  const parts: string[] = [`<rect width="${WIDTH}" height="${HEIGHT}" fill="${COLORS.bg}"/>`];
+  const parts: string[] = [GROUND];
   const fullWidth = WIDTH - MARGIN * 2;
 
   switch (cover.kind) {
     case "site": {
-      parts.push(logo(144, 273, 132));
+      parts.push(logo(128, 265, 132));
       const tagline = wrap(drawable(cover.tagline, fonts.semibold), fonts.semibold, 52, fullWidth, 3).lines;
-      parts.push(textAt(block(tagline, 52, 1.2, FAMILY.semibold, COLORS.text), MARGIN, 353).svg);
+      parts.push(textAt(block(tagline, 52, 1.2, FAMILY.semibold, COLORS.text), MARGIN, 345).svg);
       parts.push(footer(cover.promise, fonts.regular, fullWidth));
       break;
     }

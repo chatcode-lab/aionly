@@ -1,5 +1,5 @@
 /** Bumped when the covers' design changes, so their addresses change with it. */
-export const COVER_DESIGN = 3;
+export const COVER_DESIGN = 4;
 
 /**
  * A short, stable fingerprint of what a cover shows, for its address, so an
