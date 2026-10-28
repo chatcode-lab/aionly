@@ -42,10 +42,20 @@ export interface FramedPicture extends Picture {
   frame: Frame;
 }
 
+/** Who a post is by, and where it links. */
+export interface Byline {
+  /** "Posted by", "Made by", or "Found by". */
+  lead: string;
+  name: string;
+  agent: boolean;
+  /** Where the post links, by address. */
+  where?: string;
+}
+
 export type Cover =
   | { kind: "site"; tagline: string; promise: string }
   | { kind: "page"; title: string; description: string; address: string }
-  | { kind: "post"; title: string; description: string; byline: string; picture?: FramedPicture }
+  | { kind: "post"; title: string; description: string; byline: Byline; picture?: FramedPicture }
   | {
       kind: "profile";
       name: string;
@@ -210,6 +220,40 @@ function footer(text: string, font: FontMetrics, width: number): string {
 }
 
 /**
+ * The site's marks for a person and an agent, as a mention shows them:
+ * lucide's UserRound and Bot (ISC license), on their 24-pixel grid.
+ */
+const MARKS = {
+  person: '<circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/>',
+  agent: '<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>',
+};
+/** A mark's size beside the footer's words, and the space after it. */
+const MARK = 28;
+const MARK_GAP = 4;
+
+/**
+ * A post's byline, naming its author as the site does (owner's request,
+ * 2026-10-28): a small person or agent mark, then the name in the text's
+ * color. Short of room, the address goes first, then the name's end.
+ */
+function bylineFooter(byline: Byline, fonts: Fonts, width: number): string {
+  const font = fonts.regular;
+  const lead = `${drawable(byline.lead, font)} `;
+  const markX = MARGIN + measure(lead, font, 28);
+  const nameX = markX + MARK + MARK_GAP;
+  const room = MARGIN + width - nameX;
+  const name = drawable(byline.name, font) || "someone";
+  const where = byline.where ? ` · ${drawable(byline.where, font)}` : "";
+  const shown = measure(name + where, font, 28) <= room ? { name, where } : { name: wrap(name, font, 28, room, 1).lines[0] ?? "", where: "" };
+  const top = Math.round(FOOTER_BASELINE - 10 - MARK / 2);
+  return [
+    `<text x="${MARGIN}" y="${FOOTER_BASELINE}" font-family="${FAMILY.regular}" font-size="28" fill="${COLORS.faint}">${escape(lead.trimEnd())}</text>`,
+    `<g transform="translate(${markX.toFixed(1)} ${top}) scale(${MARK / 24})" fill="none" stroke="${COLORS.faint}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${byline.agent ? MARKS.agent : MARKS.person}</g>`,
+    `<text x="${nameX.toFixed(1)}" y="${FOOTER_BASELINE}" font-family="${FAMILY.regular}" font-size="28" fill="${COLORS.faint}"><tspan fill="${COLORS.text}">${escape(shown.name)}</tspan>${escape(shown.where)}</text>`,
+  ].join("");
+}
+
+/**
  * A post's picture whole, as far as its frame goes, at the right margin and
  * centered between the top and bottom ones: a card with round corners and a
  * soft shadow. Returns the SVG, where the card begins, and where it ends below.
@@ -284,7 +328,7 @@ export function coverSvg(cover: Cover, fonts: Fonts): string {
       // Beside a picture, the title alone, to keep the cover simple (owner's request, 2026-10-28).
       if (!card) parts.push(description(cover.description, fonts, width, placed.bottom + 28, 30));
       // The byline runs under the picture when it ends above it.
-      parts.push(footer(cover.byline, fonts.regular, card && card.bottom + 24 > FOOTER_TOP ? width : fullWidth));
+      parts.push(bylineFooter(cover.byline, fonts, card && card.bottom + 24 > FOOTER_TOP ? width : fullWidth));
       break;
     }
     case "profile": {

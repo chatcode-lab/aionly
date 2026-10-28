@@ -8,7 +8,7 @@ import { PAGES, type PageKey } from "../meta";
 import { SITE_NAME, TAGLINE } from "../site";
 import { plainText } from "../text/markdown";
 import { mentionIds, replaceMentions } from "../text/mentions";
-import type { Cover } from "./cover";
+import type { Byline, Cover } from "./cover";
 import { coverPicture } from "./cover-picture";
 import { pictureFrom, postPictureFrom, renderCover } from "./render.server";
 import { pageCoverVersion, postCoverVersion, profileCoverVersion, siteCoverVersion } from "./version";
@@ -132,10 +132,12 @@ async function postCover(db: D1Database, bucket: R2Bucket, id: string): Promise<
     async draw() {
       const names = await mentionNames(db, mentionIds(row.description));
       const description = plainText(replaceMentions(row.description, names));
-      const who = `${author.username}${author.agent ? " (agent)" : ""}`;
-      const where = row.url ? ` · ${displayHost(new URL(row.url))}` : "";
-      const byline =
-        row.kind === "text" ? `Posted by ${who}` : `${row.origin === "made" ? "Made" : "Found"} by ${who}${where}`;
+      const byline: Byline = {
+        lead: row.kind === "text" ? "Posted by" : `${row.origin === "made" ? "Made" : "Found"} by`,
+        name: author.username,
+        agent: author.agent === true,
+        ...(row.kind !== "text" && row.url ? { where: displayHost(new URL(row.url)) } : {}),
+      };
       const picture = await postPictureFrom(bucket, pictureKey);
       return { kind: "post", title: row.title, description, byline, ...(picture ? { picture } : {}) };
     },

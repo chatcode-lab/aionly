@@ -8,6 +8,8 @@ import type { Frame } from "./framing";
 import { coverVersion } from "./version";
 
 const WHOLE: Frame = { left: 0, top: 0, right: 1, bottom: 1 };
+const FOUND = { lead: "Found by", name: "x", agent: false };
+const POSTED = { lead: "Posted by", name: "x", agent: false };
 
 const font = (name: string) => {
   const bytes = readFileSync(new URL(`./fonts/${name}`, import.meta.url));
@@ -60,7 +62,7 @@ describe("covers", () => {
     const covers = [
       coverSvg({ kind: "site", tagline: "A place for <all> things AI", promise: "Open source" }, fonts),
       coverSvg({ kind: "page", title: "Rules", description: "What belongs & what does not", address: "aion.ly/rules" }, fonts),
-      coverSvg({ kind: "post", title: 'A "song"', description: "Why it is good", byline: "Found by x · suno.com", picture: { href: "data:image/png;base64,AAAA", width: 4, height: 3, frame: WHOLE } }, fonts),
+      coverSvg({ kind: "post", title: 'A "song"', description: "Why it is good", byline: { lead: "Found by", name: "x", agent: false, where: "suno.com" }, picture: { href: "data:image/png;base64,AAAA", width: 4, height: 3, frame: WHOLE } }, fonts),
       coverSvg({ kind: "profile", name: "quiet_otter", subtitle: "On aion.ly since October 2026", address: "aion.ly/@quiet_otter", avatar: { color: "#2b6cb0", letter: "Q" } }, fonts),
     ];
     for (const svg of covers) {
@@ -75,30 +77,42 @@ describe("covers", () => {
   it("show a post's picture whole as far as its frame goes, in a card beside the title alone (owner's request, 2026-10-28)", () => {
     // A video thumbnail: 4:3, its middle 16:9 between black bars.
     const picture = { href: "data:image/jpeg;base64,AAAA", width: 480, height: 360, frame: { left: 0, top: 0.125, right: 1, bottom: 0.875 } };
-    const svg = coverSvg({ kind: "post", title: "A song", description: "Why it is good", byline: "Found by x", picture }, fonts);
+    const svg = coverSvg({ kind: "post", title: "A song", description: "Why it is good", byline: FOUND, picture }, fonts);
     // 520 by 292.5 at the right margin, centered between the top and bottom.
     expect(svg).toContain('<rect x="608" y="169" width="520" height="293" rx="16"/>');
     // The whole picture is placed so that its frame fills the card, and cut to it.
     expect(svg).toMatch(/<image x="608.00" y="120.\d+" width="520.00" height="390.\d+" preserveAspectRatio="none" clip-path="url\(#card\)"/);
     expect(svg).not.toContain("Why it is good");
     // A tall picture takes the margins' height, and narrows the text instead.
-    const tall = coverSvg({ kind: "post", title: "A song", description: "", byline: "Found by x", picture: { ...picture, width: 360, height: 640, frame: WHOLE } }, fonts);
+    const tall = coverSvg({ kind: "post", title: "A song", description: "", byline: FOUND, picture: { ...picture, width: 360, height: 640, frame: WHOLE } }, fonts);
     expect(tall).toContain('<rect x="855" y="72" width="273" height="486" rx="16"/>');
   });
 
-  it("run a post's byline under its picture when the picture ends above it, else beside it", () => {
-    const byline = "Found by someone_with_a_long_name (agent) · example.com";
-    const footer = (svg: string) => /font-size="28" fill="#6f6b64">([^<]*)<\/text>/.exec(svg)![1];
+  it("name a post's author as the site does, a small person or agent mark before the name (owner's request, 2026-10-28)", () => {
+    const agent = coverSvg({ kind: "post", title: "A song", description: "", byline: { ...FOUND, agent: true, where: "youtube.com" } }, fonts);
+    expect(agent).toContain('<rect width="16" height="12" x="4" y="8" rx="2"/>');
+    expect(agent).toContain('fill="#6f6b64">Found by</text>');
+    expect(agent).toContain('<tspan fill="#1b1a18">x</tspan> · youtube.com</text>');
+    expect(agent).not.toContain("(agent)");
+    const person = coverSvg({ kind: "post", title: "A song", description: "", byline: POSTED }, fonts);
+    expect(person).toContain('<circle cx="12" cy="8" r="5"/><path d="M20 21a8 8 0 0 0-16 0"/>');
+    expect(person).not.toContain('<rect width="16" height="12"');
+  });
+
+  it("run a post's byline under its picture when the picture ends above it, else beside it, leaving out the address first", () => {
+    const byline = { lead: "Found by", name: "someone_with_a_long_name", agent: true, where: "a-long-address.example.com" };
     const wide = { href: "data:image/png;base64,AAAA", width: 1600, height: 900, frame: WHOLE };
-    expect(footer(coverSvg({ kind: "post", title: "A song", description: "", byline, picture: wide }, fonts))).toBe(byline);
+    expect(coverSvg({ kind: "post", title: "A song", description: "", byline, picture: wide }, fonts)).toContain(
+      '<tspan fill="#1b1a18">someone_with_a_long_name</tspan> · a-long-address.example.com</text>',
+    );
     const square = { ...wide, width: 900 };
-    expect(footer(coverSvg({ kind: "post", title: "A song", description: "", byline, picture: square }, fonts))).toMatch(/…$/);
+    expect(coverSvg({ kind: "post", title: "A song", description: "", byline, picture: square }, fonts)).toMatch(/<tspan fill="#1b1a18">someone_with_a_long_n[a-z_]*…?<\/tspan><\/text>/);
   });
 
   it("never cut a description to a single line: whole, two lines or more, or none", () => {
     // A title that takes three lines leaves room for one line of description.
     const title = "A long title about agents that trade, scam and bargain inside an old online game, and what they learn";
-    const shown = (description: string) => /font-size="30"/.test(coverSvg({ kind: "post", title, description, byline: "Posted by x" }, fonts));
+    const shown = (description: string) => /font-size="30"/.test(coverSvg({ kind: "post", title, description, byline: POSTED }, fonts));
     expect(shown("Short and whole.")).toBe(true);
     expect(shown("A description far too long for the one line left under a title of three lines, which would end in an ellipsis.")).toBe(false);
     expect(shown("")).toBe(false);
@@ -108,7 +122,7 @@ describe("covers", () => {
     const covers = [
       coverSvg({ kind: "site", tagline: "A place", promise: "Open source" }, fonts),
       coverSvg({ kind: "page", title: "Rules", description: "What belongs", address: "aion.ly/rules" }, fonts),
-      coverSvg({ kind: "post", title: "A song", description: "", byline: "Posted by x" }, fonts),
+      coverSvg({ kind: "post", title: "A song", description: "", byline: POSTED }, fonts),
       coverSvg({ kind: "profile", name: "x", subtitle: "", address: "aion.ly/@x", avatar: { color: "#2b6cb0", letter: "X" } }, fonts),
     ];
     for (const svg of covers) {
@@ -122,7 +136,7 @@ describe("covers", () => {
   });
 
   it("give a post with nothing drawable a title anyway", () => {
-    expect(coverSvg({ kind: "post", title: "😀😀😀", description: "", byline: "Posted by x" }, fonts)).toContain("A post on aion.ly");
+    expect(coverSvg({ kind: "post", title: "😀😀😀", description: "", byline: POSTED }, fonts)).toContain("A post on aion.ly");
   });
 
   it("have versions that change with what they show", () => {

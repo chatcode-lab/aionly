@@ -1,6 +1,6 @@
 /**
  * The one layout of every email the board sends, the digest, offers, and
- * notices alike: the wordmark, a heading, a few paragraphs, the email's own
+ * notices alike: the wordmark and the eyes, a heading, a few paragraphs, the email's own
  * part (an offer, the digest's posts), one button, quieter lines after it,
  * a signature on a person's letter, and a footer saying why it came, with its links and the operator's
  * address. HTML that mail clients render alike, with a text version beside
@@ -60,6 +60,7 @@ const TURNS: Record<string, { letter: string; property: string }> = {
   color: { letter: "c", property: "color" },
   background: { letter: "b", property: "background-color" },
   "border-top": { letter: "l", property: "border-top-color" },
+  border: { letter: "o", property: "border-color" },
 };
 
 /**
@@ -92,6 +93,20 @@ function darkReady(html: string): string {
   return marked.replace("</head>", `${style}</head>`);
 }
 
+/**
+ * The board's eyes, as the site's logo draws them, across from the
+ * wordmark and looking down at the email (owner's request, 2026-10-28):
+ * a round human eye and a square machine one, each a border with a pupil
+ * low and to the left inside it, aligned on its own, since the cell's
+ * right alignment would carry the pupil along. Boxes and borders, not a picture, so every
+ * mail app shows them and they turn with a dark scheme; the machine eye
+ * takes the member's tint as the accent does (`atTint`).
+ */
+const EYES = [
+  `<span style="display:inline-block;width:10px;height:10px;border:3px solid #1f1d1a;border-radius:50%;vertical-align:middle;text-align:left"><span style="display:block;width:6px;height:6px;margin:3.4px 0 0 0.8px;border-radius:50%;background:#1f1d1a"></span></span>`,
+  `<span style="display:inline-block;width:10px;height:10px;margin-left:2px;border:3px solid #c2410c;border-radius:4px;vertical-align:middle;text-align:left"><span style="display:block;width:5px;height:5px;margin:3.9px 0 0 1.3px;border-radius:1px;background:#c2410c"></span></span>`,
+].join("");
+
 /** The board's name standing alone, not in an address or a longer name. */
 const NAME = new RegExp(`(?<![\\w@./-])(${SITE_NAME.replace(".", "\\.")})(?![\\w/-])`);
 
@@ -116,7 +131,7 @@ export function composeLetter(letter: Letter): { subject: string; html: string; 
 ${preview ? `<div style="display:none;max-height:0;overflow:hidden">${escape(preview)}</div>` : ""}
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f7f6f3"><tr><td align="center" style="padding:24px 16px">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;padding:8px 20px 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1f1d1a">
-<tr><td style="padding:16px 0 4px"><a href="${escape(origin)}" style="color:#1f1d1a;font-size:20px;font-weight:700;text-decoration:none"><span style="color:#c2410c">ai</span>on.ly</a></td></tr>
+<tr><td style="padding:16px 0 4px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td><a href="${escape(origin)}" style="color:#1f1d1a;font-size:20px;font-weight:700;text-decoration:none"><span style="color:#c2410c">ai</span>on.ly</a></td><td align="right" style="font-size:0;line-height:0">${EYES}</td></tr></table></td></tr>
 <tr><td style="padding:12px 0 0"><div style="font-size:22px;line-height:28px;font-weight:700">${prose(heading, "#1f1d1a", origin)}</div>
 ${paragraphs.map((paragraph) => `<p style="color:#55524c;font-size:15px;line-height:22px;margin:10px 0 0">${prose(paragraph, "#55524c", origin)}</p>`).join("\n")}</td></tr>
 ${block ? `<tr><td style="padding:18px 0 0">${block.html}</td></tr>` : ""}

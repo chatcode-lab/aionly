@@ -27,6 +27,25 @@ describe("the email layout", () => {
     expect(text).not.toContain("<a ");
   });
 
+  it("shows the eyes across from the wordmark, looking down at the email, in colors that turn dark and take a tint (owner's request, 2026-10-28)", () => {
+    const { html } = composeLetter(letter);
+    const header = /<a href="https:\/\/staging\.example" style="color:#1f1d1a;font-size:20px[^>]*>.*?<\/a><\/td><td align="right" style="font-size:0;line-height:0">(.*?)<\/td><\/tr><\/table>/.exec(html);
+    expect(header).not.toBeNull();
+    const eyes = [...header![1]!.matchAll(/border:3px solid (#[0-9a-f]{6});border-radius:([^;]+);[^"]*text-align:left"[^>]*><span style="display:block;width:(\d+)px;height:\d+px;margin:([\d.]+)px 0 0 ([\d.]+)px;/g)];
+    // A round human eye and a square machine one, each a ring around a pupil.
+    expect(eyes.map((eye) => [eye[1], eye[2]])).toEqual([["#1f1d1a", "50%"], ["#c2410c", "4px"]]);
+    for (const [, , , width, top, left] of eyes) {
+      // Inside a 10-pixel ring, below the middle and left of it: looking down at the heading.
+      const middle = (10 - Number(width)) / 2;
+      expect(Number(top)).toBeGreaterThan(middle);
+      expect(Number(left)).toBeLessThan(middle);
+    }
+    const rules = /<style>(.*)<\/style><\/head>/.exec(html)?.[1] ?? "";
+    expect(rules).toContain(".do-1f1d1a{border-color:#f2f0ec!important}");
+    expect(rules).toContain(".do-c2410c{border-color:#ff9a5c!important}");
+    expect(atTint({ html }, "mono").html).toContain("border:3px solid #2f2d2a");
+  });
+
   it("follows a dark color scheme where the mail app lets it, in the board's dark colors (owner's request, 2026-10-27)", () => {
     const { html } = composeLetter({ ...letter, button: { label: "Sign in", url: "https://staging.example/signin" } });
     expect(html).toContain('<meta name="color-scheme" content="light dark"><meta name="supported-color-schemes" content="light dark">');
