@@ -652,12 +652,18 @@ test("only the first picture on the screen loads with the page, and a picture ke
   const picture = card.locator("img[alt^='A wide picture']");
   await expect(picture).toHaveAttribute("fetchpriority", "high");
   await expect(picture).not.toHaveAttribute("loading", /./);
+  // Offered at widths up to its own, resized on the media domain; the head preloads the same choice.
+  const resizedAt = (width: number) => `https://media-staging.aion.ly/cdn-cgi/image/width=${width},fit=scale-down,format=auto,onerror=redirect/${key}`;
+  await expect(picture).toHaveAttribute("srcset", `${resizedAt(400)} 400w, ${resizedAt(800)} 800w, ${resizedAt(1200)} 1200w`);
+  const head = (await (await request.get(`/p/${id}`)).text()).split("</head>")[0]!;
+  expect(head).toContain(`imageSrcSet="${resizedAt(400)} 400w, ${resizedAt(800)} 800w, ${resizedAt(1200)} 1200w"`);
   const frame = card.getByRole("button", { name: /^See the picture full size/ });
   const before = (await frame.boundingBox())!;
   expect(before.width).toBeGreaterThan(200);
   expect(Math.abs(before.height - before.width / 2)).toBeLessThan(1);
   release();
-  await expect.poll(() => picture.evaluate((img: HTMLImageElement) => img.complete && img.naturalWidth > 0)).toBe(true);
+  // Decoded, not measured: a one-pixel stand-in drawn from a wide candidate measures 0.
+  await expect.poll(() => picture.evaluate((img: HTMLImageElement) => img.complete && img.decode().then(() => true, () => false))).toBe(true);
   expect(await frame.boundingBox()).toEqual(before);
 });
 

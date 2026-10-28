@@ -10,6 +10,7 @@ import { type Aspect, PROVIDER_LABEL, type Provider } from "~/lib/links/types";
 import { playbackController } from "~/lib/playback/controller";
 import { useMediaSlot } from "~/lib/playback/hooks";
 import { connectNative } from "~/lib/playback/native";
+import { columnSources } from "~/lib/resize";
 
 /** Outbound links never pass ranking credit and never get a window handle. */
 export const OUTBOUND_REL = "nofollow ugc noopener";
@@ -23,11 +24,13 @@ function loadingOf(lead: boolean | undefined) {
   return lead ? { fetchPriority: "high" as const } : { loading: "lazy" as const };
 }
 
-function Thumb({ src, lead }: { src?: string; lead?: boolean }) {
+/** A card's snapshot, filling its frame; `sizes` when the frame is narrower than the column. */
+function Thumb({ src, lead, sizes }: { src?: string; lead?: boolean; sizes?: string }) {
   if (!src) return null;
   return (
     <img
       src={src}
+      {...columnSources(src, undefined, sizes)}
       alt=""
       {...loadingOf(lead)}
       decoding="async"
@@ -116,7 +119,7 @@ export function MediaPoster({
           )}
         >
           <Music size={22} aria-hidden />
-          <Thumb src={thumbUrl} lead={lead} />
+          <Thumb src={thumbUrl} lead={lead} sizes={tall ? `${height}px` : "4rem"} />
         </span>
         <span className="min-w-0 flex-1">
           <span className="block text-body font-medium">
@@ -164,7 +167,7 @@ export function MediaPoster({
           vertical ? "aspect-[9/16] w-full max-w-80" : "aspect-video w-full",
         )}
       >
-        <Thumb src={thumbUrl} lead={lead} />
+        <Thumb src={thumbUrl} lead={lead} sizes={vertical ? "(min-width: 20rem) 20rem, 100vw" : undefined} />
         <PlayGlyph />
         {name ? <Badge side="left">{name}</Badge> : null}
         {length ? <Badge side="right">{length}</Badge> : null}
@@ -222,6 +225,7 @@ export function UploadedImage({
           >
             <img
               src={src}
+              {...columnSources(src, width)}
               width={width}
               height={height}
               alt={alt}
@@ -364,6 +368,7 @@ function GalleryFrame({
             {index <= reached + 1 ? (
               <img
                 src={picture.src}
+                {...columnSources(picture.src, picture.width)}
                 width={picture.width}
                 height={picture.height}
                 alt={pictureAlt(alt, index, pictures.length)}

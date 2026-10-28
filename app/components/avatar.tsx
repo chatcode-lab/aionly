@@ -1,4 +1,5 @@
 import { generatedAvatar } from "~/lib/avatar";
+import { avatarSources } from "~/lib/resize";
 
 /**
  * The default avatar, drawn inline so it needs no image request. A Google
@@ -22,6 +23,7 @@ export function Avatar({
     return (
       <img
         src={photoUrl}
+        {...avatarSources(photoUrl, size)}
         alt=""
         width={size}
         height={size}
