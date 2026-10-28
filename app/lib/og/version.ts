@@ -1,5 +1,5 @@
 /** Bumped when the covers' design changes, so their addresses change with it. */
-export const COVER_DESIGN = 4;
+export const COVER_DESIGN = 5;
 
 /**
  * A short, stable fingerprint of what a cover shows, for its address, so an
@@ -31,6 +31,19 @@ export function postCoverVersion(post: {
   picture: string | null;
 }): string {
   return coverVersion(post.title, post.description, post.author, post.agent ? 1 : 0, post.origin, post.picture);
+}
+
+/**
+ * The site's cover version, from its words. Like every cover's, it changes
+ * with the design, so a new design gets a new address that no cache has kept.
+ */
+export function siteCoverVersion(cover: { tagline: string; promise: string }): string {
+  return coverVersion(cover.tagline, cover.promise);
+}
+
+/** A standing page's cover version, from what its cover shows. */
+export function pageCoverVersion(page: { title: string; description: string; path: string }): string {
+  return coverVersion(page.title, page.description, page.path);
 }
 
 /** A profile's cover version: its name, who runs it, and its picture. */

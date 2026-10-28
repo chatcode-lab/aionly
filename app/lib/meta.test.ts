@@ -26,7 +26,7 @@ describe("page meta", () => {
   it("falls back to the site's address and cover", () => {
     const meta = pageMeta([], { title: HOME_TITLE, bare: true, description: "x", path: "/" });
     expect(meta).toContainEqual({ title: HOME_TITLE });
-    expect(tag(meta, "og:image")?.content).toBe("https://aion.ly/og/site.png");
+    expect(tag(meta, "og:image")?.content).toMatch(/^https:\/\/aion\.ly\/og\/site\.png\?v=[0-9a-z]+$/);
   });
 
   it("keeps private pages out of search engines", () => {
@@ -36,7 +36,7 @@ describe("page meta", () => {
   it("gives each standing page its own cover", () => {
     for (const key of Object.keys(PAGES) as Array<keyof typeof PAGES>) {
       const meta = standingPageMeta(matches, key);
-      expect(tag(meta, "og:image")?.content).toBe(`https://staging.example/og/page/${key}.png`);
+      expect(tag(meta, "og:image")?.content).toMatch(new RegExp(`^https://staging\\.example/og/page/${key}\\.png\\?v=[0-9a-z]+$`));
       expect(tag(meta, "description")?.content.length).toBeLessThanOrEqual(160);
     }
   });

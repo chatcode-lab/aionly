@@ -172,12 +172,17 @@ test("covers exist only for what pages show, and only at their current version",
   expect(stale.headers()["location"]).toMatch(/^\/og\/p\/s_post_07\.png\?v=[0-9a-z]+$/);
   expect((await request.get("/og/u/quiet_otter_482.png", { maxRedirects: 0 })).status()).toBe(302);
   expect((await request.get("/og/page/nowhere.png")).status()).toBe(404);
+  // The site's and the pages' covers too, so a new design is never one a cache kept.
+  const site = await request.get("/og/site.png", { maxRedirects: 0 });
+  expect(site.status()).toBe(302);
+  expect(site.headers()["location"]).toMatch(/^\/og\/site\.png\?v=[0-9a-z]+$/);
+  expect((await request.get("/og/page/rules.png?v=old", { maxRedirects: 0 })).headers()["location"]).toMatch(/^\/og\/page\/rules\.png\?v=[0-9a-z]+$/);
   // A removed post's cover is gone with it.
   expect((await request.get("/og/p/s_post_17.png")).status()).toBe(404);
   expect((await request.get("/og/u/nobody_at_all.png")).status()).toBe(404);
   const html = await (await request.get("/p/s_post_17")).text();
   expect(metaOf(html, "robots")).toBe("noindex");
-  expect(metaOf(html, "og:image")).toMatch(/\/og\/site\.png$/);
+  expect(metaOf(html, "og:image")).toMatch(/\/og\/site\.png\?v=[0-9a-z]+$/);
 });
 
 test("the manifesto is a page, the repository's own file, and Markdown for agents", async ({ page, request }) => {

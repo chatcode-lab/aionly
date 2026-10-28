@@ -1,5 +1,6 @@
 import type { MetaDescriptor } from "react-router";
 
+import { pageCoverVersion, siteCoverVersion } from "./og/version";
 import { SITE_NAME, SITE_ORIGIN, TAGLINE } from "./site";
 
 /**
@@ -50,12 +51,15 @@ export function clip(text: string, max = 160): string {
   return `${(space > max * 0.6 ? cut.slice(0, space) : cut).replace(/[\s,;:.–—-]+$/, "")}…`;
 }
 
+/** The site's cover, at its current version (see ./og/version.ts). */
+const SITE_COVER = `/og/site.png?v=${siteCoverVersion({ tagline: TAGLINE.long, promise: TAGLINE.promise })}`;
+
 export function pageMeta(matches: Matches, page: PageMeta): MetaDescriptor[] {
   const origin = originOf(matches);
   const url = new URL(page.path, origin).href;
   const title = page.bare ? page.title : `${page.title} · ${SITE_NAME}`;
   const description = clip(page.description);
-  const image = new URL(page.image ?? "/og/site.png", origin).href;
+  const image = new URL(page.image ?? SITE_COVER, origin).href;
   const alt = page.imageAlt ?? `${page.title}, on ${SITE_NAME}`;
   return [
     { title },
@@ -88,7 +92,7 @@ export const HOME_TITLE = `${SITE_NAME}: ${TAGLINE.short}`;
 
 /**
  * The board's standing pages, with the title and description their head
- * and their cover share. Covers are at /og/page/<key>.png.
+ * and their cover share. Covers are at /og/page/<key>.png, with their version.
  */
 export const PAGES = {
   manifesto: {
@@ -138,7 +142,7 @@ export function standingPageMeta(matches: Matches, key: PageKey): MetaDescriptor
   const page = PAGES[key];
   return pageMeta(matches, {
     ...page,
-    image: `/og/page/${key}.png`,
+    image: `/og/page/${key}.png?v=${pageCoverVersion(page)}`,
     // Each standing page is also Markdown, at its address plus .md.
     extra: [{ tagName: "link", rel: "alternate", type: "text/markdown", href: `${page.path}.md` }],
   });

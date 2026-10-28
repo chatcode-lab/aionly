@@ -1,11 +1,13 @@
+import type { Frame } from "./framing";
 import type { FontMetrics } from "./metrics";
 
 /**
  * The covers shown when a page of the board is shared: 1200 by 630, the
  * board's own colors on a soft ground, the logo, a large title, a short description, and
- * a line saying whose it is. Drawn as SVG here and rendered to PNG by
- * resvg (see render.server.ts). Plain text and flat color only, so a cover
- * renders in a few milliseconds and reads at thumbnail size.
+ * a line saying whose it is, or a post's picture beside its title. Drawn
+ * as SVG here and rendered to PNG by resvg (see render.server.ts). Plain
+ * text and soft color, so a cover renders in a few milliseconds and reads
+ * at thumbnail size.
  */
 
 export const WIDTH = 1200;
@@ -33,10 +35,17 @@ export interface Picture {
   href: string;
 }
 
+/** A post's picture: its size in pixels, and the part of it a cover shows (see ./framing.ts). */
+export interface FramedPicture extends Picture {
+  width: number;
+  height: number;
+  frame: Frame;
+}
+
 export type Cover =
   | { kind: "site"; tagline: string; promise: string }
   | { kind: "page"; title: string; description: string; address: string }
-  | { kind: "post"; title: string; description: string; byline: string; picture?: Picture }
+  | { kind: "post"; title: string; description: string; byline: string; picture?: FramedPicture }
   | {
       kind: "profile";
       name: string;
@@ -46,8 +55,11 @@ export type Cover =
     };
 
 const MARGIN = 72;
-/** Where text ends: the margin, or the picture's edge less a gap. */
-const PICTURE_X = 744;
+/** A post's picture is at most this wide, and as tall as the margins allow. */
+const CARD_WIDTH = 520;
+const CARD_HEIGHT = HEIGHT - MARGIN * 2;
+/** Between the text and the picture. */
+const GAP = 56;
 const FOOTER_BASELINE = HEIGHT - 64;
 /** Text stops this far above the footer. */
 const BODY_BOTTOM = FOOTER_BASELINE - 72;
@@ -189,27 +201,55 @@ function logo(eyesWidth: number, baseline: number, size: number): string {
   return eyes(MARGIN, MARGIN, eyesWidth) + wordmark(MARGIN, baseline, size);
 }
 
+/** Where the footer's capitals begin. */
+const FOOTER_TOP = FOOTER_BASELINE - 21;
+
 function footer(text: string, font: FontMetrics, width: number): string {
   const line = wrap(drawable(text, font), font, 28, width, 1).lines[0] ?? "";
   return `<text x="${MARGIN}" y="${FOOTER_BASELINE}" font-family="${FAMILY.regular}" font-size="28" fill="${COLORS.faint}">${escape(line)}</text>`;
 }
 
-/** A picture filling the right of the cover, cropped to fit. */
-function picturePanel(picture: Picture): string {
-  return [
-    `<image x="${PICTURE_X}" y="0" width="${WIDTH - PICTURE_X}" height="${HEIGHT}" preserveAspectRatio="xMidYMid slice" href="${escape(picture.href)}"/>`,
-    `<rect x="${PICTURE_X}" y="0" width="1" height="${HEIGHT}" fill="${COLORS.line}"/>`,
-  ].join("");
+/**
+ * A post's picture whole, as far as its frame goes, at the right margin and
+ * centered between the top and bottom ones: a card with round corners and a
+ * soft shadow. Returns the SVG, where the card begins, and where it ends below.
+ */
+function pictureCard(picture: FramedPicture): { svg: string; x: number; bottom: number } {
+  const { frame } = picture;
+  const shown = { width: picture.width * (frame.right - frame.left), height: picture.height * (frame.bottom - frame.top) };
+  const scale = Math.min(CARD_WIDTH / shown.width, CARD_HEIGHT / shown.height);
+  const width = Math.round(shown.width * scale);
+  const height = Math.round(shown.height * scale);
+  const x = WIDTH - MARGIN - width;
+  const y = Math.round((HEIGHT - height) / 2);
+  // The whole picture, placed so that its frame fills the card.
+  const whole = { width: width / (frame.right - frame.left), height: height / (frame.bottom - frame.top) };
+  const box = `x="${x}" y="${y}" width="${width}" height="${height}" rx="16"`;
+  return {
+    x,
+    bottom: y + height,
+    svg: [
+      `<defs><filter id="lift" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="10" stdDeviation="18" flood-color="${COLORS.text}" flood-opacity="0.16"/></filter>`,
+      `<clipPath id="card"><rect ${box}/></clipPath></defs>`,
+      `<rect ${box} fill="${COLORS.ground}" filter="url(#lift)"/>`,
+      `<image x="${(x - frame.left * whole.width).toFixed(2)}" y="${(y - frame.top * whole.height).toFixed(2)}" width="${whole.width.toFixed(2)}" height="${whole.height.toFixed(2)}" preserveAspectRatio="none" clip-path="url(#card)" href="${escape(picture.href)}"/>`,
+      `<rect ${box} fill="none" stroke="${COLORS.text}" stroke-opacity="0.08" stroke-width="1"/>`,
+    ].join(""),
+  };
 }
 
-/** A description in the space left under the title, if there is room for a line. */
+/**
+ * A description in the space left under the title: whole, or at least two
+ * lines of it, never a single line cut short (owner's request, 2026-10-28).
+ */
 function description(text: string, fonts: Fonts, width: number, top: number, size: number): string {
   const lineHeight = Math.round(size * 1.38);
   const room = Math.floor((BODY_BOTTOM - top - Math.round(size * 0.97)) / lineHeight) + 1;
   const clean = drawable(text, fonts.regular);
   if (room < 1 || !clean) return "";
-  const lines = wrap(clean, fonts.regular, size, width, Math.min(room, 3)).lines;
-  return textAt({ lines, size, lineHeight, family: FAMILY.regular, color: COLORS.muted }, MARGIN, top).svg;
+  const wrapped = wrap(clean, fonts.regular, size, width, Math.min(room, 3));
+  if (wrapped.lines.length < 2 && !wrapped.complete) return "";
+  return textAt({ lines: wrapped.lines, size, lineHeight, family: FAMILY.regular, color: COLORS.muted }, MARGIN, top).svg;
 }
 
 export function coverSvg(cover: Cover, fonts: Fonts): string {
@@ -233,14 +273,18 @@ export function coverSvg(cover: Cover, fonts: Fonts): string {
       break;
     }
     case "post": {
-      const width = cover.picture ? PICTURE_X - MARGIN - 56 : fullWidth;
-      if (cover.picture) parts.push(picturePanel(cover.picture));
+      const card = cover.picture ? pictureCard(cover.picture) : null;
+      const width = card ? card.x - GAP - MARGIN : fullWidth;
+      if (card) parts.push(card.svg);
       parts.push(logo(64, 152, 44));
       const text = drawable(cover.title, fonts.semibold) || "A post on aion.ly";
-      const title = fitTitle(text, fonts.semibold, cover.picture ? [64, 56, 48] : [72, 64, 56], width, 3);
+      const title = card ? fitTitle(text, fonts.semibold, [56, 48, 44], width, 4) : fitTitle(text, fonts.semibold, [72, 64, 56], width, 3);
       const placed = textAt(title, MARGIN, 220);
-      parts.push(placed.svg, description(cover.description, fonts, width, placed.bottom + 28, 30));
-      parts.push(footer(cover.byline, fonts.regular, width));
+      parts.push(placed.svg);
+      // Beside a picture, the title alone, to keep the cover simple (owner's request, 2026-10-28).
+      if (!card) parts.push(description(cover.description, fonts, width, placed.bottom + 28, 30));
+      // The byline runs under the picture when it ends above it.
+      parts.push(footer(cover.byline, fonts.regular, card && card.bottom + 24 > FOOTER_TOP ? width : fullWidth));
       break;
     }
     case "profile": {
