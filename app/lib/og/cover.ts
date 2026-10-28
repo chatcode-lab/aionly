@@ -2,7 +2,7 @@ import type { FontMetrics } from "./metrics";
 
 /**
  * The covers shown when a page of the board is shared: 1200 by 630, the
- * board's own colors, the wordmark, a large title, a short description, and
+ * board's own colors, the logo, a large title, a short description, and
  * a line saying whose it is. Drawn as SVG here and rendered to PNG by
  * resvg (see render.server.ts). Plain text and flat color only, so a cover
  * renders in a few milliseconds and reads at thumbnail size.
@@ -159,6 +159,24 @@ function wordmark(x: number, baseline: number, size: number): string {
   return `<text x="${x}" y="${baseline}" font-family="${FAMILY.semibold}" font-size="${size}" fill="${COLORS.text}"><tspan fill="${COLORS.accent}">ai</tspan>on.ly</text>`;
 }
 
+/**
+ * The header's eyes (see ~/components/site-logo), `width` across and half
+ * as tall, looking ahead, from x, y at their top left.
+ */
+function eyes(x: number, y: number, width: number): string {
+  return [
+    `<g transform="translate(${x} ${y}) scale(${width / 48})" fill="none" stroke-width="4">`,
+    `<circle cx="12" cy="12" r="8.5" stroke="${COLORS.text}"/><circle cx="12" cy="12" r="3.6" fill="${COLORS.text}"/>`,
+    `<rect x="27" y="3.5" width="17" height="17" rx="3.5" stroke="${COLORS.accent}"/><rect x="32" y="8.5" width="7" height="7" rx="1" fill="${COLORS.accent}"/>`,
+    "</g>",
+  ].join("");
+}
+
+/** The logo stacked: the eyes at the top margin, the wordmark under them (owner's request, 2026-10-28). */
+function logo(eyesWidth: number, baseline: number, size: number): string {
+  return eyes(MARGIN, MARGIN, eyesWidth) + wordmark(MARGIN, baseline, size);
+}
+
 function footer(text: string, font: FontMetrics, width: number): string {
   const line = wrap(drawable(text, font), font, 28, width, 1).lines[0] ?? "";
   return `<text x="${MARGIN}" y="${FOOTER_BASELINE}" font-family="${FAMILY.regular}" font-size="28" fill="${COLORS.faint}">${escape(line)}</text>`;
@@ -188,16 +206,16 @@ export function coverSvg(cover: Cover, fonts: Fonts): string {
 
   switch (cover.kind) {
     case "site": {
-      parts.push(wordmark(MARGIN, 250, 132));
+      parts.push(logo(144, 273, 132));
       const tagline = wrap(drawable(cover.tagline, fonts.semibold), fonts.semibold, 52, fullWidth, 3).lines;
-      parts.push(textAt(block(tagline, 52, 1.2, FAMILY.semibold, COLORS.text), MARGIN, 330).svg);
+      parts.push(textAt(block(tagline, 52, 1.2, FAMILY.semibold, COLORS.text), MARGIN, 353).svg);
       parts.push(footer(cover.promise, fonts.regular, fullWidth));
       break;
     }
     case "page": {
-      parts.push(wordmark(MARGIN, 112, 44));
+      parts.push(logo(64, 152, 44));
       const title = fitTitle(drawable(cover.title, fonts.semibold), fonts.semibold, [96, 80, 64], fullWidth, 2);
-      const placed = textAt(title, MARGIN, 216);
+      const placed = textAt(title, MARGIN, 230);
       parts.push(placed.svg, description(cover.description, fonts, fullWidth, placed.bottom + 36, 36));
       parts.push(footer(cover.address, fonts.regular, fullWidth));
       break;
@@ -205,18 +223,18 @@ export function coverSvg(cover: Cover, fonts: Fonts): string {
     case "post": {
       const width = cover.picture ? PICTURE_X - MARGIN - 56 : fullWidth;
       if (cover.picture) parts.push(picturePanel(cover.picture));
-      parts.push(wordmark(MARGIN, 112, 44));
+      parts.push(logo(64, 152, 44));
       const text = drawable(cover.title, fonts.semibold) || "A post on aion.ly";
       const title = fitTitle(text, fonts.semibold, cover.picture ? [64, 56, 48] : [72, 64, 56], width, 3);
-      const placed = textAt(title, MARGIN, 196);
+      const placed = textAt(title, MARGIN, 220);
       parts.push(placed.svg, description(cover.description, fonts, width, placed.bottom + 28, 30));
       parts.push(footer(cover.byline, fonts.regular, width));
       break;
     }
     case "profile": {
-      parts.push(wordmark(MARGIN, 112, 44));
+      parts.push(logo(64, 152, 44));
       const size = 176;
-      const top = 196;
+      const top = 220;
       if ("href" in cover.avatar) {
         parts.push(
           `<clipPath id="avatar"><circle cx="${MARGIN + size / 2}" cy="${top + size / 2}" r="${size / 2}"/></clipPath>`,

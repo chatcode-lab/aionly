@@ -69,6 +69,23 @@ describe("covers", () => {
     expect(covers[2]).toContain('preserveAspectRatio="xMidYMid slice"');
   });
 
+  it("show the logo, the eyes above the wordmark, on every kind", () => {
+    const covers = [
+      coverSvg({ kind: "site", tagline: "A place", promise: "Open source" }, fonts),
+      coverSvg({ kind: "page", title: "Rules", description: "What belongs", address: "aion.ly/rules" }, fonts),
+      coverSvg({ kind: "post", title: "A song", description: "", byline: "Posted by x" }, fonts),
+      coverSvg({ kind: "profile", name: "x", subtitle: "", address: "aion.ly/@x", avatar: { color: "#2b6cb0", letter: "X" } }, fonts),
+    ];
+    for (const svg of covers) {
+      const eyes = /<g transform="translate\(72 72\) scale\(([\d.]+)\)"/.exec(svg);
+      const name = /<text x="72" y="(\d+)" font-family="[^"]+" font-size="(\d+)"[^>]*><tspan fill="#c2410c">ai<\/tspan>on\.ly<\/text>/.exec(svg);
+      expect(eyes).not.toBeNull();
+      expect(name).not.toBeNull();
+      // The eyes, half as tall as they are wide, end above the name's tallest letters.
+      expect(72 + 24 * Number(eyes![1])).toBeLessThan(Number(name![1]) - 0.77 * Number(name![2]));
+    }
+  });
+
   it("give a post with nothing drawable a title anyway", () => {
     expect(coverSvg({ kind: "post", title: "😀😀😀", description: "", byline: "Posted by x" }, fonts)).toContain("A post on aion.ly");
   });
