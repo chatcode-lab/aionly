@@ -1,3 +1,4 @@
+import type { Frequency } from "../digest/frequency";
 import { CONTACT, FOUNDER } from "../site";
 
 /**
@@ -12,3 +13,11 @@ export const SENDERS = {
   notices: { from: { name: "aion.ly", email: "noreply@aion.ly" }, replyTo: CONTACT.general },
   signIn: { from: { name: "aion.ly", email: "noreply@aion.ly" } },
 } as const;
+
+/**
+ * The digest's sender by its kind, "aion.ly daily", so an inbox says which
+ * digest it is before its subject does (owner's request, 2026-10-29).
+ */
+export function digestSender(frequency: Frequency): string {
+  return `${SENDERS.digest.from.name} ${frequency}`;
+}

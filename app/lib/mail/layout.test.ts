@@ -27,6 +27,23 @@ describe("the email layout", () => {
     expect(text).not.toContain("<a ");
   });
 
+  it("centers its button (owner's request, 2026-10-29)", () => {
+    const { html } = composeLetter({ ...letter, button: { label: "Open aion.ly", url: "https://staging.example" } });
+    expect(html).toContain('<tr><td align="center" style="padding:18px 0 0;text-align:center"><a href="https://staging.example" style="display:inline-block;background:#c2410c');
+  });
+
+  it("spans a phone's screen edge to edge, the card's own classes kept beside the dark scheme's, in any tint (owner's request, 2026-10-29)", () => {
+    const { html } = composeLetter(letter);
+    expect(html).toContain("@media (max-width:560px){.edge{padding-left:0!important;padding-right:0!important}.sheet{border-radius:0!important;");
+    expect(html).toContain('<td align="center" class="edge" style="padding:24px 16px">');
+    expect(html).toMatch(/<table [^>]*style="max-width:560px;background:#ffffff;[^"]*" class="sheet db-ffffff dc-1f1d1a">/);
+    expect(html).not.toMatch(/class="[^"]*" [^>]*class=/);
+    // The dark scheme's rules take the tint, after the narrow screen's.
+    const tinted = atTint({ html }, "rose").html;
+    expect(tinted).toContain("@media (max-width:560px)");
+    expect(tinted).not.toContain("#ff9a5c");
+  });
+
   it("shows the eyes across from the wordmark, looking down at the email, in colors that turn dark and take a tint (owner's request, 2026-10-28)", () => {
     const { html } = composeLetter(letter);
     const header = /<a href="https:\/\/staging\.example" style="color:#1f1d1a;font-size:20px[^>]*>.*?<\/a><\/td><td align="right" style="font-size:0;line-height:0">(.*?)<\/td><\/tr><\/table>/.exec(html);

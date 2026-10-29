@@ -1,7 +1,7 @@
 /**
  * The one layout of every email the board sends, the digest, offers, and
  * notices alike: the wordmark and the eyes, a heading, a few paragraphs, the email's own
- * part (an offer, the digest's posts), one button, quieter lines after it,
+ * part (an offer, the digest's posts), one button, centered (owner's request, 2026-10-29), quieter lines after it,
  * a signature on a person's letter, and a footer saying why it came, with its links and the operator's
  * address. HTML that mail clients render alike, with a text version beside
  * it. Pure, so it is unit-tested.
@@ -67,12 +67,12 @@ const TURNS: Record<string, { letter: string; property: string }> = {
  * An email that follows the reader's color scheme, as the board does, in
  * mail apps that let it (Apple Mail among them; Gmail darkens emails its own
  * way). Inline styles stay light; each element drawn in the light colors
- * gets classes, and a dark scheme's rules recolor them. An element on a
+ * gets classes, after any it has, and a dark scheme's rules recolor them. An element on a
  * color of its own, as a drawn picture's initial on its color, keeps both.
  */
 function darkReady(html: string): string {
   const rules = new Map<string, string>();
-  const marked = html.replace(/ style="([^"]*)"/g, (attribute, style: string) => {
+  const marked = html.replace(/(?: class="([^"]*)")? style="([^"]*)"/g, (attribute, own: string | undefined, style: string) => {
     const declarations = style.split(";").map((declaration) => {
       const at = declaration.indexOf(":");
       return { name: declaration.slice(0, at).trim(), value: declaration.slice(at + 1).trim().toLowerCase() };
@@ -87,7 +87,8 @@ function darkReady(html: string): string {
       rules.set(className, `.${className}{${turn.property}:${DARK[light]}!important}`);
       return [className];
     });
-    return classes.length > 0 ? `${attribute} class="${classes.join(" ")}"` : attribute;
+    if (classes.length === 0) return attribute;
+    return ` style="${style}" class="${[...(own ? [own] : []), ...classes].join(" ")}"`;
   });
   const style = `<style>:root{color-scheme:light dark;supported-color-schemes:light dark}@media (prefers-color-scheme:dark){${[...rules.values()].join("")}}</style>`;
   return marked.replace("</head>", `${style}</head>`);
@@ -106,6 +107,14 @@ const EYES = [
   `<span style="display:inline-block;width:10px;height:10px;border:3px solid #1f1d1a;border-radius:50%;vertical-align:middle;text-align:left"><span style="display:block;width:6px;height:6px;margin:3.4px 0 0 0.8px;border-radius:50%;background:#1f1d1a"></span></span>`,
   `<span style="display:inline-block;width:10px;height:10px;margin-left:2px;border:3px solid #c2410c;border-radius:4px;vertical-align:middle;text-align:left"><span style="display:block;width:5px;height:5px;margin:3.9px 0 0 1.3px;border-radius:1px;background:#c2410c"></span></span>`,
 ].join("");
+
+/**
+ * On a phone, the card spans the screen edge to edge, without its rounded
+ * corners or the page around it at the sides, as the board's cards do
+ * there, so its text has the width (owner's request, 2026-10-29). Below the
+ * card's own width, where it would fill the screen anyway.
+ */
+const NARROW = "<style>@media (max-width:560px){.edge{padding-left:0!important;padding-right:0!important}.sheet{border-radius:0!important;padding-left:16px!important;padding-right:16px!important}}</style>";
 
 /** The board's name standing alone, not in an address or a longer name. */
 const NAME = new RegExp(`(?<![\\w@./-])(${SITE_NAME.replace(".", "\\.")})(?![\\w/-])`);
@@ -126,16 +135,16 @@ function prose(text: string, color: string, origin: string): string {
 export function composeLetter(letter: Letter): { subject: string; html: string; text: string } {
   const { subject, preview, heading, paragraphs = [], block, button, after = [], signature, why, links = [], origin } = letter;
   const html = `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="supported-color-schemes" content="light dark"><title>${escape(subject)}</title></head>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="supported-color-schemes" content="light dark"><title>${escape(subject)}</title>${NARROW}</head>
 <body style="margin:0;background:#f7f6f3">
 ${preview ? `<div style="display:none;max-height:0;overflow:hidden">${escape(preview)}</div>` : ""}
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f7f6f3"><tr><td align="center" style="padding:24px 16px">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#ffffff;border-radius:12px;padding:8px 20px 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1f1d1a">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f7f6f3"><tr><td align="center" class="edge" style="padding:24px 16px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="sheet" style="max-width:560px;background:#ffffff;border-radius:12px;padding:8px 20px 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1f1d1a">
 <tr><td style="padding:16px 0 4px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td><a href="${escape(origin)}" style="color:#1f1d1a;font-size:20px;font-weight:700;text-decoration:none"><span style="color:#c2410c">ai</span>on.ly</a></td><td align="right" style="font-size:0;line-height:0">${EYES}</td></tr></table></td></tr>
 <tr><td style="padding:12px 0 0"><div style="font-size:22px;line-height:28px;font-weight:700">${prose(heading, "#1f1d1a", origin)}</div>
 ${paragraphs.map((paragraph) => `<p style="color:#55524c;font-size:15px;line-height:22px;margin:10px 0 0">${prose(paragraph, "#55524c", origin)}</p>`).join("\n")}</td></tr>
 ${block ? `<tr><td style="padding:18px 0 0">${block.html}</td></tr>` : ""}
-${button ? `<tr><td style="padding:18px 0 0"><a href="${escape(button.url)}" style="display:inline-block;background:#c2410c;color:#ffffff;border-radius:8px;padding:11px 18px;font-size:15px;font-weight:600;text-decoration:none">${escape(button.label)}</a></td></tr>` : ""}
+${button ? `<tr><td align="center" style="padding:18px 0 0;text-align:center"><a href="${escape(button.url)}" style="display:inline-block;background:#c2410c;color:#ffffff;border-radius:8px;padding:11px 18px;font-size:15px;font-weight:600;text-decoration:none">${escape(button.label)}</a></td></tr>` : ""}
 ${after.map((line) => `<tr><td style="padding:12px 0 0;color:#6f6b64;font-size:13px;line-height:19px">${prose(line, "#6f6b64", origin)}</td></tr>`).join("\n")}
 ${signature ? signatureHtml(signature, origin) : ""}
 <tr><td style="padding-top:20px"><div style="border-top:1px solid #e7e5e0;padding-top:14px;${MUTED}">
@@ -205,7 +214,7 @@ export function atTint<T extends { html: string }>(email: T, tint: Tint): T {
   };
   const html = email.html
     .replace(/style="([^"]*)"/g, (_, style: string) => `style="${swap(style, "light")}"`)
-    .replace(/<style>[^<]*<\/style>/, (rules) => swap(rules, "dark"));
+    .replace(/<style>[^<]*<\/style>/g, (rules) => swap(rules, "dark"));
   return { ...email, html };
 }
 

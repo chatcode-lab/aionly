@@ -318,7 +318,7 @@ export default {
       const bulk = bulkMailer();
       if (bulk) {
         ctx.waitUntil(
-          sendDigests(workerEnv.DB, bulk, {
+          sendDigests(workerEnv.DB, workerEnv.IMAGES, bulk, {
             origin,
             secret: workerEnv.BETTER_AUTH_SECRET,
             from: workerEnv.DIGEST_FROM ?? SENDERS.digest.from.email,

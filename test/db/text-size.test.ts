@@ -1,3 +1,4 @@
+import { env } from "cloudflare:workers";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { accountRecord, setTextSize, setTint } from "../../app/lib/db/accounts.server";
@@ -59,7 +60,7 @@ describe("a member's text size", () => {
     await setDigest(db, "large", "weekly", NOW - 8 * DAY);
     await setDigest(db, "plain", "weekly", NOW - 8 * DAY);
     await post("voted", { author: "plain", age: 6 * DAY, title: "Most points", score: 9 });
-    expect(await sendDigests(db, mailer, { origin: "https://aion.ly", secret: "s", from: "digest@aion.ly", now: NOW })).toBe(2);
+    expect(await sendDigests(db, env.IMAGES, mailer, { origin: "https://aion.ly", secret: "s", from: "digest@aion.ly", now: NOW })).toBe(2);
     const byReader = Object.fromEntries(sent.map((email) => [email.to, email.html]));
     // A post's 16 px title.
     expect(byReader["large@example.invalid"]).toContain("font-size:21px;font-weight:600");

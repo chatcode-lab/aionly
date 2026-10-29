@@ -62,7 +62,7 @@ export async function sendTestEmails(input: { userId: string; origin: string; no
   checks.push({ label: "Offer emails", ok: offers === null, detail: offers === null ? "Both sent through Amazon SES." : `Not sent: ${offers}` });
 
   const digest = bulk
-    ? await sendTestDigest(env.DB, bulk, { userId, origin, secret: env.BETTER_AUTH_SECRET, from: env.DIGEST_FROM ?? SENDERS.digest.from.email, now })
+    ? await sendTestDigest(env.DB, env.IMAGES, bulk, { userId, origin, secret: env.BETTER_AUTH_SECRET, from: env.DIGEST_FROM ?? SENDERS.digest.from.email, now })
     : NO_SES;
   checks.push({ label: "Digest", ok: digest === null, detail: digest === null ? "Sent through Amazon SES." : `Not sent: ${digest}` });
   return checks;

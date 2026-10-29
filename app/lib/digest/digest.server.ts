@@ -6,10 +6,13 @@ import { founderPhoto } from "../mail/founder.server";
 import type { Mailer } from "../mail/mailers.server";
 import { forReader, type Reader } from "../mail/layout";
 import { readerColumns, readerOf, recipientOf } from "../mail/recipient.server";
-import { SENDERS } from "../mail/senders";
+import { digestSender, SENDERS } from "../mail/senders";
+import { imageAddress } from "../media.server";
 import { sourceName } from "../links/source";
 import { displayHost } from "../links/url";
+import { coverPicture, type CoverPictureRow } from "../og/cover-picture";
 import type { PostCardData } from "../public-types";
+import { emailPicture, type EmailPicture, resized } from "../resize";
 import { linkAddresses, plainText } from "../text/markdown";
 import {
   CHOSEN_WITH,
@@ -17,7 +20,9 @@ import {
   type DigestPost,
   type Frequency,
   FREQUENCIES,
+  issueName,
   LIST_SIZE,
+  MEDIA_BOX,
   periodName,
   periodStart,
   periodWindow,
@@ -183,11 +188,44 @@ export interface DigestLists {
 }
 
 /**
+ * The pictures posts show in a digest, by post (owner's request,
+ * 2026-10-29): each one's cover picture, framed as its cover frames it, or
+ * none when it has none a cover could show. A picture that cannot be read
+ * leaves its post without one, never the digest unsent.
+ */
+async function digestPictures(db: D1Database, bucket: R2Bucket, ids: string[]): Promise<Map<string, EmailPicture>> {
+  const { results } = await db
+    .prepare(`SELECT id, kind, media_type, media_key, thumb_key, inline_media, card_preview FROM posts WHERE id IN (SELECT value FROM json_each(?1))`)
+    .bind(JSON.stringify(ids))
+    .all<CoverPictureRow & { id: string }>();
+  const pictures = new Map<string, EmailPicture>();
+  for (const row of results) {
+    const key = coverPicture(row);
+    // Only a picture the media domain can cut and resize, as an email needs it.
+    if (!key || !resized(imageAddress(key), 1)) continue;
+    try {
+      // Loaded only to draw a picture, so the digest runs where its
+      // WebAssembly cannot be loaded, as in the data layer's tests.
+      const { postPictureFrom } = await import("../og/render.server");
+      const picture = await postPictureFrom(bucket, key);
+      const shown = picture && emailPicture(imageAddress(key), picture, MEDIA_BOX);
+      if (shown) pictures.set(row.id, shown);
+    } catch (error) {
+      console.error("digest picture", row.id, error);
+    }
+  }
+  return pictures;
+}
+
+/**
  * The posts made in a period that clear the bar: the most voted, then the
  * most discussed of the rest, so a post is listed once. Both may be empty.
+ * The first of each shows its picture, prepared here once for everyone the
+ * digest goes to.
  */
 export async function digestLists(
   db: D1Database,
+  bucket: R2Bucket,
   input: { from: number; to: number; bar: Bar; origin: string },
 ): Promise<DigestLists> {
   const { from, to, bar } = input;
@@ -228,6 +266,7 @@ export async function digestLists(
     .bind(JSON.stringify([...voted, ...discussed].map((row) => row.id)))
     .all<Hosted & { id: string }>();
   const held = new Map(hosted.map((row) => [row.id, row]));
+  const pictures = await digestPictures(db, bucket, [voted[0], discussed[0]].flatMap((row) => (row ? [row.id] : [])));
   const cards = async (rows: Array<{ id: string }>) =>
     (await postsByIds(db, rows.map((row) => row.id))).map((card) => ({
       title: card.title,
@@ -240,6 +279,7 @@ export async function digestLists(
       authorPhoto: card.author.photoUrl ? new URL(card.author.photoUrl, input.origin).href : null,
       excerpt: plainText(card.excerpt),
       ...(card.excerptCut ? { excerptCut: true } : {}),
+      ...(pictures.has(card.id) ? { media: pictures.get(card.id)! } : {}),
     }));
   return { voted: await cards(voted), discussed: await cards(discussed) };
 }
@@ -262,6 +302,7 @@ async function digestBar(db: D1Database): Promise<Bar> {
  */
 export async function sendDigests(
   db: D1Database,
+  bucket: R2Bucket,
   mailer: Mailer,
   input: { origin: string; secret: string; from: string; now: number },
 ): Promise<number> {
@@ -292,7 +333,7 @@ export async function sendDigests(
     if (recipients.length === 0) continue;
     bar ??= await digestBar(db);
     const window = periodWindow(frequency, input.now);
-    const lists = await digestLists(db, { ...window, bar, origin: input.origin });
+    const lists = await digestLists(db, bucket, { ...window, bar, origin: input.origin });
     if (lists.voted.length === 0 && lists.discussed.length === 0) continue;
     photo ??= await founderPhoto(db, input.origin);
     const failed: string[] = [];
@@ -303,6 +344,7 @@ export async function sendDigests(
           frequency,
           chosen: recipient.chosen,
           period: periodName(frequency, window),
+          issue: issueName(frequency, window.to),
           ...lists,
           origin: input.origin,
           unsubscribeUrl,
@@ -312,7 +354,7 @@ export async function sendDigests(
       );
       try {
         await mailer.send({
-          from: { name: "aion.ly", email: input.from },
+          from: { name: digestSender(frequency), email: input.from },
           replyTo: SENDERS.digest.replyTo,
           to: recipient.email,
           subject: email.subject,
@@ -348,6 +390,7 @@ export async function sendDigests(
  */
 export async function sendTestDigest(
   db: D1Database,
+  bucket: R2Bucket,
   mailer: Mailer,
   input: { userId: string; origin: string; secret: string; from: string; now: number },
 ): Promise<string | null> {
@@ -356,15 +399,15 @@ export async function sendTestDigest(
   const bar = await digestBar(db);
   const past = (days: number) => ({ from: input.now - days * 24 * 3600, to: input.now + 1, origin: input.origin });
   let frequency: Frequency = "weekly";
-  let lists = await digestLists(db, { ...past(7), bar });
+  let lists = await digestLists(db, bucket, { ...past(7), bar });
   let below = false;
   if (lists.voted.length === 0 && lists.discussed.length === 0) {
     frequency = "monthly";
-    lists = await digestLists(db, { ...past(31), bar });
+    lists = await digestLists(db, bucket, { ...past(31), bar });
   }
   if (lists.voted.length === 0 && lists.discussed.length === 0) {
     below = true;
-    lists = await digestLists(db, { ...past(31), bar: { points: Number.MIN_SAFE_INTEGER, least: Number.MIN_SAFE_INTEGER, comments: 1 } });
+    lists = await digestLists(db, bucket, { ...past(31), bar: { points: Number.MIN_SAFE_INTEGER, least: Number.MIN_SAFE_INTEGER, comments: 1 } });
   }
   // A digest of the most discussed alone is a digest too (review F82).
   if (lists.voted.length === 0 && lists.discussed.length === 0) return "No posts this month to list.";
@@ -374,6 +417,7 @@ export async function sendTestDigest(
       frequency,
       chosen: frequency,
       period: periodName(frequency),
+      issue: issueName(frequency, input.now),
       ...lists,
       origin: input.origin,
       unsubscribeUrl,
@@ -383,7 +427,7 @@ export async function sendTestDigest(
   );
   try {
     await mailer.send({
-      from: { name: "aion.ly", email: input.from },
+      from: { name: digestSender(frequency), email: input.from },
       replyTo: SENDERS.digest.replyTo,
       to: account.email,
       subject: `[${below ? "Test, nothing notable: members get none" : "Test"}] ${email.subject}`,

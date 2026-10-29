@@ -157,7 +157,7 @@ describe("the digest", () => {
     // Last week's, as NOW is a Friday.
     await post("p1", { author: "free", age: 6 * DAY, score: 5 });
     const input = { origin: "https://aion.ly", secret: "s", from: "digest@aion.ly", now: NOW };
-    expect(await sendDigests(db, mailer, input)).toBe(1);
+    expect(await sendDigests(db, env.IMAGES, mailer, input)).toBe(1);
     expect(sent[0]).toMatchObject({
       to: "fan@example.invalid",
       from: { email: "digest@aion.ly" },
@@ -165,7 +165,7 @@ describe("the digest", () => {
       headers: { "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" },
     });
     // Sent for this period; the next run sends nothing more.
-    expect(await sendDigests(db, mailer, { ...input, now: NOW + 3600 })).toBe(0);
+    expect(await sendDigests(db, env.IMAGES, mailer, { ...input, now: NOW + 3600 })).toBe(0);
   });
 
   it("is turned on only by a member in good standing, and off by anyone", async () => {
@@ -182,7 +182,7 @@ describe("the digest", () => {
     await post("p1", { author: "free", age: 6 * DAY, score: 5 });
     await post("p2", { author: "free", age: DAY, score: 5 });
     const input = { origin: "https://aion.ly", secret: "s", from: "digest@aion.ly", now: NOW };
-    const [first, second] = await Promise.all([sendDigests(db, mailer, input), sendDigests(db, mailer, input)]);
+    const [first, second] = await Promise.all([sendDigests(db, env.IMAGES, mailer, input), sendDigests(db, env.IMAGES, mailer, input)]);
     expect(first + second).toBe(1);
     expect(sent).toHaveLength(1);
 
@@ -191,14 +191,14 @@ describe("the digest", () => {
     const refusing = { send: async () => Promise.reject(new Error("refused")) } as unknown as Mailer;
     // Once 6 hours have passed since the weekly one.
     const later = { ...input, now: NOW + 7 * 3600 };
-    expect(await sendDigests(db, refusing, later)).toBe(0);
+    expect(await sendDigests(db, env.IMAGES, refusing, later)).toBe(0);
     expect((await dueRecipients(db, "daily", later.now)).map((row) => row.userId)).toEqual(["fan"]);
   });
 
   it("starts with the next period when turned on, and counts a quiet period as sent", async () => {
     await setDigest(db, "fan", "daily", NOW);
     expect(await dueRecipients(db, "daily", NOW + 3600)).toEqual([]);
-    expect(await sendDigests(db, mailer, { origin: "https://aion.ly", secret: "s", from: "digest@aion.ly", now: NOW + 2 * DAY })).toBe(0);
+    expect(await sendDigests(db, env.IMAGES, mailer, { origin: "https://aion.ly", secret: "s", from: "digest@aion.ly", now: NOW + 2 * DAY })).toBe(0);
     expect(await dueRecipients(db, "daily", NOW + 2 * DAY)).toEqual([]);
   });
 

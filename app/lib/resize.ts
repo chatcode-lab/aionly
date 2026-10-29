@@ -8,6 +8,8 @@
  * whenever a copy cannot be made.
  */
 
+import type { Frame } from "./og/framing";
+
 /** A stored picture on its public domain: a 24-character key and its type's extension. */
 const STORED = /^(https:\/\/[^/]+)\/([0-9A-Za-z]{24}\.(?:jpg|png|webp))$/;
 
@@ -51,4 +53,31 @@ export function columnSources(src: string, own?: number, sizes = COLUMN_SIZES): 
 export function avatarSources(src: string, size: number): Sources {
   if (!resized(src, 1)) return {};
   return { srcSet: [...AVATAR_WIDTHS.map((width) => `${resized(src, width)} ${width}w`), `${src} 320w`].join(", "), sizes: `${size}px` };
+}
+
+/** A picture as an email shows it: its copy's address, and the size it is drawn at. */
+export interface EmailPicture {
+  src: string;
+  width: number;
+  height: number;
+}
+
+/**
+ * A stored picture as an email shows it (owner's request, 2026-10-29): cut
+ * to its frame, as a cover shows it (see ./og/framing.ts), and drawn as
+ * large as `box` allows; its copy twice that for dense screens, never
+ * enlarged, in baseline JPEG, which every mail app shows whatever its image
+ * proxy asks for. Null for an address that cannot be resized.
+ */
+export function emailPicture(src: string, picture: { width: number; height: number; frame: Frame }, box: { width: number; height: number }): EmailPicture | null {
+  const match = STORED.exec(src);
+  if (!match) return null;
+  const { width, height, frame } = picture;
+  // In pixels of the picture itself, top, right, bottom, and left, as `trim` takes them.
+  const cut = [frame.top * height, (1 - frame.right) * width, (1 - frame.bottom) * height, frame.left * width].map(Math.round);
+  const shown = { width: width - cut[1]! - cut[3]!, height: height - cut[0]! - cut[2]! };
+  const scale = Math.min(box.width / shown.width, box.height / shown.height);
+  const drawn = { width: Math.round(shown.width * scale), height: Math.round(shown.height * scale) };
+  const trim = cut.some(Boolean) ? `trim=${cut.join(";")},` : "";
+  return { src: `${match[1]}/cdn-cgi/image/${trim}width=${drawn.width * 2},fit=scale-down,format=baseline-jpeg,onerror=redirect/${match[2]}`, ...drawn };
 }

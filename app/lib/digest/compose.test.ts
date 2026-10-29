@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { generatedAvatar } from "../avatar";
-import { composeDigest, EXCERPT_MAX, FOUNDER_NOTE, periodName, periodStart, periodWindow } from "./compose";
+import { composeDigest, COUNTED, EXCERPT_MAX, FOUNDER_NOTE, issueName, periodName, periodStart, periodWindow } from "./compose";
 
 const at = (iso: string) => Date.parse(iso) / 1000;
 
@@ -12,36 +12,38 @@ describe("the digest email", () => {
     source: "Suno",
     sourceUrl: "https://suno.com/song/abc" as string | null,
     score: 12,
-    comments: 1,
+    comments: 6,
     author: "quiet_otter",
     authorId: "u_otter",
     authorPhoto: null as string | null,
     excerpt: "Made <b>with</b> care",
   };
 
-  const base = { origin: "https://aion.ly", unsubscribeUrl: "https://aion.ly/digest/unsubscribe?token=t" };
+  const base = { origin: "https://aion.ly", unsubscribeUrl: "https://aion.ly/digest/unsubscribe?token=t", issue: "Day #9" };
 
   it("escapes everything people wrote, and carries the unsubscribe link", () => {
-    const email = composeDigest({ ...base, frequency: "weekly", chosen: "weekly", period: "last week", voted: [post], discussed: [] });
-    expect(email.subject).toBe('Last week on aion.ly: A <song> & "more"');
+    const email = composeDigest({ ...base, frequency: "weekly", chosen: "weekly", period: "last week", issue: "Week #2", voted: [post], discussed: [] });
+    expect(email.subject).toBe('Week #2: A <song> & "more"');
     expect(email.html).not.toContain("<song>");
     expect(email.html).not.toContain("<b>with</b>");
     expect(email.html).toContain("A &#60;song&#62; &#38; &#34;more&#34;");
     expect(email.html).toContain("https://aion.ly/digest/unsubscribe?token=t");
-    expect(email.text).toContain("12 points · 1 comment · by quiet_otter");
+    expect(email.text).toContain("12 points · 6 comments · by quiet_otter");
     expect(email.text).toContain("Unsubscribe: https://aion.ly/digest/unsubscribe?token=t");
     expect(email.text).toContain("You get this because you turned on the weekly digest.");
   });
 
   it("lists the most voted and the most discussed under their own headings, leaving out an empty one", () => {
     const talked = { ...post, title: "Talked about", comments: 9 };
-    const both = composeDigest({ ...base, frequency: "monthly", chosen: "daily", period: "October", voted: [post], discussed: [talked] });
-    expect(both.subject).toBe('October on aion.ly: A <song> & "more"');
+    const both = composeDigest({ ...base, frequency: "monthly", chosen: "daily", period: "October", issue: "October", voted: [post], discussed: [talked] });
+    expect(both.subject).toBe('October: A <song> & "more"');
     expect(both.text.indexOf("MOST VOTED")).toBeLessThan(both.text.indexOf("MOST DISCUSSED"));
     expect(both.text.indexOf("MOST DISCUSSED")).toBeLessThan(both.text.indexOf("Talked about"));
     expect(both.text).toContain("It comes with the daily digest you turned on.");
     const discussedOnly = composeDigest({ ...base, frequency: "daily", chosen: "daily", period: "the past day", voted: [], discussed: [talked] });
-    expect(discussedOnly.subject).toBe("The past day on aion.ly: Talked about");
+    expect(discussedOnly.subject).toBe("Day #9: Talked about");
+    // The heading still says what it covers.
+    expect(discussedOnly.html).toContain(">The past day on <a");
     expect(discussedOnly.html).not.toContain("Most voted");
   });
 
@@ -57,7 +59,7 @@ describe("the digest email", () => {
     expect(drawn?.[1]).toContain(`background:${generatedAvatar("u_otter", "quiet_otter").color}`);
     // Sized from its own font size, so it grows with the reader's text.
     expect(drawn?.[1]).toContain("font-size:10px;width:1.6em;height:1.6em");
-    expect(email.text).toContain("12 points · 1 comment · by quiet_otter\n");
+    expect(email.text).toContain("12 points · 6 comments · by quiet_otter\n");
   });
 
   it("names the source as a link of the line's own color, what a hosted post is as it is, and nothing without either", () => {
@@ -66,9 +68,28 @@ describe("the digest email", () => {
     const email = composeDigest({ ...base, frequency: "daily", chosen: "daily", period: "the past day", voted: [post, hosted, bare], discussed: [] });
     expect(email.html).toContain('<a href="https://suno.com/song/abc" style="color:#6f6b64;text-decoration:none" class="dc-6f6b64">Suno</a> · 12 points');
     expect(email.html).toContain('class="dc-6f6b64">Article · 12 points');
-    expect(email.html).toContain('class="dc-6f6b64">12 points · 1 comment · <span');
-    expect(email.text).toContain("Suno · 12 points · 1 comment · by quiet_otter");
-    expect(email.text).toContain("Bare\n12 points · 1 comment · by quiet_otter");
+    expect(email.html).toContain('class="dc-6f6b64">12 points · 6 comments · <span');
+    expect(email.text).toContain("Suno · 12 points · 6 comments · by quiet_otter");
+    expect(email.text).toContain("Bare\n12 points · 6 comments · by quiet_otter");
+  });
+
+  it("names a post's points and comments only once they are not few (owner's request, 2026-10-29)", () => {
+    const quiet = { ...post, title: "Quiet", score: COUNTED.points - 1, comments: COUNTED.comments - 1 };
+    const voted = { ...post, title: "Voted", comments: 0 };
+    const email = composeDigest({ ...base, frequency: "daily", chosen: "daily", period: "the past day", voted: [quiet, voted], discussed: [] });
+    expect(email.text).toContain("Quiet\nSuno · by quiet_otter\n");
+    expect(email.text).toContain("Voted\nSuno · 12 points · by quiet_otter\n");
+    expect(email.html).toContain('class="dc-6f6b64">Suno</a> · <span style="white-space:nowrap">by');
+    expect(email.text).not.toMatch(/\b[0-9] (points?|comments?)\b/);
+  });
+
+  it("shows a list's first post's picture above its title, linked to the post (owner's request, 2026-10-29)", () => {
+    const media = { src: "https://media.aion.ly/cdn-cgi/image/width=1040/a.jpg?x=1&y=2", width: 520, height: 293 };
+    const email = composeDigest({ ...base, frequency: "daily", chosen: "daily", period: "the past day", voted: [{ ...post, media }, post], discussed: [] });
+    expect(email.html).toContain(
+      '<a href="https://aion.ly/p/abc1234/a-song" style="display:block;margin-bottom:12px"><img src="https://media.aion.ly/cdn-cgi/image/width=1040/a.jpg?x=1&#38;y=2" width="520" height="293" alt="" style="display:block;width:520px;max-width:100%;height:auto;border:0;border-radius:8px"></a>\n<a href="https://aion.ly/p/abc1234/a-song" style="color:#1f1d1a',
+    );
+    expect(email.html.match(/<img src="https:\/\/media/g)).toHaveLength(1);
   });
 
   it("ends with the founder asking what readers make of it, with their picture and where to reach them", () => {
@@ -133,6 +154,19 @@ describe("what a digest covers", () => {
     expect(periodName("weekly", { to: 0 })).toBe("last week");
     expect(periodName("monthly", periodWindow("monthly", now))).toBe("September");
     expect(periodName("monthly")).toBe("the past month");
+  });
+});
+
+describe("a digest's name in its subject", () => {
+  it("counts days and weeks from the launch, Tuesday, October 20, 2026, and names a month (owner's request, 2026-10-29)", () => {
+    expect(issueName("daily", periodWindow("daily", at("2026-10-21T07:00:00Z")).to)).toBe("Day #1");
+    expect(issueName("daily", periodWindow("daily", at("2026-10-29T07:00:00Z")).to)).toBe("Day #9");
+    // The first week, Monday the 19th to Sunday the 25th, goes out on the 26th.
+    expect(issueName("weekly", periodWindow("weekly", at("2026-10-26T19:00:00Z")).to)).toBe("Week #1");
+    expect(issueName("weekly", periodWindow("weekly", at("2026-11-02T19:00:00Z")).to)).toBe("Week #2");
+    expect(issueName("monthly", periodWindow("monthly", at("2026-11-03T19:00:00Z")).to)).toBe("October");
+    // An admin's test, up to now.
+    expect(issueName("weekly", at("2026-10-29T10:00:00Z"))).toBe("Week #2");
   });
 });
 

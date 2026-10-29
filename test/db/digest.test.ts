@@ -1,4 +1,14 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { env } from "cloudflare:workers";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+// Drawing needs WebAssembly the test runtime cannot load: every picture
+// shows a video thumbnail's middle, between black bars. Pictures are on
+// the media domain, as deployed, so they can be cut and resized.
+vi.mock("../../app/lib/og/render.server", () => ({
+  postPictureFrom: async (_bucket: unknown, key: string | null) =>
+    key && { href: "data:", width: 480, height: 360, frame: { left: 0, top: 0.125, right: 1, bottom: 0.875 } },
+}));
+vi.mock("../../app/lib/media.server", () => ({ imageAddress: (key: string) => `https://media.aion.ly/${key}` }));
 
 import { EXCERPT_MAX } from "../../app/lib/digest/compose";
 import { dueRecipients, sendDigests, sendTestDigest, setDigest } from "../../app/lib/digest/digest.server";
@@ -66,9 +76,9 @@ describe("a digest's posts", () => {
     await discuss("own", "maker", 3);
     await discuss("own", "helper", 3);
 
-    expect(await sendDigests(db, mailer, input)).toBe(1);
+    expect(await sendDigests(db, env.IMAGES, mailer, input)).toBe(1);
     const [email] = sent;
-    expect(email?.subject).toBe("Last week on aion.ly: Most points");
+    expect(email?.subject).toBe("Week #12: Most points");
     const order = ["MOST VOTED", "Most points", "Voted and discussed", "Just enough points", "MOST DISCUSSED", "Much discussed"];
     expect(order.map((line) => email!.text.indexOf(line))).toEqual([...order.map((line) => email!.text.indexOf(line))].sort((a, b) => a - b));
     expect(email!.text.split("Voted and discussed")).toHaveLength(2);
@@ -82,7 +92,7 @@ describe("a digest's posts", () => {
     await post("mine", { author: "maker", age: 6 * DAY, title: "Pictured", score: 9 });
     await post("theirs", { author: "helper", age: 6 * DAY, title: "Drawn", score: 8 });
 
-    expect(await sendDigests(db, mailer, input)).toBe(1);
+    expect(await sendDigests(db, env.IMAGES, mailer, input)).toBe(1);
     const { html } = sent[0]!;
     expect(html).toMatch(/by <img src="https:\/\/[^"]*\/makerface\.jpg" width="16" height="16" alt=""[^>]*>busy_maker<\/span><\/div>/);
     expect(html).toMatch(/by <span style="[^"]*">M<\/span>maker_agent<\/span><\/div>/);
@@ -94,11 +104,34 @@ describe("a digest's posts", () => {
     await post("named", { author: "maker", age: 6 * DAY, title: "Named", score: 9, url: "https://blog.anthropic.com/news/proteins" });
     await post("bare", { author: "maker", age: 6 * DAY, title: "Bare", score: 8, url: "https://www.peec.ai/blog/stats" });
 
-    expect(await sendDigests(db, mailer, input)).toBe(1);
+    expect(await sendDigests(db, env.IMAGES, mailer, input)).toBe(1);
     const { html, text } = sent[0]!;
-    expect(html).toContain('<a href="https://blog.anthropic.com/news/proteins" style="color:#6f6b64;text-decoration:none" class="dc-6f6b64">Anthropic</a> · 9 points');
-    expect(html).toContain('<a href="https://www.peec.ai/blog/stats" style="color:#6f6b64;text-decoration:none" class="dc-6f6b64">peec.ai</a> · 8 points');
-    expect(text).toContain("Anthropic · 9 points · 0 comments · by busy_maker");
+    expect(html).toContain('<a href="https://blog.anthropic.com/news/proteins" style="color:#6f6b64;text-decoration:none" class="dc-6f6b64">Anthropic</a> · <span');
+    expect(html).toContain('<a href="https://www.peec.ai/blog/stats" style="color:#6f6b64;text-decoration:none" class="dc-6f6b64">peec.ai</a> · <span');
+    // Few points and no comments go unsaid (owner's request, 2026-10-29).
+    expect(text).toContain("Anthropic · by busy_maker");
+  });
+
+  it("show the first post of each list with its picture, cut to its frame, and no other (owner's request, 2026-10-29)", async () => {
+    const week = { author: "maker", age: 6 * DAY };
+    await post("top", { ...week, title: "Top", score: 12 });
+    await post("next", { ...week, title: "Next", score: 9 });
+    await post("talked", { ...week, title: "Talked", score: 2 });
+    await discuss("talked", "reader", 5);
+    await post("plain", { ...week, title: "Plain", score: 11 });
+    const thumb = (id: string) => `${id.padEnd(24, "x")}.jpg`;
+    for (const id of ["top", "next", "talked"]) await db.prepare(`UPDATE posts SET thumb_key = ?2 WHERE id = ?1`).bind(id, thumb(id)).run();
+
+    expect(await sendDigests(db, env.IMAGES, mailer, input)).toBe(1);
+    const { html, text } = sent[0]!;
+    const pictures = [...html.matchAll(/<img src="(https:\/\/media\.aion\.ly\/cdn-cgi\/[^"]+)" width="(\d+)" height="(\d+)"/g)].map((match) => match.slice(1));
+    expect(pictures).toEqual([
+      [`https://media.aion.ly/cdn-cgi/image/trim=45;0;45;0,width=1040,fit=scale-down,format=baseline-jpeg,onerror=redirect/${thumb("top")}`, "520", "293"],
+      [`https://media.aion.ly/cdn-cgi/image/trim=45;0;45;0,width=1040,fit=scale-down,format=baseline-jpeg,onerror=redirect/${thumb("talked")}`, "520", "293"],
+    ]);
+    // Above the title, as a link to the post.
+    expect(html).toMatch(/<a href="https:\/\/aion\.ly\/p\/top\/[^"]*" style="display:block;margin-bottom:12px"><img /);
+    expect(text).not.toContain("cdn-cgi");
   });
 
   it("name a post the board hosts by where it leads, or else by what it is, never as a text post or an upload (owner's request, 2026-10-27)", async () => {
@@ -119,15 +152,15 @@ describe("a digest's posts", () => {
     await hosted("Clip", 6, { kind: "upload", media_type: "video" });
     await hosted("Shots", 5, { kind: "upload", media_type: "image", pictures });
 
-    expect(await sendDigests(db, mailer, input)).toBe(1);
+    expect(await sendDigests(db, env.IMAGES, mailer, input)).toBe(1);
     const { html, text } = sent[0]!;
-    expect(html).toContain('<a href="https://github.com/maker/tool" style="color:#6f6b64;text-decoration:none" class="dc-6f6b64">GitHub</a> · 9 points');
+    expect(html).toContain('<a href="https://github.com/maker/tool" style="color:#6f6b64;text-decoration:none" class="dc-6f6b64">GitHub</a> · <span');
     // An article's own links are its text's, not its source.
-    expect(text).toContain("Essay\nArticle · 8 points");
+    expect(text).toContain("Essay\nArticle · by busy_maker");
     // The board's own address is not where an upload leads.
-    expect(html).toContain('<a href="https://github.com/maker/demo" style="color:#6f6b64;text-decoration:none" class="dc-6f6b64">GitHub</a> · 7 points');
-    expect(text).toContain("Clip\nVideo · 6 points");
-    expect(text).toContain("Shots\nGallery · 5 points");
+    expect(html).toContain('<a href="https://github.com/maker/demo" style="color:#6f6b64;text-decoration:none" class="dc-6f6b64">GitHub</a> · <span');
+    expect(text).toContain("Clip\nVideo · by busy_maker");
+    expect(text).toContain("Shots\nGallery · by busy_maker");
     expect(text).not.toMatch(/Text post|Upload/);
   });
 
@@ -135,7 +168,7 @@ describe("a digest's posts", () => {
     const description = `Pick a place on a **map** and turn it into a miniature.\n\n${"Buildings, terrain, roads and water. ".repeat(10)}`;
     await post("long", { author: "maker", age: 6 * DAY, title: "A tiny town", score: 9, description });
 
-    expect(await sendDigests(db, mailer, input)).toBe(1);
+    expect(await sendDigests(db, env.IMAGES, mailer, input)).toBe(1);
     const shown = sent[0]!.text.split("\n").find((line) => line.startsWith("Pick a place"))!;
     expect(shown).toMatch(/^Pick a place on a map and turn it into a miniature\. Buildings, .* [a-z]+…$/);
     expect(shown.length).toBeLessThanOrEqual(EXCERPT_MAX);
@@ -147,7 +180,7 @@ describe("a digest's posts", () => {
     const first = `Pick a place on a map and turn it into a miniature. ${"Buildings, terrain, roads and water. ".repeat(5)}`.trim();
     await post("lines", { author: "maker", age: 6 * DAY, title: "A tiny town", score: 9, description: `${first}\n\nHow it was made, step by step.` });
 
-    expect(await sendDigests(db, mailer, input)).toBe(1);
+    expect(await sendDigests(db, env.IMAGES, mailer, input)).toBe(1);
     expect(sent[0]!.text).toContain(`\n${first}\n`);
     expect(sent[0]!.text).not.toContain("step by step");
     expect(sent[0]!.html).toContain(`water. <a href="https://aion.ly/p/lines/a-tiny-town"`);
@@ -157,15 +190,15 @@ describe("a digest's posts", () => {
   it("follow the bar in the settings", async () => {
     await post("p1", { author: "maker", age: 6 * DAY, title: "Three points", score: 3 });
     await db.prepare(`INSERT INTO settings (key, value, updated_at, updated_by) VALUES ('digest_points', 3, ?1, 'maker')`).bind(NOW).run();
-    expect(await sendDigests(db, mailer, input)).toBe(1);
-    expect(sent[0]?.subject).toBe("Last week on aion.ly: Three points");
+    expect(await sendDigests(db, env.IMAGES, mailer, input)).toBe(1);
+    expect(sent[0]?.subject).toBe("Week #12: Three points");
   });
 
   it("make no digest when nothing stands out, which still counts as sent", async () => {
     await post("p1", { author: "maker", age: 6 * DAY, score: 4 });
     await post("p2", { author: "maker", age: 6 * DAY, score: 1 });
     await discuss("p2", "reader", 4);
-    expect(await sendDigests(db, mailer, input)).toBe(0);
+    expect(await sendDigests(db, env.IMAGES, mailer, input)).toBe(0);
     expect(sent).toEqual([]);
     expect(await dueRecipients(db, "weekly", NOW)).toEqual([]);
   });
@@ -178,16 +211,16 @@ describe("digests of one kind", () => {
     await post("before", { author: "maker", age: 9.5 * HOUR, title: "Made before eleven", score: 6 });
     await post("after", { author: "maker", age: 8.5 * HOUR, title: "Made after eleven", score: 8 });
 
-    await sendDigests(db, mailer, { ...input, now: NOW + 2 * HOUR });
-    expect(sent.map((email) => email.subject)).toEqual(["The past day on aion.ly: Made before eleven"]);
+    await sendDigests(db, env.IMAGES, mailer, { ...input, now: NOW + 2 * HOUR });
+    expect(sent.map((email) => email.subject)).toEqual(["Day #87: Made before eleven"]);
     expect(sent[0]!.text).not.toContain("Made after eleven");
 
-    await sendDigests(db, mailer, { ...input, now: NOW + DAY - 90 * 60 });
+    await sendDigests(db, env.IMAGES, mailer, { ...input, now: NOW + DAY - 90 * 60 });
     expect(sent).toHaveLength(1);
-    await sendDigests(db, mailer, { ...input, now: NOW + DAY });
+    await sendDigests(db, env.IMAGES, mailer, { ...input, now: NOW + DAY });
     expect(sent.map((email) => email.subject)).toEqual([
-      "The past day on aion.ly: Made before eleven",
-      "The past day on aion.ly: Made after eleven",
+      "Day #87: Made before eleven",
+      "Day #88: Made after eleven",
     ]);
     expect(sent[1]!.text).not.toContain("Made before eleven");
   });
@@ -207,21 +240,21 @@ describe("the daily digest", () => {
     // All three are due now, but each account gets one digest at a time,
     // the next once 6 hours have passed.
     const got = (to: string) => sent.filter((email) => email.to === `${to}@example.invalid`).map((email) => email.subject);
-    expect(await sendDigests(db, mailer, input)).toBe(3);
-    expect(got("reader")).toEqual(["The past day on aion.ly: Of the day"]);
-    expect(got("weekly")).toEqual(["Last week on aion.ly: Of the week"]);
-    expect(got("monthly")).toEqual(["December on aion.ly: Of December"]);
-    expect(await sendDigests(db, mailer, { ...input, now: NOW + 3 * HOUR })).toBe(0);
-    expect(await sendDigests(db, mailer, { ...input, now: NOW + 6 * HOUR })).toBe(2);
-    expect(await sendDigests(db, mailer, { ...input, now: NOW + 12 * HOUR })).toBe(1);
+    expect(await sendDigests(db, env.IMAGES, mailer, input)).toBe(3);
+    expect(got("reader")).toEqual(["Day #87: Of the day"]);
+    expect(got("weekly")).toEqual(["Week #12: Of the week"]);
+    expect(got("monthly")).toEqual(["December: Of December"]);
+    expect(await sendDigests(db, env.IMAGES, mailer, { ...input, now: NOW + 3 * HOUR })).toBe(0);
+    expect(await sendDigests(db, env.IMAGES, mailer, { ...input, now: NOW + 6 * HOUR })).toBe(2);
+    expect(await sendDigests(db, env.IMAGES, mailer, { ...input, now: NOW + 12 * HOUR })).toBe(1);
     expect(got("reader")).toEqual([
-      "The past day on aion.ly: Of the day",
-      "Last week on aion.ly: Of the week",
-      "December on aion.ly: Of December",
+      "Day #87: Of the day",
+      "Week #12: Of the week",
+      "December: Of December",
     ]);
-    expect(got("weekly")).toEqual(["Last week on aion.ly: Of the week", "December on aion.ly: Of December"]);
-    expect(got("monthly")).toEqual(["December on aion.ly: Of December"]);
-    const brought = sent.find((email) => email.to === "reader@example.invalid" && email.subject.startsWith("Last week"));
+    expect(got("weekly")).toEqual(["Week #12: Of the week", "December: Of December"]);
+    expect(got("monthly")).toEqual(["December: Of December"]);
+    const brought = sent.find((email) => email.to === "reader@example.invalid" && email.subject.startsWith("Week #"));
     expect(brought?.text).toContain("It comes with the daily digest you turned on.");
   });
 
@@ -246,19 +279,19 @@ describe("an admin's test digest", () => {
 
   it("is the past week's, and goes even when nothing stands out, saying members get none", async () => {
     await post("small", { author: "maker", age: 2 * DAY, title: "Small one", score: 1 });
-    expect(await sendTestDigest(db, mailer, test)).toBeNull();
-    expect(sent[0]?.subject).toBe("[Test, nothing notable: members get none] The past month on aion.ly: Small one");
+    expect(await sendTestDigest(db, env.IMAGES, mailer, test)).toBeNull();
+    expect(sent[0]?.subject).toBe("[Test, nothing notable: members get none] January: Small one");
 
     await post("big", { author: "maker", age: 2 * DAY, title: "Big one", score: 6 });
-    expect(await sendTestDigest(db, mailer, test)).toBeNull();
-    expect(sent[1]?.subject).toBe("[Test] The past week on aion.ly: Big one");
+    expect(await sendTestDigest(db, env.IMAGES, mailer, test)).toBeNull();
+    expect(sent[1]?.subject).toBe("[Test] Week #13: Big one");
     expect(sent[1]?.text).not.toContain("Small one");
   });
 
   it("goes with the most discussed alone, when nothing is most voted (review F82)", async () => {
     await post("talked", { author: "maker", age: 2 * DAY, title: "Talked about", score: 2 });
     await discuss("talked", "reader", 5);
-    expect(await sendTestDigest(db, mailer, test)).toBeNull();
-    expect(sent[0]?.subject).toBe("[Test] The past week on aion.ly: Talked about");
+    expect(await sendTestDigest(db, env.IMAGES, mailer, test)).toBeNull();
+    expect(sent[0]?.subject).toBe("[Test] Week #13: Talked about");
   });
 });

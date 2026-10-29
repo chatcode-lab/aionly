@@ -7,6 +7,7 @@ import { generatedAvatar } from "../avatar";
 import { founderSignature } from "../mail/founder";
 import { composeLetter, escape } from "../mail/layout";
 import { clip } from "../meta";
+import type { EmailPicture } from "../resize";
 import { FREQUENCIES, type Frequency } from "./frequency";
 
 export { FREQUENCIES, type Frequency };
@@ -49,7 +50,23 @@ export interface DigestPost {
   excerpt: string;
   /** The card's excerpt stops before the description's end, at a line or past its length. */
   excerptCut?: boolean;
+  /** A picture above the title, a list's first post's alone, when it has one to show (`MEDIA_BOX`). */
+  media?: EmailPicture;
 }
+
+/**
+ * The most room a post's picture takes in a digest: the card's width, 560
+ * px less its padding, and three quarters of that in height, so a 4:3
+ * picture fills it and a tall one stays short of a screen.
+ */
+export const MEDIA_BOX = { width: 520, height: 390 };
+
+/**
+ * The fewest points, and comments, a digest names a post by: fewer say
+ * little while the board is young, so they are left out (owner's request,
+ * 2026-10-29).
+ */
+export const COUNTED = { points: 10, comments: 5 };
 
 /** A post's excerpt as a digest shows it, and whether there is more to read. */
 function excerptOf(post: DigestPost): { text: string; more: boolean } {
@@ -73,6 +90,12 @@ export function periodName(frequency: Frequency, period?: { to: number }): strin
 }
 
 const plural = (count: number, word: string) => `${count} ${word}${count === 1 ? "" : "s"}`;
+
+/** A post's points and comments, those of them a digest names (`COUNTED`). */
+const counts = (post: DigestPost) => [
+  ...(post.score >= COUNTED.points ? [plural(post.score, "point")] : []),
+  ...(post.comments >= COUNTED.comments ? [plural(post.comments, "comment")] : []),
+];
 
 /**
  * The author's picture, small, before their name: their own, or the one
@@ -101,6 +124,13 @@ function sourceHtml(post: DigestPost): string {
 /** Under the digest, the founder asks what readers make of it (owner's request, 2026-10-21). */
 export const FOUNDER_NOTE = "What do you think of this digest? Hit reply and tell me what to add, change, or leave out. I read every reply.";
 
+/** A post's picture, above its title, as a link to the post. */
+function mediaHtml(post: DigestPost): string {
+  if (!post.media) return "";
+  const { src, width, height } = post.media;
+  return `<a href="${escape(post.url)}" style="display:block;margin-bottom:12px"><img src="${escape(src)}" width="${width}" height="${height}" alt="" style="display:block;width:${width}px;max-width:100%;height:auto;border:0;border-radius:8px"></a>\n`;
+}
+
 function excerptHtml(post: DigestPost): string {
   if (!post.excerpt) return "";
   const { text, more } = excerptOf(post);
@@ -114,6 +144,8 @@ export function composeDigest(input: {
   chosen: Frequency;
   /** What it covers, from `periodName`. */
   period: string;
+  /** Its name in the subject, from `issueName`. */
+  issue: string;
   voted: DigestPost[];
   discussed: DigestPost[];
   origin: string;
@@ -121,9 +153,8 @@ export function composeDigest(input: {
   /** The founder's picture on the board, for the note under the posts, when they have one. */
   founderPhoto?: string | null;
 }): { subject: string; html: string; text: string } {
-  const { frequency, chosen, period, voted, discussed, origin, unsubscribeUrl, founderPhoto = null } = input;
-  const counts = (post: DigestPost) => `${plural(post.score, "point")} · ${plural(post.comments, "comment")}`;
-  const line = (post: DigestPost) => `${post.source ? `${post.source} · ` : ""}${counts(post)} · by ${post.author}`;
+  const { frequency, chosen, period, issue, voted, discussed, origin, unsubscribeUrl, founderPhoto = null } = input;
+  const line = (post: DigestPost) => [...(post.source ? [post.source] : []), ...counts(post), `by ${post.author}`].join(" · ");
   const lists = [
     { heading: "Most voted", posts: voted },
     { heading: "Most discussed", posts: discussed },
@@ -134,8 +165,10 @@ export function composeDigest(input: {
 ${list.posts
   .map(
     (post, index) => `<div style="padding:14px 0;${index === 0 ? "" : "border-top:1px solid #e7e5e0"}">
-<a href="${escape(post.url)}" style="color:#1f1d1a;font-size:16px;font-weight:600;text-decoration:none">${escape(post.title)}</a>
-<div style="color:#6f6b64;font-size:13px;margin-top:3px">${sourceHtml(post)}${escape(counts(post))} · <span style="white-space:nowrap">by ${authorPicture(post)}${escape(post.author)}</span></div>
+${mediaHtml(post)}<a href="${escape(post.url)}" style="color:#1f1d1a;font-size:16px;font-weight:600;text-decoration:none">${escape(post.title)}</a>
+<div style="color:#6f6b64;font-size:13px;margin-top:3px">${sourceHtml(post)}${counts(post)
+      .map((count) => `${escape(count)} · `)
+      .join("")}<span style="white-space:nowrap">by ${authorPicture(post)}${escape(post.author)}</span></div>
 ${excerptHtml(post)}
 </div>`,
   )
@@ -151,7 +184,8 @@ ${excerptHtml(post)}
   const title = `${period[0]!.toUpperCase()}${period.slice(1)} on aion.ly`;
 
   return composeLetter({
-    subject: `${title}: ${posts[0]?.title ?? "the board"}`,
+    // The sender names its kind, "aion.ly daily", so the subject need not (owner's request, 2026-10-29).
+    subject: `${issue}: ${posts[0]?.title ?? "the board"}`,
     // The line inboxes show after the subject: the next titles.
     preview: posts
       .slice(1, 4)
@@ -235,4 +269,22 @@ export function periodWindow(frequency: Frequency, now: number): { from: number;
   if (frequency === "monthly") return { from: cutoffBefore(monthStart(due, -1)), to: cutoffBefore(monthStart(due)) };
   const to = cutoffBefore(dayOf(due));
   return { from: to - (frequency === "daily" ? DAY : 7 * DAY), to };
+}
+
+/** The board's first day, its announcement's (2026-10-20), from which digests count. */
+export const LAUNCH_DAY = Date.UTC(2026, 9, 20) / 1000;
+
+/**
+ * A digest's name in its subject, before the top post's title (owner's
+ * request, 2026-10-29): the day it covers, counted from the launch's, as
+ * "Day #9"; the week to Sunday, from the launch's week, as "Week #2"; a
+ * month by its name. `end` is when its period ends, or now for an admin's
+ * test.
+ */
+export function issueName(frequency: Frequency, end: number): string {
+  if (frequency === "monthly") return MONTHS[new Date(end * 1000).getUTCMonth()]!;
+  const days = (dayOf(end) - LAUNCH_DAY) / DAY;
+  if (frequency === "daily") return `Day #${days + 1}`;
+  // Weeks run Monday to Sunday, the launch's from its Monday.
+  return `Week #${Math.floor((days + ((weekday(LAUNCH_DAY) + 6) % 7)) / 7) + 1}`;
 }
