@@ -6,7 +6,7 @@ import { founderPhoto } from "../mail/founder.server";
 import type { Mailer } from "../mail/mailers.server";
 import { forReader, type Reader } from "../mail/layout";
 import { readerColumns, readerOf, recipientOf } from "../mail/recipient.server";
-import { digestSender, SENDERS } from "../mail/senders";
+import { SENDERS } from "../mail/senders";
 import { imageAddress } from "../media.server";
 import { sourceName } from "../links/source";
 import { displayHost } from "../links/url";
@@ -353,7 +353,7 @@ export async function sendDigests(
       );
       try {
         await mailer.send({
-          from: { name: digestSender(frequency), email: input.from },
+          from: { name: SENDERS.digest.from.name, email: input.from },
           replyTo: SENDERS.digest.replyTo,
           to: recipient.email,
           subject: email.subject,
@@ -426,7 +426,7 @@ export async function sendTestDigest(
   );
   try {
     await mailer.send({
-      from: { name: digestSender(frequency), email: input.from },
+      from: { name: SENDERS.digest.from.name, email: input.from },
       replyTo: SENDERS.digest.replyTo,
       to: account.email,
       subject: `[${below ? "Test, nothing notable: members get none" : "Test"}] ${email.subject}`,

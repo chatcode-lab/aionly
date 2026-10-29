@@ -206,7 +206,7 @@ ${excerptHtml(post)}
   const title = `${period[0]!.toUpperCase()}${period.slice(1)} on aion.ly`;
 
   return composeLetter({
-    // The sender names its kind, "aion.ly daily", so the subject need not (owner's request, 2026-10-29).
+    // Its name, "Day #9", says which digest it is, from "aion.ly digest" whatever its period (owner's request, 2026-10-29).
     subject: `${issue} – ${posts[0]?.title ?? "the board"}`,
     // The line inboxes show after the subject: the next titles.
     preview: posts
