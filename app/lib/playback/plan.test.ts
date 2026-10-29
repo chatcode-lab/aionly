@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  focusCandidate,
   type MountInput,
   onScreen,
   planMounts,
@@ -22,9 +21,7 @@ function input(overrides: Partial<MountInput>): MountInput {
     viewportHeight: VH,
     mounted: new Set(),
     held: new Set(),
-    candidate: null,
     loadAhead: true,
-    autoplay: true,
     ...overrides,
   };
 }
@@ -47,31 +44,6 @@ describe("screensAway", () => {
     expect(screensAway(box("a", "post", 100), VH)).toBe(0);
     expect(screensAway(box("a", "post", VH + 400), VH)).toBe(0.5);
     expect(screensAway(box("a", "post", -1100), VH)).toBe(1);
-  });
-});
-
-describe("focusCandidate", () => {
-  it("picks the video nearest the center", () => {
-    const boxes = [box("top", "video", 0), box("middle", "video", 260)];
-    expect(focusCandidate(boxes, VH)).toBe("middle");
-  });
-
-  it("ignores videos less than 60% on screen", () => {
-    expect(focusCandidate([box("edge", "video", 650)], VH)).toBeNull();
-  });
-
-  it("never focuses a post embed or a song", () => {
-    const boxes = [box("post", "post", 250), box("song", "song", 250)];
-    expect(focusCandidate(boxes, VH)).toBeNull();
-  });
-
-  it("focuses TikTok like any video", () => {
-    expect(focusCandidate([box("t", "tiktok", 200)], VH)).toBe("t");
-  });
-
-  it("never focuses a player that waits for the viewer, as in an article's text", () => {
-    const boxes = [{ ...box("waits", "video", 250), waits: true }, { ...box("tiktok", "tiktok", 250), waits: true }, box("other", "video", 900)];
-    expect(focusCandidate(boxes, VH)).toBeNull();
   });
 });
 
@@ -114,41 +86,17 @@ describe("planMounts", () => {
     expect(result.size).toBe(3);
   });
 
-  it("loads TikTok only as it takes focus, and only with autoplay on", () => {
-    const boxes = [box("t", "tiktok", 200)];
-    expect(planMounts(input({ boxes })).has("t")).toBe(false);
-    expect(planMounts(input({ boxes, candidate: "t" })).has("t")).toBe(true);
-    expect(
-      planMounts(input({ boxes, candidate: "t", autoplay: false })).has("t"),
-    ).toBe(false);
+  it("loads TikTok and Reddit ahead like any other frame, though each starts playing as it loads (owner's request, 2026-10-29)", () => {
+    const boxes = [box("t", "tiktok", VH + 300), box("r", "post", VH + 300)];
+    expect([...planMounts(input({ boxes }))].sort()).toEqual(["r", "t"]);
+    // Kept until two screens away, as a video is.
+    const away = [box("t", "tiktok", VH + 1500)];
+    expect(planMounts(input({ boxes: away, mounted: new Set(["t"]) })).has("t")).toBe(true);
   });
 
-  it("loads Reddit's embed ahead like a post embed, but only from a tap with autoplay off, since it plays its own video (owner's report, 2026-10-29)", () => {
-    const boxes = [box("r", "reddit", VH + 300), box("x", "post", VH + 300)];
-    expect([...planMounts(input({ boxes }))].sort()).toEqual(["r", "x"]);
-    expect([...planMounts(input({ boxes, autoplay: false }))]).toEqual(["x"]);
-    expect(planMounts(input({ boxes, autoplay: false, held: new Set(["r"]) })).has("r")).toBe(true);
-    // Never focused: the page cannot play or pause it.
-    expect(focusCandidate([box("r", "reddit", 200)], VH)).toBeNull();
-  });
-
-  it("loads a waiting video ahead, held paused, and a waiting TikTok only from a tap", () => {
-    const boxes = [{ ...box("v", "video", 200), waits: true }, { ...box("t", "tiktok", 600), waits: true }];
-    expect(planMounts(input({ boxes })).has("v")).toBe(true);
-    expect(planMounts(input({ boxes, candidate: "t" })).has("t")).toBe(false);
-    expect(planMounts(input({ boxes, held: new Set(["t"]) })).has("t")).toBe(true);
-  });
-
-  it("releases TikTok half a screen away", () => {
-    const boxes = [box("t", "tiktok", VH + 500)];
-    const mounted = new Set(["t"]);
-    expect(planMounts(input({ boxes, mounted })).has("t")).toBe(false);
-  });
-
-  it("loads songs ahead like post embeds, and never focuses them", () => {
+  it("loads songs ahead like post embeds", () => {
     const boxes = [box("s", "song", VH + 300)];
     expect(planMounts(input({ boxes })).has("s")).toBe(true);
-    expect(focusCandidate([box("s", "song", 100)], VH)).toBeNull();
     const far = [box("s", "song", VH * 4)];
     expect(planMounts(input({ boxes: far, mounted: new Set(["s"]) })).has("s")).toBe(false);
   });

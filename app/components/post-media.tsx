@@ -32,7 +32,7 @@ const SLOT_KIND: Record<Provider, SlotKind> = {
   suno: "song",
   soundcloud: "song",
   x: "post",
-  reddit: "reddit",
+  reddit: "post",
   telegram: "post",
 };
 
@@ -58,8 +58,7 @@ function Player({
   const [height, setHeight] = useState(() => controller?.frameHeight(postId));
 
   // The theme is part of the frame's address, so a theme change rebuilds it.
-  // Without a tap the player loads paused; the controller starts it when it
-  // takes focus.
+  // Without a tap the player loads paused, for the viewer to start.
   const src = theme
     ? frameUrl(link, {
         siteOrigin: window.location.origin,
@@ -104,14 +103,12 @@ function ProviderMedia({
   post,
   media,
   lead,
-  waits,
 }: {
   post: PostCardData;
   media: Extract<PostMedia, { kind: "media" }>;
   lead?: boolean;
-  waits?: boolean;
 }) {
-  const { key, ref, state } = useMediaSlot(post.id, SLOT_KIND[media.provider], waits);
+  const { key, ref, state } = useMediaSlot(post.id, SLOT_KIND[media.provider]);
   const resolved = useMemo(() => mediaLinkOf(post.url), [post.url]);
   const link = state.mounted ? resolved : null;
 
@@ -163,9 +160,9 @@ function ProviderMedia({
 
 /**
  * A video or audio file the board hosts, in the browser's own player. Video
- * takes part in focus playback like a provider's controlled player: muted
- * autoplay on focus, one player at a time. Audio plays only on a tap, like a
- * song, and stops when something else starts.
+ * loads ahead like a provider's controlled player, paused for the viewer to
+ * start, one player at a time. Audio plays only on a tap, like a song, and
+ * stops when something else starts.
  */
 function UploadedMedia({
   post,
@@ -219,8 +216,6 @@ function UploadedMedia({
           controls
           playsInline
           preload="metadata"
-          // Autoplay starts muted; a tap starts with sound.
-          muted={!state.sound}
           className={cn(
             "rounded-xl bg-surface-2 object-contain",
             vertical ? "aspect-[9/16] w-full max-w-80" : "aspect-video w-full",
@@ -238,12 +233,12 @@ function UploadedMedia({
  * card that opens the original. The lead card's, the first on the screen,
  * loads its picture ahead of the rest.
  */
-export function PostMediaView({ post, lead, waits }: { post: PostCardData; lead?: boolean; waits?: boolean }) {
+export function PostMediaView({ post, lead }: { post: PostCardData; lead?: boolean }) {
   const { media } = post;
 
   switch (media.kind) {
     case "media":
-      return <ProviderMedia post={post} media={media} lead={lead} waits={waits} />;
+      return <ProviderMedia post={post} media={media} lead={lead} />;
     case "page":
       return (
         <PreviewCard
@@ -276,15 +271,13 @@ export function PostMediaView({ post, lead, waits }: { post: PostCardData; lead?
 /**
  * A provider link an article's text shows as its player, where the text
  * places it (owner's request, 2026-10-26): drawn as a link post's media,
- * with a playback slot and a remembered height of its own. It plays only
- * when the viewer starts it, unless it is the card's preview (`preview`),
- * which plays as a link post's does, with the post's snapshot as its poster.
+ * with a playback slot and a remembered height of its own. The card's
+ * preview (`preview`) has the post's snapshot as its poster.
  */
 export function TextEmbed({ post, block, preview }: { post: PostCardData; block: EmbedBlock; preview?: { thumbUrl?: string } }) {
   const thumbUrl = preview?.thumbUrl;
   return (
     <PostMediaView
-      waits={!preview}
       post={{
         ...post,
         id: `${post.id}~${block.index}`,

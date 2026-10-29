@@ -1057,7 +1057,7 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
 
       <Section
         title="Top bar"
-        note="Signed in: saved posts, the email digest, Submit, and the account menu; the theme and autoplay are in Settings. Sort and the range button share the row on wide screens and wrap to a second row on phones."
+        note="Signed in: saved posts, the email digest, Submit, and the account menu; the theme is in Settings. Sort and the range button share the row on wide screens and wrap to a second row on phones."
       >
         <div className="overflow-hidden rounded-xl border border-border [&>header]:static [&>header]:z-0">
           <SiteHeader
@@ -1137,7 +1137,7 @@ export default function DevUi({ loaderData }: Route.ComponentProps) {
 
       <Section
         title="Uploads"
-        note="A fan's pictures, video, and audio, hosted by the board, in the same card. A picture keeps its own shape; video autoplays muted on focus in the browser's own player; audio plays on a tap."
+        note="A fan's pictures, video, and audio, hosted by the board, in the same card. A picture keeps its own shape; video plays in the browser's own player once the viewer starts it; audio plays on a tap."
       >
         {sampleUploads(now).map((post) => {
           const vote = votes[post.id] ?? 0;

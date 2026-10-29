@@ -56,8 +56,8 @@ function DigestInviteButton() {
 /**
  * The top bar's right side. Signed out: the theme switch, the email digest,
  * Submit, and Sign in. Signed in: saved posts, the email digest, Submit,
- * and the account menu; the theme and autoplay are in Settings. Never more
- * than four controls, so it fits a 320 px screen.
+ * and the account menu; the theme is in Settings. Never more than four
+ * controls, so it fits a 320 px screen.
  */
 export function HeaderActions({
   viewer,

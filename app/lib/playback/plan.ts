@@ -1,23 +1,17 @@
 /**
- * Which media frames to load and which video has focus, decided from where
- * the cards sit on screen. Pure, so the rules are unit-tested; the playback
- * controller measures the page and applies the result.
+ * Which media frames to load, decided from where the cards sit on screen.
+ * Nothing plays until the viewer starts it (owner's request, 2026-10-29).
+ * Pure, so the rules are unit-tested; the playback controller measures the
+ * page and applies the result.
  */
 
 export type SlotKind =
   /** A player the page controls and can hold paused: YouTube. */
   | "video"
-  /** TikTok: controlled, but it starts playing the moment it loads. */
+  /** TikTok: controlled, but it starts playing the moment it loads, so it is paused at once. */
   | "tiktok"
-  /** A post embed that sizes itself: X and Telegram. */
+  /** A post embed that sizes itself: X, Reddit, and Telegram. */
   | "post"
-  /**
-   * Reddit's post embed, which sizes itself too, and starts a video it
-   * holds by itself, muted, whenever it is on screen: the page can stop it
-   * only by reloading it, and neither its address nor the frame's
-   * permissions keep it from starting (owner's report, 2026-10-29).
-   */
-  | "reddit"
   /** A song player the page cannot control: Suno. */
   | "song"
   /**
@@ -30,30 +24,18 @@ export type SlotKind =
 export interface SlotBox {
   key: string;
   kind: SlotKind;
-  /**
-   * Plays only when the viewer starts it, as a player in an article's text
-   * does (owner's request, 2026-10-26): it never takes focus, and a TikTok
-   * one, which plays as it loads, loads only from a tap.
-   */
-  waits?: boolean;
   /** Edges relative to the top of the viewport, in CSS pixels. */
   top: number;
   bottom: number;
 }
 
 export const RULES = {
-  /** A video needs this share on screen to take focus. */
-  focusVisible: 0.6,
-  /** How long focus must hold before the video plays, in milliseconds. */
-  dwellMs: 300,
   /** Frames load this many screens above the viewport... */
   loadAbove: 0.5,
   /** ...and this many below, where scrolling usually goes. */
   loadBelow: 1,
   /** A loaded frame is released once it is further away than this. */
   releaseBeyond: 2,
-  /** A TikTok frame, which plays as it loads, is released sooner. */
-  releaseTikTokBeyond: 0.5,
   /** At most this many frames are loaded, nearest the center first. */
   maxFrames: 3,
   /** Something the viewer started stops below this share on screen. */
@@ -83,28 +65,6 @@ function distanceFromCenter(box: SlotBox, viewportHeight: number): number {
   return Math.abs((box.top + box.bottom) / 2 - viewportHeight / 2);
 }
 
-/**
- * The video that should have focus: the one nearest the viewport center
- * among those at least 60% on screen.
- */
-export function focusCandidate(
-  boxes: readonly SlotBox[],
-  viewportHeight: number,
-): string | null {
-  let best: string | null = null;
-  let bestDistance = Infinity;
-  for (const box of boxes) {
-    if ((box.kind !== "video" && box.kind !== "tiktok") || box.waits) continue;
-    if (onScreen(box, viewportHeight) < RULES.focusVisible) continue;
-    const distance = distanceFromCenter(box, viewportHeight);
-    if (distance < bestDistance) {
-      best = box.key;
-      bestDistance = distance;
-    }
-  }
-  return best;
-}
-
 export interface MountInput {
   boxes: readonly SlotBox[];
   viewportHeight: number;
@@ -112,12 +72,8 @@ export interface MountInput {
   mounted: ReadonlySet<string>;
   /** Frames that stay regardless: the playback owner, or one loaded by a tap. */
   held: ReadonlySet<string>;
-  /** The video that has focus, or is about to. */
-  candidate: string | null;
   /** False under data saver, where nothing loads ahead of a tap. */
   loadAhead: boolean;
-  /** False when autoplay is off; TikTok and Reddit, which play as they load, then wait for a tap. */
-  autoplay: boolean;
   /**
    * True on touch screens, where a tap inside a frame tells the page
    * nothing: a song, whose player reports nothing either, then loads only
@@ -132,14 +88,13 @@ function wanted(box: SlotBox, input: MountInput): boolean {
   if (!input.loadAhead) return false;
 
   if (box.kind === "song" && input.songsWaitForTap) return false;
-  if (box.kind === "reddit" && !input.autoplay) return false;
 
   const away = screensAway(box, input.viewportHeight);
   const loaded = input.mounted.has(box.key);
   switch (box.kind) {
     case "video":
+    case "tiktok":
     case "post":
-    case "reddit":
     case "song": {
       if (loaded) return away <= RULES.releaseBeyond;
       const above = box.bottom <= 0;
@@ -148,11 +103,6 @@ function wanted(box: SlotBox, input: MountInput): boolean {
     case "native":
       // Always on the page, as its text shows it.
       return false;
-    case "tiktok":
-      // Loaded only as it takes focus, since loading starts it playing.
-      if (!input.autoplay || box.waits) return false;
-      if (loaded) return away <= RULES.releaseTikTokBeyond;
-      return box.key === input.candidate;
   }
 }
 

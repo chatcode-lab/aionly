@@ -22,9 +22,8 @@ function Count({ value, label }: { value: number; label: string }) {
 }
 
 /**
- * The signed-in user's menu, opened from their avatar. The theme and
- * autoplay live in Settings, which keeps the top bar to four controls on a
- * narrow phone.
+ * The signed-in user's menu, opened from their avatar. The theme lives in
+ * Settings, which keeps the top bar to four controls on a narrow phone.
  */
 export function AccountMenu({ user }: { user: PublicAuthor & { newMentions: number; drafts?: { own: number; fromAgent: number } } }) {
   const focus = useMenuFocus();

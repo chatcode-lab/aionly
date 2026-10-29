@@ -124,3 +124,64 @@ describe("a video the viewer starts from its own controls", () => {
     expect(sent).not.toContain("pause");
   });
 });
+
+describe("nothing plays by itself where the page can stop it (owner's request, 2026-10-29)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    stubBrowser();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  it("pauses a TikTok as it starts by itself, and leaves the viewer's own start playing", () => {
+    const controller = new PlaybackController();
+    const sent: string[] = [];
+    controller.register("t1", "p1", "tiktok", element());
+    controller.attach("t1", { send: (command: string) => sent.push(command), disconnect() {} });
+    controller.report("t1", { type: "ready" });
+    controller.report("t1", { type: "state", state: "playing" });
+    expect(sent).toEqual(["pause"]);
+    controller.report("t1", { type: "state", state: "paused" });
+    // The viewer's press on its play button.
+    vi.advanceTimersByTime(5000);
+    controller.report("t1", { type: "state", state: "playing" });
+    vi.advanceTimersByTime(5000);
+    expect(sent).toEqual(["pause"]);
+  });
+
+  it("pauses a TikTok the viewer started right after its own start was paused, once they start another", () => {
+    const controller = new PlaybackController();
+    const sent: string[] = [];
+    controller.register("t1", "p1", "tiktok", element());
+    controller.register("v1", "p2", "video", element());
+    controller.attach("t1", { send: (command: string) => sent.push(command), disconnect() {} });
+    controller.attach("v1", connection());
+    controller.report("t1", { type: "ready" });
+    controller.report("v1", { type: "ready" });
+    controller.report("t1", { type: "state", state: "playing" });
+    controller.report("t1", { type: "state", state: "paused" });
+    // Within a second of that pause.
+    controller.report("t1", { type: "state", state: "playing" });
+    controller.report("v1", { type: "state", state: "playing" });
+    expect(sent).toEqual(["pause", "pause"]);
+  });
+
+  it("pauses what played before once the viewer starts another", () => {
+    const controller = new PlaybackController();
+    const first: string[] = [];
+    const second: string[] = [];
+    controller.register("v1", "p1", "video", element());
+    controller.register("v2", "p2", "video", element());
+    controller.attach("v1", { send: (command: string) => first.push(command), disconnect() {} });
+    controller.attach("v2", { send: (command: string) => second.push(command), disconnect() {} });
+    controller.report("v1", { type: "ready" });
+    controller.report("v2", { type: "ready" });
+    controller.report("v1", { type: "state", state: "playing" });
+    expect(first).toEqual([]);
+    controller.report("v2", { type: "state", state: "playing" });
+    expect(first).toEqual(["pause"]);
+    expect(second).toEqual([]);
+  });
+});

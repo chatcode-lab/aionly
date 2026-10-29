@@ -71,6 +71,8 @@ const FAKE_FRAMES: Array<{ match: RegExp; script: string }> = [
       const send = (type, value) =>
         parent.postMessage({ "x-tiktok-player": true, type, value }, "*");
       window.player = () => ({ playing: state === 1 });
+      // A press on its own play button.
+      window.viewerPlay = () => { state = 1; send("onStateChange", 1); };
       setTimeout(() => {
         send("onPlayerReady");
         send("onMute", true);

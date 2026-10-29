@@ -191,12 +191,12 @@ test("signed in, the top bar holds saved posts, the digest, and the account menu
   await expect(header.getByRole("button", { name: /^Email digest/ })).toBeVisible();
   await header.getByRole("button", { name: `Account: ${account.username}` }).click();
   await expect(page.getByRole("menuitem", { name: "Settings" })).toBeVisible();
-  // The theme and autoplay are in Settings, not the menu.
+  // The theme is in Settings, not the menu.
   await expect(page.getByRole("menuitemradio")).toHaveCount(0);
   await expect(header.getByRole("link", { name: "Sign in" })).toHaveCount(0);
 });
 
-test("signed in, the theme and autoplay are chosen in Settings", async ({ page, context, account }) => {
+test("signed in, the theme is chosen in Settings, which has no autoplay switch (owner's request, 2026-10-29)", async ({ page, context, account }) => {
   await account.signIn(context);
   await open(page, "/settings");
   const display = page.getByRole("region", { name: "Display" });
@@ -205,12 +205,9 @@ test("signed in, the theme and autoplay are chosen in Settings", async ({ page, 
   await display.getByText("Dark", { exact: true }).click();
   await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
   expect((await saved).status()).toBe(200);
-  const autoplay = display.getByRole("checkbox", { name: /Autoplay videos/ });
-  await expect(autoplay).toBeChecked();
-  await autoplay.uncheck();
+  await expect(display.getByRole("checkbox")).toHaveCount(0);
   await open(page, "/settings");
   await expect(page.getByRole("region", { name: "Display" }).getByRole("radio", { name: "Dark" })).toBeChecked();
-  await expect(page.getByRole("region", { name: "Display" }).getByRole("checkbox", { name: /Autoplay videos/ })).not.toBeChecked();
 });
 
 test("a member's text size, chosen in Settings, scales the text on every page from the first paint", async ({ page, context, account }) => {

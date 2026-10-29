@@ -75,25 +75,22 @@ async function playingCount(page: Page): Promise<number> {
   return count;
 }
 
-async function setAutoplay(page: Page, on: boolean): Promise<void> {
-  await page.getByRole("button", { name: /^Theme:/ }).click();
-  const item = page.getByRole("menuitemcheckbox", { name: /Autoplay videos/ });
-  await expect(item).toHaveAttribute("aria-checked", String(!on));
-  await item.click();
-}
-
-test("plays the focused video muted, and pauses it when focus moves on", async ({ page, problems }) => {
+test("a video in the middle of the screen waits for the viewer, and stays paused once they pause it (owner's request, 2026-10-29)", async ({ page, problems }) => {
   await page.goto(FEED);
   await focus(page, BUNNY);
   const bunny = await player(page, BUNNY);
-  await expect.poll(() => isPlaying(bunny)).toBe(true);
-  expect(await commands(bunny)).toEqual(["mute", "playVideo"]);
+  // Longer than focus took to start a player, when it did.
+  await page.waitForTimeout(800);
+  expect(await isPlaying(bunny)).toBe(false);
+  expect(await commands(bunny)).toEqual([]);
 
-  await focus(page, SINTEL);
-  const sintel = await player(page, SINTEL);
-  await expect.poll(() => isPlaying(sintel)).toBe(true);
-  await expect.poll(() => isPlaying(bunny)).toBe(false);
-  expect(await playingCount(page)).toBe(1);
+  await bunny.evaluate(() => (window as unknown as Fake).viewerPlay());
+  await expect.poll(() => isPlaying(bunny)).toBe(true);
+  await bunny.evaluate(() => (window as unknown as Fake).viewerPause());
+  await page.waitForTimeout(800);
+  expect(await isPlaying(bunny)).toBe(false);
+  // Its sound is never touched, and it is never started.
+  expect(await commands(bunny)).toEqual([]);
   expect(problems.violations).toEqual([]);
   expect(problems.errors).toEqual([]);
 });
@@ -102,7 +99,6 @@ test("a video the provider cannot play here falls back to a preview of the origi
   await page.goto(FEED);
   await focus(page, BUNNY);
   const bunny = await player(page, BUNNY);
-  await expect.poll(() => isPlaying(bunny)).toBe(true);
   await bunny.evaluate(() => (window as unknown as { viewerFail: () => void }).viewerFail());
   const media = card(page, BUNNY);
   await expect(media.locator("iframe")).toHaveCount(0);
@@ -157,6 +153,7 @@ test("playback the viewer starts takes over, and stops once scrolled away", asyn
   await page.evaluate(() => (document.body.style.paddingTop = "1600px"));
   await focus(page, BUNNY);
   const bunny = await player(page, BUNNY);
+  await bunny.evaluate(() => (window as unknown as Fake).viewerPlay());
   await expect.poll(() => isPlaying(bunny)).toBe(true);
 
   // The viewer starts the other one in its own controls.
@@ -174,10 +171,9 @@ test("playback the viewer starts takes over, and stops once scrolled away", asyn
 
 test("a song loads ahead, and it and a video never play together", async ({ page }, testInfo) => {
   test.skip(Boolean(testInfo.project.use.hasTouch), "On a touch screen a song waits for a tap; see the next test.");
-  // With autoplay off, only what the viewer starts plays. A tall window
-  // shows the song and a video beside it, as the viewer starts what they see.
+  // A tall window shows the song and a video beside it, as the viewer
+  // starts what they see.
   await page.setViewportSize({ width: 1280, height: 1800 });
-  await page.addInitScript(() => window.localStorage.setItem("autoplay", "off"));
   await page.goto(FEED);
   await focus(page, SONG);
 
@@ -209,7 +205,6 @@ test("a song loads ahead, and it and a video never play together", async ({ page
 
 test("on a touch screen a song waits for a tap, and stops when a video starts or it scrolls away", async ({ page }, testInfo) => {
   test.skip(!testInfo.project.use.hasTouch, "Only touch screens wait for a tap.");
-  await page.addInitScript(() => window.localStorage.setItem("autoplay", "off"));
   await page.goto(FEED);
   await focus(page, SONG);
   // A tap inside a frame tells the page nothing here, so the song loads from a tap on its card.
@@ -260,28 +255,11 @@ test("under data saver a song waits for a tap, at the player's height", async ({
   await expect(card(page, SONG).locator("iframe")).toHaveAttribute("src", /^https:\/\/suno\.com\/embed\//);
 });
 
-test("leaves a video the viewer paused alone until focus moves on", async ({ page }) => {
-  await page.goto(FEED);
-  await focus(page, BUNNY);
-  const bunny = await player(page, BUNNY);
-  await expect.poll(() => isPlaying(bunny)).toBe(true);
-
-  await bunny.evaluate(() => (window as unknown as Fake).viewerPause());
-  await page.waitForTimeout(800);
-  expect(await isPlaying(bunny)).toBe(false);
-  expect((await commands(bunny)).filter((name) => name === "playVideo")).toHaveLength(1);
-
-  // Away and back, it plays again.
-  await focus(page, SINTEL);
-  await expect.poll(async () => isPlaying(await player(page, SINTEL))).toBe(true);
-  await focus(page, BUNNY);
-  await expect.poll(async () => isPlaying(await player(page, BUNNY))).toBe(true);
-});
-
 test("pauses when the tab is hidden", async ({ page }) => {
   await page.goto(FEED);
   await focus(page, BUNNY);
   const bunny = await player(page, BUNNY);
+  await bunny.evaluate(() => (window as unknown as Fake).viewerPlay());
   await expect.poll(() => isPlaying(bunny)).toBe(true);
 
   await page.evaluate(() => {
@@ -291,64 +269,27 @@ test("pauses when the tab is hidden", async ({ page }) => {
   await expect.poll(() => isPlaying(bunny)).toBe(false);
 });
 
-test("autoplay can be switched off, and stays off", async ({ page }) => {
+test("TikTok loads ahead, paused as it starts by itself, and plays once the viewer starts it (owner's request, 2026-10-29)", async ({ page }) => {
   await page.goto(FEED);
-  await setAutoplay(page, false);
-  await page.keyboard.press("Escape");
-
-  await page.reload();
-  await focus(page, BUNNY);
-  const bunny = await player(page, BUNNY);
-  await page.waitForTimeout(800);
-  expect(await commands(bunny)).toEqual([]);
-
-  await setAutoplay(page, true);
-  await expect.poll(() => isPlaying(bunny)).toBe(true);
-});
-
-test("reduced motion keeps autoplay off and says why", async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: "reduce" });
-  await page.goto(FEED);
-  await focus(page, BUNNY);
-  const bunny = await player(page, BUNNY);
-  await page.waitForTimeout(800);
-  expect(await commands(bunny)).toEqual([]);
-
-  await page.getByRole("button", { name: /^Theme:/ }).click();
-  const item = page.getByRole("menuitemcheckbox", { name: /Autoplay videos/ });
-  await expect(item).toHaveAttribute("aria-disabled", "true");
-  await expect(item).toContainText("Off while reduced motion is on");
-});
-
-test("after the viewer unmutes, the next video autoplays with sound", async ({ page }) => {
-  await page.goto(FEED);
-  await focus(page, BUNNY);
-  const bunny = await player(page, BUNNY);
-  await expect.poll(() => isPlaying(bunny)).toBe(true);
-
-  // Sound needs the page to have been used; any click counts.
-  await card(page, BUNNY).locator("p.whitespace-pre-line").first().click();
-  await bunny.evaluate(() => (window as unknown as Fake).viewerUnmute());
-
-  await focus(page, SINTEL);
-  const sintel = await player(page, SINTEL);
-  await expect.poll(() => isPlaying(sintel)).toBe(true);
-  expect(await commands(sintel)).not.toContain("mute");
-  expect(await sintel.evaluate(() => (window as unknown as Fake).player().muted)).toBe(false);
-});
-
-test("TikTok loads as it takes focus and stops when focus moves on", async ({ page }) => {
-  await page.goto(FEED);
-  await expect(card(page, TIKTOK).locator("iframe")).toHaveCount(0);
+  await card(page, TIKTOK).evaluate((element) =>
+    window.scrollBy(0, element.getBoundingClientRect().top - window.innerHeight + 40),
+  );
+  const tiktok = await player(page, TIKTOK);
+  await expect.poll(() => commands(tiktok)).toEqual(["pause"]);
+  expect(await isPlaying(tiktok)).toBe(false);
 
   await focus(page, TIKTOK);
-  const tiktok = await player(page, TIKTOK);
+  await tiktok.evaluate(() => (window as unknown as Fake).viewerPlay());
   await page.waitForTimeout(600);
   expect(await isPlaying(tiktok)).toBe(true);
+  expect(await commands(tiktok)).toEqual(["pause"]);
 
+  // Scrolled away, as the viewer starts another, it is paused.
   await focus(page, SINTEL);
-  await expect.poll(async () => isPlaying(await player(page, SINTEL))).toBe(true);
-  await expect.poll(() => isPlaying(tiktok)).toBe(false);
+  const sintel = await player(page, SINTEL);
+  await sintel.evaluate(() => (window as unknown as Fake).viewerPlay());
+  await expect.poll(() => isPlaying(sintel)).toBe(true);
+  expect(await isPlaying(tiktok)).toBe(false);
   expect(await playingCount(page)).toBe(1);
 });
 

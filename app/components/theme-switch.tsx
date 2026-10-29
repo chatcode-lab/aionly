@@ -1,16 +1,14 @@
-import { Check, Heart, Monitor, Moon, Play, Sun } from "lucide-react";
+import { Check, Heart, Monitor, Moon, Sun } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
 import { Link, useFetcher } from "react-router";
 
 import { cn } from "~/lib/cn";
-import { type PlaybackSettings, playbackController } from "~/lib/playback/controller";
-import { usePlaybackSettings } from "~/lib/playback/hooks";
 import { DEFAULT_TEXT_SIZE, parseTextSize, TEXT_SIZE_FIELD, TEXT_SIZE_LABEL, TEXT_SIZES, type TextSize } from "~/lib/text-size";
 import { parseTheme, type Theme, THEMES } from "~/lib/theme";
 import { DEFAULT_TINT, parseTint, TINT_COLORS, TINT_FIELD, TINT_LABEL, TINTS, type Tint } from "~/lib/tint";
 
 import { IconButton } from "./ui/button";
-import { MenuSeparator, useMenuFocus } from "./ui/menu";
+import { useMenuFocus } from "./ui/menu";
 
 /** Shared so the document can apply the choice before the server confirms. */
 export const THEME_FETCHER_KEY = "theme";
@@ -83,10 +81,9 @@ const CHOICE =
   "flex h-9 cursor-pointer items-center gap-2 rounded-lg border border-border-strong px-3 text-body has-checked:border-accent has-checked:bg-accent-soft has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent pointer-coarse:h-(--touch)";
 
 /**
- * The theme, text size, and autoplay as a section of Settings, where a
- * signed-in member finds them: radio buttons for the theme, kept in a
- * cookie; for the text size, kept on the account; and a checkbox for
- * autoplay, kept in this browser.
+ * The theme and text size as a section of Settings, where a signed-in
+ * member finds them: radio buttons for the theme, kept in a cookie, and for
+ * the text size, kept on the account.
  */
 export function DisplaySettings({
   theme,
@@ -103,7 +100,6 @@ export function DisplaySettings({
   const fetcher = useFetcher({ key: THEME_FETCHER_KEY });
   const sizeFetcher = useFetcher<{ textSizeError?: string }>({ key: TEXT_SIZE_FIELD });
   const tintFetcher = useFetcher<{ tintError?: string }>({ key: TINT_FIELD });
-  const { autoplay, blockedBy } = usePlaybackSettings();
   return (
     <div className="space-y-4">
       <fieldset>
@@ -195,58 +191,7 @@ export function DisplaySettings({
             ))}
         </p>
       </fieldset>
-      <label className="flex items-start gap-2.5 text-body">
-        <input
-          type="checkbox"
-          checked={autoplay && blockedBy === null}
-          disabled={blockedBy !== null}
-          onChange={(event) => playbackController()?.setAutoplay(event.target.checked)}
-          className="mt-1 size-4 shrink-0 accent-(--accent)"
-        />
-        <span>
-          Autoplay videos as they come into view, muted until you turn the sound on.
-          {blockedBy ? <span className="block text-meta text-text-muted">{AUTOPLAY_BLOCKED[blockedBy]}.</span> : null}
-          <span className="block text-meta text-text-muted">Kept in this browser.</span>
-        </span>
-      </label>
     </div>
-  );
-}
-
-const AUTOPLAY_BLOCKED: Record<
-  NonNullable<PlaybackSettings["blockedBy"]>,
-  string
-> = {
-  "reduced-motion": "Off while reduced motion is on",
-  "data-saver": "Off while data saver is on",
-};
-
-/**
- * The autoplay switch, remembered in this browser. It sits with the theme
- * in the header's theme menu, for visitors; members find both in Settings.
- */
-export function AutoplayItem() {
-  const { autoplay, blockedBy } = usePlaybackSettings();
-  return (
-    <DropdownMenu.CheckboxItem
-      checked={autoplay && blockedBy === null}
-      disabled={blockedBy !== null}
-      onCheckedChange={(checked) => playbackController()?.setAutoplay(checked)}
-      className={cn(MENU_RADIO_ITEM, blockedBy && "h-auto py-1.5")}
-    >
-      <Play size={16} aria-hidden className="text-text-muted" />
-      <span className="min-w-0">
-        Autoplay videos
-        {blockedBy ? (
-          <span className="block text-meta text-text-muted">
-            {AUTOPLAY_BLOCKED[blockedBy]}
-          </span>
-        ) : null}
-      </span>
-      <DropdownMenu.ItemIndicator className="ml-auto">
-        <Check size={16} aria-hidden />
-      </DropdownMenu.ItemIndicator>
-    </DropdownMenu.CheckboxItem>
   );
 }
 
@@ -269,8 +214,6 @@ export function ThemeSwitch({ theme }: { theme: Theme }) {
           className={`${MENU_CONTENT} min-w-48`}
         >
           <ThemeRadioGroup theme={theme} />
-          <MenuSeparator />
-          <AutoplayItem />
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>

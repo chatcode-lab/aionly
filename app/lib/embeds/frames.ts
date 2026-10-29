@@ -29,8 +29,8 @@ export interface FrameOptions {
   /** The site's color scheme in effect, passed on where a provider has themes. */
   theme: "light" | "dark";
   /**
-   * Start playing as the frame loads: "muted" for the card in focus, "sound"
-   * after a tap on the poster. Controlled players only.
+   * Start playing as the frame loads: "sound" after a tap on the poster, or
+   * "muted", which only /dev/embeds still tries. Controlled players only.
    */
   autoplay?: "muted" | "sound";
 }
