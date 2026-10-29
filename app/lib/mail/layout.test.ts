@@ -36,6 +36,12 @@ describe("the email layout", () => {
     const { html } = composeLetter(letter);
     expect(html).toContain("@media (max-width:560px){.edge{padding-left:0!important;padding-right:0!important}.sheet{border-radius:0!important;");
     expect(html).toContain('<td align="center" class="edge" style="padding:24px 16px">');
+    // The page around the card takes its color, light and dark, over the dark scheme's own rule.
+    expect(html).toContain("body.page,table.page{background-color:#ffffff!important}");
+    expect(html).toMatch(/and \(prefers-color-scheme:dark\)\{body\.page,table\.page\{background-color:#[0-9a-f]{6}!important\}/);
+    expect(html).toContain('<body style="margin:0;background:#f7f6f3" class="page db-f7f6f3">');
+    // In Apple Mail on a phone, which sets the email in as far as its subject, the text starts there.
+    expect(html).toContain("<style>@supports (-webkit-touch-callout:none){@media (max-width:560px){.sheet{padding-left:0!important;padding-right:0!important}}}</style>");
     expect(html).toMatch(/<table [^>]*style="max-width:560px;background:#ffffff;[^"]*" class="sheet db-ffffff dc-1f1d1a">/);
     expect(html).not.toMatch(/class="[^"]*" [^>]*class=/);
     // The dark scheme's rules take the tint, after the narrow screen's.
@@ -69,7 +75,7 @@ describe("the email layout", () => {
     const rules = /<style>(.*)<\/style><\/head>/.exec(html)?.[1] ?? "";
     expect(rules).toContain(":root{color-scheme:light dark;supported-color-schemes:light dark}@media (prefers-color-scheme:dark){");
     // The page, the card, the words, the rule above the foot, and the button.
-    expect(html).toContain('<body style="margin:0;background:#f7f6f3" class="db-f7f6f3">');
+    expect(html).toContain('<body style="margin:0;background:#f7f6f3" class="page db-f7f6f3">');
     for (const rule of [
       ".db-f7f6f3{background-color:#121110!important}",
       ".db-ffffff{background-color:#1b1a18!important}",

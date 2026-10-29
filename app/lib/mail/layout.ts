@@ -109,12 +109,18 @@ const EYES = [
 ].join("");
 
 /**
- * On a phone, the card spans the screen edge to edge, without its rounded
- * corners or the page around it at the sides, as the board's cards do
- * there, so its text has the width (owner's request, 2026-10-29). Below the
- * card's own width, where it would fill the screen anyway.
+ * On a phone, below the card's own width, the card is the whole email, as
+ * the board's cards span a phone's screen (owner's requests, 2026-10-29):
+ * no page around it, in its color or at its sides, and no rounded corners,
+ * with 16 px inside. Apple Mail on iPhone and iPad sets the email in from
+ * the screen's edges itself, as far as its subject, so there the text
+ * starts at that edge, in line with the subject: a block of its own, since
+ * Gmail, which reads no `@supports`, may drop a block that has one.
  */
-const NARROW = "<style>@media (max-width:560px){.edge{padding-left:0!important;padding-right:0!important}.sheet{border-radius:0!important;padding-left:16px!important;padding-right:16px!important}}</style>";
+const NARROW = [
+  `<style>@media (max-width:560px){.edge{padding-left:0!important;padding-right:0!important}.sheet{border-radius:0!important;padding-left:16px!important;padding-right:16px!important}body.page,table.page{background-color:#ffffff!important}}@media (max-width:560px) and (prefers-color-scheme:dark){body.page,table.page{background-color:${DARK["#ffffff"]}!important}}</style>`,
+  "<style>@supports (-webkit-touch-callout:none){@media (max-width:560px){.sheet{padding-left:0!important;padding-right:0!important}}}</style>",
+].join("");
 
 /** The board's name standing alone, not in an address or a longer name. */
 const NAME = new RegExp(`(?<![\\w@./-])(${SITE_NAME.replace(".", "\\.")})(?![\\w/-])`);
@@ -136,9 +142,9 @@ export function composeLetter(letter: Letter): { subject: string; html: string; 
   const { subject, preview, heading, paragraphs = [], block, button, after = [], signature, why, links = [], origin } = letter;
   const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light dark"><meta name="supported-color-schemes" content="light dark"><title>${escape(subject)}</title>${NARROW}</head>
-<body style="margin:0;background:#f7f6f3">
+<body class="page" style="margin:0;background:#f7f6f3">
 ${preview ? `<div style="display:none;max-height:0;overflow:hidden">${escape(preview)}</div>` : ""}
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f7f6f3"><tr><td align="center" class="edge" style="padding:24px 16px">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="page" style="background:#f7f6f3"><tr><td align="center" class="edge" style="padding:24px 16px">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="sheet" style="max-width:560px;background:#ffffff;border-radius:12px;padding:8px 20px 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1f1d1a">
 <tr><td style="padding:16px 0 4px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td><a href="${escape(origin)}" style="color:#1f1d1a;font-size:20px;font-weight:700;text-decoration:none"><span style="color:#c2410c">ai</span>on.ly</a></td><td align="right" style="font-size:0;line-height:0">${EYES}</td></tr></table></td></tr>
 <tr><td style="padding:12px 0 0"><div style="font-size:22px;line-height:28px;font-weight:700">${prose(heading, "#1f1d1a", origin)}</div>
