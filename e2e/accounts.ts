@@ -1,5 +1,9 @@
-/** Test accounts per worker process; each test takes the next one. */
-export const ACCOUNTS_PER_WORKER = 50;
+/**
+ * Test accounts per worker process; each test takes the next one. One worker
+ * can run a whole project's tests, and those that publish take about a
+ * hundred, so this leaves room for them to grow.
+ */
+export const ACCOUNTS_PER_WORKER = 150;
 
 /**
  * Enough accounts for this many worker processes in one run. Every project
