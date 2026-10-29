@@ -27,6 +27,11 @@ describe("the email layout", () => {
     expect(text).not.toContain("<a ");
   });
 
+  it("sets the wordmark apart from the heading under it (owner's request, 2026-10-29)", () => {
+    const { html } = composeLetter(letter);
+    expect(html).toMatch(/<\/td><\/tr><\/table><\/td><\/tr>\n<tr><td style="padding:24px 0 0"><div style="font-size:22px;[^"]*"[^>]*>The past month on /);
+  });
+
   it("centers its button (owner's request, 2026-10-29)", () => {
     const { html } = composeLetter({ ...letter, button: { label: "Open aion.ly", url: "https://staging.example" } });
     expect(html).toContain('<tr><td align="center" style="padding:18px 0 0;text-align:center"><a href="https://staging.example" style="display:inline-block;background:#c2410c');
@@ -34,7 +39,7 @@ describe("the email layout", () => {
 
   it("spans a phone's screen edge to edge, the card's own classes kept beside the dark scheme's, in any tint (owner's request, 2026-10-29)", () => {
     const { html } = composeLetter(letter);
-    expect(html).toContain("@media (max-width:560px){.edge{padding-left:0!important;padding-right:0!important}.sheet{border-radius:0!important;");
+    expect(html).toContain("@media (max-width:560px){.edge{padding:0!important}.sheet{border-radius:0!important;");
     expect(html).toContain('<td align="center" class="edge" style="padding:24px 16px">');
     // The page around the card takes its color, light and dark, over the dark scheme's own rule.
     expect(html).toContain("body.page,table.page{background-color:#ffffff!important}");

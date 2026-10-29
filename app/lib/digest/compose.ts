@@ -3,7 +3,6 @@
  * the layout every email shares. Pure, so it is unit-tested.
  */
 
-import { generatedAvatar } from "../avatar";
 import { founderSignature } from "../mail/founder";
 import { composeLetter, escape } from "../mail/layout";
 import { clip } from "../meta";
@@ -42,10 +41,8 @@ export interface DigestPost {
   score: number;
   comments: number;
   author: string;
-  /** The author's account, whose drawn picture's color it picks. */
-  authorId: string;
-  /** The author's picture on the board, absolute; their drawn one without. */
-  authorPhoto: string | null;
+  /** The author is an agent, marked as one before their name; a person otherwise. */
+  agent: boolean;
   /** The card's excerpt of the description as plain text; the digest cuts it to `EXCERPT_MAX`. */
   excerpt: string;
   /** The card's excerpt stops before the description's end, at a line or past its length. */
@@ -97,16 +94,41 @@ const counts = (post: DigestPost) => [
   ...(post.comments >= COUNTED.comments ? [plural(post.comments, "comment")] : []),
 ];
 
+/** A stroke of an author's mark, two units of its grid wide, in the line's quiet color. */
+const STROKE = "0.1em solid #6f6b64";
+
+/** A filled part of an agent's mark, from its left edge, top, and size, in ems. */
+const filled = (left: string, top: string, width: string, height: string, round = "0") =>
+  `<span style="display:inline-block;vertical-align:top;width:${width};height:${height};margin:${top} 0 0 ${left};border-radius:${round};background:#6f6b64"></span>`;
+
 /**
- * The author's picture, small, before their name: their own, or the one
- * the board draws, their initial on their color. Sized in ems of its own
- * font size, so it grows with the reader's text size (`atTextSize`).
+ * The site's marks for a person and an agent, as a mention and a cover
+ * show them: lucide's UserRound and Bot (ISC license) on their 24-unit
+ * grid, a twentieth of an em each. A person, a round head over round
+ * shoulders; an agent, a rounded head with two eyes, an antenna, and ears.
  */
-function authorPicture(post: DigestPost): string {
-  const box = "display:inline-block;font-size:10px;width:1.6em;height:1.6em;border-radius:50%;vertical-align:middle;margin-right:3px";
-  if (post.authorPhoto) return `<img src="${escape(post.authorPhoto)}" width="16" height="16" alt="" style="${box};border:0">`;
-  const { color, letter } = generatedAvatar(post.authorId, post.author);
-  return `<span style="${box};background:${color};color:#ffffff;line-height:1.6em;text-align:center;font-weight:600">${escape(letter)}</span>`;
+const MARKS = {
+  person: [
+    `<span style="display:block;width:0.4em;height:0.4em;margin:0.1em 0 0 0.3em;border:${STROKE};border-radius:50%"></span>`,
+    `<span style="display:block;width:0.7em;height:0.3em;margin:0 0 0 0.15em;border:${STROKE};border-bottom:0;border-radius:0.45em 0.45em 0 0"></span>`,
+  ].join(""),
+  agent: [
+    `<span style="display:block;width:0.2em;height:0.1em;margin:0.15em 0 0 0.35em;border:${STROKE};border-bottom:0;border-left:0;border-radius:0 0.1em 0 0"></span>`,
+    `<span style="display:block;height:0.7em;line-height:0;white-space:nowrap">${filled("0.05em", "0.3em", "0.1em", "0.1em")}`,
+    `<span style="display:inline-block;vertical-align:top;width:0.7em;height:0.5em;border:${STROKE};border-radius:0.15em">${filled("0.15em", "0.15em", "0.1em", "0.2em", "0.05em")}${filled("0.2em", "0.15em", "0.1em", "0.2em", "0.05em")}</span>`,
+    `${filled("0", "0.3em", "0.1em", "0.1em")}</span>`,
+  ].join(""),
+};
+
+/**
+ * The author's mark before their name, a person's or an agent's, as the
+ * site names an account (owner's request, 2026-10-29, replacing their
+ * picture). Bordered boxes rather than a picture, so every mail app shows
+ * it and it turns with a dark scheme, as the eyes do; sized in ems of its
+ * own font size, so it grows with the reader's text size (`atTextSize`).
+ */
+function authorMark(post: DigestPost): string {
+  return `<span style="display:inline-block;font-size:11px;width:1.2em;height:1.2em;vertical-align:middle;margin-right:3px">${post.agent ? MARKS.agent : MARKS.person}</span>`;
 }
 
 /**
@@ -168,7 +190,7 @@ ${list.posts
 ${mediaHtml(post)}<a href="${escape(post.url)}" style="color:#1f1d1a;font-size:16px;font-weight:600;text-decoration:none">${escape(post.title)}</a>
 <div style="color:#6f6b64;font-size:13px;margin-top:3px">${sourceHtml(post)}${counts(post)
       .map((count) => `${escape(count)} · `)
-      .join("")}<span style="white-space:nowrap">by ${authorPicture(post)}${escape(post.author)}</span></div>
+      .join("")}<span style="white-space:nowrap">by ${authorMark(post)}${escape(post.author)}</span></div>
 ${excerptHtml(post)}
 </div>`,
   )

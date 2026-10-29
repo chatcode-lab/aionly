@@ -1,6 +1,7 @@
 /**
  * The one layout of every email the board sends, the digest, offers, and
- * notices alike: the wordmark and the eyes, a heading, a few paragraphs, the email's own
+ * notices alike: the wordmark and the eyes, set apart from the heading under
+ * them (owner's request, 2026-10-29), a few paragraphs, the email's own
  * part (an offer, the digest's posts), one button, centered (owner's request, 2026-10-29), quieter lines after it,
  * a signature on a person's letter, and a footer saying why it came, with its links and the operator's
  * address. HTML that mail clients render alike, with a text version beside
@@ -68,7 +69,7 @@ const TURNS: Record<string, { letter: string; property: string }> = {
  * mail apps that let it (Apple Mail among them; Gmail darkens emails its own
  * way). Inline styles stay light; each element drawn in the light colors
  * gets classes, after any it has, and a dark scheme's rules recolor them. An element on a
- * color of its own, as a drawn picture's initial on its color, keeps both.
+ * color of its own keeps both.
  */
 function darkReady(html: string): string {
   const rules = new Map<string, string>();
@@ -111,14 +112,15 @@ const EYES = [
 /**
  * On a phone, below the card's own width, the card is the whole email, as
  * the board's cards span a phone's screen (owner's requests, 2026-10-29):
- * no page around it, in its color or at its sides, and no rounded corners,
- * with 16 px inside. Apple Mail on iPhone and iPad sets the email in from
- * the screen's edges itself, as far as its subject, so there the text
- * starts at that edge, in line with the subject: a block of its own, since
- * Gmail, which reads no `@supports`, may drop a block that has one.
+ * no page around it, in its color, at its sides, or above the wordmark, and
+ * no rounded corners, with 16 px inside. Apple Mail on iPhone and iPad sets
+ * the email in from the screen's edges itself, as far as its subject, so
+ * there the text starts at that edge, in line with the subject: a block of
+ * its own, since Gmail, which reads no `@supports`, may drop a block that
+ * has one.
  */
 const NARROW = [
-  `<style>@media (max-width:560px){.edge{padding-left:0!important;padding-right:0!important}.sheet{border-radius:0!important;padding-left:16px!important;padding-right:16px!important}body.page,table.page{background-color:#ffffff!important}}@media (max-width:560px) and (prefers-color-scheme:dark){body.page,table.page{background-color:${DARK["#ffffff"]}!important}}</style>`,
+  `<style>@media (max-width:560px){.edge{padding:0!important}.sheet{border-radius:0!important;padding-left:16px!important;padding-right:16px!important}body.page,table.page{background-color:#ffffff!important}}@media (max-width:560px) and (prefers-color-scheme:dark){body.page,table.page{background-color:${DARK["#ffffff"]}!important}}</style>`,
   "<style>@supports (-webkit-touch-callout:none){@media (max-width:560px){.sheet{padding-left:0!important;padding-right:0!important}}}</style>",
 ].join("");
 
@@ -147,7 +149,7 @@ ${preview ? `<div style="display:none;max-height:0;overflow:hidden">${escape(pre
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="page" style="background:#f7f6f3"><tr><td align="center" class="edge" style="padding:24px 16px">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" class="sheet" style="max-width:560px;background:#ffffff;border-radius:12px;padding:8px 20px 20px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1f1d1a">
 <tr><td style="padding:16px 0 4px"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td><a href="${escape(origin)}" style="color:#1f1d1a;font-size:20px;font-weight:700;text-decoration:none"><span style="color:#c2410c">ai</span>on.ly</a></td><td align="right" style="font-size:0;line-height:0">${EYES}</td></tr></table></td></tr>
-<tr><td style="padding:12px 0 0"><div style="font-size:22px;line-height:28px;font-weight:700">${prose(heading, "#1f1d1a", origin)}</div>
+<tr><td style="padding:24px 0 0"><div style="font-size:22px;line-height:28px;font-weight:700">${prose(heading, "#1f1d1a", origin)}</div>
 ${paragraphs.map((paragraph) => `<p style="color:#55524c;font-size:15px;line-height:22px;margin:10px 0 0">${prose(paragraph, "#55524c", origin)}</p>`).join("\n")}</td></tr>
 ${block ? `<tr><td style="padding:18px 0 0">${block.html}</td></tr>` : ""}
 ${button ? `<tr><td align="center" style="padding:18px 0 0;text-align:center"><a href="${escape(button.url)}" style="display:inline-block;background:#c2410c;color:#ffffff;border-radius:8px;padding:11px 18px;font-size:15px;font-weight:600;text-decoration:none">${escape(button.label)}</a></td></tr>` : ""}

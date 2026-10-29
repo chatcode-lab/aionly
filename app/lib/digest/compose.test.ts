@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import { generatedAvatar } from "../avatar";
 import { composeDigest, COUNTED, EXCERPT_MAX, FOUNDER_NOTE, issueName, periodName, periodStart, periodWindow } from "./compose";
 
 const at = (iso: string) => Date.parse(iso) / 1000;
@@ -14,8 +13,7 @@ describe("the digest email", () => {
     score: 12,
     comments: 6,
     author: "quiet_otter",
-    authorId: "u_otter",
-    authorPhoto: null as string | null,
+    agent: false,
     excerpt: "Made <b>with</b> care",
   };
 
@@ -47,18 +45,20 @@ describe("the digest email", () => {
     expect(discussedOnly.html).not.toContain("Most voted");
   });
 
-  it("shows each author's picture by their name: their own, or their initial on their color", () => {
-    const pictured = { ...post, title: "Pictured", author: "<maker>", authorPhoto: "https://aion.ly/img/a.jpg?x=1&y=2" };
-    const email = composeDigest({ ...base, frequency: "daily", chosen: "daily", period: "the past day", voted: [post, pictured], discussed: [] });
-    expect(email.html).toContain(`by <img src="https://aion.ly/img/a.jpg?x=1&#38;y=2" width="16" height="16" alt=""`);
-    // Kept with the name, on one line.
-    expect(email.html).toContain('· <span style="white-space:nowrap">by <img');
-    expect(email.html).toContain("&#60;maker&#62;</span></div>");
-    // Its initial on its color, kept as it is on a dark screen.
-    const drawn = /by <span style="([^"]*)">Q<\/span>quiet_otter<\/span><\/div>/.exec(email.html);
-    expect(drawn?.[1]).toContain(`background:${generatedAvatar("u_otter", "quiet_otter").color}`);
-    // Sized from its own font size, so it grows with the reader's text.
-    expect(drawn?.[1]).toContain("font-size:10px;width:1.6em;height:1.6em");
+  it("marks each author before their name as the site does, a person or an agent, not by their picture (owner's request, 2026-10-29)", () => {
+    const agent = { ...post, title: "By an agent", author: "<helper>", agent: true };
+    const email = composeDigest({ ...base, frequency: "daily", chosen: "daily", period: "the past day", voted: [post, agent], discussed: [] });
+    // Kept with the name, on one line, sized from its own font size, so it grows with the reader's text.
+    const bylines = [...email.html.matchAll(/· <span style="white-space:nowrap">by <span style="display:inline-block;font-size:11px;width:1\.2em;height:1\.2em;[^"]*">(.*?)<\/span>([^<>]*)<\/span><\/div>/g)];
+    expect(bylines.map((byline) => byline[2])).toEqual(["quiet_otter", "&#60;helper&#62;"]);
+    // A round head over shoulders; a rounded head with two eyes, an antenna, and ears.
+    expect(bylines[0]![1]).toMatch(/^<span style="display:block;width:0\.4em;height:0\.4em;[^"]*border-radius:50%"[^>]*><\/span><span style="[^"]*border-radius:0\.45em 0\.45em 0 0"/);
+    expect(bylines[1]![1]).toContain("width:0.7em;height:0.5em;border:0.1em solid #6f6b64;border-radius:0.15em");
+    expect(bylines[1]![1].match(/background:#6f6b64/g)).toHaveLength(4);
+    expect(email.html).not.toContain("<img");
+    // In the line's quiet color, which turns with a dark scheme.
+    expect(email.html).toContain(".do-6f6b64{border-color:#948f87!important}");
+    expect(email.html).toContain(".db-6f6b64{background-color:#948f87!important}");
     expect(email.text).toContain("12 points · 6 comments · by quiet_otter\n");
   });
 

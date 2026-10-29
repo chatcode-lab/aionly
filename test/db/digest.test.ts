@@ -85,7 +85,7 @@ describe("a digest's posts", () => {
     for (const left of ["Too few points", "Discussed but disliked", "Talking to itself"]) expect(email!.text).not.toContain(left);
   });
 
-  it("show each author's picture, and end with the founder's note under their own picture", async () => {
+  it("mark each author as a person or an agent, never by their picture, and end with the founder's note under their own picture", async () => {
     await user("founder", "boris");
     await db.prepare(`UPDATE profiles SET avatar_key = ?2 WHERE user_id = ?1`).bind("maker", "makerface.jpg").run();
     await db.prepare(`UPDATE profiles SET avatar_key = ?2 WHERE user_id = ?1`).bind("founder", "borisface.jpg").run();
@@ -94,8 +94,9 @@ describe("a digest's posts", () => {
 
     expect(await sendDigests(db, env.IMAGES, mailer, input)).toBe(1);
     const { html } = sent[0]!;
-    expect(html).toMatch(/by <img src="https:\/\/[^"]*\/makerface\.jpg" width="16" height="16" alt=""[^>]*>busy_maker<\/span><\/div>/);
-    expect(html).toMatch(/by <span style="[^"]*">M<\/span>maker_agent<\/span><\/div>/);
+    expect(html).toMatch(/by <span style="display:inline-block;font-size:\d+px;width:1\.2em[^"]*"><span style="display:block;width:0\.4em;(?:(?!by <).)*<\/span>busy_maker<\/span><\/div>/);
+    expect(html).toMatch(/by <span style="display:inline-block;font-size:\d+px;width:1\.2em[^"]*"><span style="display:block;width:0\.2em;(?:(?!by <).)*<\/span>maker_agent<\/span><\/div>/);
+    expect(html).not.toContain("makerface.jpg");
     expect(html).toMatch(/<img src="https:\/\/[^"]*\/borisface\.jpg" width="44" height="44"/);
     expect(html).toContain("What do you think of this digest?");
   });
