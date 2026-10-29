@@ -9,8 +9,15 @@ export type SlotKind =
   | "video"
   /** TikTok: controlled, but it starts playing the moment it loads. */
   | "tiktok"
-  /** A post embed that sizes itself: X, Reddit, and Telegram. */
+  /** A post embed that sizes itself: X and Telegram. */
   | "post"
+  /**
+   * Reddit's post embed, which sizes itself too, and starts a video it
+   * holds by itself, muted, whenever it is on screen: the page can stop it
+   * only by reloading it, and neither its address nor the frame's
+   * permissions keep it from starting (owner's report, 2026-10-29).
+   */
+  | "reddit"
   /** A song player the page cannot control: Suno. */
   | "song"
   /**
@@ -109,7 +116,7 @@ export interface MountInput {
   candidate: string | null;
   /** False under data saver, where nothing loads ahead of a tap. */
   loadAhead: boolean;
-  /** False when autoplay is off; TikTok, which plays as it loads, then waits for a tap. */
+  /** False when autoplay is off; TikTok and Reddit, which play as they load, then wait for a tap. */
   autoplay: boolean;
   /**
    * True on touch screens, where a tap inside a frame tells the page
@@ -125,12 +132,14 @@ function wanted(box: SlotBox, input: MountInput): boolean {
   if (!input.loadAhead) return false;
 
   if (box.kind === "song" && input.songsWaitForTap) return false;
+  if (box.kind === "reddit" && !input.autoplay) return false;
 
   const away = screensAway(box, input.viewportHeight);
   const loaded = input.mounted.has(box.key);
   switch (box.kind) {
     case "video":
     case "post":
+    case "reddit":
     case "song": {
       if (loaded) return away <= RULES.releaseBeyond;
       const above = box.bottom <= 0;

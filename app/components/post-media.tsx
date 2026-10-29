@@ -32,7 +32,7 @@ const SLOT_KIND: Record<Provider, SlotKind> = {
   suno: "song",
   soundcloud: "song",
   x: "post",
-  reddit: "post",
+  reddit: "reddit",
   telegram: "post",
 };
 

@@ -123,6 +123,15 @@ describe("planMounts", () => {
     ).toBe(false);
   });
 
+  it("loads Reddit's embed ahead like a post embed, but only from a tap with autoplay off, since it plays its own video (owner's report, 2026-10-29)", () => {
+    const boxes = [box("r", "reddit", VH + 300), box("x", "post", VH + 300)];
+    expect([...planMounts(input({ boxes }))].sort()).toEqual(["r", "x"]);
+    expect([...planMounts(input({ boxes, autoplay: false }))]).toEqual(["x"]);
+    expect(planMounts(input({ boxes, autoplay: false, held: new Set(["r"]) })).has("r")).toBe(true);
+    // Never focused: the page cannot play or pause it.
+    expect(focusCandidate([box("r", "reddit", 200)], VH)).toBeNull();
+  });
+
   it("loads a waiting video ahead, held paused, and a waiting TikTok only from a tap", () => {
     const boxes = [{ ...box("v", "video", 200), waits: true }, { ...box("t", "tiktok", 600), waits: true }];
     expect(planMounts(input({ boxes })).has("v")).toBe(true);
