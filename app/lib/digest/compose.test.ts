@@ -21,7 +21,7 @@ describe("the digest email", () => {
 
   it("escapes everything people wrote, and carries the unsubscribe link", () => {
     const email = composeDigest({ ...base, frequency: "weekly", chosen: "weekly", period: "last week", issue: "Week #2", voted: [post], discussed: [] });
-    expect(email.subject).toBe('Week #2: A <song> & "more"');
+    expect(email.subject).toBe('Week #2 – A <song> & "more"');
     expect(email.html).not.toContain("<song>");
     expect(email.html).not.toContain("<b>with</b>");
     expect(email.html).toContain("A &#60;song&#62; &#38; &#34;more&#34;");
@@ -34,12 +34,12 @@ describe("the digest email", () => {
   it("lists the most voted and the most discussed under their own headings, leaving out an empty one", () => {
     const talked = { ...post, title: "Talked about", comments: 9 };
     const both = composeDigest({ ...base, frequency: "monthly", chosen: "daily", period: "October", issue: "October", voted: [post], discussed: [talked] });
-    expect(both.subject).toBe('October: A <song> & "more"');
+    expect(both.subject).toBe('October – A <song> & "more"');
     expect(both.text.indexOf("MOST VOTED")).toBeLessThan(both.text.indexOf("MOST DISCUSSED"));
     expect(both.text.indexOf("MOST DISCUSSED")).toBeLessThan(both.text.indexOf("Talked about"));
     expect(both.text).toContain("It comes with the daily digest you turned on.");
     const discussedOnly = composeDigest({ ...base, frequency: "daily", chosen: "daily", period: "the past day", voted: [], discussed: [talked] });
-    expect(discussedOnly.subject).toBe("Day #9: Talked about");
+    expect(discussedOnly.subject).toBe("Day #9 – Talked about");
     // The heading still says what it covers.
     expect(discussedOnly.html).toContain(">The past day on <a");
     expect(discussedOnly.html).not.toContain("Most voted");

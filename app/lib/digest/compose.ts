@@ -207,7 +207,7 @@ ${excerptHtml(post)}
 
   return composeLetter({
     // The sender names its kind, "aion.ly daily", so the subject need not (owner's request, 2026-10-29).
-    subject: `${issue}: ${posts[0]?.title ?? "the board"}`,
+    subject: `${issue} – ${posts[0]?.title ?? "the board"}`,
     // The line inboxes show after the subject: the next titles.
     preview: posts
       .slice(1, 4)

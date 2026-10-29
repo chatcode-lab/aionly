@@ -78,7 +78,7 @@ describe("a digest's posts", () => {
 
     expect(await sendDigests(db, env.IMAGES, mailer, input)).toBe(1);
     const [email] = sent;
-    expect(email?.subject).toBe("Week #12: Most points");
+    expect(email?.subject).toBe("Week #12 – Most points");
     const order = ["MOST VOTED", "Most points", "Voted and discussed", "Just enough points", "MOST DISCUSSED", "Much discussed"];
     expect(order.map((line) => email!.text.indexOf(line))).toEqual([...order.map((line) => email!.text.indexOf(line))].sort((a, b) => a - b));
     expect(email!.text.split("Voted and discussed")).toHaveLength(2);
@@ -192,7 +192,7 @@ describe("a digest's posts", () => {
     await post("p1", { author: "maker", age: 6 * DAY, title: "Three points", score: 3 });
     await db.prepare(`INSERT INTO settings (key, value, updated_at, updated_by) VALUES ('digest_points', 3, ?1, 'maker')`).bind(NOW).run();
     expect(await sendDigests(db, env.IMAGES, mailer, input)).toBe(1);
-    expect(sent[0]?.subject).toBe("Week #12: Three points");
+    expect(sent[0]?.subject).toBe("Week #12 – Three points");
   });
 
   it("make no digest when nothing stands out, which still counts as sent", async () => {
@@ -213,15 +213,15 @@ describe("digests of one kind", () => {
     await post("after", { author: "maker", age: 8.5 * HOUR, title: "Made after eleven", score: 8 });
 
     await sendDigests(db, env.IMAGES, mailer, { ...input, now: NOW + 2 * HOUR });
-    expect(sent.map((email) => email.subject)).toEqual(["Day #87: Made before eleven"]);
+    expect(sent.map((email) => email.subject)).toEqual(["Day #87 – Made before eleven"]);
     expect(sent[0]!.text).not.toContain("Made after eleven");
 
     await sendDigests(db, env.IMAGES, mailer, { ...input, now: NOW + DAY - 90 * 60 });
     expect(sent).toHaveLength(1);
     await sendDigests(db, env.IMAGES, mailer, { ...input, now: NOW + DAY });
     expect(sent.map((email) => email.subject)).toEqual([
-      "Day #87: Made before eleven",
-      "Day #88: Made after eleven",
+      "Day #87 – Made before eleven",
+      "Day #88 – Made after eleven",
     ]);
     expect(sent[1]!.text).not.toContain("Made before eleven");
   });
@@ -242,19 +242,19 @@ describe("the daily digest", () => {
     // the next once 6 hours have passed.
     const got = (to: string) => sent.filter((email) => email.to === `${to}@example.invalid`).map((email) => email.subject);
     expect(await sendDigests(db, env.IMAGES, mailer, input)).toBe(3);
-    expect(got("reader")).toEqual(["Day #87: Of the day"]);
-    expect(got("weekly")).toEqual(["Week #12: Of the week"]);
-    expect(got("monthly")).toEqual(["December: Of December"]);
+    expect(got("reader")).toEqual(["Day #87 – Of the day"]);
+    expect(got("weekly")).toEqual(["Week #12 – Of the week"]);
+    expect(got("monthly")).toEqual(["December – Of December"]);
     expect(await sendDigests(db, env.IMAGES, mailer, { ...input, now: NOW + 3 * HOUR })).toBe(0);
     expect(await sendDigests(db, env.IMAGES, mailer, { ...input, now: NOW + 6 * HOUR })).toBe(2);
     expect(await sendDigests(db, env.IMAGES, mailer, { ...input, now: NOW + 12 * HOUR })).toBe(1);
     expect(got("reader")).toEqual([
-      "Day #87: Of the day",
-      "Week #12: Of the week",
-      "December: Of December",
+      "Day #87 – Of the day",
+      "Week #12 – Of the week",
+      "December – Of December",
     ]);
-    expect(got("weekly")).toEqual(["Week #12: Of the week", "December: Of December"]);
-    expect(got("monthly")).toEqual(["December: Of December"]);
+    expect(got("weekly")).toEqual(["Week #12 – Of the week", "December – Of December"]);
+    expect(got("monthly")).toEqual(["December – Of December"]);
     const brought = sent.find((email) => email.to === "reader@example.invalid" && email.subject.startsWith("Week #"));
     expect(brought?.text).toContain("It comes with the daily digest you turned on.");
   });
@@ -281,11 +281,11 @@ describe("an admin's test digest", () => {
   it("is the past week's, and goes even when nothing stands out, saying members get none", async () => {
     await post("small", { author: "maker", age: 2 * DAY, title: "Small one", score: 1 });
     expect(await sendTestDigest(db, env.IMAGES, mailer, test)).toBeNull();
-    expect(sent[0]?.subject).toBe("[Test, nothing notable: members get none] January: Small one");
+    expect(sent[0]?.subject).toBe("[Test, nothing notable: members get none] January – Small one");
 
     await post("big", { author: "maker", age: 2 * DAY, title: "Big one", score: 6 });
     expect(await sendTestDigest(db, env.IMAGES, mailer, test)).toBeNull();
-    expect(sent[1]?.subject).toBe("[Test] Week #13: Big one");
+    expect(sent[1]?.subject).toBe("[Test] Week #13 – Big one");
     expect(sent[1]?.text).not.toContain("Small one");
   });
 
@@ -293,6 +293,6 @@ describe("an admin's test digest", () => {
     await post("talked", { author: "maker", age: 2 * DAY, title: "Talked about", score: 2 });
     await discuss("talked", "reader", 5);
     expect(await sendTestDigest(db, env.IMAGES, mailer, test)).toBeNull();
-    expect(sent[0]?.subject).toBe("[Test] Week #13: Talked about");
+    expect(sent[0]?.subject).toBe("[Test] Week #13 – Talked about");
   });
 });
