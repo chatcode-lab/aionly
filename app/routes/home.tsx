@@ -143,7 +143,7 @@ if (typeof window !== "undefined") {
 }
 
 // Deleting a post from the feed hides its card at once; loading the feed
-// again would drop the pages added with Load more.
+// again would drop the pages added as the reader scrolled.
 export function shouldRevalidate({ formAction, defaultShouldRevalidate }: ShouldRevalidateFunctionArgs) {
   if (formAction?.startsWith("/p/")) return false;
   return defaultShouldRevalidate;
@@ -172,6 +172,10 @@ function FeedList({ data, address }: { data: FeedData; address: string }) {
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
   const mounted = useRef(true);
+  /** A page on its way, so a second call does not ask for it again. */
+  const busy = useRef(false);
+  /** Just after the last card: nearing it loads the next page, which it says while it loads. */
+  const sentinel = useRef<HTMLParagraphElement>(null);
 
   useEffect(() => {
     mounted.current = true;
@@ -192,6 +196,8 @@ function FeedList({ data, address }: { data: FeedData; address: string }) {
     snapshot !== null && !hasMore && snapshot.length >= SNAPSHOT_LIMIT;
 
   const loadMore = async () => {
+    if (busy.current) return;
+    busy.current = true;
     const query = snapshot
       ? new URLSearchParams({ ids: snapshot.slice(offset, offset + PAGE_SIZE).join(",") })
       : new URLSearchParams({ sort: "new", range: data.range, cursor: cursor ?? "" });
@@ -224,9 +230,29 @@ function FeedList({ data, address }: { data: FeedData; address: string }) {
     } catch {
       if (mounted.current) setFailed(true);
     } finally {
+      busy.current = false;
       if (mounted.current) setLoading(false);
     }
   };
+
+  // The next page loads as the reader nears the end, a screen and a half
+  // ahead, with no button to press (owner's request, 2026-10-29). Watching
+  // again after each page loads it at once while the end is still near, as
+  // on a tall screen; a page that failed waits for Try again.
+  const loadNext = useRef(loadMore);
+  loadNext.current = loadMore;
+  useEffect(() => {
+    const element = sentinel.current;
+    if (!element || !hasMore || loading || failed) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) void loadNext.current();
+      },
+      { rootMargin: "0px 0px 150% 0px" },
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [hasMore, loading, failed, offset]);
 
   if (posts.length === 0) {
     const wider = RANGES[RANGES.indexOf(data.range) + 1] as Range | undefined;
@@ -275,15 +301,16 @@ function FeedList({ data, address }: { data: FeedData; address: string }) {
         />
       ))}
 
+      <p ref={sentinel} role="status" className="text-center text-body text-text-muted">
+        {loading ? "Loading…" : null}
+      </p>
       {failed ? (
-        <Notice tone="danger">More posts did not load. Try again.</Notice>
-      ) : null}
-      {hasMore ? (
-        <div className="flex justify-center pt-1">
-          <Button onClick={() => void loadMore()} disabled={loading}>
-            {loading ? "Loading…" : "Load more"}
-          </Button>
-        </div>
+        <>
+          <Notice tone="danger">More posts did not load.</Notice>
+          <div className="flex justify-center pt-1">
+            <Button onClick={() => void loadMore()}>Try again</Button>
+          </div>
+        </>
       ) : null}
       {atLimit ? (
         <p className="pt-1 text-center text-body text-text-muted">

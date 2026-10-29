@@ -10,7 +10,7 @@ import { viewerOf } from "~/lib/viewer.server";
 import type { Route } from "./+types/feed-more";
 
 /**
- * The next page of the feed, for "Load more". Top asks for the next IDs of
+ * The next page of the feed, as the reader nears its end. Top asks for the next IDs of
  * the ranking snapshot it already holds; New sends its cursor.
  */
 export async function loader({ request, context }: Route.LoaderArgs) {

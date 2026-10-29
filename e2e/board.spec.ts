@@ -44,14 +44,14 @@ test.describe("feed", () => {
     await expect(page.locator("article h2").first()).toContainText("Big Buck Bunny");
   });
 
-  test("loads more without repeating posts, and Back restores them", async ({ page }) => {
+  test("loads more as the reader nears the end, without repeating posts, and Back restores them (owner's request, 2026-10-29)", async ({ page }) => {
     await page.goto("/?sort=top&range=all");
     await expect(page.locator("article")).toHaveCount(20);
     await expect(page.locator("article h2").first()).toContainText("two months ago");
+    await expect(page.getByRole("button", { name: /Load more|Try again/ })).toHaveCount(0);
 
-    await page.getByRole("button", { name: "Load more" }).click();
+    await page.locator("article").nth(17).scrollIntoViewIfNeeded();
     await expect(page.locator("article")).toHaveCount(26);
-    await expect(page.getByRole("button", { name: "Load more" })).toHaveCount(0);
     const loaded = await titles(page);
     expect(new Set(loaded).size).toBe(26);
 
