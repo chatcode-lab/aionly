@@ -29,7 +29,7 @@ describe("resized pictures", () => {
     expect(avatarSources(STORED, 18)).toEqual({ srcSet: `${at(64)} 64w, ${at(128)} 128w, ${STORED} 320w`, sizes: "18px" });
   });
 
-  it("cuts a picture for an email to its frame, drawn as large as its box allows (owner's request, 2026-10-29)", () => {
+  it("cuts a picture for an email to its frame, drawn across its box and cut from the bottom past its height (owner's requests, 2026-10-29 and 2026-10-31)", () => {
     const box = { width: 520, height: 390 };
     // A video thumbnail, its middle 16:9 between black bars.
     const thumbnail = { width: 480, height: 360, frame: { left: 0, top: 0.125, right: 1, bottom: 0.875 } };
@@ -38,9 +38,15 @@ describe("resized pictures", () => {
       width: 520,
       height: 293,
     });
-    // A tall one takes the box's height, and nothing is cut from a whole one.
+    // A tall one fills the box, its top 4:3 kept and the rest cut from the bottom.
     const tall = emailPicture(STORED, { width: 1080, height: 1920, frame: { left: 0, top: 0, right: 1, bottom: 1 } }, box);
-    expect(tall).toEqual({ src: `https://media.aion.ly/cdn-cgi/image/width=438,fit=scale-down,format=baseline-jpeg,onerror=redirect/${KEY}`, width: 219, height: 390 });
+    expect(tall).toEqual({ src: `https://media.aion.ly/cdn-cgi/image/trim=0;0;1110;0,width=1040,fit=scale-down,format=baseline-jpeg,onerror=redirect/${KEY}`, width: 520, height: 390 });
+    // A square one between black bars at its sides: those go, and then its bottom quarter.
+    const square = emailPicture(STORED, { width: 1280, height: 720, frame: { left: 0.21875, top: 0, right: 0.78125, bottom: 1 } }, box);
+    expect(square).toEqual({ src: `https://media.aion.ly/cdn-cgi/image/trim=0;280;180;280,width=1040,fit=scale-down,format=baseline-jpeg,onerror=redirect/${KEY}`, width: 520, height: 390 });
+    // A small wide one is drawn across the box all the same, its copy never enlarged, and nothing is cut from a whole one.
+    const small = emailPicture(STORED, { width: 300, height: 100, frame: { left: 0, top: 0, right: 1, bottom: 1 } }, box);
+    expect(small).toEqual({ src: `https://media.aion.ly/cdn-cgi/image/width=1040,fit=scale-down,format=baseline-jpeg,onerror=redirect/${KEY}`, width: 520, height: 173 });
     expect(emailPicture(`/img/${KEY}`, thumbnail, box)).toBeNull();
   });
 });

@@ -130,8 +130,8 @@ describe("a digest's posts", () => {
       [`https://media.aion.ly/cdn-cgi/image/trim=45;0;45;0,width=1040,fit=scale-down,format=baseline-jpeg,onerror=redirect/${thumb("top")}`, "520", "293"],
       [`https://media.aion.ly/cdn-cgi/image/trim=45;0;45;0,width=1040,fit=scale-down,format=baseline-jpeg,onerror=redirect/${thumb("talked")}`, "520", "293"],
     ]);
-    // Above the title, centered, as a link to the post.
-    expect(html).toMatch(/<div style="margin-bottom:12px;text-align:center;line-height:0"><a href="https:\/\/aion\.ly\/p\/top\/[^"]*"><img /);
+    // Above the title, as a link to the post.
+    expect(html).toMatch(/<a href="https:\/\/aion\.ly\/p\/top\/[^"]*" style="display:block;margin-bottom:12px"><img /);
     expect(text).not.toContain("cdn-cgi");
   });
 
