@@ -12,10 +12,13 @@ import { type Block, type EmbedBlock, type Inline, mailtoAddress, parseArticle, 
 import { ArticleMedia } from "./media-poster";
 import { Mention } from "./mentions";
 
+const UNDERLINE = "underline decoration-dotted decoration-border-strong underline-offset-4";
+
 /**
  * An outside address: shown, never followed. A tap copies it, so it can be
  * pasted somewhere on purpose. A long one is cut short with an ellipsis. With
- * `children`, a link's label of other words stands in for it.
+ * `children`, a link's label of other words stands in for it, and wraps as
+ * the text around it does, the copy mark after its last word.
  */
 function CopyUrl({ href, email = false, words, children }: { href: string; email?: boolean; words?: string; children?: ReactNode }) {
   const [copied, setCopied] = useState(false);
@@ -25,19 +28,38 @@ function CopyUrl({ href, email = false, words, children }: { href: string; email
     return () => clearTimeout(timer);
   }, [copied]);
 
+  const mark = (className: string) =>
+    copied ? (
+      <Check size={13} aria-hidden className={cn(className, "text-accent")} />
+    ) : (
+      <Copy size={13} aria-hidden className={className} />
+    );
   return (
     <button
       type="button"
       title={href}
       aria-label={`${words ? `${words}, copy` : "Copy"} ${email ? "email address" : "link"} ${href}`}
       onClick={async () => setCopied(await copyText(href))}
-      className="inline-flex max-w-full items-baseline gap-1 rounded-sm align-bottom text-text-muted underline decoration-dotted decoration-border-strong underline-offset-4 hover:text-text"
+      // Left-aligned, as a button's text is centered by default.
+      className={cn(
+        "max-w-full rounded-sm text-left align-bottom text-text-muted hover:text-text",
+        children === undefined ? cn("inline-flex items-baseline gap-1", UNDERLINE) : "inline-block",
+      )}
     >
-      {children === undefined ? <span className="truncate">{href.replace(/^https?:\/\//, "")}</span> : <span>{children}</span>}
-      {copied ? (
-        <Check size={13} aria-hidden className="shrink-0 self-center text-accent" />
+      {children === undefined ? (
+        <>
+          <span className="truncate">{href.replace(/^https?:\/\//, "")}</span>
+          {mark("shrink-0 self-center")}
+        </>
       ) : (
-        <Copy size={13} aria-hidden className="shrink-0 self-center" />
+        <>
+          <span className={UNDERLINE}>{children}</span>
+          {/* A no-break space keeps the mark from starting a line alone. */}
+          <span className="whitespace-nowrap">
+            {" "}
+            {mark("inline")}
+          </span>
+        </>
       )}
       <span role="status" className="sr-only">
         {copied ? (email ? "Email address copied" : "Link copied") : ""}
