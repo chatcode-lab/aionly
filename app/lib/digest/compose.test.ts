@@ -83,11 +83,11 @@ describe("the digest email", () => {
     expect(email.text).not.toMatch(/\b[0-9] (points?|comments?)\b/);
   });
 
-  it("shows a list's first post's picture above its title, linked to the post (owner's request, 2026-10-29)", () => {
+  it("shows a list's first post's picture above its title, centered and linked to the post (owner's requests, 2026-10-29 and 2026-10-31)", () => {
     const media = { src: "https://media.aion.ly/cdn-cgi/image/width=1040/a.jpg?x=1&y=2", width: 520, height: 293 };
     const email = composeDigest({ ...base, frequency: "daily", chosen: "daily", period: "the past day", voted: [{ ...post, media }, post], discussed: [] });
     expect(email.html).toContain(
-      '<a href="https://aion.ly/p/abc1234/a-song" style="display:block;margin-bottom:12px"><img src="https://media.aion.ly/cdn-cgi/image/width=1040/a.jpg?x=1&#38;y=2" width="520" height="293" alt="" style="display:block;width:520px;max-width:100%;height:auto;border:0;border-radius:8px"></a>\n<a href="https://aion.ly/p/abc1234/a-song" style="color:#1f1d1a',
+      '<div style="margin-bottom:12px;text-align:center;line-height:0"><a href="https://aion.ly/p/abc1234/a-song"><img src="https://media.aion.ly/cdn-cgi/image/width=1040/a.jpg?x=1&#38;y=2" width="520" height="293" alt="" style="display:inline-block;vertical-align:top;width:520px;max-width:100%;height:auto;border:0;border-radius:8px"></a></div>\n<a href="https://aion.ly/p/abc1234/a-song" style="color:#1f1d1a',
     );
     expect(email.html.match(/<img src="https:\/\/media/g)).toHaveLength(1);
   });

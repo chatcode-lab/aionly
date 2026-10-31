@@ -146,11 +146,15 @@ function sourceHtml(post: DigestPost): string {
 /** Under the digest, the founder asks what readers make of it (owner's request, 2026-10-21). */
 export const FOUNDER_NOTE = "What do you think of this digest? Hit reply and tell me what to add, change, or leave out. I read every reply.";
 
-/** A post's picture, above its title, as a link to the post. */
+/**
+ * A post's picture, above its title, as a link to the post, centered when it
+ * is narrower than the card (owner's request, 2026-10-31): by the block's
+ * alignment, which Outlook keeps, rather than auto margins, which it drops.
+ */
 function mediaHtml(post: DigestPost): string {
   if (!post.media) return "";
   const { src, width, height } = post.media;
-  return `<a href="${escape(post.url)}" style="display:block;margin-bottom:12px"><img src="${escape(src)}" width="${width}" height="${height}" alt="" style="display:block;width:${width}px;max-width:100%;height:auto;border:0;border-radius:8px"></a>\n`;
+  return `<div style="margin-bottom:12px;text-align:center;line-height:0"><a href="${escape(post.url)}"><img src="${escape(src)}" width="${width}" height="${height}" alt="" style="display:inline-block;vertical-align:top;width:${width}px;max-width:100%;height:auto;border:0;border-radius:8px"></a></div>\n`;
 }
 
 function excerptHtml(post: DigestPost): string {
