@@ -34,6 +34,13 @@ declare namespace Cloudflare {
     TELEGRAM_BOT_TOKEN?: string;
     TELEGRAM_CHANNEL_ID?: string;
     /**
+     * The operator's group, where that bot, a member of it, tells of
+     * sign-ups, payments, refunds, reports, deleted accounts, and errors;
+     * and its topic, none or 1 for General. Unset, no notice is sent.
+     */
+    TELEGRAM_EVENT_GROUP_ID?: string;
+    TELEGRAM_EVENT_TOPIC_ID?: string;
+    /**
      * "true" lets anyone make an account with Google. Unset, as by default,
      * a new account needs an invitation from a member.
      */

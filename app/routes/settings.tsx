@@ -46,6 +46,7 @@ import { planStatus, type PlanStatus, setShowMark } from "~/lib/db/subscriptions
 import { clearStaleX, type LinkedX, linkedX, setXShown, unlinkMethod } from "~/lib/db/x-accounts.server";
 import { formatAgo, formatDate, formatMoney } from "~/lib/format";
 import { setGooglePhoto, setXPhoto } from "~/lib/images.server";
+import { announce, announceError, escapeHtml } from "~/lib/telegram/events.server";
 import { imageAddress } from "~/lib/media.server";
 import { type Permission, PERMISSION_LABELS, PERMISSIONS, parsePermission } from "~/lib/permissions";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
@@ -238,6 +239,7 @@ async function deleteAccountAction(request: Request, viewer: AccountRecord, form
     hold = await cancelForDeletion(viewer.id);
   } catch (error) {
     console.error("stripe cancel on deletion", error);
+    announceError("account deletion: cancelling the plan", error);
     return { deleteError: "Your plan could not be cancelled just now, so nothing was deleted. Try again in a few minutes." };
   }
   // Its files, queued in the same write, to delete from the bucket.
@@ -259,6 +261,15 @@ async function deleteAccountAction(request: Request, viewer: AccountRecord, form
     throw error;
   }
   await deleteReleasedFiles(env.DB, env.IMAGES, files);
+  announce(() => ({
+    icon: "👋",
+    title: "Account deleted",
+    lines: [
+      ["User", `@${escapeHtml(viewer.username)} · <code>${escapeHtml(viewer.id)}</code>`],
+      ["Posts and comments", form.get("content") === "on" ? "deleted too" : "kept"],
+      ["Fan plan", viewer.entitled ? "ended with it" : null],
+    ],
+  }));
   const headers = new Headers();
   for (const cookie of signedOut.headers.getSetCookie()) headers.append("Set-Cookie", cookie);
   return redirect("/deleted", { headers });
@@ -334,6 +345,7 @@ async function planAction(viewer: AccountRecord, form: FormData, planIntent: "pl
     return { planError: refused(result.reason, to) };
   } catch (error) {
     console.error("plan switch", error);
+    announceError("plan switch", error);
     return { planError: "That did not go through. Try again in a minute." };
   }
 }

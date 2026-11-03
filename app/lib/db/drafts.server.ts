@@ -14,6 +14,7 @@ import { mediaTypeOf } from "../uploads";
 import { accountRecord, participantCondition } from "./accounts.server";
 import { inlineMediaFor, inlineMediaHolds } from "./article-media.server";
 import { deleteReleasedFiles, releasedKeys, releaseUnusedDraftFiles } from "./draft-files.server";
+import { announceError } from "../telegram/events.server";
 import { linkMentions } from "./mentions.server";
 import { settingSql } from "./setting-sql.server";
 import { type Existing, type NewPost, postingStatus, type PostingStatus, publishPost } from "./submit.server";
@@ -833,6 +834,7 @@ export async function publishScheduledDrafts(
       outcome = await publishDue(db, due.id, due.scheduled_at, input, seen);
     } catch (error) {
       console.error("scheduled publication", due.id, error);
+      announceError("scheduled publication", error);
       outcome = { reason: "error", message: "Something went wrong as it was publishing." };
     }
     if (outcome === "published") published += 1;

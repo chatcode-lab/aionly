@@ -13,6 +13,7 @@ import { FRESH_START_DAYS } from "~/lib/moderation";
 import { useSettings } from "~/lib/use-settings";
 import { FRESH_START_AMOUNTS, FRESH_START_MAX_CENTS, FRESH_START_PRICE, freshStartAmount } from "~/lib/plan";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
+import { announceError } from "~/lib/telegram/events.server";
 import { CONTACT } from "~/lib/site";
 import { requireAccount } from "~/lib/viewer.server";
 
@@ -68,6 +69,7 @@ export async function action({ request, context }: Route.ActionArgs) {
   } catch (error) {
     if (error instanceof CheckoutBusy) return { error: BUSY };
     console.error("stripe fresh start checkout", error);
+    announceError("stripe fresh start checkout", error);
     return { error: TROUBLE };
   }
 }

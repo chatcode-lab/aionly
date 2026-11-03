@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 
 import { type AccountRecord, grantNameAllowance } from "../db/accounts.server";
 import { readBodyCapped } from "../security/body";
+import { announceError, announcePayment, announceRefund } from "../telegram/events.server";
 import { applyFreshStart, type FreshStartOutcome } from "../db/fresh-starts.server";
 import { paymentWithIntent, recordPayment, recordRefund } from "../db/payments.server";
 import {
@@ -248,11 +249,13 @@ async function settleNameAllowance(session: StripeCheckoutSession): Promise<bool
     paymentIntent: session.payment_intent ?? null,
     invoiceId: session.mode === "subscription" ? (session.invoice ?? null) : null,
   });
+  if (result.fresh) announcePayment(env.DB, { userId: bought.userId, kind: "name", cents, currency: session.currency ?? "usd", length: bought.length });
   if (result.duplicate && cents > 0) {
     if (session.mode === "payment" && session.payment_intent) {
       if (env.STRIPE_SECRET_KEY) await refundPayment(client(), session.payment_intent, "the Short username package was bought already");
     } else {
       console.error("Short username package bought again with the plan: refund its line by hand", session.id);
+      announceError("stripe webhook", `Short username package bought again with the plan: refund its line by hand (${session.id})`);
     }
   }
   return result.granted;
@@ -312,15 +315,18 @@ async function settleFreshStart(session: StripeCheckoutSession, userId: string):
   const outcome = await applyFreshStart(env.DB, { id: session.id, userId, source: "stripe", now: now() });
   // What it brought in, for the fund.
   if (outcome === "applied") {
-    await recordPayment(env.DB, {
+    const payment = {
       id: session.id,
       userId,
-      kind: "fresh_start",
+      kind: "fresh_start" as const,
       amountCents: session.amount_subtotal ?? FRESH_START_PRICE.cents,
       currency: session.currency ?? "usd",
       paidAt: now(),
       paymentIntent: session.payment_intent ?? null,
-    });
+    };
+    if (await recordPayment(env.DB, payment)) {
+      announcePayment(env.DB, { userId, kind: "fresh_start", cents: payment.amountCents, currency: payment.currency });
+    }
   }
   if (outcome === "declined" && session.payment_intent) {
     await refundPayment(client(), session.payment_intent, "fresh start within 30 days of the last one");
@@ -627,9 +633,10 @@ async function recordInvoice(invoice: StripeInvoice): Promise<void> {
     .first<{ user_id: string }>();
   if (!member) {
     console.error("stripe invoice for an unknown customer", invoice.id);
+    announceError("stripe webhook", `A paid invoice for a customer no member has (${invoice.id})`);
     return;
   }
-  await recordPayment(env.DB, {
+  const fresh = await recordPayment(env.DB, {
     id: invoice.id,
     userId: member.user_id,
     kind: "plan",
@@ -637,6 +644,15 @@ async function recordInvoice(invoice: StripeInvoice): Promise<void> {
     currency: invoice.currency,
     paidAt: invoice.status_transitions?.paid_at ?? now(),
   });
+  if (fresh) {
+    announcePayment(env.DB, { userId: member.user_id, kind: "plan", cents: planCents, currency: invoice.currency, paidUntil: paidUntil(invoice) });
+  }
+}
+
+/** The end of the period a plan's invoice pays for, from its subscription lines, before the subscription's own event says so. */
+function paidUntil(invoice: StripeInvoice): number | null {
+  const ends = (invoice.lines?.data ?? []).filter((line) => line.parent?.type === "subscription_item_details").map((line) => line.period?.end ?? 0);
+  return Math.max(0, ...ends) || null;
 }
 
 /**
@@ -648,7 +664,7 @@ async function recordChargeRefund(charge: StripeCharge): Promise<void> {
   if (!charge.payment_intent) return;
   const known = await paymentWithIntent(env.DB, charge.payment_intent);
   const invoiceId = !known && env.STRIPE_SECRET_KEY ? await invoiceOfPaymentIntent(client(), charge.payment_intent) : null;
-  await recordRefund(env.DB, {
+  const refunded = await recordRefund(env.DB, {
     chargeId: charge.id,
     paymentIntent: charge.payment_intent,
     invoiceId,
@@ -656,6 +672,16 @@ async function recordChargeRefund(charge: StripeCharge): Promise<void> {
     paid: charge.amount,
     now: now(),
   });
+  if (refunded > 0) {
+    announceRefund(env.DB, {
+      chargeId: charge.id,
+      paymentIntent: charge.payment_intent,
+      invoiceId,
+      cents: refunded,
+      paid: charge.amount,
+      currency: charge.currency ?? "usd",
+    });
+  }
 }
 
 /**

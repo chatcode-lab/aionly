@@ -1,11 +1,26 @@
-import type { EntryContext, RouterContextProvider } from "react-router";
-import { ServerRouter } from "react-router";
+import type { EntryContext, HandleErrorFunction, RouterContextProvider } from "react-router";
+import { isRouteErrorResponse, ServerRouter } from "react-router";
 import { isbot } from "isbot";
 import { renderToReadableStream } from "react-dom/server";
 
 import { nonceContext } from "./context";
+import { announceError } from "./lib/telegram/events.server";
 
 export const streamTimeout = 5_000;
+
+/**
+ * A loader's, an action's, or a page's own error: logged, as React Router
+ * logs it by default, and told to the operator when it is the board's fault,
+ * not a missing page or a request given up.
+ */
+export const handleError: HandleErrorFunction = (error, { request }) => {
+  if (request.signal.aborted) return;
+  // React Router's own error responses, a missing page's among them, carry what caused them.
+  const cause = (isRouteErrorResponse(error) && (error as { error?: unknown }).error) || error;
+  console.error(cause);
+  if (isRouteErrorResponse(error) && error.status < 500) return;
+  announceError(`${request.method} ${new URL(request.url).pathname}`, cause);
+};
 
 export default async function handleRequest(
   request: Request,

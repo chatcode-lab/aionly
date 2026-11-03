@@ -15,6 +15,7 @@ import { channelPicture } from "../resize";
 import { parseArticle, parseBlocks } from "../text/markdown";
 import { mentionIds } from "../text/mentions";
 import { type ChannelMedia, type ChannelMessage, type ChannelPost, channelMessages, RETRACTED, UPLOAD_FIELD } from "./compose";
+import { announceError } from "./events.server";
 
 const HOUR = 3600;
 const MB = 1024 * 1024;
@@ -266,6 +267,7 @@ async function keep(db: D1Database, bucket: R2Bucket, bot: Bot, sent: Sent): Pro
   if (!deleted?.ok) {
     // Only someone in the channel can take it down now.
     console.error("channel post left on the channel unstored", sent.postId, sent.messageId, deleted?.error_code, deleted?.description);
+    announceError("telegram channel", `Post ${sent.postId} is on the channel as message ${sent.messageId ?? "?"}, unrecorded: take it down by hand if it leaves the board`);
     return;
   }
   await db
@@ -323,6 +325,8 @@ async function sendNext(db: D1Database, bucket: R2Bucket, bot: Bot, origin: stri
     console.error("channel post", row.id, answer.error_code, failure);
     if (answer.error_code === 0) break;
     if (!aboutMessage(answer)) {
+      // The bot or the channel, which no post gets past until someone sees to it.
+      announceError("telegram channel", `Telegram refused the channel's post: ${answer.error_code} ${failure}`);
       await db.prepare(`DELETE FROM channel_posts WHERE post_id = ?1`).bind(row.id).run();
       return;
     }

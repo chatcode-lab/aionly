@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 
+import { announceError } from "../telegram/events.server";
 import { deliverable } from "./address";
 
 /** One email, as the board writes it, whichever service sends it. */
@@ -62,6 +63,7 @@ export function transactionalMailer(binding: SendEmail = env.EMAIL, onSesRefused
         return await ses(mail);
       } catch (error) {
         console.error("ses refused, sending through cloudflare", error);
+        announceError("Amazon SES refused a mail, sent through Cloudflare instead", error);
         onSesRefused?.(error);
       }
     }

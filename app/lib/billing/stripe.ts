@@ -438,6 +438,8 @@ export interface StripeInvoice {
       amount: number;
       discount_amounts?: Array<{ amount: number }> | null;
       parent?: { type?: string | null } | null;
+      /** The period it bills, for a subscription's line. */
+      period?: { start?: number; end?: number } | null;
     }>;
   } | null;
 }
@@ -470,6 +472,7 @@ export interface StripeCharge {
   object: "charge";
   amount: number;
   amount_refunded: number;
+  currency?: string;
   payment_intent?: string | null;
 }
 

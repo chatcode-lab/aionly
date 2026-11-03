@@ -123,7 +123,8 @@ export default function Privacy() {
         <li>
           <strong>Telegram</strong> receives the public posts the board shares on its channel, with their pictures and
           video and their authors&apos; usernames, under its own privacy policy. A post that leaves the board leaves
-          the channel too, within about an hour.
+          the channel too, within about an hour. It also carries the operator&apos;s own notices to a private group: a new
+          account&apos;s username and email, a payment or refund with the member&apos;s username, and errors.
         </li>
         <li>
           <strong>Embedded players</strong> from YouTube, TikTok, Suno, SoundCloud, X, Reddit, and Telegram are loaded from those

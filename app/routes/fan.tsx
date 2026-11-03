@@ -36,6 +36,7 @@ import {
 } from "~/lib/plan";
 import { safeReturnPath } from "~/lib/security/request";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
+import { announceError } from "~/lib/telegram/events.server";
 import { requireAccount, requireParticipant, viewerOf } from "~/lib/viewer.server";
 import { standingPageMeta } from "~/lib/meta";
 
@@ -110,6 +111,7 @@ export async function action({ request, context }: Route.ActionArgs) {
       return redirect(url, 303);
     } catch (error) {
       console.error("stripe portal", error);
+      announceError("stripe portal", error);
       return { error: TROUBLE };
     }
   }
@@ -140,6 +142,7 @@ export async function action({ request, context }: Route.ActionArgs) {
       if (error instanceof AlreadySubscribed) return { error: "You already have a plan. Buy the name alone." };
       if (error instanceof CheckoutBusy) return { error: BUSY };
       console.error("stripe name checkout", error);
+      announceError("stripe name checkout", error);
       return { error: TROUBLE };
     }
   }
@@ -160,6 +163,7 @@ export async function action({ request, context }: Route.ActionArgs) {
     if (error instanceof AlreadySubscribed) return { error: "You already have a plan. Manage it below." };
     if (error instanceof CheckoutBusy) return { error: BUSY };
     console.error("stripe checkout", error);
+    announceError("stripe checkout", error);
     return { error: TROUBLE };
   }
 }

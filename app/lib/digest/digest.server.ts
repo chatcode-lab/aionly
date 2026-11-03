@@ -13,6 +13,7 @@ import { displayHost } from "../links/url";
 import { coverPicture, type CoverPictureRow } from "../og/cover-picture";
 import type { PostCardData } from "../public-types";
 import { emailPicture, type EmailPicture, resized } from "../resize";
+import { announceError } from "../telegram/events.server";
 import { linkAddresses, plainText } from "../text/markdown";
 import {
   CHOSEN_WITH,
@@ -367,6 +368,7 @@ export async function sendDigests(
         sent += 1;
       } catch (error) {
         console.error("digest send", frequency, error);
+        announceError(`digest send: ${frequency}`, error);
         failed.push(recipient.userId);
       }
     }

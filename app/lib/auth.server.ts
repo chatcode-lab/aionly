@@ -16,6 +16,7 @@ import { newId } from "./ids";
 import { transactionalMailer } from "./mail/mailers.server";
 import { SIGN_IN_LINK_MINUTES } from "./notices/notices";
 import { sendSignInLink } from "./notices/notices.server";
+import { announceSignUp } from "./telegram/events.server";
 
 // A session lasts 30 days and is extended once a day while in use.
 const SESSION_SECONDS = 30 * 24 * 3600;
@@ -260,11 +261,16 @@ function createAuth(origin: string, request?: Request) {
           // Every account gets its public profile and a generated name as
           // it is created, with the digest chosen on the way in, and who
           // invited it. A failure here is repaired on the next request, or
-          // by the hourly sweep, with that same digest.
+          // by the hourly sweep, with that same digest. The operator is
+          // told of the new account either way.
           after: async (user) => {
-            await createProfile(env.DB, user.id);
-            await attachInvite(env.DB, { userId: user.id });
-            await attachPartner(env.DB, { userId: user.id });
+            try {
+              await createProfile(env.DB, user.id);
+              await attachInvite(env.DB, { userId: user.id });
+              await attachPartner(env.DB, { userId: user.id });
+            } finally {
+              announceSignUp(env.DB, user.id);
+            }
           },
         },
       },

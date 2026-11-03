@@ -4,7 +4,7 @@ import { type CommentReplies, parsePostChoice, type PostChoice } from "../replie
 import { NEW_MENTIONS_MAX } from "../text/mentions";
 import { DEFAULT_TEXT_SIZE, storedTextSize, type TextSize } from "../text-size";
 import { DEFAULT_TINT, storedTint, type Tint } from "../tint";
-import { paymentStatements } from "./payments.server";
+import { isNew, paymentIsNew, paymentStatements } from "./payments.server";
 import { settingSql } from "./setting-sql.server";
 
 const DAY = 24 * 3600;
@@ -621,13 +621,15 @@ export async function grantNameAllowance(
     /** The plan's first invoice, when bought with the plan. */
     invoiceId?: string | null;
   },
-): Promise<{ granted: boolean; duplicate: boolean }> {
+): Promise<{ granted: boolean; duplicate: boolean; fresh: boolean }> {
   const member = await db
     .prepare(`SELECT 1 FROM profiles WHERE user_id = ?1 AND owner_id IS NULL`)
     .bind(input.userId)
     .first();
-  if (!member) return { granted: false, duplicate: false };
+  if (!member) return { granted: false, duplicate: false, fresh: false };
   const results = await db.batch([
+    // Whether its payment is new, so it is announced once.
+    paymentIsNew(db, input.sessionId),
     db
       .prepare(
         `INSERT INTO name_allowances (user_id, length, session_id, granted_at) VALUES (?1, ?2, ?3, ?4)
@@ -654,5 +656,5 @@ export async function grantNameAllowance(
     db.prepare(`SELECT session_id FROM name_allowances WHERE user_id = ?1 AND length = ?2`).bind(input.userId, input.length),
   ]);
   const winner = (results.at(-1)!.results[0] as { session_id: string } | undefined)?.session_id;
-  return { granted: true, duplicate: winner !== input.sessionId };
+  return { granted: true, duplicate: winner !== input.sessionId, fresh: isNew(results[0]) };
 }

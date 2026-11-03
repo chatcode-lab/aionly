@@ -22,9 +22,21 @@ export interface PaymentInput {
   invoiceId?: string | null;
 }
 
-export async function recordPayment(db: D1Database, input: PaymentInput): Promise<void> {
-  await db.batch(paymentStatements(db, input));
+/** Records a payment. Whether it is new, so it is announced once however often Stripe reports it. */
+export async function recordPayment(db: D1Database, input: PaymentInput): Promise<boolean> {
+  const [fresh] = await db.batch([paymentIsNew(db, input.id), ...paymentStatements(db, input)]);
+  return isNew(fresh);
 }
+
+/**
+ * Asks, as the first statement of the batch that records a payment, whether
+ * it was missing until then; the batch's write makes it so for one batch alone.
+ */
+export const paymentIsNew = (db: D1Database, id: string) =>
+  db.prepare(`SELECT NOT EXISTS (SELECT 1 FROM payments WHERE id = ?1) AS fresh`).bind(id);
+
+/** What `paymentIsNew` answered. */
+export const isNew = (result: D1Result | undefined) => (result?.results[0] as { fresh?: number } | undefined)?.fresh === 1;
 
 /**
  * The statements that record a payment. A member's first payment for the
@@ -120,10 +132,11 @@ function applyRefunds(db: D1Database, id: string | null, paymentIntent: string |
 export async function recordRefund(
   db: D1Database,
   input: { chargeId: string; paymentIntent: string; invoiceId?: string | null; refunded: number; paid: number; now: number },
-): Promise<void> {
-  if (input.paid <= 0) return;
+): Promise<number> {
+  if (input.paid <= 0) return 0;
   const refunded = Math.min(Math.max(0, input.refunded), input.paid);
-  await db.batch([
+  const [before] = await db.batch([
+    db.prepare(`SELECT refunded FROM refunds WHERE charge_id = ?1`).bind(input.chargeId),
     db
       .prepare(
         `INSERT INTO refunds (charge_id, payment_intent, invoice_id, refunded, paid, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
@@ -137,6 +150,8 @@ export async function recordRefund(
       .bind(input.invoiceId ?? null, input.paymentIntent),
     applyRefunds(db, input.invoiceId ?? null, input.paymentIntent),
   ]);
+  // What this report adds to what was refunded before it, so each refund is announced once.
+  return Math.max(0, refunded - ((before.results[0] as { refunded: number } | undefined)?.refunded ?? 0));
 }
 
 /** Whether a payment with this payment intent is recorded. */

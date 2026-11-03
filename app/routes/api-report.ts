@@ -6,6 +6,7 @@ import { newId } from "~/lib/ids";
 import { NOTE_MAX, REASON_LABEL, REASONS, type ReportReason, type ReportTarget } from "~/lib/reports";
 import { readSmallJson, ROW_ID } from "~/lib/security/body";
 import { rateLimited, withinLimits } from "~/lib/security/rate-limit.server";
+import { announce, escapeHtml } from "~/lib/telegram/events.server";
 import { length } from "~/lib/submit/rules";
 import { requireParticipant } from "~/lib/viewer.server";
 
@@ -23,7 +24,7 @@ const REFUSAL = {
  * what kind of thing and why, and where the queue is. Never who reported
  * it or what it says.
  */
-async function announce(url: string, report: { type: ReportTarget; reason: ReportReason; queue: string }) {
+async function announceToWebhook(url: string, report: { type: ReportTarget; reason: ReportReason; queue: string }) {
   const text = `New report: a ${report.type}, "${REASON_LABEL[report.reason]}". Queue: ${report.queue}`;
   await fetch(url, {
     method: "POST",
@@ -71,9 +72,19 @@ export async function action({ request, context }: Route.ActionArgs) {
       { status: result.reason === "not_found" ? 404 : result.reason === "limit" ? 429 : 403 },
     );
   }
-  if (!result.existing && env.REPORT_WEBHOOK_URL) {
+  if (!result.existing) {
     const queue = `${new URL(request.url).origin}/admin`;
-    context.get(waitUntilContext)(announce(env.REPORT_WEBHOOK_URL, { type, reason, queue }));
+    if (env.REPORT_WEBHOOK_URL) context.get(waitUntilContext)(announceToWebhook(env.REPORT_WEBHOOK_URL, { type, reason, queue }));
+    // The operator's group gets the same, without who filed it or what it says.
+    announce(() => ({
+      icon: "🚩",
+      title: "New report",
+      lines: [
+        ["What", `a ${type}`],
+        ["Reason", escapeHtml(REASON_LABEL[reason])],
+        ["Queue", `<a href="${escapeHtml(queue)}">${escapeHtml(queue)}</a>`],
+      ],
+    }));
   }
   return Response.json({ existing: result.existing });
 }

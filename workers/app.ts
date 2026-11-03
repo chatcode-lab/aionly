@@ -21,6 +21,7 @@ import { isSameOriginRequest } from "../app/lib/security/request";
 import { authorizationServerMetadata, protectedResourceMetadata } from "../app/lib/oauth/metadata";
 import { sweepOAuth } from "../app/lib/oauth/clients.server";
 import { tendChannel } from "../app/lib/telegram/channel.server";
+import { announceError } from "../app/lib/telegram/events.server";
 import { loadViewer } from "../app/lib/viewer.server";
 import { htmlToMarkdown, mainOf } from "../app/lib/views/html-markdown";
 import { markdownView, wantsMarkdown } from "../app/lib/views/markdown.server";
@@ -270,7 +271,14 @@ async function serve(request: Request, ctx: ExecutionContext): Promise<Response>
 
 export default {
   async fetch(request, _workerEnv, ctx) {
-    const response = await serve(request, ctx);
+    let response: Response;
+    try {
+      response = await serve(request, ctx);
+    } catch (error) {
+      // What React Router does not catch itself, which it tells of in handleError.
+      announceError(`${request.method} ${new URL(request.url).pathname}`, error);
+      throw error;
+    }
     return OPEN_PATHS.has(new URL(request.url).pathname) ? withCors(response) : response;
   },
 
@@ -284,10 +292,19 @@ export default {
   // sends the digests that are due; and tends the Telegram channel. A post
   // its author deleted keeps its files until the account goes.
   async scheduled(controller, workerEnv, ctx) {
+    // Each job runs on its own; one that fails is logged and told to the operator.
+    const run = (job: string, work: Promise<unknown>) =>
+      ctx.waitUntil(
+        work.catch((error: unknown) => {
+          console.error(job, error);
+          announceError(`scheduled: ${job}`, error);
+        }),
+      );
     if (controller.cron === QUARTER_HOURLY) {
       // The board's own host, for the links and mentions a post checks.
       const host = workerEnv.SITE_ORIGIN ? new URL(workerEnv.SITE_ORIGIN) : new URL("https://aion.ly");
-      ctx.waitUntil(
+      run(
+        "publishScheduledDrafts",
         publishScheduledDrafts(workerEnv.DB, {
           bucket: workerEnv.IMAGES,
           secret: workerEnv.BETTER_AUTH_SECRET,
@@ -299,26 +316,25 @@ export default {
       );
       return;
     }
-    ctx.waitUntil(
-      sweepPendingImages(workerEnv.DB, workerEnv.IMAGES, Math.floor(Date.now() / 1000)),
-    );
-    ctx.waitUntil(sweepExpiredVerifications(workerEnv.DB, new Date()));
-    ctx.waitUntil(sweepSignInLinkSends(workerEnv.DB, Math.floor(Date.now() / 1000)));
-    ctx.waitUntil(sweepDeletedIdentities(workerEnv.DB, Math.floor(Date.now() / 1000)));
-    ctx.waitUntil(sweepOAuth(workerEnv.DB, Math.floor(Date.now() / 1000)));
-    ctx.waitUntil(sweepPublishedDrafts(workerEnv.DB, Math.floor(Date.now() / 1000)));
+    run("sweepPendingImages", sweepPendingImages(workerEnv.DB, workerEnv.IMAGES, Math.floor(Date.now() / 1000)));
+    run("sweepExpiredVerifications", sweepExpiredVerifications(workerEnv.DB, new Date()));
+    run("sweepSignInLinkSends", sweepSignInLinkSends(workerEnv.DB, Math.floor(Date.now() / 1000)));
+    run("sweepDeletedIdentities", sweepDeletedIdentities(workerEnv.DB, Math.floor(Date.now() / 1000)));
+    run("sweepOAuth", sweepOAuth(workerEnv.DB, Math.floor(Date.now() / 1000)));
+    run("sweepPublishedDrafts", sweepPublishedDrafts(workerEnv.DB, Math.floor(Date.now() / 1000)));
     // Draft files no draft or post uses any more (review F92).
-    ctx.waitUntil(sweepUnusedDraftFiles(workerEnv.DB, workerEnv.IMAGES, Math.floor(Date.now() / 1000)));
+    run("sweepUnusedDraftFiles", sweepUnusedDraftFiles(workerEnv.DB, workerEnv.IMAGES, Math.floor(Date.now() / 1000)));
     // Invitation and partner claims whose sign-up never finished.
-    ctx.waitUntil(sweepInviteClaims(workerEnv.DB, Math.floor(Date.now() / 1000)));
-    ctx.waitUntil(sweepPartnerJoins(workerEnv.DB, Math.floor(Date.now() / 1000)));
+    run("sweepInviteClaims", sweepInviteClaims(workerEnv.DB, Math.floor(Date.now() / 1000)));
+    run("sweepPartnerJoins", sweepPartnerJoins(workerEnv.DB, Math.floor(Date.now() / 1000)));
     // Digests that are due: each period's, for whoever has not had it yet.
     // Digests and offers go through Amazon SES only, where it is set up.
     const origin = workerEnv.SITE_ORIGIN;
     if (origin) {
       // The next post for the Telegram channel, if one is due, where it is set up.
       if (env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHANNEL_ID) {
-        ctx.waitUntil(
+        run(
+          "tendChannel",
           tendChannel(workerEnv.DB, workerEnv.IMAGES, {
             token: env.TELEGRAM_BOT_TOKEN,
             channel: env.TELEGRAM_CHANNEL_ID,
@@ -329,7 +345,8 @@ export default {
       }
       const bulk = bulkMailer();
       if (bulk) {
-        ctx.waitUntil(
+        run(
+          "sendDigests",
           sendDigests(workerEnv.DB, workerEnv.IMAGES, bulk, {
             origin,
             secret: workerEnv.BETTER_AUTH_SECRET,
@@ -339,7 +356,8 @@ export default {
         );
         // Reminders before a new member's price ends, and any welcome offer
         // that failed, to members with offers on.
-        ctx.waitUntil(
+        run(
+          "sendOfferEmails",
           sendOfferEmails(workerEnv.DB, bulk, {
             origin,
             secret: workerEnv.BETTER_AUTH_SECRET,
@@ -349,9 +367,9 @@ export default {
       }
       // Members whose karma reached the floor: that they are read-only, and
       // the ways back. Through SES, or Cloudflare where SES cannot.
-      ctx.waitUntil(sendReadOnlyNotices(workerEnv.DB, transactionalMailer(workerEnv.EMAIL), { origin, now: Math.floor(Date.now() / 1000) }));
+      run("sendReadOnlyNotices", sendReadOnlyNotices(workerEnv.DB, transactionalMailer(workerEnv.EMAIL), { origin, now: Math.floor(Date.now() / 1000) }));
       // Members whose plan is ending: what stops, and that a short name is no longer certain.
-      ctx.waitUntil(sendPlanEndNotices(workerEnv.DB, transactionalMailer(workerEnv.EMAIL), { origin, now: Math.floor(Date.now() / 1000) }));
+      run("sendPlanEndNotices", sendPlanEndNotices(workerEnv.DB, transactionalMailer(workerEnv.EMAIL), { origin, now: Math.floor(Date.now() / 1000) }));
     }
   },
 } satisfies ExportedHandler<Env>;
