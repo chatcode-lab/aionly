@@ -30,7 +30,36 @@ const bucket = (size = MB, stored = true) =>
     get: async () => (stored ? { arrayBuffer: async () => new ArrayBuffer(8) } : null),
   }) as unknown as R2Bucket;
 
-const tend = (at = NOW, files = bucket()) => tendChannel(db, files, { token: "secret-token", channel: "1234567890", origin: "https://aion.ly", now: at });
+const tend = (at = NOW, files = bucket(), database: D1Database = db) =>
+  tendChannel(database, files, { token: "secret-token", channel: "1234567890", origin: "https://aion.ly", now: at });
+
+/** The database, where storing a sent message's ID fails its first `times` tries. */
+function storeFails(times: number): D1Database {
+  let left = times;
+  return new Proxy(db, {
+    get(target, key) {
+      if (key !== "prepare") {
+        const value: unknown = Reflect.get(target, key);
+        return typeof value === "function" ? value.bind(target) : value;
+      }
+      return (sql: string) => {
+        const statement = target.prepare(sql);
+        if (!sql.includes("SET message_id")) return statement;
+        return {
+          bind: (...values: unknown[]) => ({
+            run: async () => {
+              if (left > 0) {
+                left -= 1;
+                throw new Error("D1_ERROR: Network connection lost.");
+              }
+              return statement.bind(...values).run();
+            },
+          }),
+        };
+      };
+    },
+  });
+}
 
 const sends = () => calls.filter((call) => call.method.startsWith("send"));
 const row = (id: string) =>
@@ -54,7 +83,7 @@ beforeEach(async () => {
     const form = init?.body instanceof FormData ? init.body : undefined;
     const call: Call = { method: name, body: form ? {} : (JSON.parse(String(init?.body)) as Record<string, unknown>), ...(form ? { form } : {}) };
     calls.push(call);
-    return Response.json(answer(call));
+    return Response.json(await answer(call));
   });
 });
 
@@ -108,6 +137,27 @@ describe("what goes to the channel", () => {
     await tend();
     await tend(NOW + 6 * HOUR - 30);
     expect(sends()).toHaveLength(2);
+  });
+
+  it("sends one post between two runs at once, as the claim takes the channel's turn", async () => {
+    await post("first", { score: 9, age: OLD_ENOUGH });
+    await post("second", { score: 5, age: OLD_ENOUGH });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    answer = async () => {
+      await held;
+      return sendsOk();
+    };
+    const first = tend();
+    await vi.waitFor(() => expect(sends()).toHaveLength(1));
+    answer = sendsOk;
+    await tend(NOW + 60);
+    release();
+    await first;
+    expect(sends()).toHaveLength(1);
+    expect(await row("second")).toBeNull();
+    await tend(NOW + 6 * HOUR);
+    expect(await row("second")).toMatchObject({ sent_at: NOW + 6 * HOUR });
   });
 
   it("never sends a post twice", async () => {
@@ -286,6 +336,37 @@ describe("when Telegram does not take a post", () => {
   });
 });
 
+describe("when the board cannot store what it sent", () => {
+  it("tries the write again, and keeps the message", async () => {
+    await post("kept", { score: 9, age: OLD_ENOUGH });
+    await tend(NOW, bucket(), storeFails(2));
+    expect(calls.map((call) => call.method)).toEqual(["sendMessage"]);
+    expect(await row("kept")).toMatchObject({ message_id: 101, sent_at: NOW });
+  });
+
+  it("takes back a message it could never take down, and sends the post again", async () => {
+    await post("lost", { score: 9, age: OLD_ENOUGH });
+    await tend(NOW, bucket(), storeFails(3));
+    expect(calls.map((call) => call.method)).toEqual(["sendMessage", "deleteMessage"]);
+    expect(calls[1]!.body).toMatchObject({ message_id: 101 });
+    expect(await row("lost")).toBeNull();
+    await tend(NOW + HOUR);
+    expect(sends()).toHaveLength(2);
+    expect(await row("lost")).toMatchObject({ message_id: expect.any(Number), sent_at: NOW + HOUR });
+  });
+
+  it("keeps the claim, and logs the message, when it cannot take it back either", async () => {
+    await post("stuck", { score: 9, age: OLD_ENOUGH });
+    answer = (call) => (call.method === "deleteMessage" ? { ok: false, error_code: 502, description: "Bad Gateway" } : sendsOk());
+    await tend(NOW, bucket(), storeFails(3));
+    expect(await row("stuck")).toMatchObject({ message_id: null, failure: null });
+    expect(logged.mock.calls.some((args: unknown[]) => args.includes(101))).toBe(true);
+    calls.length = 0;
+    await tend(NOW + HOUR);
+    expect(calls).toHaveLength(0);
+  });
+});
+
 describe("a post that leaves the board", () => {
   async function sent(id = "post", at = NOW) {
     await post(id, { score: 9, age: OLD_ENOUGH });
@@ -326,6 +407,30 @@ describe("a post that leaves the board", () => {
     await tend(NOW + HOUR);
     expect(calls).toHaveLength(1);
     expect(await row("post")).toMatchObject({ retracted_at: NOW + HOUR });
+  });
+
+  it("counts as gone when the message to write over is not found", async () => {
+    await sent();
+    await fields("post", `deleted_at = ?2`, NOW);
+    answer = (call) => ({
+      ok: false,
+      error_code: 400,
+      description: call.method === "deleteMessage" ? "Bad Request: message can't be deleted" : "Bad Request: message to edit not found",
+    });
+    await tend(NOW + HOUR);
+    expect(await row("post")).toMatchObject({ retracted_at: NOW + HOUR });
+  });
+
+  it("is tried again while the bot cannot reach the channel, which says nothing of the message", async () => {
+    await sent();
+    await fields("post", `deleted_at = ?2`, NOW);
+    answer = () => ({ ok: false, error_code: 400, description: "Bad Request: chat not found" });
+    await tend(NOW + HOUR);
+    expect(calls.map((call) => call.method)).toEqual(["deleteMessage", "editMessageText"]);
+    expect(await row("post")).toMatchObject({ retracted_at: null });
+    answer = () => ({ ok: true, result: true });
+    await tend(NOW + 2 * HOUR);
+    expect(await row("post")).toMatchObject({ retracted_at: NOW + 2 * HOUR });
   });
 
   it("is tried again next run if neither works, and left alone once done", async () => {

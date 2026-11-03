@@ -214,6 +214,38 @@ function nextPost(db: D1Database, now: number): Promise<PostRow | null> {
     .first<PostRow>();
 }
 
+/** How long a failed write of a sent message's ID waits before each try again. */
+const KEEP_WAITS = [250, 1_000];
+
+/**
+ * Stores a sent message's ID, without which the board could never take it
+ * off the channel (review F137). A failed write is tried again. A message
+ * still not stored is deleted from the channel, and once it is gone its
+ * claim is given back, so the post can go out again.
+ */
+async function keep(db: D1Database, bot: Bot, postId: string, messageId: number, now: number): Promise<void> {
+  for (const wait of [0, ...KEEP_WAITS]) {
+    if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
+    try {
+      await db.prepare(`UPDATE channel_posts SET message_id = ?2, sent_at = ?3, failure = NULL WHERE post_id = ?1`).bind(postId, messageId, now).run();
+      return;
+    } catch (error) {
+      console.error("channel post not stored", postId, messageId, String(error));
+    }
+  }
+  const deleted = await call(bot, "deleteMessage", { message_id: messageId });
+  if (!deleted.ok) {
+    // Only someone in the channel can take it down now.
+    console.error("channel post left on the channel unstored", postId, messageId, deleted.error_code, deleted.description);
+    return;
+  }
+  await db
+    .prepare(`DELETE FROM channel_posts WHERE post_id = ?1`)
+    .bind(postId)
+    .run()
+    .catch((error: unknown) => console.error("channel claim kept", postId, String(error)));
+}
+
 /**
  * Sends the next post if one is due. Its claim comes first, so a run cut
  * short leaves it unsent rather than risk sending it twice, as a digest does.
@@ -222,18 +254,25 @@ function nextPost(db: D1Database, now: number): Promise<PostRow | null> {
  * Telegram being unwell, gives the claim back for the next run.
  */
 async function sendNext(db: D1Database, bucket: R2Bucket, bot: Bot, origin: string, now: number): Promise<void> {
-  const latest = await db.prepare(`SELECT MAX(sent_at) AS sent_at FROM channel_posts`).first<{ sent_at: number | null }>();
-  if (latest?.sent_at && now - latest.sent_at < SPACING) return;
   const row = await nextPost(db, now);
   if (!row) return;
-  const claim = await db.prepare(`INSERT OR IGNORE INTO channel_posts (post_id, claimed_at) VALUES (?1, ?2)`).bind(row.id, now).run();
+  // The claim takes the channel's turn too, in the same write: any claim of
+  // the last six hours that has not failed holds it, one still being sent
+  // included, so two runs at once send one post between them (review F138).
+  const claim = await db
+    .prepare(
+      `INSERT OR IGNORE INTO channel_posts (post_id, claimed_at)
+       SELECT ?1, ?2 WHERE NOT EXISTS (SELECT 1 FROM channel_posts WHERE failure IS NULL AND claimed_at > ?2 - ?3)`,
+    )
+    .bind(row.id, now, SPACING)
+    .run();
   if (claim.meta.changes === 0) return;
 
   let failure = "Nothing to send.";
   for (const message of channelMessages(await channelPost(db, bucket, row, origin), origin)) {
     const answer = message.upload ? await callWithFile(bot, bucket, message) : await call(bot, message.method, message.params);
     if (answer.ok && answer.result?.message_id) {
-      await db.prepare(`UPDATE channel_posts SET message_id = ?2, sent_at = ?3, failure = NULL WHERE post_id = ?1`).bind(row.id, answer.result.message_id, now).run();
+      await keep(db, bot, row.id, answer.result.message_id, now);
       return;
     }
     failure = answer.description ?? "No reason given.";
@@ -267,8 +306,10 @@ async function retract(db: D1Database, bot: Bot, now: number): Promise<void> {
     .all<{ post_id: string; message_id: number }>();
   for (const { post_id, message_id } of results) {
     const deleted = await call(bot, "deleteMessage", { message_id });
-    // Someone may have deleted it in Telegram already.
-    const gone = (answer: Answer) => answer.ok || /not found/i.test(answer.description ?? "");
+    // Someone may have deleted it in Telegram already. Only the message's own
+    // "not found" says so: "chat not found" means the bot cannot reach the
+    // channel, which is tried again (review F136).
+    const gone = (answer: Answer) => answer.ok || /message to (delete|edit) not found/i.test(answer.description ?? "");
     let done = gone(deleted);
     if (!done) {
       const edited = await call(bot, "editMessageText", { message_id, ...RETRACTED });

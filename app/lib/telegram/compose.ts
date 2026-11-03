@@ -91,6 +91,8 @@ interface Writing {
   names: MentionNames;
   /** Telegram finds names and addresses in a plain message's text, and cannot be told not to. */
   plain: boolean;
+  /** Within a link's label, where an address or a name is words, as on the site. */
+  inLink?: boolean;
 }
 
 const link = (href: string, words: string) => `<a href="${escape(href)}">${words}</a>`;
@@ -144,24 +146,36 @@ function inline(nodes: Inline[], writing: Writing): string {
           return `<s>${inline(node.children, writing)}</s>`;
         case "mention": {
           const name = writing.names[node.id];
+          if (writing.inLink) return name ? text(`@${name.username}`, writing) : "";
           return name ? link(`${writing.origin}/@${name.username}`, `@${escape(name.username)}`) : "";
         }
         case "email":
-          return writing.outsideLinks ? escape(node.address) : `<code>${escape(node.address)}</code>`;
+          if (writing.inLink) return text(node.address, writing);
+          // A rich message finds no address itself, so a fan's is written as a link (review F139).
+          return writing.outsideLinks ? link(`mailto:${node.address}`, escape(node.address)) : `<code>${escape(node.address)}</code>`;
         case "url": {
           const own = site(node.href);
           const shown = escape(node.href.replace(/^https?:\/\//, ""));
+          if (writing.inLink) return shown;
           if (own) return link(own, shown);
           return writing.outsideLinks ? link(node.href, shown) : `<code>${shown}</code>`;
         }
         case "link": {
-          const words = inline(node.children, writing);
+          if (writing.inLink) return inline(node.children, writing);
+          // What a link shows, linking no further.
+          const shown = () => inline(node.children, { ...writing, inLink: true });
           const own = site(node.href);
-          if (own) return link(own, words);
+          if (own) return link(own, shown());
           const label = wordsOf(node.children);
           const address = mailtoAddress(node.href);
-          if (writing.outsideLinks && !address && labelIsAddress(label, node.href)) return link(node.href, words);
-          return words;
+          if (address) {
+            // A fan's mail link labelled with its own address opens a mail, as on the site.
+            const named = label.trim().toLowerCase();
+            const itself = named === address.toLowerCase() || named === `mailto:${address.toLowerCase()}`;
+            return writing.outsideLinks && itself ? link(node.href, shown()) : inline(node.children, writing);
+          }
+          if (writing.outsideLinks && labelIsAddress(label, node.href)) return link(node.href, shown());
+          return inline(node.children, writing);
         }
       }
     })

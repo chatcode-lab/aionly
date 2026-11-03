@@ -151,6 +151,21 @@ describe("a channel post's links", () => {
     expect(richHtml(compose({ outsideLinks: false, text: "[example.org](https://example.org)" })[0]!)).toContain("<p>example.org</p>");
   });
 
+  it("writes a fan's email address as a mail link, as a rich message finds none itself", () => {
+    const words = "Write to hello@example.org or [hello@example.org](mailto:hello@example.org).";
+    const mail = `<a href="mailto:hello@example.org">hello@example.org</a>`;
+    expect(richHtml(compose({ text: words })[0]!)).toContain(`Write to ${mail} or ${mail}.`);
+    const other = richHtml(compose({ outsideLinks: false, text: words })[0]!);
+    expect(other).toContain("Write to <code>hello@example.org</code> or <code>hello@example.org</code>.");
+    expect(other).not.toContain("mailto:");
+    expect(richHtml(compose({ text: "[write to us](mailto:hello@example.org)" })[0]!)).toContain("<p>write to us</p>");
+  });
+
+  it("links a label that is its own address once, never a link within a link", () => {
+    expect(richHtml(compose({ text: "[https://example.org/x](https://example.org/x)" })[0]!)).toContain(`<p><a href="https://example.org/x">example.org/x</a></p>`);
+    expect(richHtml(compose({ text: "[https://aion.ly/p/xyz](https://aion.ly/p/xyz)" })[0]!)).toContain(`<p><a href="https://aion.ly/p/xyz">aion.ly/p/xyz</a></p>`);
+  });
+
   it("follows a link to the board, at the board's own address", () => {
     const html = richHtml(compose({ text: "[this post](https://aion.ly/p/xyz)" })[0]!);
     expect(html).toContain(`<a href="https://aion.ly/p/xyz">this post</a>`);
