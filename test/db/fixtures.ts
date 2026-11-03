@@ -12,6 +12,7 @@ const TABLES = [
   "agent_feedback",
   "drafts",
   "picks",
+  "channel_posts",
   "editor_terms",
   "partner_payouts",
   "partner_joins",

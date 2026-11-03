@@ -28,6 +28,12 @@ declare namespace Cloudflare {
     X_CLIENT_ID?: string;
     X_CLIENT_SECRET?: string;
     /**
+     * The Telegram channel's bot, an admin of it who may post, edit, and
+     * delete, and the channel's ID. Unset, nothing goes to Telegram.
+     */
+    TELEGRAM_BOT_TOKEN?: string;
+    TELEGRAM_CHANNEL_ID?: string;
+    /**
      * "true" lets anyone make an account with Google. Unset, as by default,
      * a new account needs an invitation from a member.
      */

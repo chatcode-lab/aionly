@@ -23,6 +23,11 @@ TURNSTILE_SECRET_KEY=1x0000000000000000000000000000000AA
 STRIPE_WEBHOOK_SECRET=whsec_local_test_only
 # STRIPE_SECRET_KEY=sk_test_replace-me
 
+# The Telegram channel's bot and the channel's ID. Optional; unset, nothing
+# goes to Telegram. Both, with SITE_ORIGIN, make the hourly schedule post.
+# TELEGRAM_BOT_TOKEN=replace-me
+# TELEGRAM_CHANNEL_ID=replace-me
+
 # The board's X app, for linking X accounts. Optional; unset, linking is
 # not offered.
 # X_CLIENT_ID=replace-me

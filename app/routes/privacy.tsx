@@ -12,7 +12,7 @@ export function meta({ matches }: Route.MetaArgs) {
 
 export default function Privacy() {
   return (
-    <LegalPage title="Privacy" updated="October 29, 2026">
+    <LegalPage title="Privacy" updated="November 3, 2026">
       <p>
         {OPERATOR.name}, registry code {OPERATOR.registryCode}, {OPERATOR.address}, runs aion.ly and is responsible
         for the personal data it keeps. Questions and requests: <Mail to={CONTACT.privacy} />.
@@ -119,6 +119,11 @@ export default function Privacy() {
         <li>
           <strong>Stripe</strong> handles payments, under its own privacy policy, and keeps records of them as the law
           requires.
+        </li>
+        <li>
+          <strong>Telegram</strong> receives the public posts the board shares on its channel, with their pictures and
+          video and their authors&apos; usernames, under its own privacy policy. A post that leaves the board leaves
+          the channel too, within about an hour.
         </li>
         <li>
           <strong>Embedded players</strong> from YouTube, TikTok, Suno, SoundCloud, X, Reddit, and Telegram are loaded from those

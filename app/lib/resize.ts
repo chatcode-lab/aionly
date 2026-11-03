@@ -55,6 +55,16 @@ export function avatarSources(src: string, size: number): Sources {
   return { srcSet: [...AVATAR_WIDTHS.map((width) => `${resized(src, width)} ${width}w`), `${src} 320w`].join(", "), sizes: `${size}px` };
 }
 
+/**
+ * A stored picture as Telegram fetches it: a JPEG copy well under the 5 MB it
+ * takes from an address, and within the 10,000 pixels its sides may add up
+ * to. Any other address, or a kind the media domain does not resize, as it is.
+ */
+export function channelPicture(src: string): string {
+  const match = STORED.exec(src);
+  return match ? `${match[1]}/cdn-cgi/image/width=1600,height=2560,fit=scale-down,format=baseline-jpeg,onerror=redirect/${match[2]}` : src;
+}
+
 /** A picture as an email shows it: its copy's address, and the size it is drawn at. */
 export interface EmailPicture {
   src: string;

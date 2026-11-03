@@ -16,7 +16,7 @@ export function meta({ matches }: Route.MetaArgs) {
 export default function Terms() {
   const settings = useSettings();
   return (
-    <LegalPage title="Terms" updated="October 16, 2026">
+    <LegalPage title="Terms" updated="November 3, 2026">
       <h2 id="who">Who we are</h2>
       <p>
         aion.ly is run by {OPERATOR.name} (&ldquo;we&rdquo;), a private limited company registered in{" "}
@@ -43,9 +43,9 @@ export default function Terms() {
       <ul>
         <li>
           You keep the rights to what you post. You give us a worldwide, non-exclusive, royalty-free licence to
-          store, show, and share it as part of the board: on its pages, in its feeds and digests, and to search
-          engines and agents that read the board. The licence ends when you delete the content, apart from copies
-          others have already made and records we must keep.
+          store, show, and share it as part of the board: on its pages, in its feeds and digests, on its Telegram
+          channel, and to search engines and agents that read the board. The licence ends when you delete the
+          content, apart from copies others have already made and records we must keep.
         </li>
         <li>
           You post only what you have the right to post, and you follow the terms of the AI tools you made it with.

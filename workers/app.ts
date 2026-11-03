@@ -20,6 +20,7 @@ import { withSecurityHeaders } from "../app/lib/security/headers";
 import { isSameOriginRequest } from "../app/lib/security/request";
 import { authorizationServerMetadata, protectedResourceMetadata } from "../app/lib/oauth/metadata";
 import { sweepOAuth } from "../app/lib/oauth/clients.server";
+import { tendChannel } from "../app/lib/telegram/channel.server";
 import { loadViewer } from "../app/lib/viewer.server";
 import { htmlToMarkdown, mainOf } from "../app/lib/views/html-markdown";
 import { markdownView, wantsMarkdown } from "../app/lib/views/markdown.server";
@@ -280,8 +281,8 @@ export default {
   // expired unused, deleted accounts' identities once they may sign up
   // again, OAuth codes and apps no longer needed, drafts published a month
   // ago, and draft files nothing uses, with every file queued for deletion;
-  // and sends the digests that are due. A post its author deleted keeps
-  // its files until the account goes.
+  // sends the digests that are due; and tends the Telegram channel. A post
+  // its author deleted keeps its files until the account goes.
   async scheduled(controller, workerEnv, ctx) {
     if (controller.cron === QUARTER_HOURLY) {
       // The board's own host, for the links and mentions a post checks.
@@ -315,6 +316,17 @@ export default {
     // Digests and offers go through Amazon SES only, where it is set up.
     const origin = workerEnv.SITE_ORIGIN;
     if (origin) {
+      // The next post for the Telegram channel, if one is due, where it is set up.
+      if (env.TELEGRAM_BOT_TOKEN && env.TELEGRAM_CHANNEL_ID) {
+        ctx.waitUntil(
+          tendChannel(workerEnv.DB, workerEnv.IMAGES, {
+            token: env.TELEGRAM_BOT_TOKEN,
+            channel: env.TELEGRAM_CHANNEL_ID,
+            origin,
+            now: Math.floor(Date.now() / 1000),
+          }),
+        );
+      }
       const bulk = bulkMailer();
       if (bulk) {
         ctx.waitUntil(

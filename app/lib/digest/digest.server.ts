@@ -163,7 +163,7 @@ function outsideLink(text: string, origin: string): URL | null {
  * the upload's "Video", "Audio", "Picture", or "Gallery". Nothing for an
  * upload whose file is gone.
  */
-function sourceOf(card: PostCardData, hosted: Hosted | undefined, origin: string): Pick<DigestPost, "source" | "sourceUrl"> {
+export function sourceOf(card: PostCardData, hosted: Hosted | undefined, origin: string): Pick<DigestPost, "source" | "sourceUrl"> {
   if (card.host) return { source: sourceName(card.host), sourceUrl: card.url };
   const article = hosted?.kind === "text";
   const link = article ? (card.preview?.url ? new URL(card.preview.url) : null) : outsideLink(hosted?.description ?? "", origin);
