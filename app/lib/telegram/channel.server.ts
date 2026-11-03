@@ -214,36 +214,75 @@ function nextPost(db: D1Database, now: number): Promise<PostRow | null> {
     .first<PostRow>();
 }
 
-/** How long a failed write of a sent message's ID waits before each try again. */
+/** How long a failed write of a sent message waits before each try again. */
 const KEEP_WAITS = [250, 1_000];
 
+/** Where a run notes a sent message the database would not take, for a later run to store (review F137). */
+const UNSTORED = "channel/unstored/";
+
+interface Sent {
+  postId: string;
+  /** None while Telegram holds the message back, scheduled, as it may a video for a big channel (review F140). */
+  messageId: number | null;
+  sentAt: number;
+}
+
+/** Stores a sent message, over its claim or, from a note, in place of one. Answers whether the write went through. */
+async function store(db: D1Database, sent: Sent): Promise<boolean> {
+  try {
+    await db
+      .prepare(
+        `INSERT INTO channel_posts (post_id, claimed_at, message_id, sent_at) VALUES (?1, ?3, ?2, ?3)
+         ON CONFLICT (post_id) DO UPDATE SET message_id = excluded.message_id, sent_at = excluded.sent_at, failure = NULL`,
+      )
+      .bind(sent.postId, sent.messageId, sent.sentAt)
+      .run();
+    return true;
+  } catch (error) {
+    console.error("channel post not stored", sent.postId, sent.messageId, String(error));
+    return false;
+  }
+}
+
 /**
- * Stores a sent message's ID, without which the board could never take it
- * off the channel (review F137). A failed write is tried again. A message
- * still not stored is deleted from the channel, and once it is gone its
- * claim is given back, so the post can go out again.
+ * Stores a sent message, without which the board could never take it off
+ * the channel (review F137). A failed write is tried again, and one that
+ * still fails is noted in storage for the next run to store. Failing both,
+ * the message is deleted from the channel and its claim given back, so the
+ * post can go out again.
  */
-async function keep(db: D1Database, bot: Bot, postId: string, messageId: number, now: number): Promise<void> {
+async function keep(db: D1Database, bucket: R2Bucket, bot: Bot, sent: Sent): Promise<void> {
   for (const wait of [0, ...KEEP_WAITS]) {
     if (wait) await new Promise((resolve) => setTimeout(resolve, wait));
-    try {
-      await db.prepare(`UPDATE channel_posts SET message_id = ?2, sent_at = ?3, failure = NULL WHERE post_id = ?1`).bind(postId, messageId, now).run();
-      return;
-    } catch (error) {
-      console.error("channel post not stored", postId, messageId, String(error));
-    }
+    if (await store(db, sent)) return;
   }
-  const deleted = await call(bot, "deleteMessage", { message_id: messageId });
-  if (!deleted.ok) {
+  try {
+    await bucket.put(`${UNSTORED}${sent.postId}`, JSON.stringify(sent));
+    return;
+  } catch (error) {
+    console.error("channel post not noted", sent.postId, sent.messageId, String(error));
+  }
+  const deleted = sent.messageId ? await call(bot, "deleteMessage", { message_id: sent.messageId }) : null;
+  if (!deleted?.ok) {
     // Only someone in the channel can take it down now.
-    console.error("channel post left on the channel unstored", postId, messageId, deleted.error_code, deleted.description);
+    console.error("channel post left on the channel unstored", sent.postId, sent.messageId, deleted?.error_code, deleted?.description);
     return;
   }
   await db
     .prepare(`DELETE FROM channel_posts WHERE post_id = ?1`)
-    .bind(postId)
+    .bind(sent.postId)
     .run()
-    .catch((error: unknown) => console.error("channel claim kept", postId, String(error)));
+    .catch((error: unknown) => console.error("channel claim kept", sent.postId, String(error)));
+}
+
+/** Stores what earlier runs sent and could only note, now the database takes it. */
+async function storeNoted(db: D1Database, bucket: R2Bucket): Promise<void> {
+  const { objects } = await bucket.list({ prefix: UNSTORED });
+  for (const { key } of objects) {
+    const note = await bucket.get(key);
+    if (note && !(await store(db, await note.json<Sent>()))) return;
+    await bucket.delete(key);
+  }
 }
 
 /**
@@ -271,8 +310,13 @@ async function sendNext(db: D1Database, bucket: R2Bucket, bot: Bot, origin: stri
   let failure = "Nothing to send.";
   for (const message of channelMessages(await channelPost(db, bucket, row, origin), origin)) {
     const answer = message.upload ? await callWithFile(bot, bucket, message) : await call(bot, message.method, message.params);
-    if (answer.ok && answer.result?.message_id) {
-      await keep(db, bot, row.id, answer.result.message_id, now);
+    if (answer.ok) {
+      // Telegram may hold a message back, scheduled, with no ID until it goes
+      // out. It is sent all the same, so it never goes again (review F140),
+      // though without an ID it cannot be taken down.
+      const messageId = answer.result?.message_id || null;
+      if (!messageId) console.error("channel post scheduled by Telegram, with no message ID", row.id);
+      await keep(db, bucket, bot, { postId: row.id, messageId, sentAt: now });
       return;
     }
     failure = answer.description ?? "No reason given.";
@@ -320,13 +364,17 @@ async function retract(db: D1Database, bot: Bot, now: number): Promise<void> {
   }
 }
 
-/** One run of the hourly schedule: what has left the board leaves the channel, and the next post goes out if due. */
+/**
+ * One run of the hourly schedule: what was sent but not stored is stored,
+ * what has left the board leaves the channel, and the next post goes out if due.
+ */
 export async function tendChannel(
   db: D1Database,
   bucket: R2Bucket,
   input: { token: string; channel: string; origin: string; now: number },
 ): Promise<void> {
   const bot = { token: input.token, chat: chatOf(input.channel) };
+  await storeNoted(db, bucket).catch((error: unknown) => console.error("channel notes", String(error)));
   await retract(db, bot, input.now);
   await sendNext(db, bucket, bot, input.origin, input.now);
 }

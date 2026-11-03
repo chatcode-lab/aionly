@@ -24,10 +24,24 @@ let nextId = 100;
 let logged: ReturnType<typeof vi.spyOn>;
 
 const sendsOk = (): unknown => ({ ok: true, result: { message_id: (nextId += 1) } });
-const bucket = (size = MB, stored = true) =>
+/** What runs have noted in storage, by key. */
+const notes = new Map<string, string>();
+const bucket = (size = MB, stored = true, { notesFail = false } = {}) =>
   ({
     head: async () => (stored ? { size } : null),
-    get: async () => (stored ? { arrayBuffer: async () => new ArrayBuffer(8) } : null),
+    get: async (key: string) => {
+      const note = notes.get(key);
+      if (note) return { json: async () => JSON.parse(note) as unknown };
+      return stored ? { arrayBuffer: async () => new ArrayBuffer(8) } : null;
+    },
+    put: async (key: string, value: string) => {
+      if (notesFail) throw new Error("R2 is unwell");
+      notes.set(key, value);
+    },
+    list: async ({ prefix }: { prefix: string }) => ({ objects: [...notes.keys()].filter((key) => key.startsWith(prefix)).map((key) => ({ key })) }),
+    delete: async (key: string) => {
+      notes.delete(key);
+    },
   }) as unknown as R2Bucket;
 
 const tend = (at = NOW, files = bucket(), database: D1Database = db) =>
@@ -75,6 +89,7 @@ beforeEach(async () => {
   await reset();
   await user("u1", "aisha");
   calls.length = 0;
+  notes.clear();
   nextId = 100;
   answer = sendsOk;
   logged = vi.spyOn(console, "error").mockImplementation(() => {});
@@ -344,9 +359,36 @@ describe("when the board cannot store what it sent", () => {
     expect(await row("kept")).toMatchObject({ message_id: 101, sent_at: NOW });
   });
 
-  it("takes back a message it could never take down, and sends the post again", async () => {
-    await post("lost", { score: 9, age: OLD_ENOUGH });
+  it("notes a message the database will not take, and stores it once it will", async () => {
+    await post("noted", { score: 9, age: OLD_ENOUGH });
+    await post("next", { score: 5, age: OLD_ENOUGH });
     await tend(NOW, bucket(), storeFails(3));
+    expect(calls.map((call) => call.method)).toEqual(["sendMessage"]);
+    expect(await row("noted")).toMatchObject({ message_id: null, sent_at: null });
+    expect([...notes.keys()]).toEqual(["channel/unstored/noted"]);
+    await tend(NOW + HOUR);
+    expect(await row("noted")).toMatchObject({ message_id: 101, sent_at: NOW, failure: null });
+    expect(notes.size).toBe(0);
+    expect(sends()).toHaveLength(1);
+    await fields("noted", `deleted_at = ?2`, NOW + HOUR);
+    calls.length = 0;
+    await tend(NOW + 2 * HOUR);
+    expect(calls[0]).toMatchObject({ method: "deleteMessage", body: { message_id: 101 } });
+  });
+
+  it("keeps a note while the database still will not take it", async () => {
+    await post("noted", { score: 9, age: OLD_ENOUGH });
+    await tend(NOW, bucket(), storeFails(3));
+    await tend(NOW + HOUR, bucket(), storeFails(1));
+    expect(notes.size).toBe(1);
+    await tend(NOW + 2 * HOUR);
+    expect(notes.size).toBe(0);
+    expect(await row("noted")).toMatchObject({ message_id: 101 });
+  });
+
+  it("takes back a message it can neither store nor note, and sends the post again", async () => {
+    await post("lost", { score: 9, age: OLD_ENOUGH });
+    await tend(NOW, bucket(MB, true, { notesFail: true }), storeFails(3));
     expect(calls.map((call) => call.method)).toEqual(["sendMessage", "deleteMessage"]);
     expect(calls[1]!.body).toMatchObject({ message_id: 101 });
     expect(await row("lost")).toBeNull();
@@ -358,12 +400,29 @@ describe("when the board cannot store what it sent", () => {
   it("keeps the claim, and logs the message, when it cannot take it back either", async () => {
     await post("stuck", { score: 9, age: OLD_ENOUGH });
     answer = (call) => (call.method === "deleteMessage" ? { ok: false, error_code: 502, description: "Bad Gateway" } : sendsOk());
-    await tend(NOW, bucket(), storeFails(3));
+    await tend(NOW, bucket(MB, true, { notesFail: true }), storeFails(3));
     expect(await row("stuck")).toMatchObject({ message_id: null, failure: null });
     expect(logged.mock.calls.some((args: unknown[]) => args.includes(101))).toBe(true);
     calls.length = 0;
     await tend(NOW + HOUR);
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe("a message Telegram holds back", () => {
+  it("counts as sent though it has no ID yet, so the post never goes twice and the turn is spent", async () => {
+    await post("held", { score: 9, age: OLD_ENOUGH });
+    await post("next", { score: 5, age: OLD_ENOUGH });
+    answer = () => ({ ok: true, result: { message_id: 0 } });
+    await tend();
+    expect(sends()).toHaveLength(1);
+    expect(await row("held")).toMatchObject({ message_id: null, sent_at: NOW, failure: null });
+    answer = sendsOk;
+    await tend(NOW + HOUR);
+    expect(sends()).toHaveLength(1);
+    await tend(NOW + 6 * HOUR);
+    expect(sends()).toHaveLength(2);
+    expect(JSON.stringify(sends()[1]!.body)).toContain("Title of next");
   });
 });
 
