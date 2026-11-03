@@ -22,6 +22,7 @@ import { FRESH_START_PRICE, INTRO_PRICES, introHonoredUntil, NAME_ALLOWANCES, PL
 import {
   ArrangedInStripe,
   arrangedInStripe,
+  billedInterval,
   cancelSubscription,
   checkoutSubscription,
   createCheckout,
@@ -645,7 +646,14 @@ async function recordInvoice(invoice: StripeInvoice): Promise<void> {
     paidAt: invoice.status_transitions?.paid_at ?? now(),
   });
   if (fresh) {
-    announcePayment(env.DB, { userId: member.user_id, kind: "plan", cents: planCents, currency: invoice.currency, paidUntil: paidUntil(invoice) });
+    announcePayment(env.DB, {
+      userId: member.user_id,
+      kind: "plan",
+      cents: planCents,
+      currency: invoice.currency,
+      interval: billedInterval(invoice),
+      paidUntil: paidUntil(invoice),
+    });
   }
 }
 

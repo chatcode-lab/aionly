@@ -11,7 +11,8 @@ import {
   noticeHtml,
   redact,
 } from "../../app/lib/telegram/events.server";
-import { db, NOW, reset, user } from "./fixtures";
+import { rememberCustomer } from "../../app/lib/db/subscriptions.server";
+import { DAY, db, NOW, reset, user } from "./fixtures";
 
 const SECRET = "whsec_test_events";
 const TOKEN = "123456:secret-token-for-the-events-tests";
@@ -107,7 +108,7 @@ describe("the operator's notices", () => {
       subtotal: 7000,
       status_transitions: { paid_at: NOW },
       parent: { subscription_details: { subscription: "sub_fan" } },
-      lines: { has_more: false, data: [{ amount: 7000, parent: { type: "subscription_item_details" }, period: { start: NOW, end: Date.UTC(2027, 10, 25) / 1000 } }] },
+      lines: { has_more: false, data: [{ amount: 7000, parent: { type: "subscription_item_details" }, period: { start: NOW, end: NOW + 365 * DAY } }] },
     };
     await deliver("invoice.paid", invoice);
     await deliver("invoice.paid", invoice);
@@ -117,7 +118,7 @@ describe("the operator's notices", () => {
         'User: <a href="https://aion.ly/@paying_fan">@paying_fan</a> · <code>fan</code>',
         "Payment: $70.00 before tax",
         "Interval: yearly",
-        "Access until: Nov 25, 2027",
+        "Access until: Jan 15, 2028",
         "Count: first payment",
       ].join("\n"),
     ]);
@@ -125,6 +126,42 @@ describe("the operator's notices", () => {
     // The next is counted as such.
     await deliver("invoice.paid", { ...invoice, id: "in_2" });
     expect((await texts(2))[1]).toContain("Count: 2nd payment");
+  });
+
+  it("take the interval from the invoice, not from a subscription Stripe's events have not brought up to date (review F141)", async () => {
+    const line = (amount: number, days: number, proration = false) => ({
+      amount,
+      parent: { type: "subscription_item_details", subscription_item_details: { proration } },
+      period: { start: NOW, end: NOW + days * DAY },
+    });
+    const invoice = (id: string, customer: string, lines: unknown[]) => ({
+      id,
+      object: "invoice",
+      customer,
+      currency: "usd",
+      amount_paid: 700,
+      total_excluding_tax: 700,
+      subtotal: 700,
+      status_transitions: { paid_at: NOW },
+      parent: { subscription_details: { subscription: `sub_${id}` } },
+      lines: { has_more: false, data: lines },
+    });
+    // The first invoice, before the subscription's own event: the board knows the customer alone.
+    await user("early", "early_fan");
+    await rememberCustomer(db, { userId: "early", customerId: "cus_early", now: NOW });
+    await deliver("invoice.paid", invoice("in_early", "cus_early", [line(700, 31)]));
+    const first = (await texts(1))[0];
+    expect(first).toContain("Interval: monthly");
+    expect(first).toContain("Access until: Feb 15, 2027");
+
+    // A switch to yearly, billed before the board hears of it: the month left is credited, the year charged.
+    await user("switch", "switching_fan", { plan: "year" });
+    await db.prepare(`UPDATE subscriptions SET customer_id = 'cus_switch', interval = 'month' WHERE user_id = 'switch'`).run();
+    await deliver("invoice.paid", { ...invoice("in_switch", "cus_switch", [line(-300, 13, true), line(7000, 365)]), amount_paid: 6700, total_excluding_tax: 6700, subtotal: 6700 });
+    const second = (await texts(2))[1];
+    expect(second).toContain("Payment: $67.00 before tax");
+    expect(second).toContain("Interval: yearly");
+    expect(second).toContain("Access until: Jan 15, 2028");
   });
 
   it("tell of a fresh start once, and of each refund by what it adds", async () => {

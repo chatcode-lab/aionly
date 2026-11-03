@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   ArrangedInStripe,
   arrangedInStripe,
+  billedInterval,
   completedNameCheckouts,
   createCheckout,
   createFreshStartCheckout,
@@ -244,6 +245,25 @@ describe("the Short username package", () => {
     expect(planCentsOf({ ...base, lines: { data: [line(25000, "invoice_item_details"), line(10000, "subscription_item_details", 1000)] } })).toBe(9000);
     // Past the first page of lines, the whole less what is known not to be the plan's.
     expect(planCentsOf({ ...base, lines: { has_more: true, data: [line(25000, "invoice_item_details")] } })).toBe(10000);
+  });
+
+  it("bills a month or a year, as the period of its subscription line says, a proration's left out (review F141)", () => {
+    const base: StripeInvoice = { id: "in_1", object: "invoice", customer: "cus_1", currency: "usd", amount_paid: 1, subtotal: 1 };
+    const day = 24 * 3600;
+    const line = (days: number, type = "subscription_item_details", proration = false) => ({
+      amount: 1,
+      parent: { type, subscription_item_details: type === "subscription_item_details" ? { proration } : null },
+      period: { start: NOW, end: NOW + days * day },
+    });
+    expect(billedInterval({ ...base, lines: { data: [line(28)] } })).toBe("month");
+    expect(billedInterval({ ...base, lines: { data: [line(31)] } })).toBe("month");
+    expect(billedInterval({ ...base, lines: { data: [line(366)] } })).toBe("year");
+    // A switch to yearly: the month left is credited, the year charged.
+    expect(billedInterval({ ...base, lines: { data: [line(12, "subscription_item_details", true), line(365)] } })).toBe("year");
+    // A short username's line, a proration alone, or no lines: the invoice does not say.
+    expect(billedInterval({ ...base, lines: { data: [line(365, "invoice_item_details")] } })).toBeNull();
+    expect(billedInterval({ ...base, lines: { data: [line(29, "subscription_item_details", true)] } })).toBeNull();
+    expect(billedInterval(base)).toBeNull();
   });
 });
 

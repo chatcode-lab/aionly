@@ -186,12 +186,20 @@ const PAYMENT_TITLE: Record<PaymentKind, string> = {
 
 /**
  * A payment recorded for the first time, before tax: for the plan, its
- * interval, how far it is paid, and how many the member has made; for a
- * short username, its length.
+ * interval and how far it is paid, both as its invoice says (review F141),
+ * and how many the member has made; for a short username, its length.
  */
 export function announcePayment(
   db: D1Database,
-  payment: { userId: string; kind: PaymentKind; cents: number; currency: string; paidUntil?: number | null; length?: number },
+  payment: {
+    userId: string;
+    kind: PaymentKind;
+    cents: number;
+    currency: string;
+    interval?: "month" | "year" | null;
+    paidUntil?: number | null;
+    length?: number;
+  },
 ): void {
   announce(async () => {
     const lines: Notice["lines"] = [
@@ -200,16 +208,12 @@ export function announcePayment(
     ];
     if (payment.kind === "plan") {
       const plan = await db
-        .prepare(
-          `SELECT s.interval, s.period_end, (SELECT COUNT(*) FROM payments WHERE user_id = ?1 AND kind = 'plan') AS paid
-           FROM profiles AS p LEFT JOIN subscriptions AS s ON s.user_id = p.user_id WHERE p.user_id = ?1`,
-        )
+        .prepare(`SELECT COUNT(*) AS paid FROM payments WHERE user_id = ?1 AND kind = 'plan'`)
         .bind(payment.userId)
-        .first<{ interval: string | null; period_end: number | null; paid: number }>();
-      const until = payment.paidUntil ?? plan?.period_end;
+        .first<{ paid: number }>();
       lines.push(
-        ["Interval", plan?.interval === "year" ? "yearly" : plan?.interval === "month" ? "monthly" : null],
-        ["Access until", until ? day(until) : null],
+        ["Interval", payment.interval === "year" ? "yearly" : payment.interval === "month" ? "monthly" : null],
+        ["Access until", payment.paidUntil ? day(payment.paidUntil) : null],
         ["Count", plan?.paid ? (plan.paid === 1 ? "first payment" : `${ordinal(plan.paid)} payment`) : null],
       );
     }

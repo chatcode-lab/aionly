@@ -437,7 +437,7 @@ export interface StripeInvoice {
       /** Before tax and discounts. */
       amount: number;
       discount_amounts?: Array<{ amount: number }> | null;
-      parent?: { type?: string | null } | null;
+      parent?: { type?: string | null; subscription_item_details?: { proration?: boolean | null } | null } | null;
       /** The period it bills, for a subscription's line. */
       period?: { start?: number; end?: number } | null;
     }>;
@@ -459,6 +459,24 @@ export function planCentsOf(invoice: StripeInvoice): number {
   // Past the first page, the whole less what is known not to be the plan's.
   if (invoice.lines?.has_more) return whole - other;
   return lines.filter((line) => line.parent?.type === "subscription_item_details").reduce((sum, line) => sum + net(line), 0);
+}
+
+/**
+ * The interval a plan's invoice bills, as the invoice itself says, never the
+ * board's copy of the subscription, which Stripe's events, sent in no set
+ * order, may not have brought up to date (review F141). A webhook names a
+ * line's price by its ID alone, so it is the length of the period a
+ * subscription line bills, a proration's left out: 28 to 31 days is a month,
+ * 365 or 366 a year. Null when no line says.
+ */
+export function billedInterval(invoice: StripeInvoice): "month" | "year" | null {
+  for (const line of invoice.lines?.data ?? []) {
+    if (line.parent?.type !== "subscription_item_details" || line.parent.subscription_item_details?.proration) continue;
+    const days = ((line.period?.end ?? 0) - (line.period?.start ?? 0)) / 86_400;
+    if (days >= 27 && days <= 32) return "month";
+    if (days >= 360 && days <= 367) return "year";
+  }
+  return null;
 }
 
 /** The subscription an invoice bills, or null for a one-time invoice such as a fresh start's. */
