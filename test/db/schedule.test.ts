@@ -16,7 +16,7 @@ import {
   unscheduleAgentDraft,
   unscheduleDraft,
 } from "../../app/lib/db/drafts.server";
-import { publishPost } from "../../app/lib/db/submit.server";
+import { postingStatus, publishPost } from "../../app/lib/db/submit.server";
 import { SLOT_SECONDS } from "../../app/lib/schedule";
 import { DAY, db, NOW, post, reset, user } from "./fixtures";
 
@@ -360,6 +360,21 @@ describe("the time a draft is suggested to go out at (owner's request, 2026-11-0
     // Another member's are no matter to them: theirs, a minute old, frees up in a day.
     await post("theirs", { author: "other", age: 60 });
     expect(await suggestion("other")).toBe(NOW + 24 * HOUR);
+  });
+
+  it("reads as many of the day's posts as the author's allowance, however high an admin set it (review F142)", async () => {
+    await db.prepare(`UPDATE profiles SET limits = '{"postsPerDay":201}' WHERE user_id = 'other'`).run();
+    for (let n = 0; n <= 200; n += 1) await post(`busy${n}`, { author: "other", age: 60 + n });
+    // The oldest of the 201, 260 seconds old, frees the next a day after it was made.
+    const at = await suggestion("other");
+    expect(at).toBe(NOW + DAY);
+    const author = (await accountRecord(db, "other", NOW))!;
+    expect(await postingStatus(db, author, at! - SLOT_SECONDS)).toMatchObject({ allowed: false, reason: "wait" });
+    // Scheduled at the time offered, it goes out then.
+    const id = await draft("other");
+    expect((await schedule(id, "other", at!)).ok).toBe(true);
+    expect(await run(at!)).toBe(1);
+    expect(await draftById(db, id)).toMatchObject({ postId: expect.any(String), scheduleFailure: null });
   });
 
   function ownerSchedules(id: string, at: number) {

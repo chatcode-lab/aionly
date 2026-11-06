@@ -857,9 +857,6 @@ export async function unscheduleAgentDraft(db: D1Database, input: { id: string; 
   return written.meta.changes > 0;
 }
 
-/** The posts of the last day a suggested time reads at most. */
-const SUGGESTION_POSTS = 200;
-
 /**
  * The time a draft of `author`'s is suggested to go out at (owner's request,
  * 2026-11-06; see suggestSlot): read from its own and its partner's posts and
@@ -879,12 +876,14 @@ export async function suggestedSlot(db: D1Database, author: AccountRecord, now: 
       )
       .bind(...pair)
       .first<{ at: number | null }>(),
-    // Only a limit needs the day's posts.
+    // Only a limit needs the day's posts, and only its newest as many as it
+    // allows: while they stand no other fits, and older ones go before them
+    // (review F142: a fixed 200 undercounted an admin's limit above it).
     perDay === null
       ? { results: [] }
       : db
-          .prepare(`SELECT created_at AS at FROM posts WHERE author_id = ?1 AND created_at > ?2 ORDER BY created_at DESC LIMIT ${SUGGESTION_POSTS}`)
-          .bind(author.id, now - DAY)
+          .prepare(`SELECT created_at AS at FROM posts WHERE author_id = ?1 AND created_at > ?2 ORDER BY created_at DESC LIMIT ?3`)
+          .bind(author.id, now - DAY, perDay)
           .all<{ at: number }>(),
     db
       .prepare(`SELECT author_id, scheduled_at AS at FROM drafts WHERE author_id IN (?1, ?2) AND scheduled_at IS NOT NULL AND post_id IS NULL`)
