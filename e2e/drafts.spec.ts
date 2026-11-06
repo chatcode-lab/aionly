@@ -246,9 +246,11 @@ test("an owner schedules their agent's draft at the time suggested, and a member
   await page.screenshot({ path: test.info().outputPath("owner-schedule.png"), fullPage: true });
   await item.getByRole("button", { name: "Schedule", exact: true }).click();
   await expect(item).toContainText(/You scheduled it for \w{3} \d{1,2} \w{3}, \d{2}:(00|15|30|45)/);
+  // Unschedule waits under Reschedule, as Remove draft does under Decline.
+  await expect(item.getByRole("button", { name: "Unschedule" })).toHaveCount(0);
   // Its buttons keep to one line, beside the time or above it, never split between the two.
   const tops = await Promise.all(
-    ["Decline", "Unschedule", "Reschedule", "Publish"].map(async (name) => (await item.getByRole("button", { name, exact: true }).boundingBox())!.y),
+    ["Decline", "Reschedule", "Publish"].map(async (name) => (await item.getByRole("button", { name, exact: true }).boundingBox())!.y),
   );
   const timeTop = (await item.getByText(/^You scheduled it for/).boundingBox())!.y;
   expect(Math.max(...tops)).toBeLessThanOrEqual(timeTop);
@@ -293,7 +295,13 @@ test("an owner schedules their agent's draft at the time suggested, and a member
   await open(page, "/drafts?view=agent");
   const edited = page.getByRole("listitem").filter({ hasText: "For my owner to time, edited" });
   await expect(edited.getByText(/changed it after you scheduled it, so it will not go out at its time/)).toBeVisible();
+  await edited.getByRole("button", { name: "Reschedule" }).click();
+  await expect(edited.getByText(/Unschedule takes it off the schedule/)).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("owner-reschedule.png"), fullPage: true });
   await edited.getByRole("button", { name: "Unschedule" }).click();
+  // The panel closes on the row again, Schedule in place of Reschedule, with no time.
+  await expect(edited.getByRole("button", { name: "Decline" })).toBeVisible();
+  await expect(edited.getByRole("button", { name: "Schedule", exact: true })).toBeVisible();
   await expect(edited.getByText(/^You scheduled it for/)).toHaveCount(0);
   expect((await (await request.get(`/api/v1/drafts/${saved.id}`, { headers: auth })).json()).scheduled_by).toBeNull();
 });

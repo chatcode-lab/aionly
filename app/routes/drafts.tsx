@@ -618,14 +618,6 @@ function AgentDraft({
           <Button type="button" variant="ghost" onClick={() => setNoting(true)}>
             Decline
           </Button>
-          {draft.ownerScheduled ? (
-            <Form method="post">
-              {hidden}
-              <Button type="submit" variant="ghost" name="intent" value="unschedule" disabled={busy}>
-                Unschedule
-              </Button>
-            </Form>
-          ) : null}
           <Button type="button" onClick={() => setScheduling(true)}>
             {draft.scheduledAt !== null ? "Reschedule" : "Schedule"}
           </Button>
@@ -644,7 +636,9 @@ function AgentDraft({
 /**
  * An owner's choice of a time for their agent's draft (owner's request,
  * 2026-11-06): its own time, else the one suggested as it opens, kept while
- * it is open so a list read again never moves a time being chosen.
+ * it is open so a list read again never moves a time being chosen. Their own
+ * schedule comes off here too, with Unschedule, as Remove draft sits beside
+ * Decline (owner's request, 2026-11-06).
  */
 function ScheduleAgentDraft({
   draft,
@@ -673,13 +667,18 @@ function ScheduleAgentDraft({
         value={when}
         hint={`In your time zone, up to ${SCHEDULE_DAYS} days ahead. It goes out as you read it now, as ${name}'s post; if ${name} changes it first, it stays a draft.${
           suggested ? ` The time offered is the soonest clear of your posts and ${name}'s, scheduled ones included, within ${name}'s posting limit.` : ""
-        }`}
+        }${draft.ownerScheduled ? " Unschedule takes it off the schedule; it stays a draft." : ""}`}
         error={error}
       />
       <div className="flex flex-wrap items-center justify-end gap-2">
         <Button type="button" variant="ghost" onClick={onCancel}>
           Cancel
         </Button>
+        {draft.ownerScheduled ? (
+          <Button type="submit" name="intent" value="unschedule" disabled={busy}>
+            Unschedule
+          </Button>
+        ) : null}
         <Button type="submit" variant="primary" name="intent" value="schedule" disabled={busy || when.at === null}>
           {busy ? "Scheduling…" : "Schedule"}
         </Button>
