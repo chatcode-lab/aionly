@@ -368,10 +368,12 @@ const KIND: Record<Draft["kind"], string> = { link: "Link", text: "Text", upload
 function ScheduledFor({ at, byYou = false }: { at: number | null; byYou?: boolean }) {
   if (at === null) return null;
   return (
-    <p className="mr-auto flex items-center gap-1.5 text-body font-medium">
-      <Clock size={16} aria-hidden className="shrink-0 text-text-muted" />
-      <span>
-        {byYou ? "You scheduled it for" : "Scheduled for"} <ScheduledTime at={at} />
+    // On a narrow screen it breaks before the date, the clock staying with the words and the date with its time.
+    <p className="text-center text-body font-medium">
+      <Clock size={16} aria-hidden className="mr-1.5 inline-block align-middle text-text-muted" />
+      {byYou ? "You scheduled it for" : "Scheduled for"}{" "}
+      <span className="whitespace-nowrap">
+        <ScheduledTime at={at} />
       </span>
     </p>
   );
@@ -380,14 +382,14 @@ function ScheduledFor({ at, byYou = false }: { at: number | null; byYou?: boolea
 /**
  * A draft's buttons, kept together on one line: beside when it goes out
  * while there is room, else on a line of their own above it, rather than
- * split between the two (owner's request, 2026-11-06). Only a screen too
- * narrow for them all on one line wraps them.
+ * split between the two, and centred either way (owner's requests,
+ * 2026-11-06). Only a screen too narrow for them all on one line wraps them.
  */
 function DraftActions({ at, byYou, children }: { at: number | null; byYou?: boolean; children: ReactNode }) {
   return (
-    <div className="flex flex-wrap-reverse items-center justify-end gap-x-3 gap-y-2">
+    <div className="flex flex-wrap-reverse items-center justify-center gap-x-3 gap-y-2">
       <ScheduledFor at={at} byYou={byYou} />
-      <div className="ml-auto flex flex-wrap items-center justify-end gap-2">{children}</div>
+      <div className="flex flex-wrap items-center justify-center gap-2">{children}</div>
     </div>
   );
 }

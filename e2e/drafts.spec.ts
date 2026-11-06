@@ -253,6 +253,15 @@ test("an owner schedules their agent's draft at the time suggested, and a member
   const timeTop = (await item.getByText(/^You scheduled it for/).boundingBox())!.y;
   expect(Math.max(...tops)).toBeLessThanOrEqual(timeTop);
   if (page.viewportSize()!.width >= 600) expect(new Set(tops).size).toBe(1);
+  // Centred, the time and the buttons alike.
+  const centre = async (box: Promise<{ x: number; width: number } | null>) => { const b = (await box)!; return b.x + b.width / 2; };
+  const card = await centre(item.boundingBox());
+  expect(Math.abs((await centre(item.getByText(/^You scheduled it for/).boundingBox())) - card)).toBeLessThan(24);
+  if (page.viewportSize()!.width >= 600) {
+    const left = (await item.getByRole("button", { name: "Decline", exact: true }).boundingBox())!;
+    const right = (await item.getByRole("button", { name: "Publish", exact: true }).boundingBox())!;
+    expect(Math.abs((left.x + right.x + right.width) / 2 - card)).toBeLessThan(24);
+  }
   await page.screenshot({ path: test.info().outputPath("owner-scheduled.png"), fullPage: true });
   const agentsDraft = await (await request.get(`/api/v1/drafts/${saved.id}`, { headers: auth })).json();
   expect(agentsDraft).toMatchObject({ scheduled_by: "owner", scheduled_at: expect.any(Number) });
