@@ -1,4 +1,17 @@
+import type { Locator } from "@playwright/test";
+
 import { expect, open, setPlan, test } from "./fixtures";
+
+/**
+ * An agent's draft's other actions, in the menu beside Publish (owner's
+ * request, 2026-11-06), chosen as a keyboard does: on the 320 px phone, the
+ * test's long usernames widen the page past the screen, and the open menu's
+ * scroll lock moves it under a tap.
+ */
+async function choose(item: Locator, action: string) {
+  await item.getByRole("button", { name: "More actions" }).click();
+  await item.page().getByRole("menuitem", { name: action, exact: true }).press("Enter");
+}
 
 test("an agent drafts what it may not post, and its owner declines, publishes, and removes with notes", async ({ page, context, account, request }) => {
   await setPlan(request, account);
@@ -22,12 +35,12 @@ test("an agent drafts what it may not post, and its owner declines, publishes, a
   });
   expect((await refused.json()).error).toBe("read_only_token");
 
-  // The owner declines it with a note; the draft stays. One Decline opens the
-  // note, then the note goes with Decline or Remove draft.
+  // The owner declines it with a note; the draft stays. Decline in the menu
+  // opens the note, then the note goes with Decline or Remove draft.
   await open(page, "/drafts?view=agent");
   const item = page.getByRole("listitem").filter({ hasText: "A week with a small model" });
   await expect(item.getByRole("button", { name: /^Remove/ })).toHaveCount(0);
-  await item.getByRole("button", { name: "Decline" }).click();
+  await choose(item, "Decline");
   await expect(item.getByRole("button", { name: "Remove draft" })).toBeVisible();
   // A long address in it wraps, never widening the page (review F112).
   const note = `Say which laptop. Like https://example.org/${"long-model-file-name-".repeat(8)}gguf`;
@@ -160,7 +173,7 @@ test("an agent's drafts show as their posts will, and the account menu counts th
   await expect(guide.locator(`a[href="https://${host}/guide"][target="_blank"]`).first()).toBeVisible();
 
   // Removed from the same note form, with its note.
-  await guide.getByRole("button", { name: "Decline" }).click();
+  await choose(guide, "Decline");
   await guide.getByLabel("Your note").fill("Not for this board.");
   await guide.getByRole("button", { name: "Remove draft" }).click();
   await expect(item("A guide worth a look")).toHaveCount(0);
@@ -215,11 +228,14 @@ test("a member schedules a post from Submit and takes it off again, and an agent
   await open(page, "/drafts?view=agent");
   const queued = page.getByRole("listitem").filter({ hasText: "The agent's queued note" });
   await expect(queued).toContainText("Scheduled for");
-  // The agent's schedule comes off under Reschedule too (owner's request, 2026-11-06).
-  await queued.getByRole("button", { name: "Reschedule" }).click();
+  // The agent's schedule comes off from the menu, and under Reschedule, too (owner's request, 2026-11-06).
+  await queued.getByRole("button", { name: "More actions" }).click();
+  await expect(page.getByRole("menuitem", { name: "Unschedule" })).toBeVisible();
+  await page.keyboard.press("Escape");
+  await choose(queued, "Reschedule");
   await expect(queued.getByRole("button", { name: "Unschedule" })).toBeVisible();
   await queued.getByRole("button", { name: "Cancel" }).click();
-  await queued.getByRole("button", { name: "Decline" }).click();
+  await choose(queued, "Decline");
   await expect(queued.getByText(/and takes it off the schedule/)).toBeVisible();
   await queued.getByRole("button", { name: "Decline" }).click();
   await expect(queued.getByText(/^Declined\. /)).toBeVisible();
@@ -243,30 +259,34 @@ test("an owner schedules their agent's draft at the time suggested, and a member
   // The time offered is filled in, and scheduling keeps it.
   await open(page, "/drafts?view=agent");
   const item = page.getByRole("listitem").filter({ hasText: "For my owner to time" });
-  await item.getByRole("button", { name: "Schedule", exact: true }).click();
+  // Unscheduled, the menu offers no Unschedule.
+  await item.getByRole("button", { name: "More actions" }).click();
+  await expect(page.getByRole("menuitem", { name: "Schedule", exact: true })).toBeVisible();
+  await expect(page.getByRole("menuitem", { name: "Unschedule" })).toHaveCount(0);
+  await page.getByRole("menuitem", { name: "Schedule", exact: true }).press("Enter");
   await expect(item.getByLabel("Date")).not.toHaveValue("");
   await expect(item.getByLabel("Time")).toHaveValue(/^\d{2}:(00|15|30|45)$/);
   await expect(item.getByText(/The time offered is the soonest clear of your posts and .*'s, scheduled ones included/)).toBeVisible();
   await page.screenshot({ path: test.info().outputPath("owner-schedule.png"), fullPage: true });
   await item.getByRole("button", { name: "Schedule", exact: true }).click();
   await expect(item).toContainText(/You scheduled it for \w{3} \d{1,2} \w{3}, \d{2}:(00|15|30|45)/);
-  // Unschedule waits under Reschedule, as Remove draft does under Decline.
-  await expect(item.getByRole("button", { name: "Unschedule" })).toHaveCount(0);
-  // Its buttons keep to one line, beside the time or above it, never split between the two.
-  const tops = await Promise.all(
-    ["Decline", "Reschedule", "Publish"].map(async (name) => (await item.getByRole("button", { name, exact: true }).boundingBox())!.y),
-  );
-  const timeTop = (await item.getByText(/^You scheduled it for/).boundingBox())!.y;
-  expect(Math.max(...tops)).toBeLessThanOrEqual(timeTop);
-  if (page.viewportSize()!.width >= 600) expect(new Set(tops).size).toBe(1);
-  // Centred, the time and the buttons alike.
-  const centre = async (box: Promise<{ x: number; width: number } | null>) => { const b = (await box)!; return b.x + b.width / 2; };
-  const card = await centre(item.boundingBox());
-  expect(Math.abs((await centre(item.getByText(/^You scheduled it for/).boundingBox())) - card)).toBeLessThan(24);
+  // One button, Publish, its menu's arrow beside it: on one line with the
+  // time on a wide screen, above it on a narrow one, and centred either way.
+  await expect(item.getByRole("button", { name: /^(Decline|Reschedule|Unschedule)$/ })).toHaveCount(0);
+  const publish = (await item.getByRole("button", { name: "Publish", exact: true }).boundingBox())!;
+  const more = (await item.getByRole("button", { name: "More actions" }).boundingBox())!;
+  expect(more.y).toBe(publish.y);
+  expect(Math.abs(more.x - (publish.x + publish.width))).toBeLessThan(2);
+  const time = (await item.getByText(/^You scheduled it for/).boundingBox())!;
+  const card = (await item.boundingBox())!;
+  const middle = card.x + card.width / 2;
   if (page.viewportSize()!.width >= 600) {
-    const left = (await item.getByRole("button", { name: "Decline", exact: true }).boundingBox())!;
-    const right = (await item.getByRole("button", { name: "Publish", exact: true }).boundingBox())!;
-    expect(Math.abs((left.x + right.x + right.width) / 2 - card)).toBeLessThan(24);
+    expect(Math.abs(time.y + time.height / 2 - (publish.y + publish.height / 2))).toBeLessThan(4);
+    expect(Math.abs((time.x + more.x + more.width) / 2 - middle)).toBeLessThan(24);
+  } else {
+    expect(publish.y + publish.height).toBeLessThanOrEqual(time.y);
+    expect(Math.abs(time.x + time.width / 2 - middle)).toBeLessThan(24);
+    expect(Math.abs((publish.x + more.x + more.width) / 2 - middle)).toBeLessThan(24);
   }
   await page.screenshot({ path: test.info().outputPath("owner-scheduled.png"), fullPage: true });
   const agentsDraft = await (await request.get(`/api/v1/drafts/${saved.id}`, { headers: auth })).json();
@@ -299,13 +319,12 @@ test("an owner schedules their agent's draft at the time suggested, and a member
   await open(page, "/drafts?view=agent");
   const edited = page.getByRole("listitem").filter({ hasText: "For my owner to time, edited" });
   await expect(edited.getByText(/changed it after you scheduled it, so it will not go out at its time/)).toBeVisible();
-  await edited.getByRole("button", { name: "Reschedule" }).click();
-  await expect(edited.getByText(/Unschedule takes it off the schedule/)).toBeVisible();
-  await page.screenshot({ path: test.info().outputPath("owner-reschedule.png"), fullPage: true });
-  await edited.getByRole("button", { name: "Unschedule" }).click();
-  // The panel closes on the row again, Schedule in place of Reschedule, with no time.
-  await expect(edited.getByRole("button", { name: "Decline" })).toBeVisible();
-  await expect(edited.getByRole("button", { name: "Schedule", exact: true })).toBeVisible();
+  await edited.getByRole("button", { name: "More actions" }).click();
+  await page.screenshot({ path: test.info().outputPath("owner-menu.png"), fullPage: true });
+  await page.getByRole("menuitem", { name: "Unschedule" }).press("Enter");
   await expect(edited.getByText(/^You scheduled it for/)).toHaveCount(0);
+  await edited.getByRole("button", { name: "More actions" }).click();
+  await expect(page.getByRole("menuitem", { name: "Schedule", exact: true })).toBeVisible();
+  await page.keyboard.press("Escape");
   expect((await (await request.get(`/api/v1/drafts/${saved.id}`, { headers: auth })).json()).scheduled_by).toBeNull();
 });

@@ -1,15 +1,18 @@
 import { env } from "cloudflare:workers";
-import { Clock } from "lucide-react";
+import { CalendarClock, CalendarX, ChevronDown, Clock, MessageSquareX } from "lucide-react";
+import { DropdownMenu } from "radix-ui";
 import { type ReactNode, useState } from "react";
-import { Form, Link, redirect, useFetcher, useNavigation } from "react-router";
+import { Form, Link, redirect, useFetcher, useNavigation, useSubmit } from "react-router";
 
 import { MentionsProvider } from "~/components/mentions";
 import { PostMediaView } from "~/components/post-media";
 import { RichText } from "~/components/rich-text";
 import { ScheduleFields, useScheduleTime } from "~/components/schedule-fields";
 import { ScheduledTime } from "~/components/scheduled-time";
+import { MENU_CONTENT } from "~/components/theme-switch";
 import { Button } from "~/components/ui/button";
 import { TextArea } from "~/components/ui/field";
+import { MenuItem, MenuSeparator, useMenuFocus } from "~/components/ui/menu";
 import { EmptyState, Notice } from "~/components/ui/states";
 import { LinkTabs } from "~/components/ui/tabs";
 import type { ArticleFile } from "~/lib/article";
@@ -530,7 +533,9 @@ function MyDraft({ draft, now, outsideLinks }: { draft: DraftItem; now: number; 
 /**
  * An agent's draft as its owner reviews it: whole, to publish as the
  * agent's post, or, with Decline, to leave a note and either decline it or
- * remove it (owner's request, 2026-10-20). Never to edit.
+ * remove it (owner's request, 2026-10-20). Never to edit. Publish is the one
+ * button, the rest in its menu, so the row keeps to one line beside its time
+ * (owner's request, 2026-11-06).
  */
 function AgentDraft({
   draft,
@@ -614,21 +619,81 @@ function AgentDraft({
         />
       ) : (
         <DraftActions at={draft.scheduledAt} byYou={draft.ownerScheduled}>
-          <Button type="button" variant="ghost" onClick={() => setNoting(true)}>
-            Decline
-          </Button>
-          <Button type="button" onClick={() => setScheduling(true)}>
-            {draft.scheduledAt !== null ? "Reschedule" : "Schedule"}
-          </Button>
-          <Form method="post">
-            {hidden}
-            <Button type="submit" variant="primary" name="intent" value="publish" disabled={busy}>
-              {busy ? "Publishing…" : "Publish"}
-            </Button>
-          </Form>
+          <div className="flex">
+            <Form method="post">
+              {hidden}
+              <Button type="submit" variant="primary" name="intent" value="publish" disabled={busy} className="rounded-r-none">
+                {busy ? "Publishing…" : "Publish"}
+              </Button>
+            </Form>
+            <AgentDraftMenu
+              draft={draft}
+              busy={busy}
+              onSchedule={() => setScheduling(true)}
+              onDecline={() => setNoting(true)}
+            />
+          </div>
         </DraftActions>
       )}
     </li>
+  );
+}
+
+/**
+ * The rest of what an owner does with their agent's draft, opened from the
+ * arrow beside Publish: choose its time, take it off the schedule, or
+ * decline it, with a note, which also offers to remove it.
+ */
+function AgentDraftMenu({
+  draft,
+  busy,
+  onSchedule,
+  onDecline,
+}: {
+  draft: DraftItem;
+  busy: boolean;
+  onSchedule: () => void;
+  onDecline: () => void;
+}) {
+  const focus = useMenuFocus();
+  const submit = useSubmit();
+  const scheduled = draft.scheduledAt !== null;
+  return (
+    <DropdownMenu.Root>
+      <DropdownMenu.Trigger asChild {...focus.trigger}>
+        <Button
+          variant="primary"
+          aria-label="More actions"
+          disabled={busy}
+          className="rounded-l-none border-l border-on-accent/30 px-2"
+        >
+          <ChevronDown size={18} aria-hidden />
+        </Button>
+      </DropdownMenu.Trigger>
+      <DropdownMenu.Portal>
+        <DropdownMenu.Content {...focus.content} align="end" sideOffset={4} className={`${MENU_CONTENT} min-w-44`}>
+          <MenuItem onSelect={onSchedule}>
+            <CalendarClock size={16} aria-hidden className="text-text-muted" />
+            {scheduled ? "Reschedule" : "Schedule"}
+          </MenuItem>
+          {scheduled ? (
+            <MenuItem
+              onSelect={() =>
+                submit({ draft: draft.id, revision: String(draft.revision), intent: "unschedule" }, { method: "post" })
+              }
+            >
+              <CalendarX size={16} aria-hidden className="text-text-muted" />
+              Unschedule
+            </MenuItem>
+          ) : null}
+          <MenuSeparator />
+          <MenuItem onSelect={onDecline}>
+            <MessageSquareX size={16} aria-hidden className="text-text-muted" />
+            Decline
+          </MenuItem>
+        </DropdownMenu.Content>
+      </DropdownMenu.Portal>
+    </DropdownMenu.Root>
   );
 }
 
