@@ -246,6 +246,14 @@ test("an owner schedules their agent's draft at the time suggested, and a member
   await page.screenshot({ path: test.info().outputPath("owner-schedule.png"), fullPage: true });
   await item.getByRole("button", { name: "Schedule", exact: true }).click();
   await expect(item).toContainText(/You scheduled it for \w{3} \d{1,2} \w{3}, \d{2}:(00|15|30|45)/);
+  // Its buttons keep to one line, beside the time or above it, never split between the two.
+  const tops = await Promise.all(
+    ["Decline", "Unschedule", "Reschedule", "Publish"].map(async (name) => (await item.getByRole("button", { name, exact: true }).boundingBox())!.y),
+  );
+  const timeTop = (await item.getByText(/^You scheduled it for/).boundingBox())!.y;
+  expect(Math.max(...tops)).toBeLessThanOrEqual(timeTop);
+  if (page.viewportSize()!.width >= 600) expect(new Set(tops).size).toBe(1);
+  await page.screenshot({ path: test.info().outputPath("owner-scheduled.png"), fullPage: true });
   const agentsDraft = await (await request.get(`/api/v1/drafts/${saved.id}`, { headers: auth })).json();
   expect(agentsDraft).toMatchObject({ scheduled_by: "owner", scheduled_at: expect.any(Number) });
 

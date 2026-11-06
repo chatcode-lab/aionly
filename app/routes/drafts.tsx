@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { Clock } from "lucide-react";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { Form, Link, redirect, useFetcher, useNavigation } from "react-router";
 
 import { MentionsProvider } from "~/components/mentions";
@@ -377,6 +377,21 @@ function ScheduledFor({ at, byYou = false }: { at: number | null; byYou?: boolea
   );
 }
 
+/**
+ * A draft's buttons, kept together on one line: beside when it goes out
+ * while there is room, else on a line of their own above it, rather than
+ * split between the two (owner's request, 2026-11-06). Only a screen too
+ * narrow for them all on one line wraps them.
+ */
+function DraftActions({ at, byYou, children }: { at: number | null; byYou?: boolean; children: ReactNode }) {
+  return (
+    <div className="flex flex-wrap-reverse items-center justify-end gap-x-3 gap-y-2">
+      <ScheduledFor at={at} byYou={byYou} />
+      <div className="ml-auto flex flex-wrap items-center justify-end gap-2">{children}</div>
+    </div>
+  );
+}
+
 function DraftSummary({ draft, now, full, outsideLinks }: { draft: DraftItem; now: number; full: boolean; outsideLinks: boolean }) {
   return (
     <div className="min-w-0 space-y-2">
@@ -482,8 +497,7 @@ function MyDraft({ draft, now, outsideLinks }: { draft: DraftItem; now: number; 
   return (
     <li className="space-y-3 bleed rounded-xl border border-border bg-surface p-3 sm:p-4">
       <DraftSummary draft={draft} now={now} full={false} outsideLinks={outsideLinks} />
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <ScheduledFor at={draft.scheduledAt} />
+      <DraftActions at={draft.scheduledAt}>
         <Form method="post">
           <input type="hidden" name="draft" value={draft.id} />
           <Button type="submit" variant="ghost" name="intent" value="delete" disabled={busy}>
@@ -507,7 +521,7 @@ function MyDraft({ draft, now, outsideLinks }: { draft: DraftItem; now: number; 
         <Button asChild variant="primary">
           <Link to={`/submit?draft=${draft.id}`}>{draft.scheduledAt !== null ? "Edit or reschedule" : "Edit and publish"}</Link>
         </Button>
-      </div>
+      </DraftActions>
     </li>
   );
 }
@@ -576,8 +590,7 @@ function AgentDraft({
               draft.scheduledAt !== null ? ", and takes it off the schedule" : ""
             }; Remove draft takes it away.`}
           />
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <ScheduledFor at={draft.scheduledAt} />
+          <DraftActions at={draft.scheduledAt} byYou={draft.ownerScheduled}>
             <Button type="button" variant="ghost" onClick={() => setNoting(false)}>
               Cancel
             </Button>
@@ -587,7 +600,7 @@ function AgentDraft({
             <Button type="submit" variant="primary" name="intent" value="decline" disabled={busy}>
               Decline
             </Button>
-          </div>
+          </DraftActions>
         </Form>
       ) : scheduling ? (
         <ScheduleAgentDraft
@@ -599,8 +612,7 @@ function AgentDraft({
           onCancel={() => setScheduling(false)}
         />
       ) : (
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <ScheduledFor at={draft.scheduledAt} byYou={draft.ownerScheduled} />
+        <DraftActions at={draft.scheduledAt} byYou={draft.ownerScheduled}>
           <Button type="button" variant="ghost" onClick={() => setNoting(true)}>
             Decline
           </Button>
@@ -621,7 +633,7 @@ function AgentDraft({
               {busy ? "Publishing…" : "Publish"}
             </Button>
           </Form>
-        </div>
+        </DraftActions>
       )}
     </li>
   );
