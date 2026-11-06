@@ -1212,6 +1212,8 @@ function draftJson(draft: Draft, origin: string) {
     declined_at: draft.declinedAt,
     // When it goes out on its own, as it is then; null while it waits to be published.
     scheduled_at: draft.scheduledAt,
+    // Who scheduled it: "you", or "owner", whose schedule holds only for the revision they read, so a change keeps it from going out.
+    scheduled_by: draft.scheduledAt === null ? null : draft.scheduledRevision !== null ? "owner" : "you",
     // Why it did not go out at its time: { at, reason, message }. It stays a draft, off the schedule.
     schedule_failure: draft.scheduleFailure,
   };

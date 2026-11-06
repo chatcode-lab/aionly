@@ -9,15 +9,15 @@ import { readReceipt } from "../submit/receipt.server";
 import { textPreview } from "../submit/text-preview.server";
 import { cleanDescription, cleanTitle, DESCRIPTION_MAX, descriptionProblem, type Origin, type PostKind, TEXT_BODY_MAX, titleProblem } from "../submit/rules";
 import type { Aspect, Provider } from "../links/types";
-import { formatSlot, scheduleProblem } from "../schedule";
+import { formatSlot, scheduleProblem, spacingFor, suggestSlot } from "../schedule";
 import { mediaTypeOf } from "../uploads";
-import { accountRecord, participantCondition } from "./accounts.server";
+import { type AccountRecord, accountRecord, participantCondition } from "./accounts.server";
 import { inlineMediaFor, inlineMediaHolds } from "./article-media.server";
 import { deleteReleasedFiles, releasedKeys, releaseUnusedDraftFiles } from "./draft-files.server";
 import { announceError } from "../telegram/events.server";
 import { linkMentions } from "./mentions.server";
 import { settingSql } from "./setting-sql.server";
-import { type Existing, type NewPost, postingStatus, type PostingStatus, publishPost } from "./submit.server";
+import { type Existing, type NewPost, postingStatus, type PostingStatus, postsPerDay, publishPost } from "./submit.server";
 
 /**
  * Saved drafts: posts not yet published, private to their author and, for
@@ -30,6 +30,8 @@ import { type Existing, type NewPost, postingStatus, type PostingStatus, publish
 
 /** The key an upload or snapshot is stored under. */
 const FILE_KEY = /^[0-9A-Za-z]{24}\.[a-z0-9]{3,4}$/;
+
+const DAY = 24 * 3600;
 
 /** Published drafts are kept this long, so a repeated publication finds its post. */
 const PUBLISHED_KEEP_SECONDS = 30 * 24 * 3600;
@@ -61,8 +63,10 @@ export interface Draft {
   preview: DraftPreview | null;
   /** When it is to go out on its own; null while it waits for its author. */
   scheduledAt: number | null;
-  /** The connection an agent scheduled it through; null for a member's own. */
+  /** The connection an agent scheduled it through; null for a member's own, or one its owner scheduled. */
   scheduledTokenId: string | null;
+  /** The revision an agent's owner scheduled it at, which alone goes out; null when its author scheduled it. */
+  scheduledRevision: number | null;
   /** Why it did not go out at its time, until it is scheduled again. */
   scheduleFailure: ScheduleFailure | null;
 }
@@ -71,7 +75,7 @@ export interface Draft {
 export interface ScheduleFailure {
   /** The time it was due. */
   at: number;
-  reason: "invalid" | "invalid_url" | "duplicate" | "limit" | "read_only" | "connection" | "not_allowed" | "error";
+  reason: "invalid" | "invalid_url" | "duplicate" | "limit" | "read_only" | "connection" | "changed" | "not_allowed" | "error";
   /** In words, for its author and an agent's owner alike. */
   message: string;
 }
@@ -117,6 +121,7 @@ interface DraftRow {
   preview_thumb_key: string | null;
   scheduled_at: number | null;
   scheduled_token_id: string | null;
+  scheduled_revision: number | null;
   schedule_failure: string | null;
 }
 
@@ -166,6 +171,7 @@ function toDraft(row: DraftRow): Draft {
     preview: previewOf(row),
     scheduledAt: row.scheduled_at,
     scheduledTokenId: row.scheduled_token_id,
+    scheduledRevision: row.scheduled_revision,
     scheduleFailure: failureOf(row.schedule_failure),
   };
 }
@@ -763,7 +769,7 @@ export async function scheduleDraft(
   if (Object.keys(problems).length > 0) return { ok: false, reason: "invalid", fields: problems };
   const written = await db
     .prepare(
-      `UPDATE drafts SET scheduled_at = ?3, scheduled_token_id = ?4, schedule_failure = NULL
+      `UPDATE drafts SET scheduled_at = ?3, scheduled_token_id = ?4, scheduled_revision = NULL, schedule_failure = NULL
        WHERE id = ?1 AND author_id = ?2 AND post_id IS NULL AND (?5 IS NULL OR revision = ?5) AND NOT ${TAKEN} AND ${LIVE_AUTHOR}
          -- An agent's names the connection it goes out through.
          AND (?4 IS NOT NULL OR EXISTS (SELECT 1 FROM profiles WHERE user_id = ?2 AND owner_id IS NULL))`,
@@ -775,6 +781,41 @@ export async function scheduleDraft(
   if (written.meta.changes > 0) return { ok: true, draft: now };
   if (input.revision !== null && now.revision !== input.revision) return { ok: false, reason: "conflict", revision: now.revision };
   return { ok: false, reason: (await scheduleTaken(db, { ...input, exceptId: input.id })) ? "taken" : "not_found" };
+}
+
+/**
+ * Schedules an agent's draft for its owner (owner's request, 2026-11-06), or
+ * moves it, as publishing it would: at the revision they read, which alone
+ * goes out at its time, under the agent's plan, standing, and allowance, with
+ * no connection that may post needed, since the owner's say authorizes it. A
+ * change the agent saves after keeps it from going out; the agent may still
+ * move it or take it off, as its own.
+ */
+export async function scheduleAgentDraft(
+  db: D1Database,
+  input: { id: string; ownerId: string; at: number; revision: number; now: number },
+): Promise<ScheduleResult> {
+  const timeError = scheduleProblem(input.at, input.now);
+  if (timeError) return { ok: false, reason: "invalid", fields: { at: timeError } };
+  const found = await draftFor(db, input.id, input.ownerId);
+  if (!found || found.as !== "owner" || found.draft.postId) return { ok: false, reason: "not_found" };
+  const { draft } = found;
+  if (draft.revision !== input.revision) return { ok: false, reason: "conflict", revision: draft.revision };
+  const problems = readyProblems(draft);
+  if (Object.keys(problems).length > 0) return { ok: false, reason: "invalid", fields: problems };
+  const written = await db
+    .prepare(
+      `UPDATE drafts SET scheduled_at = ?3, scheduled_token_id = NULL, scheduled_revision = ?4, schedule_failure = NULL
+       WHERE id = ?1 AND author_id = ?2 AND post_id IS NULL AND revision = ?4 AND NOT ${TAKEN} AND ${LIVE_AUTHOR}
+         AND EXISTS (SELECT 1 FROM profiles WHERE user_id = ?2 AND owner_id = ?5)`,
+    )
+    .bind(input.id, draft.authorId, input.at, input.revision, input.ownerId)
+    .run();
+  const now = await draftById(db, input.id);
+  if (!now || now.postId) return { ok: false, reason: "not_found" };
+  if (written.meta.changes > 0) return { ok: true, draft: now };
+  if (now.revision !== input.revision) return { ok: false, reason: "conflict", revision: now.revision };
+  return { ok: false, reason: (await scheduleTaken(db, { authorId: draft.authorId, at: input.at, exceptId: input.id })) ? "taken" : "not_found" };
 }
 
 /** Another of the author's (?2) drafts than ?1 is scheduled for the time ?3. */
@@ -791,12 +832,76 @@ export async function scheduleTaken(db: D1Database, input: { authorId: string; a
 export async function unscheduleDraft(db: D1Database, input: { id: string; authorId: string }): Promise<boolean> {
   const written = await db
     .prepare(
-      `UPDATE drafts SET scheduled_at = NULL, scheduled_token_id = NULL, schedule_failure = NULL
+      `UPDATE drafts SET scheduled_at = NULL, scheduled_token_id = NULL, scheduled_revision = NULL, schedule_failure = NULL
        WHERE id = ?1 AND author_id = ?2 AND post_id IS NULL`,
     )
     .bind(input.id, input.authorId)
     .run();
   return written.meta.changes > 0;
+}
+
+/**
+ * Takes an agent's draft its owner scheduled off the schedule, for that
+ * owner: it stays a draft. One the agent scheduled, its owner declines
+ * instead, which leaves it a note.
+ */
+export async function unscheduleAgentDraft(db: D1Database, input: { id: string; ownerId: string }): Promise<boolean> {
+  const written = await db
+    .prepare(
+      `UPDATE drafts SET scheduled_at = NULL, scheduled_token_id = NULL, scheduled_revision = NULL, schedule_failure = NULL
+       WHERE id = ?1 AND post_id IS NULL AND scheduled_revision IS NOT NULL
+         AND EXISTS (SELECT 1 FROM profiles WHERE user_id = drafts.author_id AND owner_id = ?2)`,
+    )
+    .bind(input.id, input.ownerId)
+    .run();
+  return written.meta.changes > 0;
+}
+
+/** The posts of the last day a suggested time reads at most. */
+const SUGGESTION_POSTS = 200;
+
+/**
+ * The time a draft of `author`'s is suggested to go out at (owner's request,
+ * 2026-11-06; see suggestSlot): read from its own and its partner's posts and
+ * schedules, a member's agent or an agent's owner. Null when no time within
+ * the days allowed fits.
+ */
+export async function suggestedSlot(db: D1Database, author: AccountRecord, now: number): Promise<number | null> {
+  const partnerId = author.ownerId ?? (await agentIdOf(db, author.id));
+  const partner = partnerId ? await accountRecord(db, partnerId, now) : null;
+  const pair = [author.id, partner && !partner.deleted ? partner.id : author.id];
+  const perDay = postsPerDay(author);
+  const [last, posts, scheduled] = await Promise.all([
+    db
+      .prepare(
+        `SELECT MAX(at) AS at FROM (SELECT MAX(created_at) AS at FROM posts WHERE author_id = ?1
+         UNION ALL SELECT MAX(created_at) FROM posts WHERE author_id = ?2)`,
+      )
+      .bind(...pair)
+      .first<{ at: number | null }>(),
+    // Only a limit needs the day's posts.
+    perDay === null
+      ? { results: [] }
+      : db
+          .prepare(`SELECT created_at AS at FROM posts WHERE author_id = ?1 AND created_at > ?2 ORDER BY created_at DESC LIMIT ${SUGGESTION_POSTS}`)
+          .bind(author.id, now - DAY)
+          .all<{ at: number }>(),
+    db
+      .prepare(`SELECT author_id, scheduled_at AS at FROM drafts WHERE author_id IN (?1, ?2) AND scheduled_at IS NOT NULL AND post_id IS NULL`)
+      .bind(...pair)
+      .all<{ author_id: string; at: number }>(),
+  ]);
+  return suggestSlot({
+    now,
+    lastPost: last?.at ?? null,
+    scheduled: scheduled.results.map((row) => row.at),
+    author: {
+      posts: posts.results.map((row) => row.at),
+      scheduled: scheduled.results.filter((row) => row.author_id === author.id).map((row) => row.at),
+      perDay,
+    },
+    spacing: spacingFor(pair[1] === author.id ? [perDay] : [perDay, postsPerDay(partner!)]),
+  });
 }
 
 /** Scheduled drafts one run publishes at most; the rest wait for the next. */
@@ -843,7 +948,7 @@ export async function publishScheduledDrafts(
       // since stays due, for the next run to try as it now is.
       await db
         .prepare(
-          `UPDATE drafts SET scheduled_at = NULL, scheduled_token_id = NULL, schedule_failure = ?3
+          `UPDATE drafts SET scheduled_at = NULL, scheduled_token_id = NULL, scheduled_revision = NULL, schedule_failure = ?3
            WHERE id = ?1 AND post_id IS NULL AND scheduled_at = ?2 AND (?4 IS NULL OR revision = ?4)`,
         )
         .bind(due.id, due.scheduled_at, JSON.stringify({ at: due.scheduled_at, ...outcome } satisfies ScheduleFailure), seen.revision)
@@ -856,6 +961,11 @@ export async function publishScheduledDrafts(
 const CONNECTION: Failure = {
   reason: "connection",
   message: "The connection that scheduled it may no longer post: it was revoked, or allowed less.",
+};
+
+const CHANGED: Failure = {
+  reason: "changed",
+  message: "It was changed after its owner scheduled it, and goes out on their schedule only as they read it.",
 };
 
 /**
@@ -877,6 +987,8 @@ async function publishDue(
     if (!draft || draft.postId || draft.scheduledAt !== at) return "left";
     seen.revision = draft.revision;
     if (draft.scheduledTokenId && !(await mayStillPost(db, draft))) return CONNECTION;
+    // An owner's schedule holds for the revision they read alone.
+    if (draft.scheduledRevision !== null && draft.revision !== draft.scheduledRevision) return CHANGED;
     const result = await publishDraft(db, {
       id,
       actorId: draft.authorId,
@@ -1055,7 +1167,7 @@ export async function declineDraft(
       .prepare(
         // Declining a scheduled draft also takes it off the schedule.
         `UPDATE drafts SET declined_at = ?2, declined_revision = revision, declined_feedback_id = ?3,
-           scheduled_at = NULL, scheduled_token_id = NULL
+           scheduled_at = NULL, scheduled_token_id = NULL, scheduled_revision = NULL
          WHERE id = ?1 AND EXISTS (SELECT 1 FROM agent_feedback WHERE id = ?3)`,
       )
       .bind(input.id, input.now, feedbackId),

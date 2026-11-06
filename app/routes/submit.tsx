@@ -6,12 +6,12 @@ import { Form, Link, redirect, useNavigation } from "react-router";
 import { PlanPaywall } from "~/components/plan-paywall";
 import { RepliesField } from "~/components/replies-field";
 import { PostMediaView } from "~/components/post-media";
+import { ScheduleFields, useScheduleTime } from "~/components/schedule-fields";
 import { ScheduledTime } from "~/components/scheduled-time";
 import { Turnstile } from "~/components/turnstile";
 import { Button } from "~/components/ui/button";
 import { TextArea, TextField } from "~/components/ui/field";
 import { Segmented } from "~/components/ui/segmented";
-import { Select } from "~/components/ui/select";
 import { Notice } from "~/components/ui/states";
 import { type Uploaded, UploadPicker } from "~/components/upload-picker";
 import { agentOf } from "~/lib/db/agents.server";
@@ -25,6 +25,7 @@ import {
   type SaveResult,
   scheduleDraft,
   scheduleTaken,
+  suggestedSlot,
   wantsPreview,
 } from "~/lib/db/drafts.server";
 import type { DraftFields } from "~/lib/draft-rules";
@@ -69,7 +70,7 @@ import {
 import { requireAccount, requireParticipant } from "~/lib/viewer.server";
 import { privatePageMeta } from "~/lib/meta";
 import { parsePostChoice, POST_CHOICES, type PostChoice } from "~/lib/replies";
-import { firstSlot, fromLocalParts, localParts, QUARTER_HOURS, SCHEDULE_DAYS, scheduleProblem } from "~/lib/schedule";
+import { SCHEDULE_DAYS, scheduleProblem } from "~/lib/schedule";
 
 import type { Route } from "./+types/submit";
 
@@ -106,11 +107,12 @@ export async function loader({ request, context }: Route.LoaderArgs) {
   const now = Math.floor(Date.now() / 1000);
   // A saved draft of the viewer's own, picked up again from Drafts.
   const asked = new URL(request.url).searchParams.get("draft");
-  // Read at once: the draft, the posting allowance, and the agent's name.
-  const [found, status, agent] = await Promise.all([
+  // Read at once: the draft, the posting allowance, the agent's name, and the time Publish later offers.
+  const [found, status, agent, suggestedAt] = await Promise.all([
     asked && ROW_ID.test(asked) ? draftFor(env.DB, asked, viewer.id) : null,
     postingStatus(env.DB, viewer, now),
     viewer.entitled ? agentOf(env.DB, viewer.id) : null,
+    suggestedSlot(env.DB, viewer, now),
   ]);
   const draft = found && found.as === "author" && !found.draft.postId ? found.draft : null;
   const saved: SavedDraft | null = draft
@@ -172,6 +174,10 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     saved: new URL(request.url).searchParams.has("saved"),
     // Saved to be scheduled, though the time could not be kept.
     unscheduled: new URL(request.url).searchParams.has("unscheduled"),
+    // Opened from Drafts' Schedule, with Publish later chosen.
+    later: new URL(request.url).searchParams.has("later"),
+    // The soonest time clear of the member's and their agent's other posts, within the day's posts (suggestSlot).
+    suggestedAt,
     status,
     siteKey: env.TURNSTILE_SITE_KEY,
     now,
@@ -642,20 +648,14 @@ function Composer({ loaderData, actionData }: Pick<Route.ComponentProps, "loader
   const [uploading, setUploading] = useState(false);
   const [touched, setTouched] = useState(false);
   const restored = useRef(false);
-  // Publishing later, at a quarter hour in the viewer's own time zone: the
-  // fields are filled once the page runs, since only the browser knows it.
-  const [later, setLater] = useState(opened?.scheduledAt != null);
-  const [day, setDay] = useState("");
-  const [time, setTime] = useState("");
-  const [days, setDays] = useState({ min: "", max: "" });
-  useEffect(() => {
-    const now = Math.floor(Date.now() / 1000);
-    const parts = localParts(opened?.scheduledAt ?? firstSlot(now));
-    setDay(parts.date);
-    setTime(parts.time);
-    setDays({ min: localParts(now).date, max: localParts(now + SCHEDULE_DAYS * 24 * 3600).date });
-  }, [opened?.scheduledAt]);
-  const scheduledAt = later ? fromLocalParts(day, time) : null;
+  // Publishing later, at a quarter hour in the viewer's own time zone: a
+  // scheduled draft's own time, else the one suggested for it.
+  const [later, setLater] = useState(opened?.scheduledAt != null || loaderData.later);
+  // The suggestion as the page first had it: one read again later never moves a time being chosen.
+  const [suggestion] = useState(loaderData.suggestedAt);
+  const when = useScheduleTime(opened?.scheduledAt ?? suggestion);
+  const scheduledAt = later ? when.at : null;
+  const suggested = opened?.scheduledAt == null && suggestion !== null && when.at === suggestion;
   // A server answer that the agent box was ticked, before scripts ran.
   const [agentAnswered, setAgentAnswered] = useState(false);
   useEffect(() => setAgentAnswered(Boolean(result?.agentPaywall)), [result]);
@@ -1025,38 +1025,19 @@ function Composer({ loaderData, actionData }: Pick<Route.ComponentProps, "loader
               Publish later
             </label>
             {later ? (
-              <div className="space-y-1 pl-6.5">
-                <div className="flex flex-wrap gap-2">
-                  <input
-                    type="date"
-                    aria-label="Date"
-                    value={day}
-                    min={days.min}
-                    max={days.max}
-                    onChange={(event) => setDay(event.target.value)}
-                    className="h-9 rounded-lg border border-border-strong bg-surface px-2 text-body text-text"
-                  />
-                  <Select
-                    aria-label="Time"
-                    value={time}
-                    onChange={(event) => setTime(event.target.value)}
-                    className="h-9 rounded-lg border border-border-strong bg-surface pl-2 text-body text-text"
-                  >
-                    {QUARTER_HOURS.map((slot) => (
-                      <option key={slot} value={slot}>
-                        {slot}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
-                <p className="text-meta text-text-muted">
-                  In your time zone, up to {SCHEDULE_DAYS} days ahead. It goes out as it is then, and the day&apos;s posting limit still applies.
-                </p>
-                {result?.errors.schedule ? (
-                  <p role="alert" className="text-meta text-danger">
-                    {result.errors.schedule}
-                  </p>
-                ) : null}
+              <div className="pl-6.5">
+                <ScheduleFields
+                  value={when}
+                  hint={
+                    <>
+                      In your time zone, up to {SCHEDULE_DAYS} days ahead. It goes out as it is then, and the day&apos;s posting limit still applies.
+                      {suggested
+                        ? ` The time offered is the soonest clear of your posts${loaderData.agentName ? ` and ${loaderData.agentName}'s` : ""}, scheduled ones included, within your posting limit.`
+                        : null}
+                    </>
+                  }
+                  error={result?.errors.schedule}
+                />
               </div>
             ) : null}
             <input type="hidden" name="scheduled_at" value={scheduledAt ?? ""} />

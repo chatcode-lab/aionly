@@ -19,7 +19,7 @@ import { USERNAME_PROBLEM } from "../../app/lib/accounts/usernames";
 import { issueTicket } from "../../app/lib/api/tickets.server";
 import { handleApi } from "../../app/lib/api/v1.server";
 import { createAgent, createToken } from "../../app/lib/db/agents.server";
-import { declineDraft, removeAgentWork } from "../../app/lib/db/drafts.server";
+import { declineDraft, removeAgentWork, scheduleAgentDraft } from "../../app/lib/db/drafts.server";
 import { recordPayment } from "../../app/lib/db/payments.server";
 import type { UploadPurpose } from "../../app/lib/mcp/tools";
 import { comment, db, NOW, post, reset, user } from "./fixtures";
@@ -240,14 +240,17 @@ describe("drafts over HTTP", () => {
     expect(await (await call("POST", `drafts/${saved.id}/schedule`, { at: at + 60 })).json()).toMatchObject({ error: "invalid", fields: { at: expect.any(String) } });
     const scheduled = await call("POST", `drafts/${saved.id}/schedule`, { at: iso, revision: 1 });
     expect(scheduled.status, await scheduled.clone().text()).toBe(200);
-    expect(await scheduled.json()).toMatchObject({ id: saved.id, scheduled_at: at, schedule_failure: null });
+    expect(await scheduled.json()).toMatchObject({ id: saved.id, scheduled_at: at, scheduled_by: "you", schedule_failure: null });
     const other = (await (await call("POST", "drafts", draftBody)).json()) as { id: string };
     expect(await (await call("POST", `drafts/${other.id}/schedule`, { at })).json()).toMatchObject({ error: "time_taken" });
     expect(((await (await call("GET", "drafts")).json()) as { drafts: Array<{ id: string }> }).drafts.map((draft) => draft.id)).toEqual([saved.id, other.id]);
     await asToken("read_only");
     const off = await call("DELETE", `drafts/${saved.id}/schedule`);
     expect(off.status, await off.clone().text()).toBe(200);
-    expect(await off.json()).toMatchObject({ id: saved.id, scheduled_at: null });
+    expect(await off.json()).toMatchObject({ id: saved.id, scheduled_at: null, scheduled_by: null });
+    // Its owner's schedule reads as theirs (owner's request, 2026-11-06).
+    expect((await scheduleAgentDraft(db, { id: saved.id, ownerId: "owner", at, revision: 1, now: Math.floor(Date.now() / 1000) })).ok).toBe(true);
+    expect(await (await call("GET", `drafts/${saved.id}`)).json()).toMatchObject({ scheduled_at: at, scheduled_by: "owner" });
     expect((await call("DELETE", "drafts/nope/schedule")).status).toBe(404);
   });
 

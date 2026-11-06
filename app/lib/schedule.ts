@@ -41,6 +41,85 @@ export function firstSlot(now: number): number {
   return Math.ceil((now + SLOT_SECONDS) / SLOT_SECONDS) * SLOT_SECONDS;
 }
 
+/** The least a suggested time keeps from the other posts of a member and their agent. */
+export const SPACING_MIN = 3600;
+
+/**
+ * How far apart a member's and their agent's posts are suggested to go: the
+ * day shared among the posts both may make in it, so that spread out evenly
+ * they never run out; never under an hour, and an hour where either has no
+ * limit. Each gives its posts a day, or null for no limit.
+ */
+export function spacingFor(perDay: ReadonlyArray<number | null>): number {
+  if (perDay.some((each) => each === null)) return SPACING_MIN;
+  const total = perDay.reduce<number>((sum, each) => sum + each!, 0);
+  return total > 0 ? Math.max(SPACING_MIN, Math.floor(DAY / total)) : DAY;
+}
+
+/** What a draft's suggested time is chosen among: the posts and schedules of a member and their agent. */
+export interface SlotContext {
+  now: number;
+  /** When the member or their agent last published, if either has. */
+  lastPost: number | null;
+  /** When the other scheduled drafts of both go out, the author's among them. */
+  scheduled: readonly number[];
+  /** The draft's author: when it published in the last day, when its own other drafts are scheduled, and its posts a day, null for no limit. */
+  author: { posts: readonly number[]; scheduled: readonly number[]; perDay: number | null };
+  /** How far apart they go (spacingFor). */
+  spacing: number;
+}
+
+/**
+ * The time a draft is suggested to go out at (owner's request, 2026-11-06):
+ * the first quarter hour that keeps `spacing` from the last post of the
+ * member or their agent and from every post either has scheduled, which is
+ * the soonest gap between them wide enough, and that fits the author's day's
+ * posts without leaving another of its scheduled drafts without one. A gap
+ * too short, or a day used up, moves it on to the next. Null when no time
+ * within the days allowed does.
+ */
+export function suggestSlot(context: SlotContext): number | null {
+  const { now, lastPost, author, spacing } = context;
+  // One due but not yet published goes out with the next run.
+  const scheduled = context.scheduled.map((at) => Math.max(at, now));
+  const own = author.scheduled.map((at) => Math.max(at, now)).sort((a, b) => a - b);
+  const posts = [...author.posts].sort((a, b) => a - b);
+  const going = author.perDay === null ? null : goingOut(own, posts, author.perDay);
+  let at = firstSlot(now);
+  if (lastPost !== null) at = Math.max(at, Math.ceil((lastPost + spacing) / SLOT_SECONDS) * SLOT_SECONDS);
+  for (const last = now + SCHEDULE_DAYS * DAY; at <= last; at += SLOT_SECONDS) {
+    if (scheduled.some((other) => Math.abs(at - other) < spacing)) continue;
+    if (going === null) return at;
+    const index = own.findIndex((other) => other > at);
+    const withIt = goingOut(index === -1 ? [...own, at] : [...own.slice(0, index), at, ...own.slice(index)], posts, author.perDay!);
+    if (withIt.has(at) && [...going].every((other) => withIt.has(other))) return at;
+  }
+  return null;
+}
+
+/**
+ * Which of an author's scheduled times, in order, go out within its posts a
+ * day, after its posts already made, also in order: a post counts against
+ * the next for a day, and a scheduled one for a quarter hour more, as the
+ * run that publishes it may come that much after its time. One that cannot
+ * go out takes nothing from the rest.
+ */
+function goingOut(due: readonly number[], posts: readonly number[], perDay: number): Set<number> {
+  const went: number[] = [];
+  const out = new Set<number>();
+  let post = 0;
+  let sent = 0;
+  for (const at of due) {
+    while (post < posts.length && at - posts[post]! >= DAY) post += 1;
+    while (sent < went.length && at - went[sent]! >= DAY + SLOT_SECONDS) sent += 1;
+    if (posts.length - post + (went.length - sent) < perDay) {
+      went.push(at);
+      out.add(at);
+    }
+  }
+  return out;
+}
+
 const two = (value: number) => String(value).padStart(2, "0");
 
 /** Every quarter hour of a day, "00:00" to "23:45", for choosing a time. */

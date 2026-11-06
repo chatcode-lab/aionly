@@ -222,3 +222,61 @@ test("a member schedules a post from Submit and takes it off again, and an agent
   await expect(queued.getByText(/^Scheduled for/)).toHaveCount(0);
   expect((await (await request.get(`/api/v1/drafts/${saved.id}`, { headers: auth })).json()).scheduled_at).toBeNull();
 });
+
+test("an owner schedules their agent's draft at the time suggested, and a member's own Schedule opens Submit with Publish later (owner's request, 2026-11-06)", async ({ page, context, account, request }) => {
+  await setPlan(request, account);
+  await account.signIn(context);
+  await open(page, "/settings");
+  const section = page.getByRole("region", { name: "Your agent" });
+  await section.getByRole("button", { name: "Connect an agent" }).click();
+  // Read-only: the owner's say is what lets it go out.
+  await section.getByRole("button", { name: "New token" }).click();
+  const auth = { Authorization: `Bearer ${(await section.locator("code", { hasText: /^aionly_/ }).textContent())!.trim()}` };
+  const saved = await (
+    await request.post("/api/v1/drafts", { headers: auth, data: { kind: "text", title: "For my owner to time", description: "The owner picks when this goes out." } })
+  ).json();
+
+  // The time offered is filled in, and scheduling keeps it.
+  await open(page, "/drafts?view=agent");
+  const item = page.getByRole("listitem").filter({ hasText: "For my owner to time" });
+  await item.getByRole("button", { name: "Schedule", exact: true }).click();
+  await expect(item.getByLabel("Date")).not.toHaveValue("");
+  await expect(item.getByLabel("Time")).toHaveValue(/^\d{2}:(00|15|30|45)$/);
+  await expect(item.getByText(/The time offered is the soonest clear of your posts and .*'s, scheduled ones included/)).toBeVisible();
+  await page.screenshot({ path: test.info().outputPath("owner-schedule.png"), fullPage: true });
+  await item.getByRole("button", { name: "Schedule", exact: true }).click();
+  await expect(item).toContainText(/You scheduled it for \w{3} \d{1,2} \w{3}, \d{2}:(00|15|30|45)/);
+  const agentsDraft = await (await request.get(`/api/v1/drafts/${saved.id}`, { headers: auth })).json();
+  expect(agentsDraft).toMatchObject({ scheduled_by: "owner", scheduled_at: expect.any(Number) });
+
+  // The member's own Schedule opens Submit with Publish later chosen, at a time clear of the agent's.
+  await open(page, "/submit");
+  await page.getByRole("button", { name: "Text", exact: true }).click();
+  await page.getByLabel("Title").fill(`Mine to time, from ${account.username}`);
+  await page.getByRole("textbox", { name: /^(Text|Description)$/ }).fill("A draft of my own, scheduled from Drafts.");
+  await page.getByRole("button", { name: "Save draft" }).click();
+  await expect(page.getByText("Draft saved.")).toBeVisible();
+  await open(page, "/drafts");
+  await page.getByRole("listitem").filter({ hasText: "Mine to time" }).getByRole("link", { name: "Schedule" }).click();
+  await expect(page).toHaveURL(/\/submit\?draft=[^&]+&later$/);
+  await expect(page.getByLabel("Publish later")).toBeChecked();
+  await expect(page.getByLabel("Time")).toHaveValue(/^\d{2}:(00|15|30|45)$/);
+  await expect(page.getByText(/The time offered is the soonest clear of your posts and .*'s, scheduled ones included/)).toBeVisible();
+  const offered = await page.evaluate(() => {
+    const day = (document.querySelector('input[aria-label="Date"]') as HTMLInputElement).value;
+    const time = (document.querySelector('select[aria-label="Time"]') as HTMLSelectElement).value;
+    return new Date(`${day}T${time}:00`).getTime() / 1000;
+  });
+  // At 0 karma each posts once a day, so the two go at least 12 hours apart.
+  expect(Math.abs(offered - agentsDraft.scheduled_at)).toBeGreaterThanOrEqual(12 * 3600);
+  await page.screenshot({ path: test.info().outputPath("own-schedule.png"), fullPage: true });
+
+  // Changed by the agent after, it warns, and the owner takes their schedule off.
+  expect((await request.patch(`/api/v1/drafts/${saved.id}`, { headers: auth, data: { title: "For my owner to time, edited" } })).status()).toBe(200);
+  await open(page, "/drafts?view=agent");
+  const edited = page.getByRole("listitem").filter({ hasText: "For my owner to time, edited" });
+  await expect(edited.getByText(/changed it after you scheduled it, so it will not go out at its time/)).toBeVisible();
+  await edited.getByRole("button", { name: "Unschedule" }).click();
+  await expect(edited.getByText(/^You scheduled it for/)).toHaveCount(0);
+  expect((await (await request.get(`/api/v1/drafts/${saved.id}`, { headers: auth })).json()).scheduled_by).toBeNull();
+});

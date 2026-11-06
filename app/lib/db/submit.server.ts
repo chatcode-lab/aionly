@@ -31,6 +31,11 @@ function dailyLimit(account: AccountRecord): number | null {
   return set === undefined ? postsPerDayFor(Math.max(account.karma, 0)) : set;
 }
 
+/** The account's publications a rolling day, or null where none are counted: an admin's, or a limit an admin lifted. */
+export function postsPerDay(account: AccountRecord): number | null {
+  return account.role === "admin" ? null : dailyLimit(account);
+}
+
 /**
  * Whether the account may publish now, and if not, why and until when.
  * Deleted and removed posts still count: removing a post never resets the
@@ -116,7 +121,8 @@ interface PostBase {
    * files are used, and it is used up, in the same write, which refuses if
    * it changed or was published meanwhile. A scheduled publication names
    * the time it was due: it goes in only while the draft is still due then,
-   * and an agent's only while the connection that scheduled it may post.
+   * an agent's only while the connection that scheduled it may post, and one
+   * its owner scheduled only at the revision they read.
    */
   draft?: { id: string; revision: number; scheduledAt?: number };
   now: number;
@@ -234,7 +240,10 @@ export async function publishPost(db: D1Database, post: NewPost): Promise<Publis
   -- published again rather than going out without it (review F109).
   AND (?3 <> 'link' OR ?11 = '' OR ${pending(11, "post")} IS NOT NULL)
   AND (?22 IS NULL OR EXISTS (SELECT 1 FROM drafts WHERE id = ?22 AND author_id = ?2 AND revision = ?23 AND post_id IS NULL
-    AND (?25 IS NULL OR (drafts.scheduled_at = ?25 AND (drafts.scheduled_token_id IS NULL OR EXISTS (
+    AND (?25 IS NULL OR (drafts.scheduled_at = ?25
+      -- An owner's schedule holds for the revision they read alone.
+      AND (drafts.scheduled_revision IS NULL OR drafts.scheduled_revision = drafts.revision)
+      AND (drafts.scheduled_token_id IS NULL OR EXISTS (
       SELECT 1 FROM agent_tokens WHERE id = drafts.scheduled_token_id AND agent_id = ?2 AND revoked_at IS NULL AND permission = 'read_write'))))))
   -- Every picture of a gallery is the author's, a picture, and pending or the
   -- draft's, its first the post's file: all of them go in, or none.

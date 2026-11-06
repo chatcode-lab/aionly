@@ -6,6 +6,7 @@ import { Form, Link, redirect, useFetcher, useNavigation } from "react-router";
 import { MentionsProvider } from "~/components/mentions";
 import { PostMediaView } from "~/components/post-media";
 import { RichText } from "~/components/rich-text";
+import { ScheduleFields, useScheduleTime } from "~/components/schedule-fields";
 import { ScheduledTime } from "~/components/scheduled-time";
 import { Button } from "~/components/ui/button";
 import { TextArea } from "~/components/ui/field";
@@ -28,9 +29,13 @@ import {
   type PublishDraftResult,
   previewDraft,
   removeAgentDraft,
+  scheduleAgentDraft,
   type ScheduleFailure,
+  suggestedSlot,
+  unscheduleAgentDraft,
   unscheduleDraft,
 } from "~/lib/db/drafts.server";
+import { accountRecord } from "~/lib/db/accounts.server";
 import { deleteReleasedFiles } from "~/lib/db/draft-files.server";
 import { mentionHosts, mentionNames } from "~/lib/db/mentions.server";
 import { cleanExplanation, EXPLANATION_MAX } from "~/lib/draft-rules";
@@ -43,6 +48,7 @@ import { privatePageMeta } from "~/lib/meta";
 import { ROW_ID } from "~/lib/security/body";
 import { RATE_LIMITED_MESSAGE, withinLimits } from "~/lib/security/rate-limit.server";
 import type { PostMedia } from "~/lib/public-types";
+import { SCHEDULE_DAYS } from "~/lib/schedule";
 import { postPath } from "~/lib/slug";
 import { mentionIds } from "~/lib/text/mentions";
 import { requireAccount } from "~/lib/viewer.server";
@@ -80,6 +86,10 @@ interface DraftItem {
   declineNote: string | null;
   /** When it goes out on its own, if it is scheduled. */
   scheduledAt: number | null;
+  /** An agent's draft its owner scheduled, which goes out only at the revision they read. */
+  ownerScheduled: boolean;
+  /** Changed since its owner scheduled it, so it will not go out at its time. */
+  changedSinceScheduled: boolean;
   /** Why it did not go out at its time. */
   scheduleFailure: ScheduleFailure | null;
 }
@@ -151,6 +161,8 @@ function itemOf(draft: Draft, declineNote: string | null = null): DraftItem {
     declinedAt: draft.declinedAt,
     declineNote,
     scheduledAt: draft.scheduledAt,
+    ownerScheduled: draft.scheduledRevision !== null,
+    changedSinceScheduled: draft.scheduledRevision !== null && draft.scheduledRevision !== draft.revision,
     scheduleFailure: draft.scheduleFailure,
   };
 }
@@ -179,13 +191,16 @@ export async function loader({ request, context }: Route.LoaderArgs) {
       // A full page has older feedback still.
       before: feedback.length === FEEDBACK_PAGE ? feedbackCursor(feedback[feedback.length - 1]!) : null,
       outsideLinks,
+      suggestedAt: null,
       now,
     };
   }
-  const [drafts, notes, settings] = await Promise.all([
+  const [drafts, notes, settings, suggestedAt] = await Promise.all([
     draftsOf(env.DB, view === "agent" ? agentId! : viewer.id),
     view === "agent" ? declineNotes(env.DB, agentId!) : new Map<string, string>(),
     loadSettings(env.DB),
+    // The time an owner's Schedule offers for their agent's drafts; a member's own schedule from Submit.
+    view === "agent" ? agentSuggestion(agentId!, now) : null,
   ]);
   return {
     view,
@@ -196,8 +211,15 @@ export async function loader({ request, context }: Route.LoaderArgs) {
     names: {},
     before: null,
     outsideLinks,
+    suggestedAt,
     now,
   };
+}
+
+/** The soonest time clear of the agent's and its owner's other posts, within the agent's day's posts (suggestSlot). */
+async function agentSuggestion(agentId: string, now: number): Promise<number | null> {
+  const agent = await accountRecord(env.DB, agentId, now);
+  return agent && !agent.deleted ? suggestedSlot(env.DB, agent, now) : null;
 }
 
 interface ActionResult {
@@ -207,6 +229,8 @@ interface ActionResult {
   error?: string;
   /** It was declined: its note is with the agent now. */
   declined?: boolean;
+  /** The error is about the time an owner chose, shown where they choose it. */
+  schedule?: boolean;
 }
 
 /** Why an agent's draft did not publish, for its owner. */
@@ -259,8 +283,11 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
   }
 
   if (intent === "unschedule") {
-    // The author's own: it stays a draft. An owner declines an agent's instead.
-    return (await unscheduleDraft(env.DB, { id, authorId: viewer.id })) ? { draft: id } : { draft: id, error: "This draft is gone." };
+    // The author's own, or an agent's its owner scheduled: it stays a draft.
+    // One the agent scheduled, its owner declines instead.
+    const done =
+      (await unscheduleDraft(env.DB, { id, authorId: viewer.id })) || (await unscheduleAgentDraft(env.DB, { id, ownerId: viewer.id }));
+    return done ? { draft: id } : { draft: id, error: "This draft is gone." };
   }
 
   if (intent === "preview") {
@@ -298,6 +325,25 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
     if (result.ok) throw redirect(postPath({ id: result.postId, title: result.title }));
     return { draft: id, error: publishRefusal(result, now) };
   }
+  if (intent === "schedule") {
+    // An agent's draft, for its owner, as they read it: a member's own schedules from Submit.
+    const at = String(form.get("scheduled_at") ?? "");
+    if (!/^\d{1,12}$/.test(at)) return { draft: id, error: "Choose a date and a time.", schedule: true };
+    const result = await scheduleAgentDraft(env.DB, { id, ownerId: viewer.id, at: Number(at), revision, now });
+    if (result.ok) return { draft: id };
+    switch (result.reason) {
+      case "invalid":
+        return result.fields.at
+          ? { draft: id, error: result.fields.at, schedule: true }
+          : { draft: id, error: `It is not ready to publish: ${Object.values(result.fields).join(" ")}` };
+      case "taken":
+        return { draft: id, error: "Another of your agent's drafts is scheduled for that time. Choose another.", schedule: true };
+      case "conflict":
+        return changed;
+      default:
+        return gone;
+    }
+  }
   const explanation = cleanExplanation(form.get("explanation"));
   if (intent === "decline") {
     const result = await declineDraft(env.DB, { id, ownerId: viewer.id, revision, explanation, now });
@@ -319,13 +365,13 @@ const KIND: Record<Draft["kind"], string> = { link: "Link", text: "Text", upload
  * When a scheduled draft goes out, at the start of its row of buttons, where
  * it is seen with what can be done about it (owner's request, 2026-10-22).
  */
-function ScheduledFor({ at }: { at: number | null }) {
+function ScheduledFor({ at, byYou = false }: { at: number | null; byYou?: boolean }) {
   if (at === null) return null;
   return (
     <p className="mr-auto flex items-center gap-1.5 text-body font-medium">
       <Clock size={16} aria-hidden className="shrink-0 text-text-muted" />
       <span>
-        Scheduled for <ScheduledTime at={at} />
+        {byYou ? "You scheduled it for" : "Scheduled for"} <ScheduledTime at={at} />
       </span>
     </p>
   );
@@ -452,6 +498,12 @@ function MyDraft({ draft, now, outsideLinks }: { draft: DraftItem; now: number; 
             </Button>
           </Form>
         ) : null}
+        {draft.scheduledAt === null ? (
+          // Scheduled from Submit, with its check that a person sends it, at the time suggested there.
+          <Button asChild>
+            <Link to={`/submit?draft=${draft.id}&later`}>Schedule</Link>
+          </Button>
+        ) : null}
         <Button asChild variant="primary">
           <Link to={`/submit?draft=${draft.id}`}>{draft.scheduledAt !== null ? "Edit or reschedule" : "Edit and publish"}</Link>
         </Button>
@@ -471,16 +523,21 @@ function AgentDraft({
   agent,
   result,
   outsideLinks,
+  suggestedAt,
 }: {
   draft: DraftItem;
   now: number;
   agent: string | null;
   result?: ActionResult;
   outsideLinks: boolean;
+  /** The time Schedule offers when the draft has none (suggestSlot). */
+  suggestedAt: number | null;
 }) {
   const navigation = useNavigation();
   const busy = navigation.state !== "idle" && navigation.formData?.get("draft") === draft.id;
   const [noting, setNoting] = useState(false);
+  // Choosing a time for it, which a refused time leaves open to choose another.
+  const [scheduling, setScheduling] = useState(false);
   const name = agent ?? "your agent";
   const hidden = (
     <>
@@ -498,7 +555,12 @@ function AgentDraft({
           <p className="text-body whitespace-pre-line [overflow-wrap:anywhere]">{draft.declineNote}</p>
         </div>
       ) : null}
-      {result?.error ? <Notice tone="danger">{result.error}</Notice> : null}
+      {draft.changedSinceScheduled ? (
+        <Notice tone="danger">
+          {name} changed it after you scheduled it, so it will not go out at its time. Schedule it again to publish it as it is now.
+        </Notice>
+      ) : null}
+      {result?.error && !(result.schedule && scheduling) ? <Notice tone="danger">{result.error}</Notice> : null}
       {result?.declined ? (
         <Notice tone="info">Declined. The draft stays here, off any schedule, for {name} to change or publish, and {name} sees your note.</Notice>
       ) : null}
@@ -527,11 +589,31 @@ function AgentDraft({
             </Button>
           </div>
         </Form>
+      ) : scheduling ? (
+        <ScheduleAgentDraft
+          draft={draft}
+          name={name}
+          suggestedAt={suggestedAt}
+          busy={busy}
+          error={result?.schedule ? result.error : undefined}
+          onCancel={() => setScheduling(false)}
+        />
       ) : (
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <ScheduledFor at={draft.scheduledAt} />
+          <ScheduledFor at={draft.scheduledAt} byYou={draft.ownerScheduled} />
           <Button type="button" variant="ghost" onClick={() => setNoting(true)}>
             Decline
+          </Button>
+          {draft.ownerScheduled ? (
+            <Form method="post">
+              {hidden}
+              <Button type="submit" variant="ghost" name="intent" value="unschedule" disabled={busy}>
+                Unschedule
+              </Button>
+            </Form>
+          ) : null}
+          <Button type="button" onClick={() => setScheduling(true)}>
+            {draft.scheduledAt !== null ? "Reschedule" : "Schedule"}
           </Button>
           <Form method="post">
             {hidden}
@@ -542,6 +624,53 @@ function AgentDraft({
         </div>
       )}
     </li>
+  );
+}
+
+/**
+ * An owner's choice of a time for their agent's draft (owner's request,
+ * 2026-11-06): its own time, else the one suggested as it opens, kept while
+ * it is open so a list read again never moves a time being chosen.
+ */
+function ScheduleAgentDraft({
+  draft,
+  name,
+  suggestedAt,
+  busy,
+  error,
+  onCancel,
+}: {
+  draft: DraftItem;
+  name: string;
+  suggestedAt: number | null;
+  busy: boolean;
+  error?: string;
+  onCancel: () => void;
+}) {
+  const [start] = useState(draft.scheduledAt ?? suggestedAt);
+  const when = useScheduleTime(start);
+  const suggested = draft.scheduledAt === null && start !== null && when.at === start;
+  return (
+    <Form method="post" className="space-y-2">
+      <input type="hidden" name="draft" value={draft.id} />
+      <input type="hidden" name="revision" value={draft.revision} />
+      <input type="hidden" name="scheduled_at" value={when.at ?? ""} />
+      <ScheduleFields
+        value={when}
+        hint={`In your time zone, up to ${SCHEDULE_DAYS} days ahead. It goes out as you read it now, as ${name}'s post; if ${name} changes it first, it stays a draft.${
+          suggested ? ` The time offered is the soonest clear of your posts and ${name}'s, scheduled ones included, within ${name}'s posting limit.` : ""
+        }`}
+        error={error}
+      />
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <Button type="button" variant="ghost" onClick={onCancel}>
+          Cancel
+        </Button>
+        <Button type="submit" variant="primary" name="intent" value="schedule" disabled={busy || when.at === null}>
+          {busy ? "Scheduling…" : "Schedule"}
+        </Button>
+      </div>
+    </Form>
   );
 }
 
@@ -575,7 +704,7 @@ function FeedbackItem({ note, now, outsideLinks }: { note: Feedback; now: number
 
 /** The viewer's saved drafts, their agent's for review, and the feedback they left it. Private. */
 export default function Drafts({ loaderData, actionData }: Route.ComponentProps) {
-  const { view, agent, drafts, limit, feedback, names, before, outsideLinks, now } = loaderData;
+  const { view, agent, drafts, limit, feedback, names, before, outsideLinks, suggestedAt, now } = loaderData;
   const result = actionData as ActionResult | undefined;
   const tabs = [
     { label: "Mine", to: "/drafts" },
@@ -635,7 +764,7 @@ export default function Drafts({ loaderData, actionData }: Route.ComponentProps)
         <>
           <p className="text-body text-text-muted">
             {view === "agent"
-              ? `Publishing makes it ${agent}'s post. Declining leaves it with a note for ${agent}, and takes it off any schedule; only you and ${agent} see this.`
+              ? `Publishing makes it ${agent}'s post, now or at a time you schedule. Declining leaves it with a note for ${agent}, and takes it off any schedule; only you and ${agent} see this.`
               : `Only you can see your drafts, up to ${limit}. Scheduled ones go out at their time, as they are then.`}
           </p>
           <ol className="space-y-3">
@@ -649,6 +778,7 @@ export default function Drafts({ loaderData, actionData }: Route.ComponentProps)
                   agent={agent}
                   result={result?.draft === draft.id ? result : undefined}
                   outsideLinks={outsideLinks}
+                  suggestedAt={suggestedAt}
                 />
               ) : (
                 <MyDraft key={draft.id} draft={draft} now={now} outsideLinks={outsideLinks} />

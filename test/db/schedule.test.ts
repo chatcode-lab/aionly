@@ -10,7 +10,10 @@ import {
   draftsOf,
   publishScheduledDrafts,
   saveDraft,
+  scheduleAgentDraft,
   scheduleDraft,
+  suggestedSlot,
+  unscheduleAgentDraft,
   unscheduleDraft,
 } from "../../app/lib/db/drafts.server";
 import { publishPost } from "../../app/lib/db/submit.server";
@@ -257,4 +260,109 @@ describe("the run every quarter hour", () => {
     await schedule(id, agentId, SLOT, { tokenId: await token("read_write") });
     expect(await asDue(SLOT)).toMatchObject({ ok: true });
   });
+});
+
+describe("an owner scheduling their agent's draft (owner's request, 2026-11-06)", () => {
+  const ownerSchedules = (id: string, at: number, more: { ownerId?: string; revision?: number } = {}) =>
+    scheduleAgentDraft(db, { id, ownerId: more.ownerId ?? "owner", at, revision: more.revision ?? 1, now: NOW });
+
+  it("schedules it as they read it, and it goes out as the agent's post with no connection that may post", async () => {
+    const id = await draft(agentId);
+    expect(await ownerSchedules(id, SLOT)).toMatchObject({ ok: true, draft: { scheduledAt: SLOT, scheduledRevision: 1, scheduledTokenId: null } });
+    expect(await run(SLOT)).toBe(1);
+    expect(await postsBy(agentId)).toEqual([ready.title]);
+    expect(await postsBy("owner")).toEqual([]);
+  });
+
+  it("is for the agent's owner alone, at the revision read, a draft ready, and a time free", async () => {
+    const id = await draft(agentId);
+    expect(await ownerSchedules(id, SLOT, { ownerId: "other" })).toEqual({ ok: false, reason: "not_found" });
+    // A member's own schedules from Submit, with its human check.
+    expect(await ownerSchedules(await draft("owner"), SLOT)).toEqual({ ok: false, reason: "not_found" });
+    expect(await ownerSchedules(id, SLOT, { revision: 2 })).toEqual({ ok: false, reason: "conflict", revision: 1 });
+    expect(await ownerSchedules(id, NOW + 60)).toMatchObject({ ok: false, reason: "invalid", fields: { at: expect.any(String) } });
+    const unfinished = await draft(agentId, { title: "No" });
+    expect(await ownerSchedules(unfinished, SLOT)).toMatchObject({ ok: false, reason: "invalid", fields: { title: expect.any(String) } });
+    await schedule(await draft(agentId), agentId, SLOT, { tokenId: await token("read_write") });
+    expect(await ownerSchedules(id, SLOT)).toEqual({ ok: false, reason: "taken" });
+    expect((await ownerSchedules(id, SLOT + SLOT_SECONDS)).ok).toBe(true);
+  });
+
+  it("holds only for the revision they read: changed after, it stays a draft, saying why", async () => {
+    const id = await draft(agentId);
+    await ownerSchedules(id, SLOT);
+    expect((await saveDraft(db, { authorId: agentId, id, fields: { ...ready, title: "Changed after" }, now: NOW })).ok).toBe(true);
+    expect(await draftById(db, id)).toMatchObject({ revision: 2, scheduledAt: SLOT, scheduledRevision: 1 });
+    expect(await run(SLOT)).toBe(0);
+    expect(await postsBy(agentId)).toEqual([]);
+    expect(await draftById(db, id)).toMatchObject({
+      postId: null,
+      scheduledAt: null,
+      scheduledRevision: null,
+      scheduleFailure: { at: SLOT, reason: "changed", message: expect.stringContaining("after its owner scheduled it") },
+    });
+    // Scheduled again as it now is, it goes.
+    expect((await ownerSchedules(id, SLOT + SLOT_SECONDS, { revision: 2 })).ok).toBe(true);
+    expect(await run(SLOT + SLOT_SECONDS)).toBe(1);
+    expect(await postsBy(agentId)).toEqual(["Changed after"]);
+  });
+
+  it("writes no post for a revision other than the one they read, even one the run read as due", async () => {
+    const id = await draft(agentId);
+    await ownerSchedules(id, SLOT);
+    await saveDraft(db, { authorId: agentId, id, fields: { ...ready, title: "Changed after" }, now: NOW });
+    const author = (await accountRecord(db, agentId, SLOT))!;
+    const asDue = (revision: number) =>
+      publishPost(db, { kind: "text", id: `p${revision}`, author, origin: "made", title: ready.title, description: ready.description, draft: { id, revision, scheduledAt: SLOT }, now: SLOT });
+    expect(await asDue(2)).toEqual({ ok: false, reason: "not_allowed" });
+    expect(await asDue(1)).toEqual({ ok: false, reason: "not_allowed" });
+    expect(await postsBy(agentId)).toEqual([]);
+  });
+
+  it("gives way to the agent's own schedule, and comes off for the owner only while it is theirs", async () => {
+    const id = await draft(agentId);
+    await ownerSchedules(id, SLOT);
+    expect(await unscheduleAgentDraft(db, { id, ownerId: "other" })).toBe(false);
+    expect(await unscheduleAgentDraft(db, { id, ownerId: "owner" })).toBe(true);
+    expect(await draftById(db, id)).toMatchObject({ scheduledAt: null, scheduledRevision: null });
+
+    // The agent moves it: its own now, edits going out with it, and its owner declines it to take it off.
+    await ownerSchedules(id, SLOT);
+    expect(await schedule(id, agentId, SLOT + SLOT_SECONDS, { tokenId: await token("read_write") })).toMatchObject({
+      ok: true,
+      draft: { scheduledAt: SLOT + SLOT_SECONDS, scheduledRevision: null },
+    });
+    expect(await unscheduleAgentDraft(db, { id, ownerId: "owner" })).toBe(false);
+    expect(await draftById(db, id)).toMatchObject({ scheduledAt: SLOT + SLOT_SECONDS });
+
+    // Declined, an owner's own schedule goes too.
+    await ownerSchedules(id, SLOT);
+    expect(await declineDraft(db, { id, ownerId: "owner", revision: 1, explanation: null, now: NOW })).toEqual({ ok: true });
+    expect(await draftById(db, id)).toMatchObject({ scheduledAt: null, scheduledRevision: null });
+  });
+});
+
+describe("the time a draft is suggested to go out at (owner's request, 2026-11-06)", () => {
+  const HOUR = 3600;
+  const suggestion = async (authorId: string) => suggestedSlot(db, (await accountRecord(db, authorId, NOW))!, NOW);
+
+  it("keeps the member's and the agent's posts apart, each within its own day's posts", async () => {
+    // Nothing yet: the first quarter hour a form offers.
+    expect(await suggestion("owner")).toBe(NOW + SLOT_SECONDS);
+    // At 0 karma each posts once a day, so the two keep 12 hours apart.
+    await post("made", { author: "owner", age: HOUR });
+    const id = await draft(agentId);
+    expect((await ownerSchedules(id, NOW + 30 * HOUR)).ok).toBe(true);
+    // The owner's next is a day after their post, and 12 hours from the agent's.
+    expect(await suggestion("owner")).toBe(NOW + 42 * HOUR);
+    // The agent's keeps 12 hours from its owner's post, and a day and a quarter hour from its own.
+    expect(await suggestion(agentId)).toBe(NOW + 54 * HOUR + SLOT_SECONDS);
+    // Another member's are no matter to them: theirs, a minute old, frees up in a day.
+    await post("theirs", { author: "other", age: 60 });
+    expect(await suggestion("other")).toBe(NOW + 24 * HOUR);
+  });
+
+  function ownerSchedules(id: string, at: number) {
+    return scheduleAgentDraft(db, { id, ownerId: "owner", at, revision: 1, now: NOW });
+  }
 });
