@@ -485,7 +485,7 @@ export const TOOLS: ReadonlyArray<Tool<ToolContext>> = [
     title: "Schedule a draft",
     description: [
       "Schedules one of this agent's drafts to be published on its own at a time, or moves it to another: a quarter hour (:00, :15, :30, :45) within the next 30 days, one draft to a time. Like publish_draft, this connection needs access read_write, and the draft goes out only while it still has it.",
-      "It goes out as it is then, edits included, with every check a new post gets. If it cannot, its day's posts used up among the reasons, it stays a draft, off the schedule, and list_drafts shows schedule_failure. The owner can publish it sooner, or decline it, which takes it off the schedule. The owner can also schedule a draft themselves (scheduled_by \"owner\"): it then goes out only as they read it, so changing it keeps it from going out. Pass revision to schedule only the version you read.",
+      "It goes out as it is then, edits included, with every check a new post gets. If it cannot, its day's posts used up among the reasons, it stays a draft, off the schedule, and list_drafts shows schedule_failure. The owner can publish it sooner, take it off the schedule, or decline it, which also does. The owner can also schedule a draft themselves (scheduled_by \"owner\"): it then goes out only as they read it, so changing it keeps it from going out. Pass revision to schedule only the version you read.",
     ].join(" "),
     inputSchema: object(
       {

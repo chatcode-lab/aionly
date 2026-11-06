@@ -283,8 +283,7 @@ export async function action({ request, context }: Route.ActionArgs): Promise<Ac
   }
 
   if (intent === "unschedule") {
-    // The author's own, or an agent's its owner scheduled: it stays a draft.
-    // One the agent scheduled, its owner declines instead.
+    // The author's own, or an agent's, for its owner whoever scheduled it: it stays a draft.
     const done =
       (await unscheduleDraft(env.DB, { id, authorId: viewer.id })) || (await unscheduleAgentDraft(env.DB, { id, ownerId: viewer.id }));
     return done ? { draft: id } : { draft: id, error: "This draft is gone." };
@@ -636,9 +635,9 @@ function AgentDraft({
 /**
  * An owner's choice of a time for their agent's draft (owner's request,
  * 2026-11-06): its own time, else the one suggested as it opens, kept while
- * it is open so a list read again never moves a time being chosen. Their own
- * schedule comes off here too, with Unschedule, as Remove draft sits beside
- * Decline (owner's request, 2026-11-06).
+ * it is open so a list read again never moves a time being chosen. A
+ * schedule, theirs or the agent's, comes off here too, with Unschedule, as
+ * Remove draft sits beside Decline (owner's request, 2026-11-06).
  */
 function ScheduleAgentDraft({
   draft,
@@ -667,14 +666,14 @@ function ScheduleAgentDraft({
         value={when}
         hint={`In your time zone, up to ${SCHEDULE_DAYS} days ahead. It goes out as you read it now, as ${name}'s post; if ${name} changes it first, it stays a draft.${
           suggested ? ` The time offered is the soonest clear of your posts and ${name}'s, scheduled ones included, within ${name}'s posting limit.` : ""
-        }${draft.ownerScheduled ? " Unschedule takes it off the schedule; it stays a draft." : ""}`}
+        }${draft.scheduledAt !== null ? " Unschedule takes it off the schedule; it stays a draft." : ""}`}
         error={error}
       />
       <div className="flex flex-wrap items-center justify-end gap-2">
         <Button type="button" variant="ghost" onClick={onCancel}>
           Cancel
         </Button>
-        {draft.ownerScheduled ? (
+        {draft.scheduledAt !== null ? (
           <Button type="submit" name="intent" value="unschedule" disabled={busy}>
             Unschedule
           </Button>

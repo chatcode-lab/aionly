@@ -841,15 +841,15 @@ export async function unscheduleDraft(db: D1Database, input: { id: string; autho
 }
 
 /**
- * Takes an agent's draft its owner scheduled off the schedule, for that
- * owner: it stays a draft. One the agent scheduled, its owner declines
- * instead, which leaves it a note.
+ * Takes an agent's draft off the schedule, for its owner, whoever scheduled
+ * it (owner's request, 2026-11-06): it stays a draft, with no note, as
+ * declining would leave.
  */
 export async function unscheduleAgentDraft(db: D1Database, input: { id: string; ownerId: string }): Promise<boolean> {
   const written = await db
     .prepare(
       `UPDATE drafts SET scheduled_at = NULL, scheduled_token_id = NULL, scheduled_revision = NULL, schedule_failure = NULL
-       WHERE id = ?1 AND post_id IS NULL AND scheduled_revision IS NOT NULL
+       WHERE id = ?1 AND post_id IS NULL
          AND EXISTS (SELECT 1 FROM profiles WHERE user_id = drafts.author_id AND owner_id = ?2)`,
     )
     .bind(input.id, input.ownerId)

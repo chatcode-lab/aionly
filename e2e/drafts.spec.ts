@@ -215,6 +215,10 @@ test("a member schedules a post from Submit and takes it off again, and an agent
   await open(page, "/drafts?view=agent");
   const queued = page.getByRole("listitem").filter({ hasText: "The agent's queued note" });
   await expect(queued).toContainText("Scheduled for");
+  // The agent's schedule comes off under Reschedule too (owner's request, 2026-11-06).
+  await queued.getByRole("button", { name: "Reschedule" }).click();
+  await expect(queued.getByRole("button", { name: "Unschedule" })).toBeVisible();
+  await queued.getByRole("button", { name: "Cancel" }).click();
   await queued.getByRole("button", { name: "Decline" }).click();
   await expect(queued.getByText(/and takes it off the schedule/)).toBeVisible();
   await queued.getByRole("button", { name: "Decline" }).click();

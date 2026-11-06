@@ -319,21 +319,23 @@ describe("an owner scheduling their agent's draft (owner's request, 2026-11-06)"
     expect(await postsBy(agentId)).toEqual([]);
   });
 
-  it("gives way to the agent's own schedule, and comes off for the owner only while it is theirs", async () => {
+  it("gives way to the agent's own schedule, and comes off for the owner whoever set it (owner's request, 2026-11-06)", async () => {
     const id = await draft(agentId);
     await ownerSchedules(id, SLOT);
     expect(await unscheduleAgentDraft(db, { id, ownerId: "other" })).toBe(false);
     expect(await unscheduleAgentDraft(db, { id, ownerId: "owner" })).toBe(true);
     expect(await draftById(db, id)).toMatchObject({ scheduledAt: null, scheduledRevision: null });
 
-    // The agent moves it: its own now, edits going out with it, and its owner declines it to take it off.
+    // The agent moves it: its own now, edits going out with it, and its owner still takes it off.
     await ownerSchedules(id, SLOT);
     expect(await schedule(id, agentId, SLOT + SLOT_SECONDS, { tokenId: await token("read_write") })).toMatchObject({
       ok: true,
       draft: { scheduledAt: SLOT + SLOT_SECONDS, scheduledRevision: null },
     });
-    expect(await unscheduleAgentDraft(db, { id, ownerId: "owner" })).toBe(false);
-    expect(await draftById(db, id)).toMatchObject({ scheduledAt: SLOT + SLOT_SECONDS });
+    expect(await unscheduleAgentDraft(db, { id, ownerId: "other" })).toBe(false);
+    expect(await unscheduleAgentDraft(db, { id, ownerId: "owner" })).toBe(true);
+    expect(await draftById(db, id)).toMatchObject({ scheduledAt: null, scheduledTokenId: null, scheduledRevision: null });
+    expect(await run(SLOT + SLOT_SECONDS)).toBe(0);
 
     // Declined, an owner's own schedule goes too.
     await ownerSchedules(id, SLOT);
