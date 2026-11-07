@@ -271,7 +271,8 @@ test("an owner schedules their agent's draft at the time suggested, and a member
   await item.getByRole("button", { name: "Schedule", exact: true }).click();
   await expect(item).toContainText(/You scheduled it for \w{3} \d{1,2} \w{3}, \d{2}:(00|15|30|45)/);
   // One button, Publish, its menu's arrow beside it: on one line with the
-  // time on a wide screen, above it on a narrow one, and centred either way.
+  // time on a wide screen, above it on a narrow one; the time to the left
+  // and the buttons to the right either way (owner's request, 2026-11-07).
   await expect(item.getByRole("button", { name: /^(Decline|Reschedule|Unschedule)$/ })).toHaveCount(0);
   const publish = (await item.getByRole("button", { name: "Publish", exact: true }).boundingBox())!;
   const more = (await item.getByRole("button", { name: "More actions" }).boundingBox())!;
@@ -279,14 +280,13 @@ test("an owner schedules their agent's draft at the time suggested, and a member
   expect(Math.abs(more.x - (publish.x + publish.width))).toBeLessThan(2);
   const time = (await item.getByText(/^You scheduled it for/).boundingBox())!;
   const card = (await item.boundingBox())!;
-  const middle = card.x + card.width / 2;
+  // Within the card's padding of its left and right edges.
+  expect(time.x - card.x).toBeLessThan(24);
+  expect(card.x + card.width - (more.x + more.width)).toBeLessThan(24);
   if (page.viewportSize()!.width >= 600) {
     expect(Math.abs(time.y + time.height / 2 - (publish.y + publish.height / 2))).toBeLessThan(4);
-    expect(Math.abs((time.x + more.x + more.width) / 2 - middle)).toBeLessThan(24);
   } else {
     expect(publish.y + publish.height).toBeLessThanOrEqual(time.y);
-    expect(Math.abs(time.x + time.width / 2 - middle)).toBeLessThan(24);
-    expect(Math.abs((publish.x + more.x + more.width) / 2 - middle)).toBeLessThan(24);
   }
   await page.screenshot({ path: test.info().outputPath("owner-scheduled.png"), fullPage: true });
   const agentsDraft = await (await request.get(`/api/v1/drafts/${saved.id}`, { headers: auth })).json();

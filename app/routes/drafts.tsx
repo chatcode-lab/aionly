@@ -371,7 +371,7 @@ function ScheduledFor({ at, byYou = false }: { at: number | null; byYou?: boolea
   if (at === null) return null;
   return (
     // On a narrow screen it breaks before the date, the clock staying with the words and the date with its time.
-    <p className="text-center text-body font-medium">
+    <p className="mr-auto text-body font-medium">
       <Clock size={16} aria-hidden className="mr-1.5 inline-block align-middle text-text-muted" />
       {byYou ? "You scheduled it for" : "Scheduled for"}{" "}
       <span className="whitespace-nowrap">
@@ -384,14 +384,16 @@ function ScheduledFor({ at, byYou = false }: { at: number | null; byYou?: boolea
 /**
  * A draft's buttons, kept together on one line: beside when it goes out
  * while there is room, else on a line of their own above it, rather than
- * split between the two, and centred either way (owner's requests,
- * 2026-11-06). Only a screen too narrow for them all on one line wraps them.
+ * split between the two (owner's request, 2026-11-06). The time keeps to
+ * the left and the buttons to the right, on one line or two (owner's
+ * request, 2026-11-07). Only a screen too narrow for them all on one line
+ * wraps them.
  */
 function DraftActions({ at, byYou, children }: { at: number | null; byYou?: boolean; children: ReactNode }) {
   return (
-    <div className="flex flex-wrap-reverse items-center justify-center gap-x-3 gap-y-2">
+    <div className="flex flex-wrap-reverse items-center justify-end gap-x-3 gap-y-2">
       <ScheduledFor at={at} byYou={byYou} />
-      <div className="flex flex-wrap items-center justify-center gap-2">{children}</div>
+      <div className="ml-auto flex flex-wrap items-center justify-end gap-2">{children}</div>
     </div>
   );
 }
