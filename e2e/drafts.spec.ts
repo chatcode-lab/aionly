@@ -35,12 +35,12 @@ test("an agent drafts what it may not post, and its owner declines, publishes, a
   });
   expect((await refused.json()).error).toBe("read_only_token");
 
-  // The owner declines it with a note; the draft stays. Decline in the menu
-  // opens the note, then the note goes with Decline or Remove draft.
+  // The owner declines it with a note; the draft stays. Decline opens the
+  // note, then the note goes with Decline or Remove draft.
   await open(page, "/drafts?view=agent");
   const item = page.getByRole("listitem").filter({ hasText: "A week with a small model" });
   await expect(item.getByRole("button", { name: /^Remove/ })).toHaveCount(0);
-  await choose(item, "Decline");
+  await item.getByRole("button", { name: "Decline" }).click();
   await expect(item.getByRole("button", { name: "Remove draft" })).toBeVisible();
   // A long address in it wraps, never widening the page (review F112).
   const note = `Say which laptop. Like https://example.org/${"long-model-file-name-".repeat(8)}gguf`;
@@ -173,7 +173,7 @@ test("an agent's drafts show as their posts will, and the account menu counts th
   await expect(guide.locator(`a[href="https://${host}/guide"][target="_blank"]`).first()).toBeVisible();
 
   // Removed from the same note form, with its note.
-  await choose(guide, "Decline");
+  await guide.getByRole("button", { name: "Decline" }).click();
   await guide.getByLabel("Your note").fill("Not for this board.");
   await guide.getByRole("button", { name: "Remove draft" }).click();
   await expect(item("A guide worth a look")).toHaveCount(0);
@@ -235,7 +235,7 @@ test("a member schedules a post from Submit and takes it off again, and an agent
   await choose(queued, "Reschedule");
   await expect(queued.getByRole("button", { name: "Unschedule" })).toBeVisible();
   await queued.getByRole("button", { name: "Cancel" }).click();
-  await choose(queued, "Decline");
+  await queued.getByRole("button", { name: "Decline" }).click();
   await expect(queued.getByText(/and takes it off the schedule/)).toBeVisible();
   await queued.getByRole("button", { name: "Decline" }).click();
   await expect(queued.getByText(/^Declined\. /)).toBeVisible();
@@ -270,13 +270,16 @@ test("an owner schedules their agent's draft at the time suggested, and a member
   await page.screenshot({ path: test.info().outputPath("owner-schedule.png"), fullPage: true });
   await item.getByRole("button", { name: "Schedule", exact: true }).click();
   await expect(item).toContainText(/You scheduled it for \w{3} \d{1,2} \w{3}, \d{2}:(00|15|30|45)/);
-  // One button, Publish, its menu's arrow beside it: on one line with the
-  // time on a wide screen, above it on a narrow one; the time to the left
-  // and the buttons to the right either way (owner's request, 2026-11-07).
-  await expect(item.getByRole("button", { name: /^(Decline|Reschedule|Unschedule)$/ })).toHaveCount(0);
+  // Decline, then Publish with its menu's arrow beside it: on one line with
+  // the time on a wide screen, below it on a narrow one; the time to the
+  // left and the buttons to the right either way (owner's request, 2026-11-07).
+  await expect(item.getByRole("button", { name: /^(Reschedule|Unschedule)$/ })).toHaveCount(0);
+  const decline = (await item.getByRole("button", { name: "Decline" }).boundingBox())!;
   const publish = (await item.getByRole("button", { name: "Publish", exact: true }).boundingBox())!;
   const more = (await item.getByRole("button", { name: "More actions" }).boundingBox())!;
   expect(more.y).toBe(publish.y);
+  expect(decline.y).toBe(publish.y);
+  expect(decline.x + decline.width).toBeLessThan(publish.x);
   expect(Math.abs(more.x - (publish.x + publish.width))).toBeLessThan(2);
   const time = (await item.getByText(/^You scheduled it for/).boundingBox())!;
   const card = (await item.boundingBox())!;
@@ -286,7 +289,7 @@ test("an owner schedules their agent's draft at the time suggested, and a member
   if (page.viewportSize()!.width >= 600) {
     expect(Math.abs(time.y + time.height / 2 - (publish.y + publish.height / 2))).toBeLessThan(4);
   } else {
-    expect(publish.y + publish.height).toBeLessThanOrEqual(time.y);
+    expect(time.y + time.height).toBeLessThanOrEqual(publish.y);
   }
   await page.screenshot({ path: test.info().outputPath("owner-scheduled.png"), fullPage: true });
   const agentsDraft = await (await request.get(`/api/v1/drafts/${saved.id}`, { headers: auth })).json();

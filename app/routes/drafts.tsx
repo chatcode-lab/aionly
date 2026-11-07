@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { CalendarClock, CalendarX, ChevronDown, Clock, MessageSquareX } from "lucide-react";
+import { CalendarClock, CalendarX, ChevronDown, Clock } from "lucide-react";
 import { DropdownMenu } from "radix-ui";
 import { type ReactNode, useState } from "react";
 import { Form, Link, redirect, useFetcher, useNavigation, useSubmit } from "react-router";
@@ -12,7 +12,7 @@ import { ScheduledTime } from "~/components/scheduled-time";
 import { MENU_CONTENT } from "~/components/theme-switch";
 import { Button } from "~/components/ui/button";
 import { TextArea } from "~/components/ui/field";
-import { MenuItem, MenuSeparator, useMenuFocus } from "~/components/ui/menu";
+import { MenuItem, useMenuFocus } from "~/components/ui/menu";
 import { EmptyState, Notice } from "~/components/ui/states";
 import { LinkTabs } from "~/components/ui/tabs";
 import type { ArticleFile } from "~/lib/article";
@@ -383,15 +383,15 @@ function ScheduledFor({ at, byYou = false }: { at: number | null; byYou?: boolea
 
 /**
  * A draft's buttons, kept together on one line: beside when it goes out
- * while there is room, else on a line of their own above it, rather than
+ * while there is room, else on a line of their own below it, rather than
  * split between the two (owner's request, 2026-11-06). The time keeps to
- * the left and the buttons to the right, on one line or two (owner's
- * request, 2026-11-07). Only a screen too narrow for them all on one line
- * wraps them.
+ * the left and the buttons to the right, on one line or two, the time read
+ * first (owner's request, 2026-11-07). Only a screen too narrow for them all
+ * on one line wraps them.
  */
 function DraftActions({ at, byYou, children }: { at: number | null; byYou?: boolean; children: ReactNode }) {
   return (
-    <div className="flex flex-wrap-reverse items-center justify-end gap-x-3 gap-y-2">
+    <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-2">
       <ScheduledFor at={at} byYou={byYou} />
       <div className="ml-auto flex flex-wrap items-center justify-end gap-2">{children}</div>
     </div>
@@ -535,9 +535,10 @@ function MyDraft({ draft, now, outsideLinks }: { draft: DraftItem; now: number; 
 /**
  * An agent's draft as its owner reviews it: whole, to publish as the
  * agent's post, or, with Decline, to leave a note and either decline it or
- * remove it (owner's request, 2026-10-20). Never to edit. Publish is the one
- * button, the rest in its menu, so the row keeps to one line beside its time
- * (owner's request, 2026-11-06).
+ * remove it (owner's request, 2026-10-20). Never to edit. Decline and
+ * Publish are its buttons, choosing its time in Publish's menu, so the row
+ * keeps to one line beside its time (owner's request, 2026-11-06 and
+ * 2026-11-07).
  */
 function AgentDraft({
   draft,
@@ -621,6 +622,9 @@ function AgentDraft({
         />
       ) : (
         <DraftActions at={draft.scheduledAt} byYou={draft.ownerScheduled}>
+          <Button type="button" variant="ghost" onClick={() => setNoting(true)}>
+            Decline
+          </Button>
           <div className="flex">
             <Form method="post">
               {hidden}
@@ -628,12 +632,7 @@ function AgentDraft({
                 {busy ? "Publishing…" : "Publish"}
               </Button>
             </Form>
-            <AgentDraftMenu
-              draft={draft}
-              busy={busy}
-              onSchedule={() => setScheduling(true)}
-              onDecline={() => setNoting(true)}
-            />
+            <AgentDraftMenu draft={draft} busy={busy} onSchedule={() => setScheduling(true)} />
           </div>
         </DraftActions>
       )}
@@ -642,21 +641,10 @@ function AgentDraft({
 }
 
 /**
- * The rest of what an owner does with their agent's draft, opened from the
- * arrow beside Publish: choose its time, take it off the schedule, or
- * decline it, with a note, which also offers to remove it.
+ * When an owner's agent's draft goes out, opened from the arrow beside
+ * Publish: choose its time, or take it off the schedule.
  */
-function AgentDraftMenu({
-  draft,
-  busy,
-  onSchedule,
-  onDecline,
-}: {
-  draft: DraftItem;
-  busy: boolean;
-  onSchedule: () => void;
-  onDecline: () => void;
-}) {
+function AgentDraftMenu({ draft, busy, onSchedule }: { draft: DraftItem; busy: boolean; onSchedule: () => void }) {
   const focus = useMenuFocus();
   const submit = useSubmit();
   const scheduled = draft.scheduledAt !== null;
@@ -688,11 +676,6 @@ function AgentDraftMenu({
               Unschedule
             </MenuItem>
           ) : null}
-          <MenuSeparator />
-          <MenuItem onSelect={onDecline}>
-            <MessageSquareX size={16} aria-hidden className="text-text-muted" />
-            Decline
-          </MenuItem>
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
