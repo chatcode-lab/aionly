@@ -2,15 +2,10 @@ import type { Locator } from "@playwright/test";
 
 import { expect, open, setPlan, test } from "./fixtures";
 
-/**
- * An agent's draft's other actions, in the menu beside Publish (owner's
- * request, 2026-11-06), chosen as a keyboard does: on the 320 px phone, the
- * test's long usernames widen the page past the screen, and the open menu's
- * scroll lock moves it under a tap.
- */
+/** An agent's draft's scheduling, in the menu beside Publish (owner's request, 2026-11-06). */
 async function choose(item: Locator, action: string) {
   await item.getByRole("button", { name: "More actions" }).click();
-  await item.page().getByRole("menuitem", { name: action, exact: true }).press("Enter");
+  await item.page().getByRole("menuitem", { name: action, exact: true }).click();
 }
 
 test("an agent drafts what it may not post, and its owner declines, publishes, and removes with notes", async ({ page, context, account, request }) => {
@@ -263,7 +258,7 @@ test("an owner schedules their agent's draft at the time suggested, and a member
   await item.getByRole("button", { name: "More actions" }).click();
   await expect(page.getByRole("menuitem", { name: "Schedule", exact: true })).toBeVisible();
   await expect(page.getByRole("menuitem", { name: "Unschedule" })).toHaveCount(0);
-  await page.getByRole("menuitem", { name: "Schedule", exact: true }).press("Enter");
+  await page.getByRole("menuitem", { name: "Schedule", exact: true }).click();
   await expect(item.getByLabel("Date")).not.toHaveValue("");
   await expect(item.getByLabel("Time")).toHaveValue(/^\d{2}:(00|15|30|45)$/);
   await expect(item.getByText(/The time offered is the soonest clear of your posts and .*'s, scheduled ones included/)).toBeVisible();
@@ -324,10 +319,43 @@ test("an owner schedules their agent's draft at the time suggested, and a member
   await expect(edited.getByText(/changed it after you scheduled it, so it will not go out at its time/)).toBeVisible();
   await edited.getByRole("button", { name: "More actions" }).click();
   await page.screenshot({ path: test.info().outputPath("owner-menu.png"), fullPage: true });
-  await page.getByRole("menuitem", { name: "Unschedule" }).press("Enter");
+  await page.getByRole("menuitem", { name: "Unschedule" }).click();
   await expect(edited.getByText(/^You scheduled it for/)).toHaveCount(0);
   await edited.getByRole("button", { name: "More actions" }).click();
   await expect(page.getByRole("menuitem", { name: "Schedule", exact: true })).toBeVisible();
   await page.keyboard.press("Escape");
   expect((await (await request.get(`/api/v1/drafts/${saved.id}`, { headers: auth })).json()).scheduled_by).toBeNull();
+});
+
+test("Drafts keeps to a 320 px screen with the longest agent name, at every text size (review F143)", async ({ page, context, account, request }) => {
+  await setPlan(request, account);
+  await account.signIn(context);
+  await open(page, "/settings");
+  const section = page.getByRole("region", { name: "Your agent" });
+  await section.getByRole("button", { name: "Connect an agent" }).click();
+  await section.getByRole("button", { name: "New token" }).click();
+  const auth = { Authorization: `Bearer ${(await section.locator("code", { hasText: /^aionly_/ }).textContent())!.trim()}` };
+  // As long as a name may be.
+  const name = `${account.username}_agent`.padEnd(20, "x").slice(0, 20);
+  const renamed = await request.patch("/api/v1/me", { headers: auth, data: { username: name } });
+  expect(renamed.status(), await renamed.text()).toBe(200);
+
+  const sideways = () => page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  for (const size of ["Normal", "Big", "Small"]) {
+    if (size !== "Normal") {
+      await open(page, "/settings");
+      const saved = page.waitForResponse((response) => response.request().method() === "POST" && new URL(response.url()).pathname.startsWith("/settings"));
+      await page.getByRole("region", { name: "Display" }).getByText(size, { exact: true }).click();
+      expect((await saved).status()).toBe(200);
+    }
+    for (const path of ["/drafts", "/drafts?view=agent", "/drafts?view=feedback"]) {
+      await open(page, path);
+      // The whole name stays the tab's, however much of it shows.
+      const tab = page.getByRole("navigation", { name: "Drafts" }).getByRole("link", { name: `${name}'s` });
+      await expect(tab).toBeVisible();
+      await expect(tab).toHaveAttribute("title", `${name}'s`);
+      expect(await sideways(), `${size} ${path}`).toBeLessThanOrEqual(0);
+    }
+  }
+  await page.screenshot({ path: test.info().outputPath("drafts-tabs.png") });
 });

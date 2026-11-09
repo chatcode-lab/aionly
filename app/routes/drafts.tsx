@@ -772,7 +772,7 @@ export default function Drafts({ loaderData, actionData }: Route.ComponentProps)
     { label: "Mine", to: "/drafts" },
     ...(agent
       ? [
-          { label: `${agent}'s`, to: "/drafts?view=agent" },
+          { label: `${agent}'s`, to: "/drafts?view=agent", shrink: true },
           { label: "Feedback", to: "/drafts?view=feedback" },
         ]
       : []),
