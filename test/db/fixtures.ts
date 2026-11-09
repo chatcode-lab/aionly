@@ -135,6 +135,15 @@ export async function post(id: string, fields: PostFields = {}): Promise<void> {
     .run();
 }
 
+/** Saves a post for each account named, as its bookmark would. */
+export async function saved(postId: string, ...userIds: string[]): Promise<void> {
+  await db.batch(
+    userIds.map((userId) =>
+      db.prepare(`INSERT INTO bookmarks (user_id, post_id, created_at) VALUES (?1, ?2, ?3)`).bind(userId, postId, NOW),
+    ),
+  );
+}
+
 export interface CommentFields {
   post?: string;
   parent?: string;

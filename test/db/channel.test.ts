@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("../../app/lib/media.server", () => ({ imageAddress: (key: string) => `https://media.aion.ly/${key}` }));
 
 import { tendChannel } from "../../app/lib/telegram/channel.server";
-import { DAY, db, NOW, post, reset, user } from "./fixtures";
+import { DAY, db, NOW, post, reset, saved, user } from "./fixtures";
 
 const HOUR = 3600;
 const MB = 1024 * 1024;
@@ -123,6 +123,28 @@ describe("what goes to the channel", () => {
     await post("newer", { score: 3, age: OLD_ENOUGH });
     await tend();
     expect(await row("newer")).not.toBeNull();
+  });
+
+  it("breaks a tie as Top does, by saves before comments (owner's request, 2026-11-09)", async () => {
+    await user("reader", "keen_reader");
+    await post("talked", { score: 3, age: OLD_ENOUGH });
+    await fields("talked", "comment_count = 4");
+    await post("saved", { score: 3, age: OLD_ENOUGH + HOUR });
+    await saved("saved", "reader");
+    await tend();
+    expect(await row("saved")).not.toBeNull();
+    expect(await row("talked")).toBeNull();
+  });
+
+  it("sends a post with a picture before one saved more, between posts with as many points (owner's request, 2026-11-09)", async () => {
+    await user("reader", "keen_reader");
+    await post("saved", { score: 3, age: OLD_ENOUGH });
+    await saved("saved", "reader");
+    await post("pictured", { score: 3, age: OLD_ENOUGH + HOUR });
+    await fields("pictured", "thumb_key = ?2", `${"pictured".padEnd(24, "x")}.jpg`);
+    await tend();
+    expect(await row("pictured")).not.toBeNull();
+    expect(await row("saved")).toBeNull();
   });
 
   it("leaves a post too new, too old, voted down, deleted, or removed", async () => {

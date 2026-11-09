@@ -1,6 +1,6 @@
 import { participantCondition } from "../db/accounts.server";
 import { postsByIds } from "../db/feed.server";
-import { LIVE } from "../db/rows.server";
+import { deliveryOrderSql, LIVE, savesSql } from "../db/rows.server";
 import { settingsInForce } from "../db/settings.server";
 import { founderPhoto } from "../mail/founder.server";
 import type { Mailer } from "../mail/mailers.server";
@@ -10,7 +10,7 @@ import { SENDERS } from "../mail/senders";
 import { imageAddress } from "../media.server";
 import { sourceName } from "../links/source";
 import { displayHost } from "../links/url";
-import { coverPicture, type CoverPictureRow } from "../og/cover-picture";
+import { coverPicture, type CoverPictureRow, coverPictureSql } from "../og/cover-picture";
 import type { PostCardData } from "../public-types";
 import { emailPicture, type EmailPicture, resized } from "../resize";
 import { announceError } from "../telegram/events.server";
@@ -221,6 +221,8 @@ async function digestPictures(db: D1Database, bucket: R2Bucket, ids: string[]): 
 /**
  * The posts made in a period that clear the bar: the most voted, then the
  * most discussed of the rest, so a post is listed once. Both may be empty.
+ * Between posts as voted, or as discussed and voted, one with a picture
+ * goes first, then the most saved (owner's request, 2026-11-09).
  * The first of each shows its picture, prepared here once for everyone the
  * digest goes to.
  */
@@ -234,7 +236,7 @@ export async function digestLists(
     .prepare(
       `SELECT id FROM posts INDEXED BY posts_new
        WHERE ${LIVE} AND created_at >= ?1 AND created_at < ?2 AND score >= ?3
-       ORDER BY score DESC, created_at DESC, id DESC
+       ORDER BY ${deliveryOrderSql("posts")}
        LIMIT ?4`,
     )
     .bind(from, to, bar.points, LIST_SIZE)
@@ -248,7 +250,8 @@ export async function digestLists(
            (SELECT COUNT(*) FROM comments AS comment
             JOIN profiles AS commenter ON commenter.user_id = comment.author_id
             WHERE comment.post_id = post.id AND comment.deleted_at IS NULL AND comment.removed_batch_id IS NULL
-              AND COALESCE(commenter.owner_id, commenter.user_id) <> COALESCE(author.owner_id, author.user_id)) AS others
+              AND COALESCE(commenter.owner_id, commenter.user_id) <> COALESCE(author.owner_id, author.user_id)) AS others,
+           ${coverPictureSql("post")} AS pictured, ${savesSql("post")} AS saves
          FROM posts AS post INDEXED BY posts_new
          JOIN profiles AS author ON author.user_id = post.author_id
          WHERE post.deleted_at IS NULL AND post.removed_batch_id IS NULL
@@ -256,7 +259,7 @@ export async function digestLists(
            AND post.id NOT IN (SELECT value FROM json_each(?5))
        )
        WHERE others >= ?4
-       ORDER BY others DESC, score DESC, created_at DESC, id DESC
+       ORDER BY others DESC, score DESC, pictured DESC, saves DESC, created_at DESC, id DESC
        LIMIT ?6`,
     )
     .bind(from, to, bar.least, bar.comments, JSON.stringify(voted.map((row) => row.id)), LIST_SIZE)

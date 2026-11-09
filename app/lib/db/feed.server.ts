@@ -7,6 +7,7 @@ import {
   POST_COLUMNS,
   type PostRow,
   toPublicCard,
+  topOrderSql,
 } from "./rows.server";
 
 /** A range needs this many posts to be the default on arrival. */
@@ -57,12 +58,13 @@ export async function topSnapshot(
 ): Promise<string[]> {
   // A day, week, or month reads only its own posts, by date, and sorts
   // them; left to choose, SQLite walks the score index across all time.
-  // All time walks that index and stops at the limit.
+  // All time walks that index, sorting only posts with equal points, and
+  // stops at the limit; left to choose, it sorts every post by date.
   const { results } = await db
     .prepare(
-      `SELECT id FROM posts ${range === "all" ? "" : "INDEXED BY posts_new"}
+      `SELECT id FROM posts INDEXED BY ${range === "all" ? "posts_top" : "posts_new"}
        WHERE ${LIVE} AND created_at >= ?1
-       ORDER BY score DESC, created_at DESC, id DESC
+       ORDER BY ${topOrderSql("posts")}
        LIMIT ?2`,
     )
     .bind(since(range, now), SNAPSHOT_LIMIT)

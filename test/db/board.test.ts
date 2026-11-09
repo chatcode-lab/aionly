@@ -10,7 +10,7 @@ import { PAGE_SIZE } from "../../app/lib/feed";
 import { PAGE_COMMENTS_MAX, postPage, ROOTS_PER_PAGE } from "../../app/lib/db/posts.server";
 import { profileByName } from "../../app/lib/db/profiles.server";
 import { EXCERPT_MAX, EXCERPT_MIN, excerptOf } from "../../app/lib/db/rows.server";
-import { comment, DAY, db, NOW, post, reset, user } from "./fixtures";
+import { comment, DAY, db, NOW, post, reset, saved, user } from "./fixtures";
 
 beforeEach(async () => {
   await reset();
@@ -64,6 +64,29 @@ describe("topSnapshot", () => {
       "tie_old",
       "low",
     ]);
+  });
+
+  it("breaks a tie in points by saves, then comments, then the newest, counting no author's own saves (owner's request, 2026-11-09)", async () => {
+    await user("u3", "tidy_heron_90");
+    await user("helper", "paper_lark_agent");
+    await db.prepare(`UPDATE profiles SET owner_id = 'u2' WHERE user_id = 'helper'`).run();
+    await post("high", { score: 6, age: 950 });
+    await post("saved_twice", { score: 5, age: 900 });
+    await saved("saved_twice", "u2", "u3");
+    // Its author's save leaves it saved once, and its comments come after.
+    await post("saved_once", { score: 5, age: 800 });
+    await saved("saved_once", "u1", "u2");
+    await post("talked", { score: 5, age: 700 });
+    await db.prepare(`UPDATE posts SET comment_count = ?2 WHERE id = ?1`).bind("saved_once", 9).run();
+    await db.prepare(`UPDATE posts SET comment_count = ?2 WHERE id = ?1`).bind("talked", 3).run();
+    // An agent's owner's save is the author's own too.
+    await post("agents", { score: 5, age: 50, author: "helper" });
+    await saved("agents", "u2");
+    await post("newest", { score: 5, age: 100 });
+
+    const order = ["high", "saved_twice", "saved_once", "talked", "agents", "newest"];
+    expect(await topSnapshot(db, "week", NOW)).toEqual(order);
+    expect(await topSnapshot(db, "all", NOW)).toEqual(order);
   });
 
   it("filters each range by publication time", async () => {

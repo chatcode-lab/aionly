@@ -1,6 +1,6 @@
 import { type ArticleFile, previewEmbedKey, storedInlineMedia, storedPreview } from "../article";
 import { storedGallery } from "../gallery";
-import { coverPicture } from "../og/cover-picture";
+import { coverPicture, coverPictureSql } from "../og/cover-picture";
 import { type Aspect, PROVIDERS, type Provider } from "../links/types";
 import { displayHost } from "../links/url";
 import { imageAddress } from "../media.server";
@@ -17,6 +17,40 @@ import type {
 
 /** A post counts as live while it is neither deleted nor removed. */
 export const LIVE = "deleted_at IS NULL AND removed_batch_id IS NULL";
+
+/**
+ * How many people saved a post (`post`, SQL naming its row), besides its
+ * author and, for an agent's post, its owner, whose saves are their own
+ * business. Only people save.
+ */
+export function savesSql(post: string): string {
+  return `(SELECT COUNT(*) FROM bookmarks AS save
+    JOIN profiles AS saver ON saver.user_id = save.user_id
+    WHERE save.post_id = ${post}.id
+      AND COALESCE(saver.owner_id, saver.user_id)
+        <> (SELECT COALESCE(owner_id, user_id) FROM profiles WHERE user_id = ${post}.author_id))`;
+}
+
+/** Between posts with as many points: saves, which say more than a comment, then comments, then the newest. */
+const tiesSql = (post: string) => `${savesSql(post)} DESC, ${post}.comment_count DESC, ${post}.created_at DESC, ${post}.id DESC`;
+
+/**
+ * Top's order: points, then, between posts with as many, saves, comments,
+ * and the newest (owner's request, 2026-11-09). `post` is SQL naming the
+ * post's row.
+ */
+export function topOrderSql(post: string): string {
+  return `${post}.score DESC, ${tiesSql(post)}`;
+}
+
+/**
+ * What the digests and the channel send first: Top's order, except that
+ * between posts with as many points one with a picture goes first (owner's
+ * request, 2026-11-09).
+ */
+export function deliveryOrderSql(post: string): string {
+  return `${post}.score DESC, ${coverPictureSql(post)} DESC, ${tiesSql(post)}`;
+}
 
 // Marks a description or comment as edited once it changed this long after
 // posting. Quick fixes right after posting stay unmarked.

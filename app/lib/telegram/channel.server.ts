@@ -8,7 +8,7 @@
 
 import { type InlineMedia, storedInlineMedia } from "../article";
 import { mentionNames } from "../db/mentions.server";
-import { AUTHOR_JOINS, POST_COLUMNS, type PostRow, toPublicPost } from "../db/rows.server";
+import { AUTHOR_JOINS, deliveryOrderSql, POST_COLUMNS, type PostRow, toPublicPost } from "../db/rows.server";
 import { sourceOf } from "../digest/digest.server";
 import type { PostDetail } from "../public-types";
 import { channelPicture } from "../resize";
@@ -199,7 +199,7 @@ async function channelPost(db: D1Database, bucket: R2Bucket, row: PostRow, origi
   };
 }
 
-/** The top post of the window that has never been claimed: Top's order, among posts old enough. */
+/** The top post of the window that has never been claimed, among posts old enough: Top's order, but one with a picture first between posts with as many points. */
 function nextPost(db: D1Database, now: number): Promise<PostRow | null> {
   return db
     .prepare(
@@ -208,7 +208,7 @@ function nextPost(db: D1Database, now: number): Promise<PostRow | null> {
        WHERE post.deleted_at IS NULL AND post.removed_batch_id IS NULL
          AND post.created_at >= ?1 AND post.created_at <= ?2 AND post.score >= 1
          AND NOT EXISTS (SELECT 1 FROM channel_posts WHERE post_id = post.id)
-       ORDER BY post.score DESC, post.created_at DESC, post.id DESC
+       ORDER BY ${deliveryOrderSql("post")}
        LIMIT 1`,
     )
     .bind(now - WINDOW, now - SETTLED)

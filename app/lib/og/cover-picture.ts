@@ -30,3 +30,19 @@ export function coverPicture(row: CoverPictureRow): string | null {
   if (preview && "link" in preview && row.thumb_key) return row.thumb_key;
   return firstPicture(files)?.key ?? null;
 }
+
+/**
+ * Whether a post has a cover picture, as coverPicture would find one, in
+ * SQL for its row (`post`): 1 or 0. What a digest and the channel prefer
+ * between posts with as many points (owner's request, 2026-11-09).
+ */
+export function coverPictureSql(post: string): string {
+  // Malformed JSON, which coverPicture reads as none, would stop the query.
+  const json = (column: string, empty: string) => `CASE WHEN json_valid(${post}.${column}) THEN ${post}.${column} ELSE '${empty}' END`;
+  return `(CASE
+    WHEN ${post}.kind = 'upload' AND ${post}.media_type = 'image' THEN COALESCE(${post}.media_key, '') <> ''
+    WHEN ${post}.kind <> 'text' THEN COALESCE(${post}.thumb_key, '') <> ''
+    ELSE (json_type(${json("card_preview", "{}")}, '$.link') IS 'text' AND COALESCE(${post}.thumb_key, '') <> '')
+      OR EXISTS (SELECT 1 FROM json_each(${json("inline_media", "[]")}) AS file WHERE CASE WHEN file.type = 'object' THEN json_extract(file.value, '$.type') = 'image' AND json_type(file.value, '$.key') = 'text' END)
+  END)`;
+}

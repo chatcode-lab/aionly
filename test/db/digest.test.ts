@@ -13,7 +13,7 @@ vi.mock("../../app/lib/media.server", () => ({ imageAddress: (key: string) => `h
 import { EXCERPT_MAX } from "../../app/lib/digest/compose";
 import { dueRecipients, sendDigests, sendTestDigest, setDigest } from "../../app/lib/digest/digest.server";
 import type { Mailer } from "../../app/lib/mail/mailers.server";
-import { comment, DAY, db, NOW, post, reset, user } from "./fixtures";
+import { comment, DAY, db, NOW, post, reset, saved, user } from "./fixtures";
 
 // NOW is Friday, 15 January 2027, 08:00 UTC. The daily digest due at 07:00
 // covers 23:00 on the 13th to 23:00 on the 14th; the weekly one, due Monday
@@ -83,6 +83,50 @@ describe("a digest's posts", () => {
     expect(order.map((line) => email!.text.indexOf(line))).toEqual([...order.map((line) => email!.text.indexOf(line))].sort((a, b) => a - b));
     expect(email!.text.split("Voted and discussed")).toHaveLength(2);
     for (const left of ["Too few points", "Discussed but disliked", "Talking to itself"]) expect(email!.text).not.toContain(left);
+  });
+
+  it("break a tie by saves, others' alone, in either list (owner's request, 2026-11-09)", async () => {
+    const week = { author: "maker", age: 6 * DAY };
+    for (let n = 1; n <= 6; n += 1) await post(`voted${n}`, { ...week, title: `Voted ${n}`, score: 9 - n });
+    // As voted as the fourth and older, saved by its author alone: left out.
+    await post("own_saves", { ...week, age: 6.5 * DAY, title: "Saved by its maker", score: 5 });
+    await saved("own_saves", "maker");
+    // As voted as the fourth and older still, but saved by a reader: in, above it.
+    await post("saved", { ...week, age: 7 * DAY, title: "Saved by a reader", score: 5 });
+    await saved("saved", "reader");
+    // As discussed and voted as each other: the saved one first.
+    await post("talked", { ...week, age: 5 * DAY, title: "Discussed only", score: 2 });
+    await discuss("talked", "reader", 5);
+    await post("talked_saved", { ...week, age: 6 * DAY, title: "Discussed and saved", score: 2 });
+    await discuss("talked_saved", "reader", 5);
+    await saved("talked_saved", "reader");
+
+    expect(await sendDigests(db, env.IMAGES, mailer, input)).toBe(1);
+    const text = sent[0]!.text;
+    const order = ["Voted 1", "Voted 2", "Voted 3", "Saved by a reader", "Voted 4", "MOST DISCUSSED", "Discussed and saved", "Discussed only"];
+    expect(order.map((line) => text.indexOf(line))).toEqual([...order.map((line) => text.indexOf(line))].sort((a, b) => a - b));
+    for (const left of ["Voted 5", "Voted 6", "Saved by its maker"]) expect(text).not.toContain(left);
+  });
+
+  it("put a post with a picture before one saved more, between posts as voted, or as discussed and voted (owner's request, 2026-11-09)", async () => {
+    const week = { author: "maker", age: 6 * DAY };
+    await post("saved", { ...week, title: "Saved, no picture", score: 6 });
+    await saved("saved", "reader");
+    await post("pictured", { ...week, age: 7 * DAY, title: "Older, with a picture", score: 6 });
+    await post("talked_saved", { ...week, title: "Discussed and saved", score: 2 });
+    await discuss("talked_saved", "reader", 5);
+    await saved("talked_saved", "reader");
+    await post("talked_pictured", { ...week, age: 7 * DAY, title: "Discussed, with a picture", score: 2 });
+    await discuss("talked_pictured", "reader", 5);
+    for (const id of ["pictured", "talked_pictured"]) {
+      await db.prepare(`UPDATE posts SET thumb_key = ?2 WHERE id = ?1`).bind(id, `${id.padEnd(24, "x")}.jpg`).run();
+    }
+
+    expect(await sendDigests(db, env.IMAGES, mailer, input)).toBe(1);
+    const text = sent[0]!.text;
+    const order = ["Older, with a picture", "Saved, no picture", "MOST DISCUSSED", "Discussed, with a picture", "Discussed and saved"];
+    expect(order.map((line) => text.indexOf(line))).toEqual([...order.map((line) => text.indexOf(line))].sort((a, b) => a - b));
+    expect(sent[0]!.subject).toBe("Week #12 – Older, with a picture");
   });
 
   it("mark each author as a person or an agent, never by their picture, and end with the founder's note under their own picture", async () => {
