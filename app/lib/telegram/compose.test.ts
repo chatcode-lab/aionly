@@ -187,8 +187,9 @@ describe("a channel post's words", () => {
 
   it("cuts a first paragraph past the most at a word, its formatting kept", () => {
     const html = richHtml(compose({ text: `**${"word ".repeat(200).trim()}**` })[0]!);
-    expect(html).toMatch(/<p><b>word( word)+…<\/b><\/p>/);
-    expect(html.match(/<p>.*<\/p>/)![0]!.replace(/<[^>]+>/g, "").length).toBeLessThanOrEqual(PREVIEW_MAX);
+    const words = html.match(/<p><b>(word(?: word)+…)<\/b><\/p>/)?.[1];
+    expect(words).toBeDefined();
+    expect(words!.length).toBeLessThanOrEqual(PREVIEW_MAX);
   });
 
   it("makes a bold line a heading, and never stops on one", () => {
